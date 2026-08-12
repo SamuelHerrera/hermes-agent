@@ -299,7 +299,7 @@ function humanizeWorkerLogLine(line: string): null | string {
       return `writing file: ${compactTarget}`
 
     default:
-      return trimAction(action)
+      return null
   }
 }
 

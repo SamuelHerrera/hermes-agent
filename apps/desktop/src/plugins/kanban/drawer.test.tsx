@@ -352,6 +352,22 @@ describe('buildTimelineItems', () => {
     )
   })
 
+  it('does not echo unknown raw worker output into current activity', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+    const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
+
+    const items = buildTimelineItems(detail, log, testKanbanText as never)
+
+    expect(items.at(-1)?.actionTrace).toBeUndefined()
+  })
+
   it('keeps the last 20 worker actions as sublabels under the current status', () => {
     const detail = {
       attachments: [],
