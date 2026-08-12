@@ -6,9 +6,10 @@ import {
   buildTimelineItems,
   CommentComposer,
   DependenciesSection,
-  TimelineSection,
   TaskDetailHeaderControls,
-  TaskDrawerShell
+  TaskDrawerShell,
+  TimelineSection,
+  WorkerLogSection
 } from './drawer'
 import type { KanbanTaskDetail, WorkerLog } from './types'
 
@@ -68,7 +69,8 @@ const testKanbanText = {
   timelineWorking: 'Agent is working now',
   uploadAttachment: 'Upload attachment',
   workerLog: 'Worker log',
-  workerLogTail: 'Worker log · tail'
+  workerLogTail: 'Worker log · tail',
+  workerLogEmpty: 'No worker log yet.'
 }
 
 vi.mock('./ui', async () => {
@@ -259,7 +261,8 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Agent is working now')).toBe(true)
     expect(items.at(-1)?.detail).not.toContain('latest action')
     expect(items.at(-1)?.actionTrace).toEqual(["searching code for: 'timeline'"])
-    expect(items.some(item => item.label === 'heartbeat')).toBe(true)
+    expect(items.some(item => item.label === 'heartbeat')).toBe(false)
+    expect(items.at(-1)?.children?.map(item => item.label)).toEqual(['heartbeat'])
   })
 
   it('folds event activity and run history into the same compact timeline', () => {
@@ -277,12 +280,13 @@ describe('buildTimelineItems', () => {
 
     const items = buildTimelineItems(detail, undefined, testKanbanText as never)
 
-    expect(items.map(item => item.label)).toContain('heartbeat')
+    expect(items.map(item => item.label)).not.toContain('heartbeat')
+    expect(items.at(-1)?.children).toMatchObject([{ label: 'heartbeat', detail: 'note=checking package' }])
     expect(items.map(item => item.label)).toContain('default run · timed_out')
     expect(items.find(item => item.id === 'run-9')).toMatchObject({ tone: 'error' })
   })
 
-  it('renders worker log as a collapsed row inside the timeline instead of separate activity sections', () => {
+  it('keeps raw worker logs out of the timeline view', () => {
     const detail = {
       attachments: [],
       comments: [],
@@ -291,14 +295,32 @@ describe('buildTimelineItems', () => {
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
       task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
     } as KanbanTaskDetail
+
     const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
 
     render(<TimelineSection detail={detail} log={log} />)
 
     expect(screen.getByText('heartbeat')).toBeTruthy()
-    expect(screen.getByText('Worker log')).toBeTruthy()
+    expect(screen.queryByText('Worker log')).toBeNull()
+    expect(screen.queryByText('worker output')).toBeNull()
     expect(screen.queryByText('Activity · 1')).toBeNull()
     expect(screen.queryByText('Runs · 1')).toBeNull()
+  })
+
+  it('renders raw worker logs in their own section', () => {
+    const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
+
+    render(<WorkerLogSection log={log} />)
+
+    expect(screen.getByText('Worker log')).toBeTruthy()
+    expect(screen.getByText('worker output')).toBeTruthy()
+  })
+
+  it('renders an empty state when worker logs have not been written yet', () => {
+    render(<WorkerLogSection />)
+
+    expect(screen.getByText('Worker log')).toBeTruthy()
+    expect(screen.getByText('No worker log yet.')).toBeTruthy()
   })
 
   it('turns worker tool log rows into plain-language current activity', () => {

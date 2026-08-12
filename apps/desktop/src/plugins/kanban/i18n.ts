@@ -171,6 +171,7 @@ type KanbanMessages = {
   runs: (n: number) => string
   workerLog: string
   workerLogTail: string
+  workerLogEmpty: string
   attachments: (n: number) => string
   noAttachments: string
   uploadAttachment: string
@@ -386,6 +387,7 @@ const en: KanbanMessages = {
   runs: n => `Runs · ${n}`,
   workerLog: 'Worker log',
   workerLogTail: 'Worker log · tail',
+  workerLogEmpty: 'No worker log yet.',
   attachments: n => `Attachments · ${n}`,
   noAttachments: 'No attachments yet.',
   uploadAttachment: 'Upload attachment',
@@ -600,7 +602,8 @@ const ja: KanbanMessages = {
   runs: n => `実行・${n}`,
   workerLog: 'ワーカーログ',
   workerLogTail: 'ワーカーログ・末尾',
-  attachments: n => `添付・${n}`,
+  workerLogEmpty: 'ワーカーログはまだありません。',
+  attachments: n => `添付ファイル・${n}`,
   noAttachments: 'まだ添付はありません。',
   uploadAttachment: '添付をアップロード',
   taskActions: 'タスクの操作',
@@ -812,6 +815,7 @@ const zh: KanbanMessages = {
   runs: n => `运行・${n}`,
   workerLog: '工作单元日志',
   workerLogTail: '工作单元日志・末尾',
+  workerLogEmpty: '暂无工作单元日志。',
   attachments: n => `附件・${n}`,
   noAttachments: '暂无附件。',
   uploadAttachment: '上传附件',
@@ -1023,6 +1027,7 @@ const zhHant: KanbanMessages = {
   runs: n => `執行・${n}`,
   workerLog: '工作單元日誌',
   workerLogTail: '工作單元日誌・末尾',
+  workerLogEmpty: '尚無工作單元日誌。',
   attachments: n => `附件・${n}`,
   noAttachments: '尚無附件。',
   uploadAttachment: '上傳附件',

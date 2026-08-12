@@ -299,9 +299,19 @@ export function Callout({
 // A short, edge-masked scroll area. Thin wrapper over the app's FadeScroll so
 // the drawer's scrollers behave exactly like the ones in chat; kept as a local
 // name because every call site here passes `max`.
-export function ScrollFade({ children, deps, max = '9rem' }: { children: ReactNode; deps?: unknown; max?: string }) {
+export function ScrollFade({
+  children,
+  className,
+  deps,
+  max = '9rem'
+}: {
+  children: ReactNode
+  className?: string
+  deps?: unknown
+  max?: string
+}) {
   return (
-    <FadeScroll deps={deps} maxHeight={max}>
+    <FadeScroll className={className} deps={deps} maxHeight={max}>
       {children}
     </FadeScroll>
   )

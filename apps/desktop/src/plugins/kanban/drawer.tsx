@@ -186,16 +186,23 @@ type TimelineTone = 'current' | 'done' | 'error' | 'pending' | 'warning'
 interface TimelineItem {
   actionTrace?: string[]
   at?: null | number
+  children?: TimelineSubitem[]
   detail?: string
   id: string
   label: string
   tone: TimelineTone
 }
 
+interface TimelineSubitem {
+  at?: null | number
+  detail?: string
+  id: string
+  label: string
+}
+
 const EVENT_TONES: Record<string, TimelineTone> = {
   blocked: 'error',
   completed: 'done',
-  heartbeat: 'current',
   reclaimed: 'warning',
   scheduled: 'pending'
 }
@@ -381,8 +388,20 @@ function runTimelineItem(run: KanbanRun): TimelineItem {
   }
 }
 
+function heartbeatTimelineSubitem(event: KanbanEvent, k: KanbanText): TimelineSubitem {
+  const { detail, label } = eventText(event, k)
+
+  return {
+    at: event.created_at,
+    detail,
+    id: `heartbeat-${event.id}`,
+    label
+  }
+}
+
 export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | undefined, k: KanbanText): TimelineItem[] {
   const items: TimelineItem[] = []
+  const heartbeats: TimelineSubitem[] = []
   const seen = new Set<string>()
 
   const push = (item: TimelineItem) => {
@@ -401,6 +420,12 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   }
 
   for (const event of detail.events) {
+    if (event.kind === 'heartbeat') {
+      heartbeats.push(heartbeatTimelineSubitem(event, k))
+
+      continue
+    }
+
     const { detail: extra, label } = eventText(event, k)
     const payload = parseEventPayload(event)
     const tone = EVENT_TONES[event.kind] ?? 'done'
@@ -425,10 +450,12 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   }
 
   const current = currentStatusLabel(detail.task, run, log, k)
+  const heartbeatChildren = heartbeats.length > 0 ? heartbeats : undefined
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
     push({
       at: detail.task.completed_at ?? run?.ended_at ?? run?.started_at ?? detail.task.last_heartbeat_at ?? detail.task.created_at,
+      children: heartbeatChildren,
       detail: current.detail,
       id: `current-${detail.task.status}`,
       label: current.label,
@@ -440,6 +467,7 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
     push({
       actionTrace: actionTrace.length > 0 ? actionTrace : undefined,
       at: detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at,
+      children: heartbeatChildren,
       detail: current.detail,
       id: `current-${detail.task.status}`,
       label: current.label,
@@ -453,7 +481,8 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
 export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log?: WorkerLog }) {
   const k = useKanban()
   const items = buildTimelineItems(detail, log, k)
-  const timelineCount = items.reduce((count, item) => count + 1 + (item.actionTrace?.length ?? 0), 0) + (log?.content ? 1 : 0)
+
+  const timelineCount = items.reduce((count, item) => count + 1 + (item.children?.length ?? 0) + (item.actionTrace?.length ?? 0), 0)
 
   const iconFor = (tone: TimelineTone) => {
     switch (tone) {
@@ -495,63 +524,84 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
 
   if (!items.length) {
     return (
-      <Section label={k.timeline(0)}>
+      <section className="min-h-0 flex flex-1 flex-col gap-1.5">
+        <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{k.timeline(0)}</div>
         <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.timelineNoActivity}</p>
-      </Section>
+      </section>
     )
   }
 
   return (
-    <Section label={k.timeline(timelineCount)}>
-      <ScrollFade deps={`${items.length}-${log?.content?.length ?? 0}`} max="18rem">
-        <ol className="flex flex-col gap-2">
+    <section className="min-h-0 flex flex-1 flex-col gap-1.5">
+      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{k.timeline(timelineCount)}</div>
+      <ScrollFade className="-mr-1 min-h-0 flex-1 pr-1" deps={`${items.length}-${log?.content?.length ?? 0}`} max="100%">
+        <ol className="relative flex flex-col gap-1.5 before:absolute before:top-2 before:bottom-2 before:left-2.5 before:w-px before:bg-(--ui-stroke-tertiary)">
           {items.map(item => (
-            <li className="flex gap-2 text-[0.75rem]" key={item.id}>
+            <li className="relative flex gap-2 text-[0.75rem]" key={item.id}>
               <span
-                className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
+                className={cn('z-[1] mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
               >
                 <Codicon name={iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
               </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-baseline gap-2">
+              <div className="min-w-0 flex-1 rounded-md px-1 py-0.5 transition-colors hover:bg-(--ui-bg-quaternary)/45">
+                <div className="flex items-baseline gap-2">
                   <span className="font-medium text-(--ui-text-secondary)">{item.label}</span>
                   {ago(item.at) && (
                     <span className="ml-auto shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{ago(item.at)}</span>
                   )}
-                </span>
+                </div>
                 {item.detail && (
-                  <span className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
+                  <div className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
                     {item.detail}
-                  </span>
+                  </div>
                 )}
-                {item.actionTrace && item.actionTrace.length > 0 && (
-                  <span className="mt-1 flex flex-col gap-0.5">
-                    {item.actionTrace.map((action, index) => (
-                      <span
+                {((item.children && item.children.length > 0) || (item.actionTrace && item.actionTrace.length > 0)) && (
+                  <div className="mt-1.5 flex flex-col gap-1 border-l border-dashed border-(--ui-stroke-tertiary) pl-3">
+                    {item.children?.map(child => (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2" key={child.id}>
+                        <span className="min-w-0">
+                          <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{child.label}</span>
+                          {child.detail && (
+                            <span className="ml-1 line-clamp-1 text-[0.6875rem] text-(--ui-text-quaternary)">{child.detail}</span>
+                          )}
+                        </span>
+                        {ago(child.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>}
+                      </div>
+                    ))}
+                    {item.actionTrace?.map((action, index) => (
+                      <div
                         className="line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)"
                         key={`${item.id}-action-${index}`}
                       >
                         {action}
-                      </span>
+                      </div>
                     ))}
-                  </span>
+                  </div>
                 )}
-              </span>
+              </div>
             </li>
           ))}
         </ol>
-        {log?.exists && log.content && (
-          <details className="mt-2 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary)/40 px-2 py-1.5 text-[0.71rem]">
-            <summary className="cursor-pointer select-none text-(--ui-text-tertiary)">
-              {log.truncated ? k.workerLogTail : k.workerLog}
-            </summary>
-            <ScrollFade deps={log.content.length} max="10rem">
-              <LogView className="border-0 px-0 pt-1.5">{log.content}</LogView>
-            </ScrollFade>
-          </details>
-        )}
       </ScrollFade>
-    </Section>
+    </section>
+  )
+}
+
+export function WorkerLogSection({ log }: { log?: WorkerLog }) {
+  const k = useKanban()
+  const title = log?.truncated ? k.workerLogTail : k.workerLog
+
+  return (
+    <section className="min-h-0 flex flex-1 flex-col gap-1.5">
+      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{title}</div>
+      {log?.exists && log.content ? (
+        <ScrollFade className="-mr-1 min-h-0 flex-1 pr-1" deps={log.content.length} max="100%">
+          <LogView className="min-h-full border-0">{log.content}</LogView>
+        </ScrollFade>
+      ) : (
+        <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.workerLogEmpty}</p>
+      )}
+    </section>
   )
 }
 
@@ -566,7 +616,7 @@ function MetaRow({ children, label }: { children: ReactNode; label: string }) {
 
 function DrawerTabContent({ children, value }: { children: ReactNode; value: string }) {
   return (
-    <TabsContent className="min-h-0 flex-col gap-4 data-[state=active]:flex data-[state=inactive]:hidden" value={value}>
+    <TabsContent className="min-h-0 flex-1 flex-col gap-4 data-[state=active]:flex data-[state=inactive]:hidden" value={value}>
       {children}
     </TabsContent>
   )
@@ -1441,7 +1491,7 @@ export function TaskDrawer({
         )}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4" data-selectable-text="true">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4" data-selectable-text="true">
         {errorMessage ? (
           <ErrorState title={errorMessage} />
         ) : !detail || !task ? (
@@ -1449,7 +1499,7 @@ export function TaskDrawer({
             <Loader type="lemniscate-bloom" />
           </div>
         ) : (
-          <Tabs className="gap-3 text-sm" defaultValue="details">
+          <Tabs className="min-h-0 flex flex-1 flex-col gap-3 text-sm" defaultValue="details">
             <TabsList className="sticky top-0 z-10 h-8 w-full justify-start overflow-x-auto rounded-none border-b border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-0">
               <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="details">
                 {k.tabDetails}
@@ -1457,8 +1507,8 @@ export function TaskDrawer({
               <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="activity">
                 {k.tabActivity}
               </TabsTrigger>
-              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="discussion">
-                {k.tabDiscussion}
+              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="logs">
+                {log?.truncated ? k.workerLogTail : k.workerLog}
               </TabsTrigger>
             </TabsList>
 
@@ -1502,13 +1552,7 @@ export function TaskDrawer({
               {(detail.links.parents.length > 0 || detail.links.children.length > 0) && (
                 <DependenciesSection detail={detail} onOpen={onOpen} />
               )}
-            </DrawerTabContent>
 
-            <DrawerTabContent value="activity">
-              <TimelineSection detail={detail} log={log} />
-            </DrawerTabContent>
-
-            <DrawerTabContent value="discussion">
               <Section
                 action={
                   <Tip label={running ? k.commentsHelpRunning : k.commentsHelp}>
@@ -1547,6 +1591,14 @@ export function TaskDrawer({
                 onUpload={file => uploadMut.mutate(file)}
                 pending={pasteImagesMut.isPending || uploadMut.isPending}
               />
+            </DrawerTabContent>
+
+            <DrawerTabContent value="activity">
+              <TimelineSection detail={detail} log={log} />
+            </DrawerTabContent>
+
+            <DrawerTabContent value="logs">
+              <WorkerLogSection log={log} />
             </DrawerTabContent>
           </Tabs>
         )}
