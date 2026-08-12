@@ -6,7 +6,6 @@
  */
 
 import {
-  Badge,
   Button,
   cn,
   Codicon,
@@ -196,6 +195,7 @@ interface TimelineItem {
 const EVENT_TONES: Record<string, TimelineTone> = {
   blocked: 'error',
   completed: 'done',
+  heartbeat: 'current',
   reclaimed: 'warning',
   scheduled: 'pending'
 }
@@ -366,6 +366,21 @@ function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, lo
   }
 }
 
+function runTimelineItem(run: KanbanRun): TimelineItem {
+  const state = run.outcome ?? run.status
+  const failed = ['crashed', 'failed', 'timed_out', 'gave_up'].includes(state)
+  const parts = [duration(run.started_at, run.ended_at), run.error ?? run.summary].filter(Boolean)
+  const label = `${run.profile ? `${run.profile} run` : 'Run'} · ${state}`
+
+  return {
+    at: run.ended_at ?? run.started_at,
+    detail: parts.join(' · ') || undefined,
+    id: `run-${run.id}`,
+    label,
+    tone: failed ? 'error' : state === 'running' ? 'current' : 'done'
+  }
+}
+
 export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | undefined, k: KanbanText): TimelineItem[] {
   const items: TimelineItem[] = []
   const seen = new Set<string>()
@@ -386,10 +401,6 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   }
 
   for (const event of detail.events) {
-    if (event.kind === 'heartbeat') {
-      continue
-    }
-
     const { detail: extra, label } = eventText(event, k)
     const payload = parseEventPayload(event)
     const tone = EVENT_TONES[event.kind] ?? 'done'
@@ -404,6 +415,15 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   }
 
   const run = latestRun(detail.runs)
+
+  for (const candidate of detail.runs) {
+    if (detail.task.status === 'running' && run?.id === candidate.id) {
+      continue
+    }
+
+    push(runTimelineItem(candidate))
+  }
+
   const current = currentStatusLabel(detail.task, run, log, k)
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
@@ -430,10 +450,10 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   return items
 }
 
-function TimelineSection({ collapsible = false, detail, log }: { collapsible?: boolean; detail: KanbanTaskDetail; log?: WorkerLog }) {
+export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log?: WorkerLog }) {
   const k = useKanban()
   const items = buildTimelineItems(detail, log, k)
-  const timelineCount = items.reduce((count, item) => count + 1 + (item.actionTrace?.length ?? 0), 0)
+  const timelineCount = items.reduce((count, item) => count + 1 + (item.actionTrace?.length ?? 0), 0) + (log?.content ? 1 : 0)
 
   const iconFor = (tone: TimelineTone) => {
     switch (tone) {
@@ -481,11 +501,9 @@ function TimelineSection({ collapsible = false, detail, log }: { collapsible?: b
     )
   }
 
-  const hasActivitySections = detail.events.length > 0 || detail.runs.length > 0 || Boolean(log?.exists && log.content)
-
   return (
-    <Section collapsible={collapsible || hasActivitySections} label={k.timeline(timelineCount)}>
-      <ScrollFade deps={items.length} max="14rem">
+    <Section label={k.timeline(timelineCount)}>
+      <ScrollFade deps={`${items.length}-${log?.content?.length ?? 0}`} max="18rem">
         <ol className="flex flex-col gap-2">
           {items.map(item => (
             <li className="flex gap-2 text-[0.75rem]" key={item.id}>
@@ -522,6 +540,16 @@ function TimelineSection({ collapsible = false, detail, log }: { collapsible?: b
             </li>
           ))}
         </ol>
+        {log?.exists && log.content && (
+          <details className="mt-2 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary)/40 px-2 py-1.5 text-[0.71rem]">
+            <summary className="cursor-pointer select-none text-(--ui-text-tertiary)">
+              {log.truncated ? k.workerLogTail : k.workerLog}
+            </summary>
+            <ScrollFade deps={log.content.length} max="10rem">
+              <LogView className="border-0 px-0 pt-1.5">{log.content}</LogView>
+            </ScrollFade>
+          </details>
+        )}
       </ScrollFade>
     </Section>
   )
@@ -1478,82 +1506,6 @@ export function TaskDrawer({
 
             <DrawerTabContent value="activity">
               <TimelineSection detail={detail} log={log} />
-
-              {detail.events.length > 0 && (
-                <Section collapsible label={k.activity(detail.events.length)}>
-                  <ScrollFade deps={detail.events.length} max="7rem">
-                    <ul className="flex flex-col gap-1">
-                      {detail.events.map(event => {
-                        const { detail: extra, label } = eventText(event, k)
-
-                        return (
-                          <li className="flex items-baseline gap-2 text-[0.6875rem]" key={event.id}>
-                            <span className="shrink-0 text-(--ui-text-secondary)">{label}</span>
-                            {extra && (
-                              <span
-                                className="min-w-0 truncate text-[0.625rem] text-(--ui-text-quaternary)"
-                                title={extra}
-                              >
-                                {extra}
-                              </span>
-                            )}
-                            <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">{ago(event.created_at)}</span>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </ScrollFade>
-                </Section>
-              )}
-
-              {detail.runs.length > 0 && (
-                <Section collapsible label={k.runs(detail.runs.length)}>
-                  <ScrollFade max="11rem">
-                    <ul className="flex flex-col gap-1.5">
-                      {detail.runs.map(run => {
-                        const failed = ['crashed', 'failed', 'timed_out', 'gave_up'].includes(run.outcome ?? run.status)
-
-                        return (
-                          <li className="flex flex-col gap-0.5 text-[0.71rem]" key={run.id}>
-                            <div className="flex items-center gap-2">
-                              <Badge size="xs" variant={failed ? 'destructive' : 'muted'}>
-                                {run.outcome ?? run.status}
-                              </Badge>
-                              {run.profile && <span className="text-(--ui-text-tertiary)">{run.profile}</span>}
-                              {duration(run.started_at, run.ended_at) && (
-                                <span className="text-(--ui-text-quaternary)">
-                                  {duration(run.started_at, run.ended_at)}
-                                </span>
-                              )}
-                              <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">
-                                {ago(run.ended_at ?? run.started_at)}
-                              </span>
-                            </div>
-                            {(run.error || run.summary) && (
-                              <p
-                                className={cn(
-                                  'line-clamp-2 whitespace-pre-wrap',
-                                  run.error ? 'text-destructive' : 'text-(--ui-text-quaternary)'
-                                )}
-                              >
-                                {run.error ?? run.summary}
-                              </p>
-                            )}
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  </ScrollFade>
-                </Section>
-              )}
-
-              {log?.exists && log.content && (
-                <Section collapsible label={log.truncated ? k.workerLogTail : k.workerLog}>
-                  <ScrollFade deps={log.content.length} max="12rem">
-                    <LogView className="border-0 px-0">{log.content}</LogView>
-                  </ScrollFade>
-                </Section>
-              )}
             </DrawerTabContent>
 
             <DrawerTabContent value="discussion">
