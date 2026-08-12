@@ -435,20 +435,46 @@ function runTimelineItem(run: KanbanRun): TimelineItem {
   }
 }
 
-function heartbeatTimelineSubitem(event: KanbanEvent, k: KanbanText): TimelineSubitem {
-  const { detail, label } = eventText(event, k)
+function heartbeatNote(event: KanbanEvent): null | string {
+  const payload = parseEventPayload(event)
+  const note = payload.note
 
-  return {
-    at: event.created_at,
-    detail,
-    id: `heartbeat-${event.id}`,
-    label
+  return typeof note === 'string' && note.trim() ? note.trim() : null
+}
+
+function heartbeatTimelineSubitems(events: KanbanEvent[]): TimelineSubitem[] {
+  const notes = events
+    .map(event => ({ event, note: heartbeatNote(event) }))
+    .filter((item): item is { event: KanbanEvent; note: string } => Boolean(item.note))
+    .slice(-3)
+    .map(({ event, note }) => ({
+      at: event.created_at,
+      detail: note,
+      id: `heartbeat-note-${event.id}`,
+      label: 'Progress update'
+    }))
+
+  const routine = events.filter(event => !heartbeatNote(event))
+  const latestRoutine = routine.at(-1)
+
+  if (latestRoutine) {
+    notes.push({
+      at: latestRoutine.created_at,
+      detail:
+        routine.length === 1
+          ? 'The agent checked in once to show it is still active.'
+          : `The agent stayed active through ${routine.length} routine check-ins.`,
+      id: 'heartbeat-check-ins',
+      label: 'Worker check-ins'
+    })
   }
+
+  return notes
 }
 
 export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | undefined, k: KanbanText): TimelineItem[] {
   const items: TimelineItem[] = []
-  const heartbeats: TimelineSubitem[] = []
+  const heartbeats: KanbanEvent[] = []
   const seen = new Set<string>()
 
   const push = (item: TimelineItem) => {
@@ -468,7 +494,7 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
 
   for (const event of detail.events) {
     if (event.kind === 'heartbeat') {
-      heartbeats.push(heartbeatTimelineSubitem(event, k))
+      heartbeats.push(event)
 
       continue
     }
@@ -505,12 +531,13 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
       : (run?.ended_at ?? detail.task.completed_at ?? detail.task.last_heartbeat_at)
   )
 
-  const heartbeatChildren = heartbeats.length > 0 ? heartbeats : undefined
+  const heartbeatChildren = heartbeatTimelineSubitems(heartbeats)
+  const children = heartbeatChildren.length > 0 ? heartbeatChildren : undefined
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
     push({
       at: detail.task.completed_at ?? run?.ended_at ?? run?.started_at ?? detail.task.last_heartbeat_at ?? detail.task.created_at,
-      children: heartbeatChildren,
+      children,
       detail: current.detail,
       id: `current-${detail.task.status}`,
       label: current.label,
@@ -521,7 +548,7 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
     push({
       actionTrace: actionTrace.length > 0 ? actionTrace : undefined,
       at: detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at,
-      children: heartbeatChildren,
+      children,
       detail: current.detail,
       id: `current-${detail.task.status}`,
       label: current.label,

@@ -264,7 +264,14 @@ describe('buildTimelineItems', () => {
       { at: 1020, detail: 'Looked through the code.', id: 'worker-activity-summary', label: 'Work updates' }
     ])
     expect(items.some(item => item.label === 'heartbeat')).toBe(false)
-    expect(items.at(-1)?.children?.map(item => item.label)).toEqual(['heartbeat'])
+    expect(items.at(-1)?.children).toEqual([
+      {
+        at: 1020,
+        detail: 'The agent checked in once to show it is still active.',
+        id: 'heartbeat-check-ins',
+        label: 'Worker check-ins'
+      }
+    ])
   })
 
   it('folds event activity and run history into the same compact timeline', () => {
@@ -283,7 +290,8 @@ describe('buildTimelineItems', () => {
     const items = buildTimelineItems(detail, undefined, testKanbanText as never)
 
     expect(items.map(item => item.label)).not.toContain('heartbeat')
-    expect(items.at(-1)?.children).toMatchObject([{ label: 'heartbeat', detail: 'note=checking package' }])
+    expect(items.at(-1)?.children).toMatchObject([{ label: 'Progress update', detail: 'checking package' }])
+    expect(items.at(-1)?.children?.[0].detail).not.toContain('note=')
     expect(items.map(item => item.label)).toContain('default run · timed_out')
     expect(items.find(item => item.id === 'run-9')).toMatchObject({ tone: 'error' })
   })
@@ -302,7 +310,8 @@ describe('buildTimelineItems', () => {
 
     render(<TimelineSection detail={detail} log={log} />)
 
-    expect(screen.getByText('heartbeat')).toBeTruthy()
+    expect(screen.queryByText('heartbeat')).toBeNull()
+    expect(screen.getByText('Worker check-ins')).toBeTruthy()
     expect(screen.queryByText('Worker log')).toBeNull()
     expect(screen.queryByText('worker output')).toBeNull()
     expect(screen.queryByText('Activity · 1')).toBeNull()
@@ -445,10 +454,12 @@ describe('buildTimelineItems', () => {
 
       const { container } = render(<TimelineSection detail={detail} log={log} />)
       const workUpdates = screen.getByText('Work updates')
-      const firstHeartbeat = screen.getAllByText('heartbeat')[0]
+      const checkIns = screen.getByText('Worker check-ins')
 
       expect(container.textContent).toContain('10 sec. ago')
-      expect(workUpdates.compareDocumentPosition(firstHeartbeat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(screen.queryByText('heartbeat')).toBeNull()
+      expect(screen.getByText('The agent stayed active through 12 routine check-ins.')).toBeTruthy()
+      expect(workUpdates.compareDocumentPosition(checkIns) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     } finally {
       now.mockRestore()
     }
