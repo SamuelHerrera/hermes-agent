@@ -611,17 +611,6 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                 )}
                 {((item.children && item.children.length > 0) || (item.actionTrace && item.actionTrace.length > 0)) && (
                   <div className="mt-1.5 flex flex-col gap-1 border-l border-dashed border-(--ui-stroke-tertiary) pl-3">
-                    {item.children?.map(child => (
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2" key={child.id}>
-                        <span className="min-w-0">
-                          <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{child.label}</span>
-                          {child.detail && (
-                            <span className="ml-1 line-clamp-1 text-[0.6875rem] text-(--ui-text-quaternary)">{child.detail}</span>
-                          )}
-                        </span>
-                        {ago(child.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>}
-                      </div>
-                    ))}
                     {item.actionTrace?.map(action => (
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2" key={action.id}>
                         <span className="min-w-0">
@@ -631,6 +620,17 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                           )}
                         </span>
                         {ago(action.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(action.at)}</span>}
+                      </div>
+                    ))}
+                    {item.children?.map(child => (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2" key={child.id}>
+                        <span className="min-w-0">
+                          <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{child.label}</span>
+                          {child.detail && (
+                            <span className="ml-1 line-clamp-1 text-[0.6875rem] text-(--ui-text-quaternary)">{child.detail}</span>
+                          )}
+                        </span>
+                        {ago(child.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>}
                       </div>
                     ))}
                   </div>

@@ -402,13 +402,15 @@ describe('buildTimelineItems', () => {
     ])
   })
 
-  it('keeps work updates visible after completion instead of leaving only heartbeat rows', () => {
+  it('keeps work updates visibly before heartbeat rows after completion with an age', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1040 * 1000)
+
     const detail = {
       attachments: [],
       comments: [],
       events: [
-        { id: 1, created_at: 1000, kind: 'heartbeat', payload: null },
-        { id: 2, created_at: 1010, kind: 'completed', payload: null }
+        ...Array.from({ length: 12 }, (_, index) => ({ id: index + 1, created_at: 1000 + index, kind: 'heartbeat', payload: null })),
+        { id: 20, created_at: 1015, kind: 'completed', payload: null }
       ],
       links: { children: [], parents: [] },
       runs: [{ ended_at: 1030, id: 9, outcome: 'completed', profile: 'default', started_at: 990, status: 'closed' }],
@@ -427,18 +429,29 @@ describe('buildTimelineItems', () => {
       truncated: false
     } as WorkerLog
 
-    const items = buildTimelineItems(detail, log, testKanbanText as never)
-    const completed = items.find(item => item.id === 'current-done')
+    try {
+      const items = buildTimelineItems(detail, log, testKanbanText as never)
+      const completed = items.find(item => item.id === 'current-done')
 
-    expect(completed?.label).toBe('Work completed')
-    expect(completed?.actionTrace).toEqual([
-      {
-        at: 1030,
-        detail: 'Loaded the project guidance, reviewed the screenshot, looked through the code, and updated the Kanban UI files.',
-        id: 'worker-activity-summary',
-        label: 'Work updates'
-      }
-    ])
+      expect(completed?.label).toBe('Work completed')
+      expect(completed?.actionTrace).toEqual([
+        {
+          at: 1030,
+          detail: 'Loaded the project guidance, reviewed the screenshot, looked through the code, and updated the Kanban UI files.',
+          id: 'worker-activity-summary',
+          label: 'Work updates'
+        }
+      ])
+
+      const { container } = render(<TimelineSection detail={detail} log={log} />)
+      const workUpdates = screen.getByText('Work updates')
+      const firstHeartbeat = screen.getAllByText('heartbeat')[0]
+
+      expect(container.textContent).toContain('10 sec. ago')
+      expect(workUpdates.compareDocumentPosition(firstHeartbeat) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    } finally {
+      now.mockRestore()
+    }
   })
 
   it('adds a waiting item when a ready task has no assignee', () => {
