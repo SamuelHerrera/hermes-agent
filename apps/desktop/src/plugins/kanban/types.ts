@@ -25,6 +25,9 @@ export interface KanbanTask {
   last_heartbeat_at?: null | number
 }
 
+export type TaskSortDirection = 'asc' | 'desc'
+export type TaskTimeDisplay = 'datetime' | 'relative'
+
 export interface KanbanColumn {
   name: string
   tasks: KanbanTask[]

@@ -13,6 +13,7 @@ import {
   cn,
   Codicon,
   compactNumber,
+  fmtDateTime,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -65,6 +66,8 @@ import {
   $collapsedLanes,
   $introDismissed,
   $lanesByProfile,
+  $taskSortDirection,
+  $taskTimeDisplay,
   boardKey,
   BOARDS_KEY,
   bulkTasks,
@@ -88,7 +91,7 @@ import {
 } from './new-task-images'
 import { OrchestrationPanel } from './orchestration'
 import { clipboardImageFiles } from './paste-images'
-import { columnMeta, type KanbanAttachment, type KanbanBoard, type KanbanTask, type TaskEstimate } from './types'
+import { columnMeta, type KanbanAttachment, type KanbanBoard, type KanbanTask, type TaskEstimate, type TaskSortDirection, type TaskTimeDisplay } from './types'
 import {
   $newTaskLane,
   ago,
@@ -107,6 +110,8 @@ import {
   useKanban,
   useOrchestration
 } from './ui'
+
+export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
 // ── optimistic board edits (reconciled by the follow-up refresh) ─────────────
 
@@ -140,6 +145,42 @@ function removeCard(board: KanbanBoard, id: string): KanbanBoard {
   return { ...board, columns: board.columns.map(col => ({ ...col, tasks: col.tasks.filter(t => t.id !== id) })) }
 }
 
+export function sortColumnTasks(tasks: readonly KanbanTask[], direction: TaskSortDirection): KanbanTask[] {
+  const dir = direction === 'desc' ? -1 : 1
+
+  return [...tasks].sort((a, b) => {
+    const priority = (b.priority ?? 0) - (a.priority ?? 0)
+
+    if (priority !== 0) {
+      return priority
+    }
+
+    const time = ((a.created_at ?? 0) - (b.created_at ?? 0)) * dir
+
+    if (time !== 0) {
+      return time
+    }
+
+    return a.id.localeCompare(b.id)
+  })
+}
+
+export function taskTimeLabel(task: KanbanTask, display: TaskTimeDisplay, nowMs = Date.now()): ReactNode {
+  if (!task.created_at) {
+    return null
+  }
+
+  const ms = task.created_at * 1000
+  const relative = ago(task.created_at, nowMs)
+  const absolute = fmtDateTime.format(new Date(ms))
+
+  return (
+    <span className="text-(--ui-text-quaternary)" title={display === 'relative' ? absolute : (relative ?? absolute)}>
+      {display === 'relative' ? relative : absolute}
+    </span>
+  )
+}
+
 // ── card ─────────────────────────────────────────────────────────────────────
 
 function Meta({ children, icon }: { children: ReactNode; icon: string }) {
@@ -151,9 +192,9 @@ function Meta({ children, icon }: { children: ReactNode; icon: string }) {
   )
 }
 
-function CardFooter({ arc, task }: { arc: ArcState | null; task: KanbanTask }) {
+function CardFooter({ arc, task, timeDisplay }: { arc: ArcState | null; task: KanbanTask; timeDisplay: TaskTimeDisplay }) {
   const k = useKanban()
-  const created = ago(task.created_at)
+  const created = taskTimeLabel(task, timeDisplay)
   const links = task.link_counts ? task.link_counts.parents + task.link_counts.children : 0
   const fallback = useDefaultAssignee()
   const orchestrator = useOrchestration()?.resolved_orchestrator_profile ?? ''
@@ -235,9 +276,7 @@ function CardFooter({ arc, task }: { arc: ArcState | null; task: KanbanTask }) {
             {task.warnings.count}
           </span>
         )}
-        {created && !task.assignee && !unassignedReady ? (
-          <span className="text-(--ui-text-quaternary)">{created}</span>
-        ) : null}
+        {created}
         <span className="min-w-0 truncate font-mono text-(--ui-text-quaternary)">{shortId(task.id)}</span>
       </div>
     </div>
@@ -251,7 +290,8 @@ function Card({
   onOpen,
   onToggleSelect,
   selected,
-  task
+  task,
+  timeDisplay
 }: {
   columns: string[]
   onDelete: (id: string) => void
@@ -260,6 +300,7 @@ function Card({
   onToggleSelect: (id: string) => void
   selected: boolean
   task: KanbanTask
+  timeDisplay: TaskTimeDisplay
 }) {
   const k = useKanban()
   const [dragging, setDragging] = useState(false)
@@ -307,7 +348,7 @@ function Card({
           {summary && (
             <span className="line-clamp-2 text-[0.6875rem] leading-snug text-(--ui-text-tertiary)">{summary}</span>
           )}
-          <CardFooter arc={arc} task={task} />
+          <CardFooter arc={arc} task={task} timeDisplay={timeDisplay} />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
@@ -351,7 +392,9 @@ function Column({
   onOpen,
   onToggle,
   onToggleSelect,
-  selected
+  selected,
+  sortDirection,
+  timeDisplay
 }: {
   collapsed: boolean
   column: { name: string; tasks: KanbanTask[] }
@@ -364,6 +407,8 @@ function Column({
   onToggle: () => void
   onToggleSelect: (id: string) => void
   selected: ReadonlySet<string>
+  sortDirection: TaskSortDirection
+  timeDisplay: TaskTimeDisplay
 }) {
   const k = useKanban()
   const [over, setOver] = useState(false)
@@ -372,22 +417,24 @@ function Column({
   const locked = isLockedTarget(column.name)
   const byProfile = useValue($lanesByProfile)
 
+  const displayTasks = useMemo(() => sortColumnTasks(column.tasks, sortDirection), [column.tasks, sortDirection])
+
   // The dashboard's "lanes by profile": sub-group Running by assignee so a
   // fleet's in-flight work reads per-worker. Null = flat (off, or trivial).
   const lanes = useMemo(() => {
-    if (!byProfile || column.name !== 'running' || column.tasks.length === 0) {
+    if (!byProfile || column.name !== 'running' || displayTasks.length === 0) {
       return null
     }
 
     const groups = new Map<string, KanbanTask[]>()
 
-    for (const task of column.tasks) {
+    for (const task of displayTasks) {
       const key = task.assignee || UNASSIGNED_LANE
       groups.set(key, [...(groups.get(key) ?? []), task])
     }
 
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [byProfile, column])
+  }, [byProfile, column.name, displayTasks])
 
   const dragHandlers = {
     onDragLeave: () => setOver(false),
@@ -487,11 +534,12 @@ function Column({
                     onToggleSelect={onToggleSelect}
                     selected={selected.has(task.id)}
                     task={task}
+                    timeDisplay={timeDisplay}
                   />
                 ))}
               </div>
             ))
-          : column.tasks.map(task => (
+          : displayTasks.map(task => (
               <Card
                 columns={columns}
                 key={task.id}
@@ -501,6 +549,7 @@ function Column({
                 onToggleSelect={onToggleSelect}
                 selected={selected.has(task.id)}
                 task={task}
+                timeDisplay={timeDisplay}
               />
             ))}
         {/* Jira-style lane add — dashed, faded in on lane hover. Opacity (not
@@ -1182,6 +1231,8 @@ export function KanbanBoardPage() {
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
   const [archived, setArchived] = useState(false)
+  const sortDirection = useValue($taskSortDirection)
+  const timeDisplay = useValue($taskTimeDisplay)
 
   // Live updates ride the events socket (bindApi); this interval is only the
   // slow heartbeat for socketless paths (OAuth remotes, dropped connections).
@@ -1442,6 +1493,28 @@ export function KanbanBoardPage() {
           />
         )}
         <SearchField aria-label={k.filterCards} onChange={setSearch} placeholder={k.filterCards} value={search} />
+        <div className="flex items-center gap-0.5 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-0.5">
+          <Tip label={sortDirection === 'asc' ? k.sortOldestFirst : k.sortNewestFirst}>
+            <Button
+              aria-label={sortDirection === 'asc' ? k.sortOldestFirst : k.sortNewestFirst}
+              onClick={() => $taskSortDirection.set(sortDirection === 'asc' ? 'desc' : 'asc')}
+              size="icon-xs"
+              variant="ghost"
+            >
+              <Codicon name={sortDirection === 'asc' ? 'arrow-down' : 'arrow-up'} size="0.85rem" />
+            </Button>
+          </Tip>
+          <Tip label={timeDisplay === 'relative' ? k.timeAgo : k.datetime}>
+            <Button
+              aria-label={timeDisplay === 'relative' ? k.timeAgo : k.datetime}
+              onClick={() => $taskTimeDisplay.set(timeDisplay === 'relative' ? 'datetime' : 'relative')}
+              size="xs"
+              variant="ghost"
+            >
+              {timeDisplay === 'relative' ? k.timeAgoShort : k.datetimeShort}
+            </Button>
+          </Tip>
+        </div>
         <div className="ml-auto flex items-center gap-1">
           <Tip label={k.orchestrationSettings}>
             <Button
@@ -1507,6 +1580,8 @@ export function KanbanBoardPage() {
                 onToggle={() => toggleLane(col.name, auto)}
                 onToggleSelect={toggleSelect}
                 selected={selected}
+                sortDirection={sortDirection}
+                timeDisplay={timeDisplay}
               />
             )
           })}

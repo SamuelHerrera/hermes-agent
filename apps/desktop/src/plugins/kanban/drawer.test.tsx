@@ -261,7 +261,12 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Agent is working now')).toBe(true)
     expect(items.at(-1)?.detail).not.toContain('latest action')
     expect(items.at(-1)?.actionTrace).toEqual([
-      { at: 1020, detail: 'Looked through the code.', id: 'worker-activity-summary', label: 'Work updates' }
+      {
+        at: 1020,
+        detail: 'Searched the Kanban activity timeline and worker-update code.',
+        id: 'worker-activity-summary',
+        label: 'Work updates'
+      }
     ])
     expect(items.some(item => item.label === 'heartbeat')).toBe(false)
     expect(items.at(-1)?.children).toEqual([
@@ -361,7 +366,7 @@ describe('buildTimelineItems', () => {
     expect(items.at(-1)?.actionTrace).toEqual([
       {
         at: 1020,
-        detail: 'Read the relevant files, updated the Kanban UI files, and ran verification.',
+        detail: 'Read drawer.tsx, updated drawer.tsx, and ran the Kanban UI tests.',
         id: 'worker-activity-summary',
         label: 'Work updates'
       }
@@ -407,7 +412,7 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Recent action')).toBe(false)
     expect(items.at(-1)).toMatchObject({ label: 'Agent is working now' })
     expect(items.at(-1)?.actionTrace).toEqual([
-      { at: 1020, detail: 'Read the relevant files.', id: 'worker-activity-summary', label: 'Work updates' }
+      { at: 1020, detail: 'Read file-1.tsx, file-2.tsx, file-3.tsx, file-4.tsx, and 21 more.', id: 'worker-activity-summary', label: 'Work updates' }
     ])
   })
 
@@ -446,7 +451,7 @@ describe('buildTimelineItems', () => {
       expect(completed?.actionTrace).toEqual([
         {
           at: 1030,
-          detail: 'Loaded the project guidance, reviewed the screenshot, looked through the code, and updated the Kanban UI files.',
+          detail: 'Loaded Hermes guidance, reviewed the attached screenshot, searched the Kanban activity timeline and worker-update code, and updated drawer.tsx.',
           id: 'worker-activity-summary',
           label: 'Work updates'
         }

@@ -22,6 +22,8 @@ import type {
   KanbanTaskDetail,
   OrchestrationSettings,
   TaskEstimate,
+  TaskSortDirection,
+  TaskTimeDisplay,
   WorkerLog
 } from './types'
 
@@ -44,10 +46,19 @@ export const $lanesByProfile = atom<boolean>(false)
  *  auto: empty lanes collapse to a rail, occupied lanes expand. Persisted. */
 export const $collapsedLanes = atom<Record<string, boolean>>({})
 
+/** Per-board card order preference: oldest-first preserves the backend's
+ *  historic order; newest-first brings fresh work to the top of each lane. */
+export const $taskSortDirection = atom<TaskSortDirection>('asc')
+
+/** Timestamp rendering preference for card footers. */
+export const $taskTimeDisplay = atom<TaskTimeDisplay>('relative')
+
 const BOARD_SLUG_KEY = 'boardSlug'
 const INTRO_KEY = 'introDismissed'
 const LANES_KEY = 'lanesByProfile'
 const COLLAPSED_KEY = 'collapsedLanes'
+const SORT_DIRECTION_KEY = 'taskSortDirection'
+const TIME_DISPLAY_KEY = 'taskTimeDisplay'
 
 /** One live `task_events` frame → precise cache invalidation: the board, plus
  *  each touched task's detail. The polls (8s board / 4s drawer) stay as the
@@ -94,6 +105,8 @@ export function bindApi(r: Rest, storage: PluginStorage, socket: Socket): () => 
   persist($introDismissed, INTRO_KEY, false)
   persist($lanesByProfile, LANES_KEY, false)
   persist($collapsedLanes, COLLAPSED_KEY, {})
+  persist($taskSortDirection, SORT_DIRECTION_KEY, 'asc')
+  persist($taskTimeDisplay, TIME_DISPLAY_KEY, 'relative')
 
   let close: (() => void) | null = null
 

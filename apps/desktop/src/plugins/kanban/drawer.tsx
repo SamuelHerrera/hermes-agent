@@ -211,15 +211,10 @@ const TERMINAL_STATUSES = new Set(['archived', 'blocked', 'done', 'review'])
 const WORKER_ACTIVITY_ORDER = ['kanban', 'context', 'inspect', 'search', 'read', 'edit', 'check', 'verify'] as const
 type WorkerActivity = (typeof WORKER_ACTIVITY_ORDER)[number]
 
-const WORKER_ACTIVITY_COPY: Record<WorkerActivity, string> = {
-  check: 'checked the change set',
-  context: 'loaded the project guidance',
-  edit: 'updated the Kanban UI files',
-  inspect: 'reviewed the screenshot',
-  kanban: 'loaded the task context',
-  read: 'read the relevant files',
-  search: 'looked through the code',
-  verify: 'ran verification'
+interface WorkerActivityHit {
+  kind: WorkerActivity
+  phrase: string
+  subject?: string
 }
 
 function parseEventPayload(event: KanbanEvent): Record<string, unknown> {
@@ -249,25 +244,88 @@ function stripLogLineChrome(line: string): string {
     .trim()
 }
 
-function classifyCommand(command: string): null | WorkerActivity {
+function describeCommand(command: string): null | WorkerActivityHit {
   const normalized = command.toLowerCase()
 
   if (/\b(?:npm|pnpm|yarn|vitest|pytest|tsc|eslint)\b/.test(normalized) || /\btest(?:s|ing)?\b/.test(normalized)) {
-    return 'verify'
+    if (/\b(?:vitest|test:ui)\b/.test(normalized)) {
+      return { kind: 'verify', phrase: 'ran the Kanban UI tests' }
+    }
+
+    if (/\b(?:tsc|typecheck)\b/.test(normalized)) {
+      return { kind: 'verify', phrase: 'ran the desktop type checks' }
+    }
+
+    if (/\beslint\b/.test(normalized)) {
+      return { kind: 'verify', phrase: 'ran the desktop lint checks' }
+    }
+
+    return { kind: 'verify', phrase: 'ran verification' }
   }
 
   if (/^git\s+(?:diff|status|show|log)\b/.test(normalized)) {
-    return 'check'
+    return { kind: 'check', phrase: 'checked the current git diff' }
   }
 
-  if (/^(?:find|rg|grep)\b/.test(normalized)) {
-    return 'search'
+  if (/\bgit\s+-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized) || /\bgit\s+(?:-c\s+\S+\s+)*-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized)) {
+    return { kind: 'check', phrase: 'checked the current git diff' }
+  }
+
+  if (/\bgit\s+-c\s+/.test(normalized) || /\bgit\s+.*\b(?:diff|status|show|log)\b/.test(normalized)) {
+    return { kind: 'check', phrase: 'checked the current git state' }
+  }
+
+  if (/^(?:find|rg|grep)\b/.test(normalized) || /\b(?:find|rg|grep)\b/.test(normalized)) {
+    return { kind: 'search', phrase: 'searched the codebase' }
   }
 
   return null
 }
 
-function classifyWorkerLogLine(line: string): null | WorkerActivity {
+function cleanSubject(raw: string): string {
+  return raw
+    .replace(/\s+\+\s+\d+\s+commands?$/i, '')
+    .replace(/\s+L\d+(?:-\d+)?$/i, '')
+    .trim()
+}
+
+function basenameSubject(raw: string): string {
+  const subject = cleanSubject(raw).split(/\s+/)[0] ?? ''
+  const bare = subject.replace(/^['"]|['"]$/g, '').replace(/,$/, '')
+  const parts = bare.split(/[\\/]/).filter(Boolean)
+
+  return parts.at(-1) ?? bare
+}
+
+function humanSkillName(raw: string): string {
+  const name = cleanSubject(raw).split(/\s+/)[0] ?? ''
+
+  if (/kanban/i.test(name)) {
+    return 'Kanban'
+  }
+
+  if (/hermes/i.test(name)) {
+    return 'Hermes'
+  }
+
+  return name.replace(/[-_]+/g, ' ')
+}
+
+function describeSearch(raw: string): string {
+  const query = cleanSubject(raw).toLowerCase()
+
+  if (/workerlogactivitysummary|work updates|worker check-ins|timeline|heartbeat|current_action|working now/.test(query)) {
+    return 'searched the Kanban activity timeline and worker-update code'
+  }
+
+  if (/kanban/.test(query)) {
+    return 'looked for the relevant Kanban UI files'
+  }
+
+  return 'searched the codebase for related logic'
+}
+
+function describeWorkerLogLine(line: string): null | WorkerActivityHit {
   const cleaned = stripLogLineChrome(line)
 
   if (
@@ -288,41 +346,62 @@ function classifyWorkerLogLine(line: string): null | WorkerActivity {
   }
 
   if (action.startsWith('$ ')) {
-    return classifyCommand(action.slice(2).trim())
+    return describeCommand(action.slice(2).trim())
   }
 
-  const [verb] = action.split(' ')
+  const [verb = '', ...rest] = action.split(/\s+/)
+  const rawRest = rest.join(' ')
 
   switch (verb) {
     case 'find':
 
     case 'grep':
-      return 'search'
+      return { kind: 'search', phrase: describeSearch(rawRest) }
 
     case 'kanban_at':
+      return { kind: 'kanban', phrase: 'checked the task attachments' }
 
     case 'kanban_co':
 
+    case 'kanban_he':
+
     case 'kanban_sh':
-      return 'kanban'
+      return { kind: 'kanban', phrase: 'loaded the task context' }
 
     case 'patch':
 
     case 'write':
-      return 'edit'
+      return { kind: 'edit', phrase: 'updated the Kanban UI files', subject: basenameSubject(rawRest) }
 
     case 'read':
-      return 'read'
+      return { kind: 'read', phrase: 'read the relevant files', subject: basenameSubject(rawRest) }
 
     case 'skill':
-      return 'context'
+      return { kind: 'context', phrase: `loaded ${humanSkillName(rawRest)} guidance` }
 
     case 'vision':
-      return 'inspect'
+      return { kind: 'inspect', phrase: 'reviewed the attached screenshot' }
 
     default:
       return null
   }
+}
+
+function compactSubjects(subjects: string[], fallback: string): string {
+  const unique = [...new Set(subjects.filter(Boolean))]
+
+  if (!unique.length) {
+    return fallback
+  }
+
+  const shown = unique.slice(0, 4)
+  const prefix = fallback.replace(/ files?$/, '')
+
+  if (unique.length > shown.length) {
+    return `${prefix} ${shown.join(', ')}, and ${unique.length - shown.length} more`
+  }
+
+  return `${prefix} ${sentenceList(shown)}`
 }
 
 function sentenceList(parts: string[]): string {
@@ -342,27 +421,57 @@ function workerLogActivitySummary(log: WorkerLog | undefined, at?: null | number
     return []
   }
 
-  const seen = new Set<WorkerActivity>()
+  const seen = new Set<string>()
+  const hits: WorkerActivityHit[] = []
 
   stripAnsi(log.content)
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
     .forEach(line => {
-      const activity = classifyWorkerLogLine(line)
+      const activity = describeWorkerLogLine(line)
 
       if (activity) {
-        seen.add(activity)
+        const key = `${activity.kind}:${activity.subject ?? activity.phrase}`
+
+        if (!seen.has(key)) {
+          seen.add(key)
+          hits.push(activity)
+        }
       }
     })
 
-  const ordered = WORKER_ACTIVITY_ORDER.filter(activity => seen.has(activity))
+  const ordered = WORKER_ACTIVITY_ORDER.flatMap(kind => hits.filter(hit => hit.kind === kind))
 
   if (!ordered.length) {
     return []
   }
 
-  const summary = sentenceList(ordered.map(activity => WORKER_ACTIVITY_COPY[activity]))
+  const phrases = WORKER_ACTIVITY_ORDER.flatMap(kind => {
+    const group = ordered.filter(hit => hit.kind === kind)
+
+    if (!group.length) {
+      return []
+    }
+
+    if (kind === 'read') {
+      return compactSubjects(
+        group.map(hit => hit.subject ?? ''),
+        'read files'
+      )
+    }
+
+    if (kind === 'edit') {
+      return compactSubjects(
+        group.map(hit => hit.subject ?? ''),
+        'updated files'
+      )
+    }
+
+    return [...new Set(group.map(hit => hit.phrase))]
+  })
+
+  const summary = sentenceList([...new Set(phrases)].slice(-6))
 
   return [
     {
@@ -643,7 +752,7 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                         <span className="min-w-0">
                           <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{action.label}</span>
                           {action.detail && (
-                            <span className="ml-1 line-clamp-2 text-[0.6875rem] text-(--ui-text-quaternary)">{action.detail}</span>
+                            <span className="ml-1 line-clamp-3 text-[0.6875rem] text-(--ui-text-quaternary)">{action.detail}</span>
                           )}
                         </span>
                         {ago(action.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(action.at)}</span>}

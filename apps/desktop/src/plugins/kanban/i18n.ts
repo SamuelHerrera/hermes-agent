@@ -50,6 +50,12 @@ type KanbanMessages = {
   allTenants: string
   showArchived: string
   groupRunning: string
+  sortOldestFirst: string
+  sortNewestFirst: string
+  timeAgo: string
+  timeAgoShort: string
+  datetime: string
+  datetimeShort: string
   nSelected: (n: number) => string
   moveToShort: string
   assign: string
@@ -263,6 +269,12 @@ const en: KanbanMessages = {
   allTenants: 'All tenants',
   showArchived: 'Show archived',
   groupRunning: 'Group Running by profile',
+  sortOldestFirst: 'Oldest first',
+  sortNewestFirst: 'Newest first',
+  timeAgo: 'Time ago',
+  timeAgoShort: 'Ago',
+  datetime: 'Date/time',
+  datetimeShort: 'Date',
   nSelected: n => `${n} selected`,
   moveToShort: 'Move to',
   assign: 'Assign',
@@ -479,6 +491,12 @@ const ja: KanbanMessages = {
   allTenants: 'すべてのテナント',
   showArchived: 'アーカイブを表示',
   groupRunning: '実行中をプロフィールでグループ化',
+  sortOldestFirst: '古い順',
+  sortNewestFirst: '新しい順',
+  timeAgo: '経過時間',
+  timeAgoShort: '経過',
+  datetime: '日時',
+  datetimeShort: '日時',
   nSelected: n => `${n} 件選択中`,
   moveToShort: '移動',
   assign: '割り当て',
@@ -693,6 +711,12 @@ const zh: KanbanMessages = {
   allTenants: '所有租户',
   showArchived: '显示已归档',
   groupRunning: '按配置档分组运行中',
+  sortOldestFirst: '最旧优先',
+  sortNewestFirst: '最新优先',
+  timeAgo: '多久前',
+  timeAgoShort: '多久前',
+  datetime: '日期时间',
+  datetimeShort: '日期',
   nSelected: n => `已选择 ${n} 个`,
   moveToShort: '移动到',
   assign: '分配',
@@ -905,6 +929,12 @@ const zhHant: KanbanMessages = {
   allTenants: '所有租戶',
   showArchived: '顯示已封存',
   groupRunning: '依設定檔分組執行中',
+  sortOldestFirst: '最舊優先',
+  sortNewestFirst: '最新優先',
+  timeAgo: '多久前',
+  timeAgoShort: '多久前',
+  datetime: '日期時間',
+  datetimeShort: '日期',
   nSelected: n => `已選取 ${n} 個`,
   moveToShort: '移至',
   assign: '指派',
