@@ -184,7 +184,7 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
 type TimelineTone = 'current' | 'done' | 'error' | 'pending' | 'warning'
 
 interface TimelineItem {
-  actionTrace?: string[]
+  actionTrace?: TimelineSubitem[]
   at?: null | number
   children?: TimelineSubitem[]
   detail?: string
@@ -208,7 +208,19 @@ const EVENT_TONES: Record<string, TimelineTone> = {
 }
 
 const TERMINAL_STATUSES = new Set(['archived', 'blocked', 'done', 'review'])
-const WORKER_ACTION_TRACE_LIMIT = 20
+const WORKER_ACTIVITY_ORDER = ['kanban', 'context', 'inspect', 'search', 'read', 'edit', 'check', 'verify'] as const
+type WorkerActivity = (typeof WORKER_ACTIVITY_ORDER)[number]
+
+const WORKER_ACTIVITY_COPY: Record<WorkerActivity, string> = {
+  check: 'checked the change set',
+  context: 'loaded the project guidance',
+  edit: 'updated the Kanban UI files',
+  inspect: 'reviewed the screenshot',
+  kanban: 'loaded the task context',
+  read: 'read the relevant files',
+  search: 'looked through the code',
+  verify: 'ran verification'
+}
 
 function parseEventPayload(event: KanbanEvent): Record<string, unknown> {
   if (!event.payload) {
@@ -230,8 +242,6 @@ function stripAnsi(text: string): string {
   return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '')
 }
 
-const trimAction = (value: string, max = 150): string => (value.length > max ? `${value.slice(0, max - 1)}…` : value)
-
 function stripLogLineChrome(line: string): string {
   return line
     .replace(/^[\s│┃┊╭╰├└┌┐┘┴┬─$|]+/, '')
@@ -239,7 +249,25 @@ function stripLogLineChrome(line: string): string {
     .trim()
 }
 
-function humanizeWorkerLogLine(line: string): null | string {
+function classifyCommand(command: string): null | WorkerActivity {
+  const normalized = command.toLowerCase()
+
+  if (/\b(?:npm|pnpm|yarn|vitest|pytest|tsc|eslint)\b/.test(normalized) || /\btest(?:s|ing)?\b/.test(normalized)) {
+    return 'verify'
+  }
+
+  if (/^git\s+(?:diff|status|show|log)\b/.test(normalized)) {
+    return 'check'
+  }
+
+  if (/^(?:find|rg|grep)\b/.test(normalized)) {
+    return 'search'
+  }
+
+  return null
+}
+
+function classifyWorkerLogLine(line: string): null | WorkerActivity {
   const cleaned = stripLogLineChrome(line)
 
   if (
@@ -260,73 +288,97 @@ function humanizeWorkerLogLine(line: string): null | string {
   }
 
   if (action.startsWith('$ ')) {
-    return trimAction(`running command: ${action.slice(2).trim()}`)
+    return classifyCommand(action.slice(2).trim())
   }
 
-  const [verb, ...rest] = action.split(' ')
-  const target = rest.join(' ').trim()
-  const compactTarget = trimAction(target || action, 120)
+  const [verb] = action.split(' ')
 
   switch (verb) {
     case 'find':
-      return `finding files: ${compactTarget}`
 
     case 'grep':
-      return `searching code for: ${compactTarget}`
+      return 'search'
+
+    case 'kanban_at':
 
     case 'kanban_co':
-      return 'updating the kanban task'
 
     case 'kanban_sh':
-      return 'loading the kanban task'
+      return 'kanban'
 
     case 'patch':
-      return `editing files: ${compactTarget}`
-
-    case 'plan':
-      return target ? `updating plan: ${compactTarget}` : 'updating the work plan'
-
-    case 'read':
-      return `reading file: ${compactTarget}`
-
-    case 'skill':
-      return `loading skill: ${compactTarget}`
-
-    case 'vision':
-      return `inspecting image: ${compactTarget}`
 
     case 'write':
-      return `writing file: ${compactTarget}`
+      return 'edit'
+
+    case 'read':
+      return 'read'
+
+    case 'skill':
+      return 'context'
+
+    case 'vision':
+      return 'inspect'
 
     default:
       return null
   }
 }
 
-function workerLogActions(log?: WorkerLog, limit = WORKER_ACTION_TRACE_LIMIT): string[] {
+function sentenceList(parts: string[]): string {
+  if (parts.length <= 1) {
+    return parts[0] ?? ''
+  }
+
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`
+  }
+
+  return `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`
+}
+
+function workerLogActivitySummary(log: WorkerLog | undefined, at?: null | number): TimelineSubitem[] {
   if (!log?.content) {
     return []
   }
 
-  const actions = stripAnsi(log.content)
+  const seen = new Set<WorkerActivity>()
+
+  stripAnsi(log.content)
     .split('\n')
     .map(line => line.trim())
     .filter(Boolean)
-    .map(line => humanizeWorkerLogLine(line))
-    .filter((action): action is string => Boolean(action))
+    .forEach(line => {
+      const activity = classifyWorkerLogLine(line)
 
-  return actions.slice(-limit)
-}
+      if (activity) {
+        seen.add(activity)
+      }
+    })
 
-function latestWorkerLogAction(log?: WorkerLog): null | string {
-  return workerLogActions(log, 1)[0] ?? null
+  const ordered = WORKER_ACTIVITY_ORDER.filter(activity => seen.has(activity))
+
+  if (!ordered.length) {
+    return []
+  }
+
+  const summary = sentenceList(ordered.map(activity => WORKER_ACTIVITY_COPY[activity]))
+
+  return [
+    {
+      at,
+      detail: `${summary.charAt(0).toUpperCase()}${summary.slice(1)}.`,
+      id: 'worker-activity-summary',
+      label: 'Work updates'
+    }
+  ]
 }
 
 function latestRun(runs: KanbanRun[]): KanbanRun | undefined {
   return [...runs].sort((a, b) => Number(b.started_at ?? 0) - Number(a.started_at ?? 0) || Number(b.id) - Number(a.id))[0]
 }
 
-function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, log: WorkerLog | undefined, k: KanbanText) {
+function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, k: KanbanText) {
   const runDuration = run ? duration(run.started_at, run.ended_at) : null
   const parts: string[] = []
 
@@ -342,11 +394,6 @@ function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, lo
     }
   }
 
-  const action = latestWorkerLogAction(log)
-
-  if (action && task.status !== 'running') {
-    parts.push(k.timelineLastAction(action))
-  }
 
   switch (task.status) {
     case 'running':
@@ -449,7 +496,15 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
     push(runTimelineItem(candidate))
   }
 
-  const current = currentStatusLabel(detail.task, run, log, k)
+  const current = currentStatusLabel(detail.task, run, k)
+
+  const actionTrace = workerLogActivitySummary(
+    log,
+    detail.task.status === 'running'
+      ? (detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at)
+      : (run?.ended_at ?? detail.task.completed_at ?? detail.task.last_heartbeat_at)
+  )
+
   const heartbeatChildren = heartbeats.length > 0 ? heartbeats : undefined
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
@@ -459,11 +514,10 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
       detail: current.detail,
       id: `current-${detail.task.status}`,
       label: current.label,
+      actionTrace: actionTrace.length > 0 ? actionTrace : undefined,
       tone: current.tone
     })
   } else {
-    const actionTrace = detail.task.status === 'running' ? workerLogActions(log) : []
-
     push({
       actionTrace: actionTrace.length > 0 ? actionTrace : undefined,
       at: detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at,
@@ -568,12 +622,15 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                         {ago(child.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>}
                       </div>
                     ))}
-                    {item.actionTrace?.map((action, index) => (
-                      <div
-                        className="line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)"
-                        key={`${item.id}-action-${index}`}
-                      >
-                        {action}
+                    {item.actionTrace?.map(action => (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-2" key={action.id}>
+                        <span className="min-w-0">
+                          <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{action.label}</span>
+                          {action.detail && (
+                            <span className="ml-1 line-clamp-2 text-[0.6875rem] text-(--ui-text-quaternary)">{action.detail}</span>
+                          )}
+                        </span>
+                        {ago(action.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(action.at)}</span>}
                       </div>
                     ))}
                   </div>

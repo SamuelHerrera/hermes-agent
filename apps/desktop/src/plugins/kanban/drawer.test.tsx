@@ -260,7 +260,9 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Task created')).toBe(true)
     expect(items.some(item => item.label === 'Agent is working now')).toBe(true)
     expect(items.at(-1)?.detail).not.toContain('latest action')
-    expect(items.at(-1)?.actionTrace).toEqual(["searching code for: 'timeline'"])
+    expect(items.at(-1)?.actionTrace).toEqual([
+      { at: 1020, detail: 'Looked through the code.', id: 'worker-activity-summary', label: 'Work updates' }
+    ])
     expect(items.some(item => item.label === 'heartbeat')).toBe(false)
     expect(items.at(-1)?.children?.map(item => item.label)).toEqual(['heartbeat'])
   })
@@ -323,7 +325,7 @@ describe('buildTimelineItems', () => {
     expect(screen.getByText('No worker log yet.')).toBeTruthy()
   })
 
-  it('turns worker tool log rows into plain-language current activity', () => {
+  it('groups worker tool log rows into one plain-language activity sentence with an age', () => {
     const detail = {
       attachments: [],
       comments: [],
@@ -347,9 +349,14 @@ describe('buildTimelineItems', () => {
     const items = buildTimelineItems(detail, log, testKanbanText as never)
 
     expect(items.at(-1)?.detail).not.toContain('latest action')
-    expect(items.at(-1)?.actionTrace?.at(-1)).toBe(
-      'running command: npm run test:ui -- src/plugins/kanban/drawer.test.tsx'
-    )
+    expect(items.at(-1)?.actionTrace).toEqual([
+      {
+        at: 1020,
+        detail: 'Read the relevant files, updated the Kanban UI files, and ran verification.',
+        id: 'worker-activity-summary',
+        label: 'Work updates'
+      }
+    ])
   })
 
   it('does not echo unknown raw worker output into current activity', () => {
@@ -361,6 +368,7 @@ describe('buildTimelineItems', () => {
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
       task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
     } as KanbanTaskDetail
+
     const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
 
     const items = buildTimelineItems(detail, log, testKanbanText as never)
@@ -368,7 +376,7 @@ describe('buildTimelineItems', () => {
     expect(items.at(-1)?.actionTrace).toBeUndefined()
   })
 
-  it('keeps the last 20 worker actions as sublabels under the current status', () => {
+  it('shows one grouped worker update instead of a long list of raw actions', () => {
     const detail = {
       attachments: [],
       comments: [],
@@ -389,9 +397,48 @@ describe('buildTimelineItems', () => {
 
     expect(items.some(item => item.label === 'Recent action')).toBe(false)
     expect(items.at(-1)).toMatchObject({ label: 'Agent is working now' })
-    expect(items.at(-1)?.actionTrace).toHaveLength(20)
-    expect(items.at(-1)?.actionTrace?.[0]).toBe('reading file: file-6.tsx')
-    expect(items.at(-1)?.actionTrace?.at(-1)).toBe('reading file: file-25.tsx')
+    expect(items.at(-1)?.actionTrace).toEqual([
+      { at: 1020, detail: 'Read the relevant files.', id: 'worker-activity-summary', label: 'Work updates' }
+    ])
+  })
+
+  it('keeps work updates visible after completion instead of leaving only heartbeat rows', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [
+        { id: 1, created_at: 1000, kind: 'heartbeat', payload: null },
+        { id: 2, created_at: 1010, kind: 'completed', payload: null }
+      ],
+      links: { children: [], parents: [] },
+      runs: [{ ended_at: 1030, id: 9, outcome: 'completed', profile: 'default', started_at: 990, status: 'closed' }],
+      task: { completed_at: 1030, created_at: 980, id: 't_demo', status: 'done', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const log = {
+      content: [
+        "  ┊ 📚 skill     hermes-agent  0.1s",
+        "  ┊ 👁️  vision    inspect screenshot  0.1s",
+        "  ┊ 🔎 grep      timeline  0.1s",
+        "  ┊ 🔧 patch     drawer.tsx  1.6s"
+      ].join('\n'),
+      exists: true,
+      size_bytes: 180,
+      truncated: false
+    } as WorkerLog
+
+    const items = buildTimelineItems(detail, log, testKanbanText as never)
+    const completed = items.find(item => item.id === 'current-done')
+
+    expect(completed?.label).toBe('Work completed')
+    expect(completed?.actionTrace).toEqual([
+      {
+        at: 1030,
+        detail: 'Loaded the project guidance, reviewed the screenshot, looked through the code, and updated the Kanban UI files.',
+        id: 'worker-activity-summary',
+        label: 'Work updates'
+      }
+    ])
   })
 
   it('adds a waiting item when a ready task has no assignee', () => {
