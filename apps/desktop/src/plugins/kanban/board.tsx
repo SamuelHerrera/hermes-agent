@@ -9,11 +9,11 @@
  */
 
 import {
+  atom,
   Button,
   cn,
   Codicon,
   compactNumber,
-  fmtDateTime,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -55,6 +55,7 @@ import {
   type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -113,6 +114,58 @@ import {
 
 export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
+const fmtTaskDateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+
+export interface NewTaskDraft {
+  assignee: string
+  bodyText: string
+  goalMode: boolean
+  id: string
+  images: File[]
+  modelOverride: TaskModelOverride
+  parent: string
+  priority: string
+  skills: string
+  target: string
+  title: string
+  workspaceKind: string
+  workspacePath: string
+}
+
+let nextNewTaskDraftId = 1
+
+export function createNewTaskDraft(target: string, patch: Partial<NewTaskDraft> = {}): NewTaskDraft {
+  return {
+    assignee: '',
+    bodyText: '',
+    goalMode: false,
+    id: `new-task-${Date.now()}-${nextNewTaskDraftId++}`,
+    images: [],
+    modelOverride: EMPTY_OVERRIDE,
+    parent: '',
+    priority: '0',
+    skills: '',
+    target,
+    title: '',
+    workspaceKind: '',
+    workspacePath: '',
+    ...patch
+  }
+}
+
+export function updateNewTaskDraft(draft: NewTaskDraft, patch: Partial<NewTaskDraft>): NewTaskDraft {
+  return { ...draft, ...patch }
+}
+
+export function minimizedNewTaskDrafts(drafts: readonly NewTaskDraft[]): NewTaskDraft[] {
+  return [...drafts]
+}
+
+export const $newTaskDrafts = atom<NewTaskDraft[]>([])
+export const $newTaskRestoreDraft = atom<null | NewTaskDraft>(null)
+export const NEW_TASK_MINIMIZE_BUTTON_CLASS = 'ml-auto mr-8'
+export const NEW_TASK_MINIMIZE_BUTTON_SIZE = 'icon-xs' as const
+
 // ── optimistic board edits (reconciled by the follow-up refresh) ─────────────
 
 function moveCard(board: KanbanBoard, id: string, toStatus: string): KanbanBoard {
@@ -149,16 +202,16 @@ export function sortColumnTasks(tasks: readonly KanbanTask[], direction: TaskSor
   const dir = direction === 'desc' ? -1 : 1
 
   return [...tasks].sort((a, b) => {
-    const priority = (b.priority ?? 0) - (a.priority ?? 0)
-
-    if (priority !== 0) {
-      return priority
-    }
-
     const time = ((a.created_at ?? 0) - (b.created_at ?? 0)) * dir
 
     if (time !== 0) {
       return time
+    }
+
+    const priority = (b.priority ?? 0) - (a.priority ?? 0)
+
+    if (priority !== 0) {
+      return priority
     }
 
     return a.id.localeCompare(b.id)
@@ -172,7 +225,7 @@ export function taskTimeLabel(task: KanbanTask, display: TaskTimeDisplay, nowMs 
 
   const ms = task.created_at * 1000
   const relative = ago(task.created_at, nowMs)
-  const absolute = fmtDateTime.format(new Date(ms))
+  const absolute = fmtTaskDateTime.format(new Date(ms))
 
   return (
     <span className="text-(--ui-text-quaternary)" title={display === 'relative' ? absolute : (relative ?? absolute)}>
@@ -590,6 +643,11 @@ function Field({ children, label }: { children: ReactNode; label: string }) {
   )
 }
 
+type NewTaskDraftState = Omit<NewTaskDraft, 'id' | 'target'>
+
+const draftFromState = (target: string, state: NewTaskDraftState) =>
+  createNewTaskDraft(target, { ...state, images: [...state.images] })
+
 function NewTaskDialog({
   onClose,
   parents,
@@ -634,7 +692,42 @@ function NewTaskDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const [estimate, setEstimate] = useState<null | TaskEstimate>(null)
+  const restoreDraft = useValue($newTaskRestoreDraft)
   const imageInputRef = useRef<HTMLInputElement>(null)
+
+  const currentDraftState: NewTaskDraftState = {
+    assignee,
+    bodyText,
+    goalMode,
+    images,
+    modelOverride,
+    parent,
+    priority,
+    skills,
+    title,
+    workspaceKind,
+    workspacePath
+  }
+
+  const applyDraft = useCallback(
+    (draft: NewTaskDraft) => {
+      setTitle(draft.title)
+      setBodyText(draft.bodyText)
+      setAssignee(draft.assignee)
+      setPriority(draft.priority)
+      setSkills(draft.skills)
+      setWorkspaceKind(draft.workspaceKind || boardDefaultKind)
+      setWorkspacePath(draft.workspacePath)
+      setParent(draft.parent)
+      setModelOverride(draft.modelOverride)
+      setGoalMode(draft.goalMode)
+      setImages([...draft.images])
+      setError(null)
+      setBusy(false)
+      setEstimate(null)
+    },
+    [boardDefaultKind]
+  )
 
   // Rough effort estimate from the typed title/body (before the task exists),
   // via the auto-routed auxiliary model. Makes a model call — explicit action.
@@ -655,6 +748,15 @@ function NewTaskDialog({
   // resolved board default, which may arrive after the first open).
   useEffect(() => {
     if (target) {
+      const pendingRestore = restoreDraft && restoreDraft.target === target ? restoreDraft : null
+
+      if (pendingRestore) {
+        applyDraft(pendingRestore)
+        $newTaskRestoreDraft.set(null)
+
+        return
+      }
+
       setTitle('')
       setBodyText('')
       setAssignee('')
@@ -670,7 +772,7 @@ function NewTaskDialog({
       setBusy(false)
       setEstimate(null)
     }
-  }, [target, boardDefaultKind])
+  }, [target, boardDefaultKind, restoreDraft, applyDraft])
 
   const addImages = (files: Iterable<File>) => {
     const next = filterNewTaskImageFiles(files)
@@ -765,6 +867,16 @@ function NewTaskDialog({
     }
   }
 
+  const minimizeDraft = () => {
+    if (!target || busy) {
+      return
+    }
+
+    const draft = draftFromState(target, currentDraftState)
+    $newTaskDrafts.set([...$newTaskDrafts.get(), draft])
+    onClose()
+  }
+
   return (
     <Dialog onOpenChange={open => !open && onClose()} open={Boolean(target)}>
       {/* `overflow-visible`: DialogContent publishes ITSELF as the portal
@@ -776,8 +888,19 @@ function NewTaskDialog({
           DialogContent is in flight as #75600; when that lands this override
           becomes a no-op and can go. */}
       <DialogContent className="w-[min(42rem,94vw)] max-w-none overflow-visible">
-        <DialogHeader>
+        <DialogHeader className="flex-row items-center gap-2 text-left">
           <DialogTitle>{target ? k.newTaskIn(columnLabel(k, target)) : k.newTask}</DialogTitle>
+          <Button
+            aria-label={k.minimizeDraft}
+            className={NEW_TASK_MINIMIZE_BUTTON_CLASS}
+            disabled={busy}
+            onClick={minimizeDraft}
+            size={NEW_TASK_MINIMIZE_BUTTON_SIZE}
+            title={k.minimizeDraft}
+            variant="ghost"
+          >
+            <Codicon name="chrome-minimize" size="0.75rem" />
+          </Button>
         </DialogHeader>
         <div className="flex max-h-[min(72vh,44rem)] flex-col gap-3 overflow-y-auto pr-0.5" onPaste={pasteImages}>
           <Input
@@ -1249,6 +1372,7 @@ export function KanbanBoardPage() {
   const [tenant, setTenant] = useState('')
   const [assignee, setAssignee] = useState('')
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+  const drafts = useValue($newTaskDrafts)
 
   // A new-task request raised from outside the page (⌘⌥N, the palette row).
   // The command navigates here and parks the lane; the page picks it up on
@@ -1595,6 +1719,34 @@ export function KanbanBoardPage() {
           onDone={failed => setSelected(new Set(failed))}
           selected={selected}
         />
+      )}
+
+      {drafts.length > 0 && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-[min(42rem,calc(100%-2rem))] items-center gap-1 overflow-x-auto rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) py-1 pr-1 pl-3">
+            <span className="mr-1 shrink-0 text-xs tabular-nums text-(--ui-text-secondary)">{k.minimizedDrafts(drafts.length)}</span>
+            {minimizedNewTaskDrafts(drafts).map(draft => {
+              const label = draft.title.trim() || draft.bodyText.trim().slice(0, 28) || k.untitledDraft
+
+              return (
+                <Button
+                  key={draft.id}
+                  onClick={() => {
+                    $newTaskDrafts.set($newTaskDrafts.get().filter(item => item.id !== draft.id))
+                    $newTaskRestoreDraft.set(draft)
+                    setAddStatus(draft.target)
+                  }}
+                  size="xs"
+                  title={k.restoreDraft(label)}
+                  variant="ghost"
+                >
+                  <Codicon name="window" size="0.75rem" />
+                  <span className="max-w-36 truncate">{label}</span>
+                </Button>
+              )
+            })}
+          </div>
+        </div>
       )}
 
       <NewTaskDialog onClose={() => setAddStatus(null)} parents={parentOptions} target={addStatus} />

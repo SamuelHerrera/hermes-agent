@@ -377,7 +377,7 @@ function describeWorkerLogLine(line: string): null | WorkerActivityHit {
       return { kind: 'read', phrase: 'read the relevant files', subject: basenameSubject(rawRest) }
 
     case 'skill':
-      return { kind: 'context', phrase: `loaded ${humanSkillName(rawRest)} guidance` }
+      return { kind: 'context', phrase: `loaded ${humanSkillName(rawRest)} guidance`, subject: humanSkillName(rawRest) }
 
     case 'vision':
       return { kind: 'inspect', phrase: 'reviewed the attached screenshot' }
@@ -454,6 +454,30 @@ function workerLogActivitySummary(log: WorkerLog | undefined, at?: null | number
       return []
     }
 
+    if (kind === 'kanban') {
+      const bits = []
+
+      if (group.some(hit => /loaded the task context/.test(hit.phrase))) {
+        bits.push('loaded the task context')
+      }
+
+      if (group.some(hit => /attachments/.test(hit.phrase))) {
+        bits.push('checked attachments')
+      }
+
+      return sentenceList(bits)
+    }
+
+    if (kind === 'context') {
+      return `loaded ${sentenceList(group.map(hit => hit.subject ?? '').filter(Boolean))} guidance`
+    }
+
+    if (kind === 'search') {
+      const specific = group.find(hit => /activity timeline/.test(hit.phrase))
+
+      return specific?.phrase ?? [...new Set(group.map(hit => hit.phrase))][0]
+    }
+
     if (kind === 'read') {
       return compactSubjects(
         group.map(hit => hit.subject ?? ''),
@@ -471,7 +495,7 @@ function workerLogActivitySummary(log: WorkerLog | undefined, at?: null | number
     return [...new Set(group.map(hit => hit.phrase))]
   })
 
-  const summary = sentenceList([...new Set(phrases)].slice(-6))
+  const summary = sentenceList([...new Set(phrases)])
 
   return [
     {

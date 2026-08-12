@@ -56,6 +56,10 @@ type KanbanMessages = {
   timeAgoShort: string
   datetime: string
   datetimeShort: string
+  minimizeDraft: string
+  minimizedDrafts: (n: number) => string
+  restoreDraft: (title: string) => string
+  untitledDraft: string
   nSelected: (n: number) => string
   moveToShort: string
   assign: string
@@ -275,6 +279,10 @@ const en: KanbanMessages = {
   timeAgoShort: 'Ago',
   datetime: 'Date/time',
   datetimeShort: 'Date',
+  minimizeDraft: 'Minimize draft',
+  minimizedDrafts: n => `${n} draft${n === 1 ? '' : 's'}`,
+  restoreDraft: title => `Restore ${title}`,
+  untitledDraft: 'Untitled draft',
   nSelected: n => `${n} selected`,
   moveToShort: 'Move to',
   assign: 'Assign',
@@ -497,6 +505,10 @@ const ja: KanbanMessages = {
   timeAgoShort: '経過',
   datetime: '日時',
   datetimeShort: '日時',
+  minimizeDraft: '下書きを最小化',
+  minimizedDrafts: n => `下書き ${n} 件`,
+  restoreDraft: title => `${title} を復元`,
+  untitledDraft: '無題の下書き',
   nSelected: n => `${n} 件選択中`,
   moveToShort: '移動',
   assign: '割り当て',
@@ -717,6 +729,10 @@ const zh: KanbanMessages = {
   timeAgoShort: '多久前',
   datetime: '日期时间',
   datetimeShort: '日期',
+  minimizeDraft: '最小化草稿',
+  minimizedDrafts: n => `${n} 个草稿`,
+  restoreDraft: title => `恢复 ${title}`,
+  untitledDraft: '无标题草稿',
   nSelected: n => `已选择 ${n} 个`,
   moveToShort: '移动到',
   assign: '分配',
@@ -935,6 +951,10 @@ const zhHant: KanbanMessages = {
   timeAgoShort: '多久前',
   datetime: '日期時間',
   datetimeShort: '日期',
+  minimizeDraft: '最小化草稿',
+  minimizedDrafts: n => `${n} 個草稿`,
+  restoreDraft: title => `恢復 ${title}`,
+  untitledDraft: '無標題草稿',
   nSelected: n => `已選取 ${n} 個`,
   moveToShort: '移至',
   assign: '指派',
