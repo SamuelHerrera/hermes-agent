@@ -22,6 +22,10 @@ import {
   host,
   Loader,
   LogView,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
   Tip,
   useMutation,
@@ -49,7 +53,7 @@ import {
   uploadPastedImage
 } from './api'
 import { KanbanCommentBody } from './comment-body'
-import { ModelOverrideField, overridePatch } from './model-override'
+import { ModelOverrideField, overridePatch, type TaskModelOverride } from './model-override'
 import { attachmentMarkdownUrl, buildPastedImageComment, clipboardImageFiles, PastedImageUploadGuard } from './paste-images'
 import {
   type Diagnostic,
@@ -537,6 +541,56 @@ function MetaRow({ children, label }: { children: ReactNode; label: string }) {
       <span className="text-(--ui-text-quaternary)">{label}</span>
       <span className="min-w-0 truncate text-(--ui-text-secondary)">{children}</span>
     </>
+  )
+}
+
+function DrawerTabContent({ children, value }: { children: ReactNode; value: string }) {
+  return (
+    <TabsContent className="min-h-0 flex-col gap-4 data-[state=active]:flex data-[state=inactive]:hidden" value={value}>
+      {children}
+    </TabsContent>
+  )
+}
+
+function DetailMetaGrid({
+  onModelChange,
+  onReassign,
+  task
+}: {
+  onModelChange: (next: TaskModelOverride) => void
+  onReassign: (profile: string) => void
+  task: KanbanTaskFull
+}) {
+  const k = useKanban()
+  const running = task.status === 'running'
+
+  return (
+    <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-[0.71rem]">
+      <MetaRow label={k.assignee}>
+        <AssigneeMenu current={task.assignee} onReassign={onReassign} />
+      </MetaRow>
+      {typeof task.priority === 'number' && <MetaRow label={k.metaPriority}>{task.priority}</MetaRow>}
+      {task.tenant && <MetaRow label={k.metaTenant}>{task.tenant}</MetaRow>}
+      {task.workspace_path && (
+        <MetaRow label={k.workspace}>
+          {task.workspace_kind ? `${task.workspace_kind}: ` : ''}
+          {task.workspace_path}
+        </MetaRow>
+      )}
+      <MetaRow label={k.model}>
+        <ModelOverrideField
+          onChange={onModelChange}
+          value={{
+            effort: task.reasoning_effort ?? '',
+            model: task.model_override ?? '',
+            provider: task.provider_override ?? ''
+          }}
+        />
+      </MetaRow>
+      {task.created_by && <MetaRow label={k.metaCreatedBy}>{task.created_by}</MetaRow>}
+      {ago(task.created_at) && <MetaRow label={k.metaCreated}>{ago(task.created_at)}</MetaRow>}
+      {running && task.worker_pid ? <MetaRow label={k.metaWorkerPid}>{task.worker_pid}</MetaRow> : null}
+    </div>
   )
 }
 
