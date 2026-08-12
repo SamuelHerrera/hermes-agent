@@ -118,6 +118,36 @@ function normalizeHermesHomeRoot(hermesHome, { pathModule = pathModuleForPlatfor
   return resolved
 }
 
+/**
+ * Remove execution-scoped identity before Desktop starts its long-lived backend.
+ *
+ * Desktop is sometimes launched from an agent-controlled shell while verifying
+ * a build. In that case Electron inherits the caller's Kanban worker and session
+ * variables. Passing them through to `hermes serve` makes every ordinary Desktop
+ * chat look like that worker, including its completion/block protocol. Keep
+ * machine/config variables (notably HERMES_HOME) while dropping only identities
+ * owned by the launching execution.
+ */
+function scrubDesktopBackendParentEnv(currentEnv = process.env) {
+  const cleaned = { ...(currentEnv || {}) }
+
+  for (const key of Object.keys(cleaned)) {
+    if (
+      key.startsWith('HERMES_KANBAN_') ||
+      key.startsWith('HERMES_SESSION_') ||
+      key.startsWith('HERMES_CRON_') ||
+      key === 'HERMES_UI_SESSION_ID' ||
+      key === 'HERMES_DELEGATED_CHILD_CONTEXT' ||
+      key === 'HERMES_PROFILE' ||
+      key === 'HERMES_TENANT'
+    ) {
+      delete cleaned[key]
+    }
+  }
+
+  return cleaned
+}
+
 function buildDesktopBackendEnv({
   hermesHome,
   pythonPathEntries = [],
@@ -157,5 +187,6 @@ export {
   hermesManagedNodePathEntries,
   normalizeHermesHomeRoot,
   pathEnvKey,
-  POSIX_SANE_PATH_ENTRIES
+  POSIX_SANE_PATH_ENTRIES,
+  scrubDesktopBackendParentEnv
 }
