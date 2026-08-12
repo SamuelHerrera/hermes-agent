@@ -92,7 +92,16 @@ import {
 } from './new-task-images'
 import { OrchestrationPanel } from './orchestration'
 import { clipboardImageFiles } from './paste-images'
-import { columnMeta, type KanbanAttachment, type KanbanBoard, type KanbanTask, type TaskEstimate, type TaskSortDirection, type TaskTimeDisplay } from './types'
+import {
+  columnMeta,
+  type KanbanAttachment,
+  type KanbanBoard,
+  type KanbanTask,
+  type TaskEstimate,
+  type TaskSortDirection,
+  type TaskSortDirections,
+  type TaskTimeDisplay
+} from './types'
 import {
   $newTaskLane,
   ago,
@@ -216,6 +225,14 @@ export function sortColumnTasks(tasks: readonly KanbanTask[], direction: TaskSor
 
     return a.id.localeCompare(b.id)
   })
+}
+
+export function taskSortDirectionForColumn(directions: TaskSortDirections, column: string): TaskSortDirection {
+  return directions[column] === 'desc' ? 'desc' : 'asc'
+}
+
+export function toggleColumnSortDirection(directions: TaskSortDirections, column: string): TaskSortDirections {
+  return { ...directions, [column]: taskSortDirectionForColumn(directions, column) === 'asc' ? 'desc' : 'asc' }
 }
 
 export function taskTimeLabel(task: KanbanTask, display: TaskTimeDisplay, nowMs = Date.now()): ReactNode {
@@ -442,11 +459,12 @@ function Column({
   onDelete,
   onDropTask,
   onMove,
+  onToggleSort,
   onOpen,
   onToggle,
   onToggleSelect,
   selected,
-  sortDirection,
+  sortDirections,
   timeDisplay
 }: {
   collapsed: boolean
@@ -456,11 +474,12 @@ function Column({
   onDelete: (id: string) => void
   onDropTask: (id: string, status: string) => void
   onMove: (id: string, status: string) => void
+  onToggleSort: (status: string) => void
   onOpen: (id: string) => void
   onToggle: () => void
   onToggleSelect: (id: string) => void
   selected: ReadonlySet<string>
-  sortDirection: TaskSortDirection
+  sortDirections: TaskSortDirections
   timeDisplay: TaskTimeDisplay
 }) {
   const k = useKanban()
@@ -469,6 +488,7 @@ function Column({
   const label = columnLabel(k, column.name)
   const locked = isLockedTarget(column.name)
   const byProfile = useValue($lanesByProfile)
+  const sortDirection = taskSortDirectionForColumn(sortDirections, column.name)
 
   const displayTasks = useMemo(() => sortColumnTasks(column.tasks, sortDirection), [column.tasks, sortDirection])
 
@@ -559,9 +579,20 @@ function Column({
           </span>
         </Tip>
         <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{column.tasks.length}</span>
+        <Tip label={sortDirection === 'asc' ? k.sortColumnOldestFirst(label) : k.sortColumnNewestFirst(label)}>
+          <Button
+            aria-label={sortDirection === 'asc' ? k.sortColumnOldestFirst(label) : k.sortColumnNewestFirst(label)}
+            className="ml-auto"
+            onClick={() => onToggleSort(column.name)}
+            size="icon-xs"
+            variant="ghost"
+          >
+            <Codicon name={sortDirection === 'asc' ? 'arrow-down' : 'arrow-up'} size="0.75rem" />
+          </Button>
+        </Tip>
         <button
           aria-label={k.collapse(label)}
-          className="ml-auto grid size-5 place-items-center rounded text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100 group-hover/col:opacity-100"
+          className="grid size-5 place-items-center rounded text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100 group-hover/col:opacity-100"
           onClick={onToggle}
           type="button"
         >
@@ -1354,7 +1385,7 @@ export function KanbanBoardPage() {
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
   const [archived, setArchived] = useState(false)
-  const sortDirection = useValue($taskSortDirection)
+  const sortDirections = useValue($taskSortDirection)
   const timeDisplay = useValue($taskTimeDisplay)
 
   // Live updates ride the events socket (bindApi); this interval is only the
@@ -1618,16 +1649,6 @@ export function KanbanBoardPage() {
         )}
         <SearchField aria-label={k.filterCards} onChange={setSearch} placeholder={k.filterCards} value={search} />
         <div className="flex items-center gap-0.5 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-0.5">
-          <Tip label={sortDirection === 'asc' ? k.sortOldestFirst : k.sortNewestFirst}>
-            <Button
-              aria-label={sortDirection === 'asc' ? k.sortOldestFirst : k.sortNewestFirst}
-              onClick={() => $taskSortDirection.set(sortDirection === 'asc' ? 'desc' : 'asc')}
-              size="icon-xs"
-              variant="ghost"
-            >
-              <Codicon name={sortDirection === 'asc' ? 'arrow-down' : 'arrow-up'} size="0.85rem" />
-            </Button>
-          </Tip>
           <Tip label={timeDisplay === 'relative' ? k.timeAgo : k.datetime}>
             <Button
               aria-label={timeDisplay === 'relative' ? k.timeAgo : k.datetime}
@@ -1703,8 +1724,9 @@ export function KanbanBoardPage() {
                 onOpen={setOpenId}
                 onToggle={() => toggleLane(col.name, auto)}
                 onToggleSelect={toggleSelect}
+                onToggleSort={status => $taskSortDirection.set(toggleColumnSortDirection($taskSortDirection.get(), status))}
                 selected={selected}
-                sortDirection={sortDirection}
+                sortDirections={sortDirections}
                 timeDisplay={timeDisplay}
               />
             )

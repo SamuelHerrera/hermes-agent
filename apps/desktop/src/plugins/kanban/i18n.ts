@@ -52,6 +52,8 @@ type KanbanMessages = {
   groupRunning: string
   sortOldestFirst: string
   sortNewestFirst: string
+  sortColumnOldestFirst: (label: string) => string
+  sortColumnNewestFirst: (label: string) => string
   timeAgo: string
   timeAgoShort: string
   datetime: string
@@ -275,6 +277,8 @@ const en: KanbanMessages = {
   groupRunning: 'Group Running by profile',
   sortOldestFirst: 'Oldest first',
   sortNewestFirst: 'Newest first',
+  sortColumnOldestFirst: label => `${label}: oldest first`,
+  sortColumnNewestFirst: label => `${label}: newest first`,
   timeAgo: 'Time ago',
   timeAgoShort: 'Ago',
   datetime: 'Date/time',
@@ -501,6 +505,8 @@ const ja: KanbanMessages = {
   groupRunning: '実行中をプロフィールでグループ化',
   sortOldestFirst: '古い順',
   sortNewestFirst: '新しい順',
+  sortColumnOldestFirst: label => `${label}: 古い順`,
+  sortColumnNewestFirst: label => `${label}: 新しい順`,
   timeAgo: '経過時間',
   timeAgoShort: '経過',
   datetime: '日時',
@@ -725,6 +731,8 @@ const zh: KanbanMessages = {
   groupRunning: '按配置档分组运行中',
   sortOldestFirst: '最旧优先',
   sortNewestFirst: '最新优先',
+  sortColumnOldestFirst: label => `${label}：最旧优先`,
+  sortColumnNewestFirst: label => `${label}：最新优先`,
   timeAgo: '多久前',
   timeAgoShort: '多久前',
   datetime: '日期时间',
@@ -947,6 +955,8 @@ const zhHant: KanbanMessages = {
   groupRunning: '依設定檔分組執行中',
   sortOldestFirst: '最舊優先',
   sortNewestFirst: '最新優先',
+  sortColumnOldestFirst: label => `${label}：最舊優先`,
+  sortColumnNewestFirst: label => `${label}：最新優先`,
   timeAgo: '多久前',
   timeAgoShort: '多久前',
   datetime: '日期時間',

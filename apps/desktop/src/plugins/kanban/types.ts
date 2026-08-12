@@ -26,6 +26,7 @@ export interface KanbanTask {
 }
 
 export type TaskSortDirection = 'asc' | 'desc'
+export type TaskSortDirections = Partial<Record<string, TaskSortDirection>>
 export type TaskTimeDisplay = 'datetime' | 'relative'
 
 export interface KanbanColumn {

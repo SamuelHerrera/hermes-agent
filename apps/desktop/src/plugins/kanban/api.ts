@@ -23,6 +23,7 @@ import type {
   OrchestrationSettings,
   TaskEstimate,
   TaskSortDirection,
+  TaskSortDirections,
   TaskTimeDisplay,
   WorkerLog
 } from './types'
@@ -46,9 +47,8 @@ export const $lanesByProfile = atom<boolean>(false)
  *  auto: empty lanes collapse to a rail, occupied lanes expand. Persisted. */
 export const $collapsedLanes = atom<Record<string, boolean>>({})
 
-/** Per-board card order preference: oldest-first preserves the backend's
- *  historic order; newest-first brings fresh work to the top of each lane. */
-export const $taskSortDirection = atom<TaskSortDirection>('asc')
+/** Per-board, per-column card order preference. Omitted lanes are oldest-first. */
+export const $taskSortDirection = atom<TaskSortDirections>({})
 
 /** Timestamp rendering preference for card footers. */
 export const $taskTimeDisplay = atom<TaskTimeDisplay>('relative')
@@ -59,6 +59,25 @@ const LANES_KEY = 'lanesByProfile'
 const COLLAPSED_KEY = 'collapsedLanes'
 const SORT_DIRECTION_KEY = 'taskSortDirection'
 const TIME_DISPLAY_KEY = 'taskTimeDisplay'
+
+const KANBAN_COLUMN_NAMES = ['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done', 'archived']
+
+const isTaskSortDirection = (value: unknown): value is TaskSortDirection => value === 'asc' || value === 'desc'
+
+function normalizeTaskSortDirections(value: unknown): TaskSortDirections {
+  // Older desktop builds persisted one global 'asc'/'desc' string. Preserve a
+  // previous global desc by expanding it to every known lane; asc remains the
+  // implicit default so the stored object stays sparse.
+  if (isTaskSortDirection(value)) {
+    return value === 'desc' ? Object.fromEntries(KANBAN_COLUMN_NAMES.map(name => [name, 'desc'])) : {}
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(Object.entries(value).filter(([, direction]) => isTaskSortDirection(direction)))
+}
 
 /** One live `task_events` frame → precise cache invalidation: the board, plus
  *  each touched task's detail. The polls (8s board / 4s drawer) stay as the
@@ -105,7 +124,8 @@ export function bindApi(r: Rest, storage: PluginStorage, socket: Socket): () => 
   persist($introDismissed, INTRO_KEY, false)
   persist($lanesByProfile, LANES_KEY, false)
   persist($collapsedLanes, COLLAPSED_KEY, {})
-  persist($taskSortDirection, SORT_DIRECTION_KEY, 'asc')
+  $taskSortDirection.set(normalizeTaskSortDirections(storage.get(SORT_DIRECTION_KEY, {})))
+  unsubs.push($taskSortDirection.listen(value => storage.set(SORT_DIRECTION_KEY, normalizeTaskSortDirections(value))))
   persist($taskTimeDisplay, TIME_DISPLAY_KEY, 'relative')
 
   let close: (() => void) | null = null

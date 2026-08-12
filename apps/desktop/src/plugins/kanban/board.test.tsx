@@ -8,7 +8,9 @@ import {
   NEW_TASK_MINIMIZE_BUTTON_SIZE,
   sortColumnTasks,
   type TaskSortDirection,
+  taskSortDirectionForColumn,
   taskTimeLabel,
+  toggleColumnSortDirection,
   updateNewTaskDraft
 } from './board'
 import type { KanbanTask } from './types'
@@ -32,6 +34,15 @@ describe('kanban board time sorting', () => {
     const tasks = [task('t_old_high', 100, 10), task('t_new_low', 300, 0), task('t_mid_high', 200, 2)]
 
     expect(sortColumnTasks(tasks, 'desc').map(t => t.id)).toEqual(['t_new_low', 't_mid_high', 't_old_high'])
+  })
+
+  it('keeps sort direction independent per column', () => {
+    const directions: Partial<Record<string, TaskSortDirection>> = { done: 'desc' }
+
+    expect(taskSortDirectionForColumn(directions, 'done')).toBe('desc')
+    expect(taskSortDirectionForColumn(directions, 'ready')).toBe('asc')
+    expect(toggleColumnSortDirection(directions, 'done')).toEqual({ done: 'asc' })
+    expect(toggleColumnSortDirection(directions, 'ready')).toEqual({ done: 'desc', ready: 'desc' })
   })
 })
 
