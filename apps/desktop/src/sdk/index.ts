@@ -120,6 +120,11 @@ export { COMPOSER_AREAS, type ComposerAttachmentProvider, type ComposerMiddlewar
 
 // -- ui: the design language --------------------------------------------------
 
+export {
+  PREVIEW_RENDERERS_AREA,
+  type PreviewRendererContribution,
+  type PreviewRendererRenderProps
+} from '@/app/chat/right-rail/preview-contrib'
 export { PALETTE_AREA, type PaletteContribution } from '@/app/command-palette/contrib'
 export { type RouteContribution, ROUTES_AREA, SIDEBAR_NAV_AREA, type SidebarNavContribution } from '@/app/routes'
 /** THE model catalog menu — the same searchable, provider-grouped, family-

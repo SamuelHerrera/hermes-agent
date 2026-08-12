@@ -116,6 +116,38 @@ def test_board_override_is_isolated_per_concurrent_call(kanban_home, monkeypatch
 # reclaim + reassign CLI smoke tests
 # ---------------------------------------------------------------------------
 
+def test_show_with_graph_diagnostics_does_not_use_closed_connection(kanban_home):
+    """Regression: `kanban show` computes graph-aware diagnostics after
+    collecting task rows. It must not close the SQLite connection before the
+    graph lookup runs, otherwise any task with diagnostics-enabled output can
+    print a partial header and then crash with "Cannot operate on a closed
+    database".
+    """
+    with kb.connect() as conn:
+        parent_id = kb.create_task(conn, title="parent", assignee="builder")
+        child_id = kb.create_task(
+            conn,
+            title="child review",
+            assignee="reviewer",
+            parents=[parent_id],
+        )
+        parent = kb.claim_task(conn, parent_id, claimer="builder:1")
+        assert parent is not None
+        assert kb.block_task(
+            conn,
+            parent_id,
+            reason="review-required: ready",
+            expected_run_id=parent.current_run_id,
+        )
+
+    out = kc.run_slash(f"show {parent_id}")
+
+    assert f"Task {parent_id}: parent" in out
+    assert "Diagnostics" in out
+    assert "Review handoff blocks" in out
+    assert child_id in out
+
+
 def test_run_slash_reclaim_running_task(kanban_home):
     import re
     import time

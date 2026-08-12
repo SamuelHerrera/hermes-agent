@@ -128,7 +128,6 @@ import {
   ARTIFACTS_ROUTE,
   MESSAGING_ROUTE,
   SIDEBAR_NAV_AREA,
-  type SidebarNavContribution,
   SKILLS_ROUTE
 } from '../../routes'
 import type { SidebarNavItem } from '../../types'
@@ -136,6 +135,7 @@ import type { SidebarNavItem } from '../../types'
 import { SidebarCronJobsSection } from './cron-jobs-section'
 import { SidebarFilterMenu } from './filter-menu'
 import { SidebarLoadMoreRow } from './load-more-row'
+import { contributedNavItems } from './nav-contributions'
 import { orderByIds, reconcileOrderIds, resolveManualSessionOrderIds, sameIds } from './order'
 import { ProfileRail } from './profile-switcher'
 import { ProjectDialog } from './project-dialog'
@@ -299,28 +299,7 @@ export function ChatSidebar({
   // below the built-ins with the same chrome; active = at their route.
   const navContributions = useContributions(SIDEBAR_NAV_AREA)
 
-  const contributedNav = useMemo<SidebarNavItem[]>(
-    () =>
-      navContributions.flatMap(c => {
-        const data = c.data as Partial<SidebarNavContribution> | undefined
-
-        if (!data?.path?.startsWith('/') || !data.label) {
-          return []
-        }
-
-        const codicon = data.codicon || 'plug'
-
-        return [
-          {
-            id: c.id,
-            label: data.label,
-            icon: (props: { className?: string }) => <Codicon name={codicon} {...props} />,
-            route: data.path
-          }
-        ]
-      }),
-    [navContributions]
-  )
+  const contributedNav = useMemo<SidebarNavItem[]>(() => contributedNavItems(navContributions), [navContributions])
 
   const panesFlipped = useStore($panesFlipped)
   const grouping = useStore($sidebarGrouping)
@@ -1440,6 +1419,11 @@ export function ChatSidebar({
                   >
                     <item.icon className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]" />
                     <span className="min-w-0 flex-1 truncate">{s.nav[item.id] ?? item.label}</span>
+                    {item.adornment ? (
+                      <span className="ml-auto inline-flex shrink-0 items-center justify-center">
+                        <item.adornment />
+                      </span>
+                    ) : null}
                     {isNewSession && (
                       <KbdGroup
                         className={cn('ml-auto opacity-55', newSessionKbdFlash && 'opacity-100!')}

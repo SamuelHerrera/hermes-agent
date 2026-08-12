@@ -434,10 +434,11 @@ def _has_valid_session_token(request: Request) -> bool:
 # links opened by the OS shell or a new browser tab where the session header
 # can't be set. Kept narrow — same query-token tradeoff as the /api/pty WS.
 _QUERY_TOKEN_API_PATHS: frozenset[str] = frozenset({"/api/files/download"})
+_QUERY_TOKEN_API_PREFIXES: tuple[str, ...] = ("/api/plugins/kanban/attachments/",)
 
 
 def _has_valid_query_token(request: Request, path: str) -> bool:
-    if path not in _QUERY_TOKEN_API_PATHS:
+    if path not in _QUERY_TOKEN_API_PATHS and not any(path.startswith(prefix) for prefix in _QUERY_TOKEN_API_PREFIXES):
         return False
     token = request.query_params.get("token", "")
     return bool(token) and hmac.compare_digest(token.encode(), _SESSION_TOKEN.encode())

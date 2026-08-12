@@ -14,6 +14,7 @@ import './kanban.css'
 import {
   cn,
   Codicon,
+  GlyphSpinner,
   type HermesPlugin,
   host,
   type KeybindContribution,
@@ -35,6 +36,23 @@ import { KanbanBoardPage } from './board'
 import { KANBAN_LOCALES } from './i18n'
 import { $newTaskLane, useKanban } from './ui'
 
+type KanbanCounts = {
+  active: number
+  attention: number
+  ready: number
+  running: number
+}
+
+function boardCounts(board: Awaited<ReturnType<typeof fetchBoard>> | undefined): KanbanCounts {
+  const count = (name: string) => board?.columns.find(col => col.name === name)?.tasks.length ?? 0
+
+  const running = count('running')
+  const ready = count('ready')
+  const attention = count('blocked') + count('review')
+
+  return { active: running + ready, attention, ready, running }
+}
+
 // Live "N running / ready" pill — one glance at fleet activity from anywhere,
 // clicks through to the board. Shares the board query (one cache, one poll with
 // the page); hidden when nothing is in flight (or unloaded).
@@ -53,15 +71,14 @@ function KanbanCount() {
     return null
   }
 
-  const count = (name: string) => board.columns.find(col => col.name === name)?.tasks.length ?? 0
-  const active = count('running') + count('ready')
+  const { active, ready, running } = boardCounts(board)
 
   if (active === 0) {
     return null
   }
 
   return (
-    <Tip label={k.countTip(count('running'), count('ready'))}>
+    <Tip label={k.countTip(running, ready)}>
       <button
         className={cn(
           'inline-flex h-full items-center gap-1 rounded-none px-1.5 text-[0.6875rem] tabular-nums transition-colors',
@@ -75,6 +92,52 @@ function KanbanCount() {
       </button>
     </Tip>
   )
+}
+
+function KanbanNavStatus() {
+  const k = useKanban()
+  const slug = useValue($boardSlug)
+
+  const { data: board } = useQuery({
+    queryFn: () => fetchBoard(false),
+    queryKey: boardKey(slug, false),
+    refetchInterval: 60_000
+  })
+
+  const { active, attention, ready, running } = boardCounts(board)
+
+  if (attention > 0) {
+    return (
+      <Tip label={`${attention} Kanban task${attention === 1 ? '' : 's'} need attention`}>
+        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[0.625rem] font-semibold leading-none text-destructive-foreground tabular-nums">
+          {attention > 99 ? '99+' : attention}
+        </span>
+      </Tip>
+    )
+  }
+
+  if (running > 0) {
+    return (
+      <Tip label={k.countTip(running, ready)}>
+        <span className="inline-flex items-center gap-1 text-(--ui-text-secondary)">
+          <GlyphSpinner ariaLabel="Kanban tasks running" className="text-[0.6875rem] text-emerald-400" />
+          <span className="text-[0.625rem] font-medium tabular-nums">{active}</span>
+        </span>
+      </Tip>
+    )
+  }
+
+  if (ready > 0) {
+    return (
+      <Tip label={k.countTip(running, ready)}>
+        <span className="grid h-4 min-w-4 place-items-center rounded-full bg-sky-500/15 px-1 text-[0.625rem] font-semibold leading-none text-sky-300 tabular-nums">
+          {ready > 99 ? '99+' : ready}
+        </span>
+      </Tip>
+    )
+  }
+
+  return null
 }
 
 const plugin: HermesPlugin = {
@@ -114,7 +177,8 @@ const plugin: HermesPlugin = {
         id: 'nav',
         area: SIDEBAR_NAV_AREA,
         order: 50,
-        data: { codicon: 'project', label: 'Kanban', path: '/kanban' } satisfies SidebarNavContribution
+        data: { codicon: 'project', label: 'Kanban', path: '/kanban' } satisfies SidebarNavContribution,
+        render: () => <KanbanNavStatus />
       },
       {
         id: 'count',

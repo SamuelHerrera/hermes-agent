@@ -165,6 +165,8 @@ export interface SidebarNavItem {
   id: SidebarNavId | (string & {})
   label: string
   icon: React.ComponentType<{ className?: string }>
+  /** Optional right-side chrome for live status badges/spinners. */
+  adornment?: React.ComponentType
   route?: string
   action?: 'new-session'
   /** Keybind action id — when set, the tooltip shows the keybind hint. */

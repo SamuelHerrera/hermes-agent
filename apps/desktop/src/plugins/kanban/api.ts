@@ -14,6 +14,7 @@ import { atom, type PluginRestOptions, type PluginStorage, queryClient } from '@
 import type {
   BoardMeta,
   BoardsResponse,
+  KanbanAttachment,
   KanbanBoard,
   KanbanProfile,
   KanbanProject,
@@ -216,7 +217,13 @@ export const reassignTask = (id: string, profile: string) =>
 export const reclaimTask = (id: string) => nudged(call(withBoard(`/tasks/${id}/reclaim`), { method: 'POST', body: {} }))
 
 export const uploadAttachment = (id: string, upload: { filename: string; contentType?: string; bytes: ArrayBuffer }) =>
-  call(withBoard(`/tasks/${id}/attachments`), { method: 'POST', upload })
+  call<{ attachment: KanbanAttachment | null }>(withBoard(`/tasks/${id}/attachments`), { method: 'POST', upload })
+
+export const uploadPastedImage = (id: string, upload: { filename: string; contentType?: string; bytes: ArrayBuffer }) =>
+  call<{ attachment: KanbanAttachment | null }>(withBoard(`/tasks/${id}/attachments/pasted-image`), {
+    method: 'POST',
+    upload
+  })
 
 export const createBoard = (slug: string, name: string, projectId?: string) =>
   call<{ board: { slug: string } }>('/boards', {

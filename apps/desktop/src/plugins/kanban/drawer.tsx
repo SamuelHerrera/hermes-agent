@@ -11,6 +11,8 @@ import {
   cn,
   Codicon,
   compactNumber,
+  Dialog,
+  DialogContent,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -27,7 +29,7 @@ import {
   useQueryClient,
   useValue
 } from '@hermes/plugin-sdk'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import {
   $boardSlug,
@@ -43,17 +45,24 @@ import {
   reassignTask,
   reclaimTask,
   taskKey,
-  uploadAttachment
+  uploadAttachment,
+  uploadPastedImage
 } from './api'
+import { KanbanCommentBody } from './comment-body'
 import { ModelOverrideField, overridePatch } from './model-override'
+import { attachmentMarkdownUrl, buildPastedImageComment, clipboardImageFiles, PastedImageUploadGuard } from './paste-images'
 import {
   type Diagnostic,
   type DiagnosticAction,
   type KanbanAttachment,
   type KanbanEvent,
+  type KanbanRun,
   type KanbanTaskDetail,
+  type KanbanTaskFull,
+  type KanbanTaskLink,
   SEVERITY_TONE,
-  type TaskEstimate
+  type TaskEstimate,
+  type WorkerLog
 } from './types'
 import {
   ago,
@@ -169,12 +178,411 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
   }
 }
 
+type TimelineTone = 'current' | 'done' | 'error' | 'pending' | 'warning'
+
+interface TimelineItem {
+  actionTrace?: string[]
+  at?: null | number
+  detail?: string
+  id: string
+  label: string
+  tone: TimelineTone
+}
+
+const EVENT_TONES: Record<string, TimelineTone> = {
+  blocked: 'error',
+  completed: 'done',
+  reclaimed: 'warning',
+  scheduled: 'pending'
+}
+
+const TERMINAL_STATUSES = new Set(['archived', 'blocked', 'done', 'review'])
+const WORKER_ACTION_TRACE_LIMIT = 20
+
+function parseEventPayload(event: KanbanEvent): Record<string, unknown> {
+  if (!event.payload) {
+    return {}
+  }
+
+  if (typeof event.payload === 'string') {
+    try {
+      return JSON.parse(event.payload) as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+
+  return typeof event.payload === 'object' ? (event.payload as Record<string, unknown>) : {}
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[ -/]*[@-~]`, 'g'), '')
+}
+
+const trimAction = (value: string, max = 150): string => (value.length > max ? `${value.slice(0, max - 1)}…` : value)
+
+function stripLogLineChrome(line: string): string {
+  return line
+    .replace(/^[\s│┃┊╭╰├└┌┐┘┴┬─$|]+/, '')
+    .replace(/\s+\d+(?:\.\d+)?s(?:\s+\[[^\]]+\])?\s*$/, '')
+    .trim()
+}
+
+function humanizeWorkerLogLine(line: string): null | string {
+  const cleaned = stripLogLineChrome(line)
+
+  if (
+    !cleaned ||
+    cleaned === '$' ||
+    /^[^\w]*\$\s*$/.test(cleaned) ||
+    /^[-=]{3,}$/.test(cleaned) ||
+    /^(?:Query:|Initializing agent|Resume this session with:|Session:|Title:|Duration:|Messages:)\b/.test(cleaned) ||
+    /^\/[^|]+$/.test(cleaned)
+  ) {
+    return null
+  }
+
+  const action = cleaned.replace(/^(?:[^\w/$]+\s*)+/u, '').replace(/\s+/g, ' ').trim()
+
+  if (!action) {
+    return null
+  }
+
+  if (action.startsWith('$ ')) {
+    return trimAction(`running command: ${action.slice(2).trim()}`)
+  }
+
+  const [verb, ...rest] = action.split(' ')
+  const target = rest.join(' ').trim()
+  const compactTarget = trimAction(target || action, 120)
+
+  switch (verb) {
+    case 'find':
+      return `finding files: ${compactTarget}`
+
+    case 'grep':
+      return `searching code for: ${compactTarget}`
+
+    case 'kanban_co':
+      return 'updating the kanban task'
+
+    case 'kanban_sh':
+      return 'loading the kanban task'
+
+    case 'patch':
+      return `editing files: ${compactTarget}`
+
+    case 'plan':
+      return target ? `updating plan: ${compactTarget}` : 'updating the work plan'
+
+    case 'read':
+      return `reading file: ${compactTarget}`
+
+    case 'skill':
+      return `loading skill: ${compactTarget}`
+
+    case 'vision':
+      return `inspecting image: ${compactTarget}`
+
+    case 'write':
+      return `writing file: ${compactTarget}`
+
+    default:
+      return trimAction(action)
+  }
+}
+
+function workerLogActions(log?: WorkerLog, limit = WORKER_ACTION_TRACE_LIMIT): string[] {
+  if (!log?.content) {
+    return []
+  }
+
+  const actions = stripAnsi(log.content)
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => humanizeWorkerLogLine(line))
+    .filter((action): action is string => Boolean(action))
+
+  return actions.slice(-limit)
+}
+
+function latestWorkerLogAction(log?: WorkerLog): null | string {
+  return workerLogActions(log, 1)[0] ?? null
+}
+
+function latestRun(runs: KanbanRun[]): KanbanRun | undefined {
+  return [...runs].sort((a, b) => Number(b.started_at ?? 0) - Number(a.started_at ?? 0) || Number(b.id) - Number(a.id))[0]
+}
+
+function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, log: WorkerLog | undefined, k: KanbanText) {
+  const runDuration = run ? duration(run.started_at, run.ended_at) : null
+  const parts: string[] = []
+
+  if (run?.profile) {
+    parts.push(runDuration ? k.timelineRunDetail(run.profile, runDuration) : k.timelineRunProfile(run.profile))
+  }
+
+  if (task.last_heartbeat_at) {
+    const lastHeartbeat = ago(task.last_heartbeat_at)
+
+    if (lastHeartbeat) {
+      parts.push(k.timelineLastHeartbeat(lastHeartbeat))
+    }
+  }
+
+  const action = latestWorkerLogAction(log)
+
+  if (action && task.status !== 'running') {
+    parts.push(k.timelineLastAction(action))
+  }
+
+  switch (task.status) {
+    case 'running':
+      return { detail: parts.join(' · ') || undefined, label: k.timelineWorking, tone: 'current' as const }
+
+    case 'blocked':
+      return { detail: task.last_failure_error ?? (parts.join(' · ') || undefined), label: k.timelineNeedsInput, tone: 'error' as const }
+
+    case 'review':
+      return { detail: parts.join(' · ') || undefined, label: k.timelineReview, tone: 'current' as const }
+
+    case 'done':
+      return { detail: task.latest_summary ?? task.result ?? (parts.join(' · ') || undefined), label: k.timelineCompleted, tone: 'done' as const }
+
+    case 'archived':
+      return { detail: parts.join(' · ') || undefined, label: k.timelineArchived, tone: 'done' as const }
+
+    default:
+      return {
+        detail: task.assignee ? k.timelineAssigned(task.assignee) : k.timelineNoAssignee,
+        label: k.timelineWaitingIn(columnLabel(k, task.status)),
+        tone: task.assignee ? ('pending' as const) : ('warning' as const)
+      }
+  }
+}
+
+export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | undefined, k: KanbanText): TimelineItem[] {
+  const items: TimelineItem[] = []
+  const seen = new Set<string>()
+
+  const push = (item: TimelineItem) => {
+    if (!seen.has(item.id)) {
+      seen.add(item.id)
+      items.push(item)
+    }
+  }
+
+  if (detail.task.created_at) {
+    push({ at: detail.task.created_at, id: 'task-created', label: k.timelineCreated, tone: 'done' })
+  }
+
+  if (detail.task.assignee) {
+    push({ id: 'task-assignee', label: k.timelineAssigned(detail.task.assignee), tone: 'done' })
+  }
+
+  for (const event of detail.events) {
+    if (event.kind === 'heartbeat') {
+      continue
+    }
+
+    const { detail: extra, label } = eventText(event, k)
+    const payload = parseEventPayload(event)
+    const tone = EVENT_TONES[event.kind] ?? 'done'
+
+    push({
+      at: event.created_at,
+      detail: extra,
+      id: `event-${event.id}`,
+      label: event.kind === 'commented' ? k.timelineCommented(String(payload.author ?? k.someone)) : label,
+      tone
+    })
+  }
+
+  const run = latestRun(detail.runs)
+  const current = currentStatusLabel(detail.task, run, log, k)
+
+  if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
+    push({
+      at: detail.task.completed_at ?? run?.ended_at ?? run?.started_at ?? detail.task.last_heartbeat_at ?? detail.task.created_at,
+      detail: current.detail,
+      id: `current-${detail.task.status}`,
+      label: current.label,
+      tone: current.tone
+    })
+  } else {
+    const actionTrace = detail.task.status === 'running' ? workerLogActions(log) : []
+
+    push({
+      actionTrace: actionTrace.length > 0 ? actionTrace : undefined,
+      at: detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at,
+      detail: current.detail,
+      id: `current-${detail.task.status}`,
+      label: current.label,
+      tone: current.tone
+    })
+  }
+
+  return items
+}
+
+function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log?: WorkerLog }) {
+  const k = useKanban()
+  const items = buildTimelineItems(detail, log, k)
+  const timelineCount = items.reduce((count, item) => count + 1 + (item.actionTrace?.length ?? 0), 0)
+  const [open, setOpen] = useState(true)
+
+  const iconFor = (tone: TimelineTone) => {
+    switch (tone) {
+      case 'current':
+        return 'sync'
+
+      case 'error':
+        return 'error'
+
+      case 'warning':
+        return 'warning'
+
+      case 'pending':
+        return 'circle-outline'
+
+      default:
+        return 'check'
+    }
+  }
+
+  const toneClass = (tone: TimelineTone) => {
+    switch (tone) {
+      case 'current':
+        return 'border-emerald-400/60 bg-emerald-400/10 text-emerald-300'
+
+      case 'error':
+        return 'border-destructive/60 bg-destructive/10 text-destructive'
+
+      case 'warning':
+        return 'border-amber-400/60 bg-amber-400/10 text-amber-300'
+
+      case 'pending':
+        return 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-(--ui-text-quaternary)'
+
+      default:
+        return 'border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) text-(--ui-text-secondary)'
+    }
+  }
+
+  if (!items.length) {
+    return (
+      <Section label={k.timeline(0)}>
+        <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.timelineNoActivity}</p>
+      </Section>
+    )
+  }
+
+  return (
+    <Section
+      action={
+        <Button onClick={() => setOpen(value => !value)} size="icon-xs" variant="ghost">
+          <Codicon name={open ? 'chevron-up' : 'chevron-down'} size="0.75rem" />
+        </Button>
+      }
+      label={k.timeline(timelineCount)}
+    >
+      {open && (
+        <ScrollFade deps={items.length} max="14rem">
+          <ol className="flex flex-col gap-2">
+            {items.map(item => (
+              <li className="flex gap-2 text-[0.75rem]" key={item.id}>
+                <span
+                  className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
+                >
+                  <Codicon name={iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2">
+                    <span className="font-medium text-(--ui-text-secondary)">{item.label}</span>
+                    {ago(item.at) && (
+                      <span className="ml-auto shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{ago(item.at)}</span>
+                    )}
+                  </span>
+                  {item.detail && (
+                    <span className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
+                      {item.detail}
+                    </span>
+                  )}
+                  {item.actionTrace && item.actionTrace.length > 0 && (
+                    <span className="mt-1 flex flex-col gap-0.5">
+                      {item.actionTrace.map((action, index) => (
+                        <span
+                          className="line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)"
+                          key={`${item.id}-action-${index}`}
+                        >
+                          {action}
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </ScrollFade>
+      )}
+    </Section>
+  )
+}
+
 function MetaRow({ children, label }: { children: ReactNode; label: string }) {
   return (
     <>
       <span className="text-(--ui-text-quaternary)">{label}</span>
       <span className="min-w-0 truncate text-(--ui-text-secondary)">{children}</span>
     </>
+  )
+}
+
+const linkedTaskLabel = (link: KanbanTaskLink): string => link.title?.trim() || shortId(link.id)
+
+function linkedTasks(detail: KanbanTaskDetail, side: 'children' | 'parents'): KanbanTaskLink[] {
+  const details = detail.link_details?.[side]
+  const byId = new Map(details?.map(link => [link.id, link]))
+
+  return detail.links[side].map(id => byId.get(id) ?? { id })
+}
+
+export function DependenciesSection({ detail, onOpen }: { detail: KanbanTaskDetail; onOpen: (id: string) => void }) {
+  const k = useKanban()
+
+  return (
+    <Section label={k.dependencies}>
+      {(['parents', 'children'] as const).map(side => {
+        const links = linkedTasks(detail, side)
+
+        return links.length > 0 ? (
+          <div className="flex flex-col gap-1" key={side}>
+            <span className="text-[0.6875rem] text-(--ui-text-quaternary)">
+              {side === 'parents' ? k.blockedBy : k.blocks}
+            </span>
+            <div className="flex flex-col gap-1">
+              {links.map(link => {
+                const label = linkedTaskLabel(link)
+
+                return (
+                  <button
+                    className="min-w-0 rounded bg-(--ui-bg-quaternary) px-1.5 py-1 text-left text-[0.6875rem] text-(--ui-text-secondary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
+                    key={link.id}
+                    onClick={() => onOpen(link.id)}
+                    title={`${label} (${link.id})`}
+                    type="button"
+                  >
+                    <span className="block truncate">{label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null
+      })}
+    </Section>
   )
 }
 
@@ -283,12 +691,14 @@ function AssigneeMenu({
 // mid-run within a few seconds — no block/unblock dance. `onRequeue` is the
 // heavier option: post the note AND reclaim so the task restarts from scratch
 // with the note in context (use when the current run has gone off the rails).
-function CommentComposer({
+export function CommentComposer({
+  onPasteImages,
   onRequeue,
   onSubmit,
   pending,
   running
 }: {
+  onPasteImages?: (files: File[]) => KanbanAttachment[] | Promise<KanbanAttachment[]> | Promise<void> | void
   onRequeue?: (body: string) => void
   onSubmit: (body: string) => void
   pending: boolean
@@ -296,23 +706,46 @@ function CommentComposer({
 }) {
   const k = useKanban()
   const [body, setBody] = useState('')
+  const [pastedImages, setPastedImages] = useState<KanbanAttachment[]>([])
+
+  const commentBody = () => buildPastedImageComment(body, pastedImages)
 
   const submit = () => {
-    const trimmed = body.trim()
+    const trimmed = commentBody().trim()
 
     if (trimmed && !pending) {
       onSubmit(trimmed)
       setBody('')
+      setPastedImages([])
     }
   }
 
   const requeue = () => {
-    const trimmed = body.trim()
+    const trimmed = commentBody().trim()
 
     if (trimmed && !pending && onRequeue) {
       onRequeue(trimmed)
       setBody('')
+      setPastedImages([])
     }
+  }
+
+  const pasteImages = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = clipboardImageFiles(event.clipboardData)
+
+    if (!files.length || pending || !onPasteImages) {
+      return
+    }
+
+    event.preventDefault()
+    void Promise.resolve(onPasteImages(files)).then(
+      attachments => {
+        if (Array.isArray(attachments) && attachments.length > 0) {
+          setPastedImages(current => [...current, ...attachments])
+        }
+      },
+      () => undefined
+    )
   }
 
   return (
@@ -327,6 +760,7 @@ function CommentComposer({
               submit()
             }
           }}
+          onPaste={pasteImages}
           placeholder={running ? k.messageWorker : k.addComment}
           rows={1}
           size="sm"
@@ -334,7 +768,7 @@ function CommentComposer({
         />
         <Button
           className="absolute top-1 right-1"
-          disabled={!body.trim() || pending}
+          disabled={!commentBody().trim() || pending}
           onClick={submit}
           size="xs"
           variant="secondary"
@@ -342,10 +776,34 @@ function CommentComposer({
           {running ? k.send : k.comment}
         </Button>
       </div>
+      {pastedImages.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5">
+          {pastedImages.map(attachment => (
+            <li
+              className="group relative overflow-hidden rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary)"
+              key={attachment.id}
+            >
+              <img
+                alt={attachment.filename || 'pasted image'}
+                className="h-16 w-16 object-cover"
+                src={attachmentMarkdownUrl(attachment)}
+              />
+              <button
+                aria-label={`Remove ${attachment.filename || 'pasted image'} from comment preview`}
+                className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded bg-black/65 text-white opacity-90 transition-opacity group-hover:opacity-100"
+                onClick={() => setPastedImages(current => current.filter(item => item.id !== attachment.id))}
+                type="button"
+              >
+                <Codicon name="close" size="0.65rem" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {running && onRequeue && (
         <div className="flex items-center justify-between gap-2">
           <span className="text-[0.625rem] leading-tight text-(--ui-text-quaternary)">{k.deliveredLive}</span>
-          <Button className="shrink-0" disabled={!body.trim() || pending} onClick={requeue} size="xs" variant="outline">
+          <Button className="shrink-0" disabled={!commentBody().trim() || pending} onClick={requeue} size="xs" variant="outline">
             <Codicon name="debug-restart" size="0.7rem" />
             {k.requeueWithNote}
           </Button>
@@ -409,17 +867,30 @@ function DescriptionSection({ body, onSave }: { body: null | string | undefined;
 // administrative note into that slot; hide those (Runs still shows them).
 const isAdminSummary = (summary: string) => /^status changed to \w+ \(dashboard\/direct\)$/.test(summary)
 
-function AttachmentsSection({
+export function AttachmentsSection({
   attachments,
+  onPasteImages,
   onUpload,
   pending
 }: {
   attachments: KanbanAttachment[]
+  onPasteImages?: (files: File[]) => Promise<unknown> | unknown
   onUpload: (file: File) => void
   pending: boolean
 }) {
   const k = useKanban()
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const pasteImages = (event: ClipboardEvent<HTMLDivElement>) => {
+    const files = clipboardImageFiles(event.clipboardData)
+
+    if (!files.length || pending || !onPasteImages) {
+      return
+    }
+
+    event.preventDefault()
+    void Promise.resolve(onPasteImages(files))
+  }
 
   return (
     <Section
@@ -452,18 +923,20 @@ function AttachmentsSection({
       }
       label={k.attachments(attachments.length)}
     >
-      {attachments.length > 0 ? (
-        <ul className="flex flex-col gap-1">
-          {attachments.map(attachment => (
-            <li className="flex items-center gap-1.5 text-[0.75rem] text-(--ui-text-tertiary)" key={attachment.id}>
-              <Codicon name="file" size="0.75rem" />
-              {attachment.filename}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noAttachments}</p>
-      )}
+      <div onPaste={pasteImages} tabIndex={0} title="Paste images here to add them as attachments">
+        {attachments.length > 0 ? (
+          <ul className="flex flex-col gap-1">
+            {attachments.map(attachment => (
+              <li className="flex items-center gap-1.5 text-[0.75rem] text-(--ui-text-tertiary)" key={attachment.id}>
+                <Codicon name="file" size="0.75rem" />
+                {attachment.filename}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noAttachments}</p>
+        )}
+      </div>
     </Section>
   )
 }
@@ -537,6 +1010,81 @@ function EstimateSection({ id }: { id: string }) {
   )
 }
 
+type TaskDetailMode = 'dialog' | 'sheet'
+
+export function TaskDetailHeaderControls({
+  mode,
+  onClose,
+  onToggleMode
+}: {
+  mode: TaskDetailMode
+  onClose: () => void
+  onToggleMode: () => void
+}) {
+  const k = useKanban()
+  const toggleLabel = mode === 'sheet' ? k.openAsDialog : k.openAsSideSheet
+
+  return (
+    <>
+      <button
+        aria-label={toggleLabel}
+        className="grid size-6 place-items-center rounded text-(--ui-text-tertiary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
+        onClick={onToggleMode}
+        type="button"
+      >
+        <Codicon name={mode === 'sheet' ? 'layout-centered' : 'layout-sidebar-right'} size="0.9rem" />
+      </button>
+      <button
+        aria-label={k.close}
+        className="grid size-6 place-items-center rounded text-(--ui-text-tertiary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
+        onClick={onClose}
+        type="button"
+      >
+        <Codicon name="close" size="0.9rem" />
+      </button>
+    </>
+  )
+}
+
+export function TaskDrawerShell({
+  children,
+  mode,
+  onClose,
+  onPaste
+}: {
+  children: ReactNode
+  mode: TaskDetailMode
+  onClose?: () => void
+  onPaste: (event: ClipboardEvent<HTMLElement>) => void
+}) {
+  const body = (
+    <div
+      className={cn(
+        'flex max-h-full flex-col bg-(--ui-bg-elevated)',
+        mode === 'sheet'
+          ? 'absolute inset-y-0 right-0 z-20 w-[clamp(26rem,38vw,72rem)] min-w-[22rem] max-w-[calc(100vw-2rem)] resize-x overflow-auto border-l border-(--ui-stroke-tertiary) duration-150 ease-out animate-in fade-in slide-in-from-right-4 [direction:rtl]'
+          : 'h-[min(86vh,60rem)] w-[min(68rem,94vw)] max-w-none overflow-hidden rounded-xl border border-(--stroke-nous) shadow-nous'
+      )}
+      data-testid="kanban-task-detail-shell"
+      onPaste={onPaste}
+    >
+      <div className="flex min-h-0 flex-1 flex-col [direction:ltr]">{children}</div>
+    </div>
+  )
+
+  if (mode === 'dialog') {
+    return (
+      <Dialog onOpenChange={open => !open && onClose?.()} open>
+        <DialogContent bodyClassName="p-0 overflow-visible" className="w-auto max-w-none border-0 bg-transparent p-0 shadow-none" showCloseButton={false}>
+          {body}
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  return body
+}
+
 export function TaskDrawer({
   columns,
   id,
@@ -548,9 +1096,11 @@ export function TaskDrawer({
   onClose: () => void
   onOpen: (id: string) => void
 }) {
+  const [mode, setMode] = useState<TaskDetailMode>('sheet')
   const k = useKanban()
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
+  const pasteGuardRef = useRef(new PastedImageUploadGuard())
 
   // Socket-invalidated (bindApi); the interval is only the socketless heartbeat.
   const { data: detail, error } = useQuery({
@@ -642,16 +1192,93 @@ export function TaskDrawer({
     }
   })
 
+  const uploadFile = async (file: File): Promise<KanbanAttachment | null> => {
+    const res = await uploadAttachment(id!, {
+      bytes: await file.arrayBuffer(),
+      contentType: file.type || undefined,
+      filename: file.name
+    })
+
+    return res.attachment ?? null
+  }
+
+  const uploadPastedImageFile = async (file: File): Promise<KanbanAttachment | null> => {
+    const res = await uploadPastedImage(id!, {
+      bytes: await file.arrayBuffer(),
+      contentType: file.type || undefined,
+      filename: file.name
+    })
+
+    return res.attachment ?? null
+  }
+
+  const uploadPastedImageFiles = async (files: File[]): Promise<KanbanAttachment[]> => {
+    const uploaded: KanbanAttachment[] = []
+
+    for (const file of files) {
+      const attachment = await uploadPastedImageFile(file)
+
+      if (attachment) {
+        uploaded.push(attachment)
+      }
+    }
+
+    return uploaded
+  }
+
   const uploadMut = useMutation({
-    mutationFn: async (file: File) =>
-      uploadAttachment(id!, {
-        bytes: await file.arrayBuffer(),
-        contentType: file.type || undefined,
-        filename: file.name
-      }),
+    mutationFn: uploadFile,
     onError: err => host.notify({ kind: 'error', message: errText(err) }),
     onSuccess: invalidate
   })
+
+  const pasteImagesMut = useMutation({
+    mutationFn: async ({ body, comment, files }: { body?: string; comment?: boolean; files: File[] }) => {
+      if (!pasteGuardRef.current.begin(files)) {
+        host.notify({ kind: 'info', message: 'Already uploading pasted image.' })
+
+        return []
+      }
+
+      try {
+        host.notify({ kind: 'info', message: `Uploading pasted image${files.length === 1 ? '' : 's'}…` })
+        const attachments = await uploadPastedImageFiles(files)
+        const commentBody = comment ? buildPastedImageComment(body ?? '', attachments) : ''
+
+        if (commentBody) {
+          await addComment(id!, commentBody)
+        }
+
+        return attachments
+      } finally {
+        pasteGuardRef.current.finish(files)
+      }
+    },
+    onError: err => host.notify({ kind: 'error', message: errText(err) }),
+    onSettled: invalidate
+  })
+
+  const pasteImagesAsAttachments = (event: ClipboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented || pasteImagesMut.isPending || uploadMut.isPending) {
+      return
+    }
+
+    const target = event.target as null | HTMLElement
+    const tag = target?.tagName.toLowerCase()
+
+    if (tag === 'textarea' || tag === 'input' || target?.isContentEditable) {
+      return
+    }
+
+    const files = clipboardImageFiles(event.clipboardData)
+
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+    void pasteImagesMut.mutateAsync({ files })
+  }
 
   if (!id) {
     return null
@@ -674,7 +1301,7 @@ export function TaskDrawer({
   }
 
   return (
-    <div className="absolute inset-y-0 right-0 z-20 flex w-[26rem] flex-col border-l border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) duration-150 ease-out animate-in fade-in slide-in-from-right-4">
+    <TaskDrawerShell mode={mode} onClose={onClose} onPaste={pasteImagesAsAttachments}>
       <header className="flex flex-col gap-2 px-4 pt-3.5 pb-3">
         <div className="flex items-center gap-2">
           {task ? (
@@ -730,14 +1357,7 @@ export function TaskDrawer({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <button
-              aria-label={k.close}
-              className="grid size-6 place-items-center rounded text-(--ui-text-tertiary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
-              onClick={onClose}
-              type="button"
-            >
-              <Codicon name="close" size="0.9rem" />
-            </button>
+            <TaskDetailHeaderControls mode={mode} onClose={onClose} onToggleMode={() => setMode(value => (value === 'sheet' ? 'dialog' : 'sheet'))} />
           </div>
         </div>
         {task && (
@@ -802,6 +1422,8 @@ export function TaskDrawer({
 
             <EstimateSection id={task.id} />
 
+            <TimelineSection detail={detail} log={log} />
+
             {task.result && (
               <Section label={k.result}>
                 <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.result}</p>
@@ -815,27 +1437,7 @@ export function TaskDrawer({
             )}
 
             {(detail.links.parents.length > 0 || detail.links.children.length > 0) && (
-              <Section label={k.dependencies}>
-                {(['parents', 'children'] as const).map(side =>
-                  detail.links[side].length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5" key={side}>
-                      <span className="text-[0.6875rem] text-(--ui-text-quaternary)">
-                        {side === 'parents' ? k.blockedBy : k.blocks}
-                      </span>
-                      {detail.links[side].map(linked => (
-                        <button
-                          className="rounded bg-(--ui-bg-quaternary) px-1.5 py-0.5 font-mono text-[0.625rem] text-(--ui-text-secondary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
-                          key={linked}
-                          onClick={() => onOpen(linked)}
-                          type="button"
-                        >
-                          {shortId(linked)}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null
-                )}
-              </Section>
+              <DependenciesSection detail={detail} onOpen={onOpen} />
             )}
 
             <Section
@@ -856,15 +1458,16 @@ export function TaskDrawer({
                       <span className="ml-2 text-[0.625rem] text-(--ui-text-quaternary)">
                         {ago(comment.created_at)}
                       </span>
-                      <p className="whitespace-pre-wrap text-(--ui-text-tertiary)">{comment.body}</p>
+                      <KanbanCommentBody body={comment.body} />
                     </li>
                   ))}
                 </ul>
               )}
               <CommentComposer
+                onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
                 onRequeue={body => requeueMut.mutate(body)}
                 onSubmit={body => commentMut.mutate(body)}
-                pending={commentMut.isPending || requeueMut.isPending}
+                pending={commentMut.isPending || pasteImagesMut.isPending || requeueMut.isPending}
                 running={running}
               />
             </Section>
@@ -947,12 +1550,13 @@ export function TaskDrawer({
 
             <AttachmentsSection
               attachments={detail.attachments}
+              onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
               onUpload={file => uploadMut.mutate(file)}
-              pending={uploadMut.isPending}
+              pending={pasteImagesMut.isPending || uploadMut.isPending}
             />
           </div>
         )}
       </div>
-    </div>
+    </TaskDrawerShell>
   )
 }

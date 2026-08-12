@@ -207,6 +207,7 @@ Import the area constants from the SDK; each area has its own `data` payload.
 | Keybind | `KEYBINDS_AREA` | `data: KeybindContribution` |
 | Theme | `THEMES_AREA` | `data` as a `DesktopTheme` |
 | Composer | `COMPOSER_AREAS.*` | render slots, or middleware / attachment providers |
+| Native file preview | `PREVIEW_RENDERERS_AREA` (`'preview.renderers'`) | `data: { matches(target), render({ target, reloadKey }) }` |
 
 ### Panes
 
@@ -319,6 +320,23 @@ ctx.registerMany([
 ```
 
 Keybinds are user-rebindable in settings; `defaults` is just the initial binding.
+
+### Native file preview renderers
+
+Use `PREVIEW_RENDERERS_AREA` when a plugin should own the body of the normal right-rail Preview tab for specific local file types. The host still owns file-tree clicks, tab identity, file watching, reload, and chrome; the plugin contributes only a pure matcher and a render function.
+
+```javascript
+ctx.register({
+  id: 'spreadsheet-preview',
+  area: PREVIEW_RENDERERS_AREA,
+  data: {
+    matches: target => target.kind === 'file' && /\.(csv|xlsx)$/i.test(target.path || target.source || ''),
+    render: ({ target, reloadKey }) => jsx(SpreadsheetPreview, { target, reloadKey })
+  }
+})
+```
+
+`reloadKey` changes when the tab reloads or the watched file changes; include it in your component's load effect dependencies. Read only `target.path`/`target.source` that the user explicitly opened through Hermes Desktop.
 
 ### Themes
 
@@ -616,8 +634,8 @@ not treat this pipeline as a trust boundary.
 |----------|---------|
 | Host | `host` (`.state.*`, `.notify`, `.notifyError`, `.navigate`, `.onEvent`, `.logs`, `.status`, `.restartGateway`, `.request`) |
 | Plugin contract | `HermesPlugin`, `PluginContext`, `PluginContribution`, `PluginStorage`, `PluginOs`, `PluginRestOptions`, `PluginNativeNotificationInput`, `Contribution` |
-| Area constants | `PANES_AREA`, `ROUTES_AREA`, `SIDEBAR_NAV_AREA`, `STATUSBAR_AREAS`, `TITLEBAR_AREAS`, `PALETTE_AREA`, `KEYBINDS_AREA`, `THEMES_AREA`, `COMPOSER_AREAS` |
-| Area payloads | `RouteContribution`, `SidebarNavContribution`, `StatusbarItem`, `TitlebarTool`, `PaletteContribution`, `KeybindContribution`, `ComposerMiddleware`, `ComposerAttachmentProvider` |
+| Area constants | `PANES_AREA`, `ROUTES_AREA`, `SIDEBAR_NAV_AREA`, `STATUSBAR_AREAS`, `TITLEBAR_AREAS`, `PALETTE_AREA`, `KEYBINDS_AREA`, `THEMES_AREA`, `COMPOSER_AREAS`, `PREVIEW_RENDERERS_AREA` |
+| Area payloads | `RouteContribution`, `SidebarNavContribution`, `StatusbarItem`, `TitlebarTool`, `PaletteContribution`, `KeybindContribution`, `ComposerMiddleware`, `ComposerAttachmentProvider`, `PreviewRendererContribution`, `PreviewRendererRenderProps` |
 | React / state | `useValue`, `atom`, `computed`, `useQuery`, `useMutation`, `useQueryClient`, `queryClient`, `Contribute` |
 | UI kit | `Button`, `Input`, `Textarea`, `Select*`, `Switch`, `Checkbox`, `SegmentedControl`, `Tabs*`, `Dialog*`, `ConfirmDialog`, `DropdownMenu*`, `ContextMenu*`, `Popover*`, `Tip`/`Tooltip*`, `Badge`, `Kbd`/`KbdGroup`, `SearchField`, `ScrollArea`, `Separator`, `Skeleton`, `GlyphSpinner`, `Loader`, `EmptyState`, `ErrorState`, `CopyButton`, `StatusDot`, `LogView`, `Codicon`, `DecodeText` |
 | Helpers | `cn`, `icons`, `haptic`, `useI18n`, `profileColor`, `profileColorSoft`, `relativeTime`, `fmtDateTime`, `fmtDayTime`, `coarseElapsed`, `evaluateRuntimeReadiness` |

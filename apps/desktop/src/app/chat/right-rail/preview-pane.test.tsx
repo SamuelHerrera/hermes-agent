@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { registry } from '@/contrib/registry'
 import { $connection } from '@/store/session'
 
+import { PREVIEW_RENDERERS_AREA } from './preview-contrib'
 import { PreviewPane } from './preview-pane'
 import { forgetPreviewStripTools, previewConsoleState } from './preview-strip-tools'
 
@@ -149,6 +151,53 @@ describe('PreviewPane console state', () => {
     expect(sourceLink?.getAttribute('href')).toBeNull()
     expect(sourceLink?.getAttribute('target')).toBeNull()
     expect(fireEvent.click(sourceLink!)).toBe(false)
+  })
+
+  it('lets plugins render native file preview targets inside the normal preview tab', async () => {
+    let dispose = () => {}
+    await act(async () => {
+      dispose = registry.register({
+        area: PREVIEW_RENDERERS_AREA,
+        data: {
+          matches: (target: { path?: string }) => target.path?.endsWith('.csv') ?? false,
+          render: ({ reloadKey, target }: { reloadKey: number; target: { label: string } }) => (
+            <div data-testid="plugin-preview">
+              {target.label}:{reloadKey}
+            </div>
+          )
+        },
+        id: 'csv-test',
+        source: 'plugin:test'
+      })
+    })
+
+    let rendered: ReturnType<typeof render> | null = null
+
+    try {
+      await act(async () => {
+        rendered = render(
+          <PreviewPane
+            target={{
+              binary: true,
+              kind: 'file',
+              label: 'sample.csv',
+              path: '/tmp/sample.csv',
+              previewKind: 'text',
+              source: '/tmp/sample.csv',
+              url: 'file:///tmp/sample.csv'
+            }}
+          />
+        )
+      })
+
+      expect(rendered!.getByTestId('plugin-preview').textContent).toBe('sample.csv:0')
+      expect(rendered!.container.textContent).not.toContain('binary')
+    } finally {
+      await act(async () => {
+        rendered?.unmount()
+        dispose()
+      })
+    }
   })
 
   it('renders PDF targets in an embedded viewer', async () => {

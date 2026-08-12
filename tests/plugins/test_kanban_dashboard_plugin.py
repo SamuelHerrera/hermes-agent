@@ -190,6 +190,33 @@ def test_dashboard_markdown_html_is_sanitized_before_render():
     assert "dangerouslySetInnerHTML: { __html: renderMarkdown(props.source || \"\") }" not in js
 
 
+def test_dashboard_paste_images_uploads_to_comments_and_attachments():
+    """The dashboard bundle wires clipboard image paste into both surfaces.
+
+    Pasting into the comment composer should upload image blobs as task
+    attachments and post a markdown image comment pointing at those attachments;
+    pasting while the attachment section is focused should upload the images
+    without creating a comment.
+    """
+
+    repo_root = Path(__file__).resolve().parents[2]
+    bundle = repo_root / "plugins" / "kanban" / "dashboard" / "dist" / "index.js"
+    js = bundle.read_text()
+
+    assert "function clipboardImageFiles(data)" in js
+    assert "function buildPastedImageComment" in js
+    assert "function handleCommentPaste(e)" in js
+    assert "function handleAttachmentPaste(e)" in js
+    assert "function attachmentImageRenderSrc(src)" in js
+    assert 'const endpoint = pastedImage ? "attachments/pasted-image" : "attachments"' in js
+    assert "onPaste: function (e) { handleCommentPaste(e); }" in js
+    assert "onPasteImages: handleAttachmentPaste" in js
+    assert "MARKDOWN_ALLOWED_TAGS = new Set([" in js and '"img"' in js
+    assert "window.__HERMES_SESSION_TOKEN__" in js
+    assert "url.searchParams.set(\"token\", token)" in js
+    assert 'src.startsWith(API + "/attachments/")' in js
+
+
 # ---------------------------------------------------------------------------
 # GET /tasks/:id returns body + comments + events + links
 # ---------------------------------------------------------------------------
@@ -211,10 +238,17 @@ def test_task_detail_includes_links_and_events(client):
     data = r.json()
     assert data["task"]["id"] == child["id"]
     assert parent["id"] in data["links"]["parents"]
+    assert data["link_details"]["parents"] == [
+        {"id": parent["id"], "title": "parent", "status": parent["status"]}
+    ]
 
     # Detail for the parent shows the child.
     r = client.get(f"/api/plugins/kanban/tasks/{parent['id']}")
-    assert child["id"] in r.json()["links"]["children"]
+    parent_data = r.json()
+    assert child["id"] in parent_data["links"]["children"]
+    assert parent_data["link_details"]["children"] == [
+        {"id": child["id"], "title": "child", "status": "todo"}
+    ]
 
     # Events exist from creation.
     assert len(data["events"]) >= 1

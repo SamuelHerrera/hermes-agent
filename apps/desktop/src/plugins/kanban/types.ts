@@ -88,7 +88,15 @@ export interface KanbanEvent {
 export interface KanbanAttachment {
   id: number | string
   filename: string
+  content_type?: null | string
   size?: null | number
+  url?: null | string
+}
+
+export interface KanbanTaskLink {
+  id: string
+  title?: null | string
+  status?: null | string
 }
 
 /** Fields present only on the detail endpoint (beyond the card's KanbanTask).
@@ -119,6 +127,7 @@ export interface KanbanTaskDetail {
   events: KanbanEvent[]
   attachments: KanbanAttachment[]
   links: { parents: string[]; children: string[] }
+  link_details?: { parents?: KanbanTaskLink[]; children?: KanbanTaskLink[] }
   runs: KanbanRun[]
 }
 

@@ -51,6 +51,7 @@ import {
 } from '@hermes/plugin-sdk'
 import {
   type CSSProperties,
+  type ClipboardEvent as ReactClipboardEvent,
   type DragEvent as ReactDragEvent,
   type ReactNode,
   useEffect,
@@ -74,13 +75,20 @@ import {
   fetchBoards,
   fetchProfiles,
   patchTask,
-  PROFILES_KEY
+  PROFILES_KEY,
+  uploadPastedImage
 } from './api'
 import { BoardSwitcher } from './board-switcher'
 import { TaskDrawer } from './drawer'
 import { EMPTY_OVERRIDE, ModelOverrideField, overrideCreateFields, type TaskModelOverride } from './model-override'
+import {
+  filterNewTaskImageFiles,
+  NEW_TASK_IMAGE_ACCEPT,
+  uploadNewTaskImages
+} from './new-task-images'
 import { OrchestrationPanel } from './orchestration'
-import { columnMeta, type KanbanBoard, type KanbanTask, type TaskEstimate } from './types'
+import { clipboardImageFiles } from './paste-images'
+import { columnMeta, type KanbanAttachment, type KanbanBoard, type KanbanTask, type TaskEstimate } from './types'
 import {
   $newTaskLane,
   ago,
@@ -573,9 +581,11 @@ function NewTaskDialog({
   const [parent, setParent] = useState('')
   const [modelOverride, setModelOverride] = useState<TaskModelOverride>(EMPTY_OVERRIDE)
   const [goalMode, setGoalMode] = useState(false)
+  const [images, setImages] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<null | string>(null)
   const [estimate, setEstimate] = useState<null | TaskEstimate>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
 
   // Rough effort estimate from the typed title/body (before the task exists),
   // via the auto-routed auxiliary model. Makes a model call — explicit action.
@@ -606,11 +616,43 @@ function NewTaskDialog({
       setParent('')
       setModelOverride(EMPTY_OVERRIDE)
       setGoalMode(false)
+      setImages([])
       setError(null)
       setBusy(false)
       setEstimate(null)
     }
   }, [target, boardDefaultKind])
+
+  const addImages = (files: Iterable<File>) => {
+    const next = filterNewTaskImageFiles(files)
+
+    if (!next.length) {
+      return
+    }
+
+    setImages(current => [...current, ...next])
+  }
+
+  const pasteImages = (event: ReactClipboardEvent<HTMLElement>) => {
+    const files = clipboardImageFiles(event.clipboardData)
+
+    if (!files.length) {
+      return
+    }
+
+    event.preventDefault()
+    setImages(current => [...current, ...files])
+  }
+
+  const uploadNewTaskImage = async (taskId: string, file: File): Promise<KanbanAttachment | null> => {
+    const res = await uploadPastedImage(taskId, {
+      bytes: await file.arrayBuffer(),
+      contentType: file.type || undefined,
+      filename: file.name
+    })
+
+    return res.attachment ?? null
+  }
 
   const submit = async () => {
     const trimmed = title.trim()
@@ -628,10 +670,17 @@ function NewTaskDialog({
         .map(s => s.trim())
         .filter(Boolean)
 
+      const finalAssignee = assignee === PARKED ? undefined : assignee || resolvedDefault
+      // Tasks with images are created parked (triage/ready + unassigned), then images
+      // are uploaded before the final assignee/status patch nudges dispatch.
+      // Otherwise the create auto-nudge can let a worker claim the task before
+      // its pasted/uploaded screenshots are visible in worker context.
+      const createAssignee = images.length > 0 ? undefined : finalAssignee
+
       // create() derives status (triage flag → 'triage', else 'ready'); move to
       // the requested column when they differ, so a per-column add lands right.
       const { task, warning } = await createTask({
-        assignee: assignee === PARKED ? undefined : assignee || resolvedDefault,
+        assignee: createAssignee,
         body: bodyText.trim() || undefined,
         goal_mode: goalMode,
         parents: parent ? [parent] : undefined,
@@ -645,8 +694,12 @@ function NewTaskDialog({
         workspace_path: workspaceKind !== 'scratch' && workspacePath.trim() ? workspacePath.trim() : undefined
       })
 
-      if (task && task.status !== target) {
-        await patchTask(task.id, { status: target })
+      if (task && images.length > 0) {
+        await uploadNewTaskImages(task.id, images, uploadNewTaskImage)
+      }
+
+      if (task && (task.status !== target || (images.length > 0 && finalAssignee))) {
+        await patchTask(task.id, { ...(finalAssignee ? { assignee: finalAssignee } : {}), status: target })
       }
 
       // Dispatcher-presence warning ("this ready task will sit idle") — not an
@@ -677,7 +730,7 @@ function NewTaskDialog({
         <DialogHeader>
           <DialogTitle>{target ? k.newTaskIn(columnLabel(k, target)) : k.newTask}</DialogTitle>
         </DialogHeader>
-        <div className="flex max-h-[min(72vh,44rem)] flex-col gap-3 overflow-y-auto pr-0.5">
+        <div className="flex max-h-[min(72vh,44rem)] flex-col gap-3 overflow-y-auto pr-0.5" onPaste={pasteImages}>
           <Input
             autoFocus
             onChange={event => setTitle(event.target.value)}
@@ -696,6 +749,52 @@ function NewTaskDialog({
             placeholder={k.descPlaceholder}
             value={bodyText}
           />
+
+          <Field label={k.attachments(images.length)}>
+            <input
+              accept={NEW_TASK_IMAGE_ACCEPT}
+              hidden
+              multiple
+              onChange={event => {
+                addImages(event.target.files ?? [])
+                event.target.value = ''
+              }}
+              ref={imageInputRef}
+              type="file"
+            />
+            <div className="flex flex-col gap-2 rounded-md border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) p-2">
+              {images.length > 0 ? (
+                <ul className="flex flex-wrap gap-1.5">
+                  {images.map((file, index) => (
+                    <li
+                      className="group relative overflow-hidden rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated)"
+                      key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                    >
+                      <img
+                        alt={file.name || `Image ${index + 1}`}
+                        className="h-16 w-16 object-cover"
+                        src={URL.createObjectURL(file)}
+                      />
+                      <button
+                        aria-label={`Remove ${file.name || `image ${index + 1}`} from task images`}
+                        className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded bg-black/65 text-white opacity-90 transition-opacity group-hover:opacity-100"
+                        onClick={() => setImages(current => current.filter((_, i) => i !== index))}
+                        type="button"
+                      >
+                        <Codicon name="close" size="0.65rem" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="text-[0.6875rem] text-(--ui-text-quaternary)">{k.noAttachments}</span>
+              )}
+              <Button className="self-start" disabled={busy} onClick={() => imageInputRef.current?.click()} size="xs" variant="outline">
+                <Codicon name="cloud-upload" size="0.75rem" />
+                {k.uploadAttachment}
+              </Button>
+            </div>
+          </Field>
 
           <div className="grid grid-cols-2 gap-3">
             <Field label={k.priority}>

@@ -146,6 +146,23 @@ type KanbanMessages = {
   deliveredLive: string
   requeueWithNote: string
   notePosted: string
+  timeline: (n: number) => string
+  timelineArchived: string
+  timelineAssigned: (assignee: string) => string
+  timelineCommented: (author: string) => string
+  timelineCompleted: string
+  timelineCreated: string
+  timelineLastAction: (action: string) => string
+  timelineLastHeartbeat: (when: string) => string
+  timelineNeedsInput: string
+  timelineRecentAction: string
+  timelineNoActivity: string
+  timelineNoAssignee: string
+  timelineReview: string
+  timelineRunDetail: (profile: string, duration: string) => string
+  timelineRunProfile: (profile: string) => string
+  timelineWaitingIn: (column: string) => string
+  timelineWorking: string
   activity: (n: number) => string
   runs: (n: number) => string
   workerLog: string
@@ -154,6 +171,8 @@ type KanbanMessages = {
   noAttachments: string
   uploadAttachment: string
   taskActions: string
+  openAsDialog: string
+  openAsSideSheet: string
   copyTaskId: string
   copyTitle: string
   copiedId: (id: string) => string
@@ -338,6 +357,23 @@ const en: KanbanMessages = {
   deliveredLive: 'Delivered to the running worker within a few seconds.',
   requeueWithNote: 'Requeue with note',
   notePosted: 'Note posted — worker requeued',
+  timeline: n => `Timeline · ${n}`,
+  timelineArchived: 'Archived',
+  timelineAssigned: assignee => `Assigned to ${assignee}`,
+  timelineCommented: author => `Comment from ${author}`,
+  timelineCompleted: 'Work completed',
+  timelineCreated: 'Task created',
+  timelineLastAction: action => `latest action: ${action}`,
+  timelineLastHeartbeat: when => `last heartbeat ${when}`,
+  timelineNeedsInput: 'Needs human input',
+  timelineRecentAction: 'Recent action',
+  timelineNoActivity: 'No timeline activity yet.',
+  timelineNoAssignee: 'No assignee yet — pick a profile to start work.',
+  timelineReview: 'Waiting for review',
+  timelineRunDetail: (profile, duration) => `${profile} run · ${duration}`,
+  timelineRunProfile: profile => `${profile} run`,
+  timelineWaitingIn: column => `Waiting in ${column}`,
+  timelineWorking: 'Agent is working now',
   activity: n => `Activity · ${n}`,
   runs: n => `Runs · ${n}`,
   workerLog: 'Worker log',
@@ -346,6 +382,8 @@ const en: KanbanMessages = {
   noAttachments: 'No attachments yet.',
   uploadAttachment: 'Upload attachment',
   taskActions: 'Task actions',
+  openAsDialog: 'Open as dialog',
+  openAsSideSheet: 'Open as side sheet',
   copyTaskId: 'Copy task id',
   copyTitle: 'Copy title',
   copiedId: id => `Copied ${id}`,
@@ -529,6 +567,23 @@ const ja: KanbanMessages = {
   deliveredLive: '数秒以内に実行中のワーカーへ届きます。',
   requeueWithNote: 'メモを付けて再キュー',
   notePosted: 'メモを投稿しました — ワーカーを再キューしました',
+  timeline: n => `タイムライン・${n}`,
+  timelineArchived: 'アーカイブ済み',
+  timelineAssigned: assignee => `${assignee} に割り当て`,
+  timelineCommented: author => `${author} のコメント`,
+  timelineCompleted: '作業完了',
+  timelineCreated: 'タスク作成',
+  timelineLastAction: action => `最新の操作: ${action}`,
+  timelineLastHeartbeat: when => `最終ハートビート ${when}`,
+  timelineNeedsInput: '人間の入力待ち',
+  timelineRecentAction: '最近の操作',
+  timelineNoActivity: 'タイムラインのアクティビティはまだありません。',
+  timelineNoAssignee: '担当が未設定です — プロフィールを選ぶと作業が始まります。',
+  timelineReview: 'レビュー待ち',
+  timelineRunDetail: (profile, duration) => `${profile} の実行・${duration}`,
+  timelineRunProfile: profile => `${profile} の実行`,
+  timelineWaitingIn: column => `${column} で待機中`,
+  timelineWorking: 'エージェントが作業中',
   activity: n => `アクティビティ・${n}`,
   runs: n => `実行・${n}`,
   workerLog: 'ワーカーログ',
@@ -537,6 +592,8 @@ const ja: KanbanMessages = {
   noAttachments: 'まだ添付はありません。',
   uploadAttachment: '添付をアップロード',
   taskActions: 'タスクの操作',
+  openAsDialog: 'ダイアログで開く',
+  openAsSideSheet: 'サイドシートで開く',
   copyTaskId: 'タスク ID をコピー',
   copyTitle: 'タイトルをコピー',
   copiedId: id => `${id} をコピーしました`,
@@ -718,6 +775,23 @@ const zh: KanbanMessages = {
   deliveredLive: '几秒内送达运行中的工作单元。',
   requeueWithNote: '附带备注重新入队',
   notePosted: '备注已发布 — 工作单元已重新入队',
+  timeline: n => `时间线・${n}`,
+  timelineArchived: '已归档',
+  timelineAssigned: assignee => `分配给 ${assignee}`,
+  timelineCommented: author => `${author} 的评论`,
+  timelineCompleted: '工作已完成',
+  timelineCreated: '任务已创建',
+  timelineLastAction: action => `最新操作：${action}`,
+  timelineLastHeartbeat: when => `最后心跳 ${when}`,
+  timelineNeedsInput: '需要人工输入',
+  timelineRecentAction: '最近操作',
+  timelineNoActivity: '暂无时间线活动。',
+  timelineNoAssignee: '尚未分配负责人 — 选择一个配置档即可开始。',
+  timelineReview: '等待审查',
+  timelineRunDetail: (profile, duration) => `${profile} 运行・${duration}`,
+  timelineRunProfile: profile => `${profile} 运行`,
+  timelineWaitingIn: column => `在 ${column} 中等待`,
+  timelineWorking: '代理正在处理',
   activity: n => `活动・${n}`,
   runs: n => `运行・${n}`,
   workerLog: '工作单元日志',
@@ -726,6 +800,8 @@ const zh: KanbanMessages = {
   noAttachments: '暂无附件。',
   uploadAttachment: '上传附件',
   taskActions: '任务操作',
+  openAsDialog: '以对话框打开',
+  openAsSideSheet: '以侧边表单打开',
   copyTaskId: '复制任务 ID',
   copyTitle: '复制标题',
   copiedId: id => `已复制 ${id}`,
@@ -906,6 +982,23 @@ const zhHant: KanbanMessages = {
   deliveredLive: '幾秒內送達執行中的工作單元。',
   requeueWithNote: '附上備註重新排入佇列',
   notePosted: '備註已發布 — 工作單元已重新排入佇列',
+  timeline: n => `時間軸・${n}`,
+  timelineArchived: '已封存',
+  timelineAssigned: assignee => `指派給 ${assignee}`,
+  timelineCommented: author => `${author} 的留言`,
+  timelineCompleted: '工作已完成',
+  timelineCreated: '任務已建立',
+  timelineLastAction: action => `最新操作：${action}`,
+  timelineLastHeartbeat: when => `最後心跳 ${when}`,
+  timelineNeedsInput: '需要人工輸入',
+  timelineRecentAction: '最近操作',
+  timelineNoActivity: '尚無時間軸活動。',
+  timelineNoAssignee: '尚未指派負責人 — 選擇一個設定檔即可開始。',
+  timelineReview: '等待審查',
+  timelineRunDetail: (profile, duration) => `${profile} 執行・${duration}`,
+  timelineRunProfile: profile => `${profile} 執行`,
+  timelineWaitingIn: column => `在 ${column} 中等待`,
+  timelineWorking: '代理正在處理',
   activity: n => `活動・${n}`,
   runs: n => `執行・${n}`,
   workerLog: '工作單元日誌',
@@ -914,6 +1007,8 @@ const zhHant: KanbanMessages = {
   noAttachments: '尚無附件。',
   uploadAttachment: '上傳附件',
   taskActions: '任務操作',
+  openAsDialog: '以對話框開啟',
+  openAsSideSheet: '以側邊表單開啟',
   copyTaskId: '複製任務 ID',
   copyTitle: '複製標題',
   copiedId: id => `已複製 ${id}`,
