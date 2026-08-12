@@ -430,11 +430,10 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
   return items
 }
 
-function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log?: WorkerLog }) {
+function TimelineSection({ collapsible = false, detail, log }: { collapsible?: boolean; detail: KanbanTaskDetail; log?: WorkerLog }) {
   const k = useKanban()
   const items = buildTimelineItems(detail, log, k)
   const timelineCount = items.reduce((count, item) => count + 1 + (item.actionTrace?.length ?? 0), 0)
-  const [open, setOpen] = useState(true)
 
   const iconFor = (tone: TimelineTone) => {
     switch (tone) {
@@ -483,54 +482,45 @@ function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log?: Work
   }
 
   return (
-    <Section
-      action={
-        <Button onClick={() => setOpen(value => !value)} size="icon-xs" variant="ghost">
-          <Codicon name={open ? 'chevron-up' : 'chevron-down'} size="0.75rem" />
-        </Button>
-      }
-      label={k.timeline(timelineCount)}
-    >
-      {open && (
-        <ScrollFade deps={items.length} max="14rem">
-          <ol className="flex flex-col gap-2">
-            {items.map(item => (
-              <li className="flex gap-2 text-[0.75rem]" key={item.id}>
-                <span
-                  className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
-                >
-                  <Codicon name={iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
+    <Section collapsible={collapsible} label={k.timeline(timelineCount)}>
+      <ScrollFade deps={items.length} max="14rem">
+        <ol className="flex flex-col gap-2">
+          {items.map(item => (
+            <li className="flex gap-2 text-[0.75rem]" key={item.id}>
+              <span
+                className={cn('mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
+              >
+                <Codicon name={iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2">
+                  <span className="font-medium text-(--ui-text-secondary)">{item.label}</span>
+                  {ago(item.at) && (
+                    <span className="ml-auto shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{ago(item.at)}</span>
+                  )}
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline gap-2">
-                    <span className="font-medium text-(--ui-text-secondary)">{item.label}</span>
-                    {ago(item.at) && (
-                      <span className="ml-auto shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{ago(item.at)}</span>
-                    )}
+                {item.detail && (
+                  <span className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
+                    {item.detail}
                   </span>
-                  {item.detail && (
-                    <span className="mt-0.5 line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">
-                      {item.detail}
-                    </span>
-                  )}
-                  {item.actionTrace && item.actionTrace.length > 0 && (
-                    <span className="mt-1 flex flex-col gap-0.5">
-                      {item.actionTrace.map((action, index) => (
-                        <span
-                          className="line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)"
-                          key={`${item.id}-action-${index}`}
-                        >
-                          {action}
-                        </span>
-                      ))}
-                    </span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        </ScrollFade>
-      )}
+                )}
+                {item.actionTrace && item.actionTrace.length > 0 && (
+                  <span className="mt-1 flex flex-col gap-0.5">
+                    {item.actionTrace.map((action, index) => (
+                      <span
+                        className="line-clamp-2 whitespace-pre-wrap text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)"
+                        key={`${item.id}-action-${index}`}
+                      >
+                        {action}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </ScrollFade>
     </Section>
   )
 }
@@ -1429,186 +1419,182 @@ export function TaskDrawer({
             <Loader type="lemniscate-bloom" />
           </div>
         ) : (
-          <div className="flex flex-col gap-4 text-sm">
-            <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-[0.71rem]">
-              <MetaRow label={k.assignee}>
-                <AssigneeMenu
-                  current={task.assignee}
+          <Tabs className="gap-3 text-sm" defaultValue="details">
+            <TabsList className="sticky top-0 z-10 h-8 w-full justify-start overflow-x-auto rounded-none border-b border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-0">
+              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="details">
+                {k.tabDetails}
+              </TabsTrigger>
+              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="activity">
+                {k.tabActivity}
+              </TabsTrigger>
+              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="discussion">
+                {k.tabDiscussion}
+              </TabsTrigger>
+            </TabsList>
+
+            <DrawerTabContent value="details">
+              <Section label={k.details}>
+                <DetailMetaGrid
+                  onModelChange={next => void mutate(() => patchTask(task.id, overridePatch(next)))()}
                   onReassign={profile => void mutate(() => reassignTask(task.id, profile))()}
+                  task={task}
                 />
-              </MetaRow>
-              {typeof task.priority === 'number' && <MetaRow label={k.metaPriority}>{task.priority}</MetaRow>}
-              {task.tenant && <MetaRow label={k.metaTenant}>{task.tenant}</MetaRow>}
-              {task.workspace_path && (
-                <MetaRow label={k.workspace}>
-                  {task.workspace_kind ? `${task.workspace_kind}: ` : ''}
-                  {task.workspace_path}
-                </MetaRow>
+              </Section>
+
+              {task.status === 'ready' && !task.assignee && !defaultAssignee && (
+                <Callout title={k.readyUnassignedTitle} tone={SEVERITY_TONE.warning}>
+                  <p className="text-[0.71rem] leading-relaxed text-(--ui-text-secondary)">{k.readyUnassignedBody}</p>
+                </Callout>
               )}
-              <MetaRow label={k.model}>
-                <ModelOverrideField
-                  onChange={next => void mutate(() => patchTask(task.id, overridePatch(next)))()}
-                  value={{
-                    effort: task.reasoning_effort ?? '',
-                    model: task.model_override ?? '',
-                    provider: task.provider_override ?? ''
-                  }}
-                />
-              </MetaRow>
-              {task.created_by && <MetaRow label={k.metaCreatedBy}>{task.created_by}</MetaRow>}
-              {ago(task.created_at) && <MetaRow label={k.metaCreated}>{ago(task.created_at)}</MetaRow>}
-              {running && task.worker_pid ? <MetaRow label={k.metaWorkerPid}>{task.worker_pid}</MetaRow> : null}
-            </div>
 
-            {task.status === 'ready' && !task.assignee && !defaultAssignee && (
-              <Callout title={k.readyUnassignedTitle} tone={SEVERITY_TONE.warning}>
-                <p className="text-[0.71rem] leading-relaxed text-(--ui-text-secondary)">{k.readyUnassignedBody}</p>
-              </Callout>
-            )}
-
-            {task.diagnostics && task.diagnostics.length > 0 && (
-              <Section label={k.diagnosticsN(task.diagnostics.length)}>
-                <Diagnostics items={task.diagnostics} onReclaim={() => void mutate(() => reclaimTask(task.id))()} />
-              </Section>
-            )}
-
-            <DescriptionSection body={task.body} onSave={body => void mutate(() => patchTask(task.id, { body }))()} />
-
-            <EstimateSection id={task.id} />
-
-            <TimelineSection detail={detail} log={log} />
-
-            {task.result && (
-              <Section label={k.result}>
-                <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.result}</p>
-              </Section>
-            )}
-
-            {task.latest_summary && !isAdminSummary(task.latest_summary) && (
-              <Section label={k.latestSummary}>
-                <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.latest_summary}</p>
-              </Section>
-            )}
-
-            {(detail.links.parents.length > 0 || detail.links.children.length > 0) && (
-              <DependenciesSection detail={detail} onOpen={onOpen} />
-            )}
-
-            <Section
-              action={
-                <Tip label={running ? k.commentsHelpRunning : k.commentsHelp}>
-                  <span className="grid size-5 place-items-center rounded text-(--ui-text-quaternary) hover:text-(--ui-text-secondary)">
-                    <Codicon name="question" size="0.8rem" />
-                  </span>
-                </Tip>
-              }
-              label={k.comments(detail.comments.length)}
-            >
-              {detail.comments.length > 0 && (
-                <ul className="flex flex-col gap-2">
-                  {detail.comments.map(comment => (
-                    <li className="text-[0.75rem]" key={comment.id}>
-                      <span className="font-medium text-(--ui-text-secondary)">{comment.author}</span>
-                      <span className="ml-2 text-[0.625rem] text-(--ui-text-quaternary)">
-                        {ago(comment.created_at)}
-                      </span>
-                      <KanbanCommentBody body={comment.body} />
-                    </li>
-                  ))}
-                </ul>
+              {task.diagnostics && task.diagnostics.length > 0 && (
+                <Section label={k.diagnosticsN(task.diagnostics.length)}>
+                  <Diagnostics items={task.diagnostics} onReclaim={() => void mutate(() => reclaimTask(task.id))()} />
+                </Section>
               )}
-              <CommentComposer
-                onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
-                onRequeue={body => requeueMut.mutate(body)}
-                onSubmit={body => commentMut.mutate(body)}
-                pending={commentMut.isPending || pasteImagesMut.isPending || requeueMut.isPending}
-                running={running}
-              />
-            </Section>
 
-            {detail.events.length > 0 && (
-              <Section label={k.activity(detail.events.length)}>
-                <ScrollFade deps={detail.events.length} max="7rem">
-                  <ul className="flex flex-col gap-1">
-                    {detail.events.map(event => {
-                      const { detail: extra, label } = eventText(event, k)
+              <DescriptionSection body={task.body} onSave={body => void mutate(() => patchTask(task.id, { body }))()} />
 
-                      return (
-                        <li className="flex items-baseline gap-2 text-[0.6875rem]" key={event.id}>
-                          <span className="shrink-0 text-(--ui-text-secondary)">{label}</span>
-                          {extra && (
-                            <span
-                              className="min-w-0 truncate text-[0.625rem] text-(--ui-text-quaternary)"
-                              title={extra}
-                            >
-                              {extra}
-                            </span>
-                          )}
-                          <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">{ago(event.created_at)}</span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </ScrollFade>
-              </Section>
-            )}
+              <EstimateSection id={task.id} />
 
-            {detail.runs.length > 0 && (
-              <Section label={k.runs(detail.runs.length)}>
-                <ScrollFade max="11rem">
-                  <ul className="flex flex-col gap-1.5">
-                    {detail.runs.map(run => {
-                      const failed = ['crashed', 'failed', 'timed_out', 'gave_up'].includes(run.outcome ?? run.status)
+              {task.result && (
+                <Section label={k.result}>
+                  <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.result}</p>
+                </Section>
+              )}
 
-                      return (
-                        <li className="flex flex-col gap-0.5 text-[0.71rem]" key={run.id}>
-                          <div className="flex items-center gap-2">
-                            <Badge size="xs" variant={failed ? 'destructive' : 'muted'}>
-                              {run.outcome ?? run.status}
-                            </Badge>
-                            {run.profile && <span className="text-(--ui-text-tertiary)">{run.profile}</span>}
-                            {duration(run.started_at, run.ended_at) && (
-                              <span className="text-(--ui-text-quaternary)">
-                                {duration(run.started_at, run.ended_at)}
+              {task.latest_summary && !isAdminSummary(task.latest_summary) && (
+                <Section label={k.latestSummary}>
+                  <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.latest_summary}</p>
+                </Section>
+              )}
+
+              {(detail.links.parents.length > 0 || detail.links.children.length > 0) && (
+                <DependenciesSection detail={detail} onOpen={onOpen} />
+              )}
+            </DrawerTabContent>
+
+            <DrawerTabContent value="activity">
+              <TimelineSection detail={detail} log={log} />
+
+              {detail.events.length > 0 && (
+                <Section collapsible label={k.activity(detail.events.length)}>
+                  <ScrollFade deps={detail.events.length} max="7rem">
+                    <ul className="flex flex-col gap-1">
+                      {detail.events.map(event => {
+                        const { detail: extra, label } = eventText(event, k)
+
+                        return (
+                          <li className="flex items-baseline gap-2 text-[0.6875rem]" key={event.id}>
+                            <span className="shrink-0 text-(--ui-text-secondary)">{label}</span>
+                            {extra && (
+                              <span
+                                className="min-w-0 truncate text-[0.625rem] text-(--ui-text-quaternary)"
+                                title={extra}
+                              >
+                                {extra}
                               </span>
                             )}
-                            <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">
-                              {ago(run.ended_at ?? run.started_at)}
-                            </span>
-                          </div>
-                          {(run.error || run.summary) && (
-                            <p
-                              className={cn(
-                                'line-clamp-2 whitespace-pre-wrap',
-                                run.error ? 'text-destructive' : 'text-(--ui-text-quaternary)'
+                            <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">{ago(event.created_at)}</span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </ScrollFade>
+                </Section>
+              )}
+
+              {detail.runs.length > 0 && (
+                <Section collapsible label={k.runs(detail.runs.length)}>
+                  <ScrollFade max="11rem">
+                    <ul className="flex flex-col gap-1.5">
+                      {detail.runs.map(run => {
+                        const failed = ['crashed', 'failed', 'timed_out', 'gave_up'].includes(run.outcome ?? run.status)
+
+                        return (
+                          <li className="flex flex-col gap-0.5 text-[0.71rem]" key={run.id}>
+                            <div className="flex items-center gap-2">
+                              <Badge size="xs" variant={failed ? 'destructive' : 'muted'}>
+                                {run.outcome ?? run.status}
+                              </Badge>
+                              {run.profile && <span className="text-(--ui-text-tertiary)">{run.profile}</span>}
+                              {duration(run.started_at, run.ended_at) && (
+                                <span className="text-(--ui-text-quaternary)">
+                                  {duration(run.started_at, run.ended_at)}
+                                </span>
                               )}
-                            >
-                              {run.error ?? run.summary}
-                            </p>
-                          )}
-                        </li>
-                      )
-                    })}
+                              <span className="ml-auto shrink-0 text-(--ui-text-quaternary)">
+                                {ago(run.ended_at ?? run.started_at)}
+                              </span>
+                            </div>
+                            {(run.error || run.summary) && (
+                              <p
+                                className={cn(
+                                  'line-clamp-2 whitespace-pre-wrap',
+                                  run.error ? 'text-destructive' : 'text-(--ui-text-quaternary)'
+                                )}
+                              >
+                                {run.error ?? run.summary}
+                              </p>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </ScrollFade>
+                </Section>
+              )}
+
+              {log?.exists && log.content && (
+                <Section collapsible label={log.truncated ? k.workerLogTail : k.workerLog}>
+                  <ScrollFade deps={log.content.length} max="12rem">
+                    <LogView className="border-0 px-0">{log.content}</LogView>
+                  </ScrollFade>
+                </Section>
+              )}
+            </DrawerTabContent>
+
+            <DrawerTabContent value="discussion">
+              <Section
+                action={
+                  <Tip label={running ? k.commentsHelpRunning : k.commentsHelp}>
+                    <span className="grid size-5 place-items-center rounded text-(--ui-text-quaternary) hover:text-(--ui-text-secondary)">
+                      <Codicon name="question" size="0.8rem" />
+                    </span>
+                  </Tip>
+                }
+                label={k.comments(detail.comments.length)}
+              >
+                {detail.comments.length > 0 && (
+                  <ul className="flex flex-col gap-2">
+                    {detail.comments.map(comment => (
+                      <li className="text-[0.75rem]" key={comment.id}>
+                        <span className="font-medium text-(--ui-text-secondary)">{comment.author}</span>
+                        <span className="ml-2 text-[0.625rem] text-(--ui-text-quaternary)">
+                          {ago(comment.created_at)}
+                        </span>
+                        <KanbanCommentBody body={comment.body} />
+                      </li>
+                    ))}
                   </ul>
-                </ScrollFade>
+                )}
+                <CommentComposer
+                  onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
+                  onRequeue={body => requeueMut.mutate(body)}
+                  onSubmit={body => commentMut.mutate(body)}
+                  pending={commentMut.isPending || pasteImagesMut.isPending || requeueMut.isPending}
+                  running={running}
+                />
               </Section>
-            )}
 
-            {log?.exists && log.content && (
-              <Section label={log.truncated ? k.workerLogTail : k.workerLog}>
-                <ScrollFade deps={log.content.length} max="12rem">
-                  <LogView className="border-0 px-0">{log.content}</LogView>
-                </ScrollFade>
-              </Section>
-            )}
-
-            <AttachmentsSection
-              attachments={detail.attachments}
-              onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
-              onUpload={file => uploadMut.mutate(file)}
-              pending={pasteImagesMut.isPending || uploadMut.isPending}
-            />
-          </div>
+              <AttachmentsSection
+                attachments={detail.attachments}
+                onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
+                onUpload={file => uploadMut.mutate(file)}
+                pending={pasteImagesMut.isPending || uploadMut.isPending}
+              />
+            </DrawerTabContent>
+          </Tabs>
         )}
       </div>
     </TaskDrawerShell>

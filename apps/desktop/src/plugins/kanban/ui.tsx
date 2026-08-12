@@ -231,14 +231,39 @@ export function StatusMenu({
 // create dialog's Field, and the orchestration panel all read identically.
 export const FIELD_LABEL = 'text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)'
 
-export function Section({ action, children, label }: { action?: ReactNode; children: ReactNode; label: string }) {
+export function Section({
+  action,
+  children,
+  collapsible = false,
+  defaultOpen = true,
+  label
+}: {
+  action?: ReactNode
+  children: ReactNode
+  collapsible?: boolean
+  defaultOpen?: boolean
+  label: string
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
   return (
     <section className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <div className={FIELD_LABEL}>{label}</div>
+      <div className="flex items-center justify-between gap-2">
+        {collapsible ? (
+          <button
+            className="-ml-1 inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-(--chrome-action-hover)"
+            onClick={() => setOpen(value => !value)}
+            type="button"
+          >
+            <Codicon className="shrink-0 text-(--ui-text-quaternary)" name={open ? 'chevron-down' : 'chevron-right'} size="0.75rem" />
+            <span className={FIELD_LABEL}>{label}</span>
+          </button>
+        ) : (
+          <div className={FIELD_LABEL}>{label}</div>
+        )}
         {action}
       </div>
-      {children}
+      {(!collapsible || open) && children}
     </section>
   )
 }
