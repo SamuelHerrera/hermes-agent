@@ -19,6 +19,25 @@ import pytest
 # Gating
 # ---------------------------------------------------------------------------
 
+def test_kanban_tools_hidden_with_leaked_worker_env_in_desktop(monkeypatch, tmp_path):
+    """An inherited worker task id must not turn a Desktop chat into that worker."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_leaked")
+    monkeypatch.setenv("HERMES_SESSION_SOURCE", "desktop")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    import tools.kanban_tools  # ensure registered
+    from tools.registry import invalidate_check_fn_cache, registry
+    from toolsets import resolve_toolset
+
+    invalidate_check_fn_cache()
+    schema = registry.get_definitions(set(resolve_toolset("hermes-cli")), quiet=True)
+    names = {s["function"].get("name") for s in schema if "function" in s}
+    kanban = {n for n in names if n and n.startswith("kanban_")}
+    assert kanban == set(), f"worker tools leaked into Desktop schema: {kanban}"
+
+
 def test_kanban_tools_hidden_without_env_var(monkeypatch, tmp_path):
     """Normal `hermes chat` sessions (no HERMES_KANBAN_TASK) must have
     zero kanban_* tools in their schema."""
