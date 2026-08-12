@@ -481,8 +481,10 @@ function TimelineSection({ collapsible = false, detail, log }: { collapsible?: b
     )
   }
 
+  const hasActivitySections = detail.events.length > 0 || detail.runs.length > 0 || Boolean(log?.exists && log.content)
+
   return (
-    <Section collapsible={collapsible} label={k.timeline(timelineCount)}>
+    <Section collapsible={collapsible || hasActivitySections} label={k.timeline(timelineCount)}>
       <ScrollFade deps={items.length} max="14rem">
         <ol className="flex flex-col gap-2">
           {items.map(item => (
