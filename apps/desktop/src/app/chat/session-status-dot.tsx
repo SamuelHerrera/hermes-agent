@@ -1,10 +1,11 @@
 import { useStore } from '@nanostores/react'
 
+import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { $sessionColorById, sessionColorFor } from '@/store/session-color'
-import { $sessionDotStateById, type SessionDotState, showsRunningArc } from '@/store/session-dot-state'
+import { $sessionDotStateById, type SessionDotState } from '@/store/session-dot-state'
 import type { SessionInfo } from '@/types/hermes'
 
 // A pure lookup table: each state maps to its className, aria-label, and title.
@@ -13,6 +14,7 @@ import type { SessionInfo } from '@/types/hermes'
 type DotVariant = {
   ariaLabel?: (r: Translations['sidebar']['row']) => string
   className: string
+  icon?: 'loading'
   role?: 'status'
   title?: (r: Translations['sidebar']['row']) => string
 }
@@ -20,12 +22,9 @@ type DotVariant = {
 // Shared base for every active dot; idle is smaller and uses its own class.
 const DOT_BASE = 'size-1.5 rounded-full'
 
-// Three colors and one fill/hollow axis, none of it moving. Motion on a 6px
-// circle can only say "something is happening" — which the row's arc already
-// says, better — while costing a repaint per frame on every row at once. What
-// the dot is for is telling states APART, and that is a job for color and fill:
-// filled means producing, hollow means open but quiet. The two states this
-// replaces differed by 30% opacity and were, in practice, the same dot.
+// Most states are dots: color + fill/hollow tell states apart. A live turn is
+// the exception — it becomes the only moving status treatment, then returns to a
+// normal dot as soon as the session settles.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // Amber — a clarify/approval is blocking the turn. The one "act now" color,
   // and the only state the user is required to do something about.
@@ -35,18 +34,21 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Accent — the turn is running. The row's arc carries the motion.
+  // Accent spinner — the turn is running. This is the only moving session
+  // status treatment; settled states return to a normal dot.
   working: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-(--ui-accent)`,
+    className: 'size-2.5 text-(--ui-accent)',
+    icon: 'loading',
     role: 'status'
   },
-  // Hollow accent — still authoritatively running, but nothing has arrived for
-  // the watchdog window. Same color as working because it IS working; hollow
-  // because nothing is coming out of it right now.
+  // Muted accent spinner — still authoritatively running, but nothing has
+  // arrived for the watchdog window. Motion stays because the turn is alive;
+  // opacity is what says it has gone quiet.
   stalled: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} border border-(--ui-accent)`,
+    className: 'size-2.5 text-(--ui-accent) opacity-70',
+    icon: 'loading',
     role: 'status',
     title: r => r.sessionRunning
   },
@@ -86,7 +88,8 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
 /** The dot a state paints, for surfaces that describe a status rather than
  *  render a session — the sidebar's status filter, say. Idle carries no color
  *  of its own (it inherits the project's), so callers supply one. */
-export const sessionDotClassName = (state: SessionDotState): string => DOT_VARIANTS[state].className
+export const sessionDotClassName = (state: SessionDotState): string =>
+  DOT_VARIANTS[state].icon === 'loading' ? `${DOT_BASE} bg-(--ui-accent)` : DOT_VARIANTS[state].className
 
 export interface SessionStatusDotProps {
   /** The STORED session id — the key every live-state atom (working /
@@ -147,6 +150,15 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
         // keeps every row's title on one left edge, so a session finishing
         // can't shift the list under the pointer.
         <span aria-hidden="true" className={variant.className} style={color ? { backgroundColor: color } : undefined} />
+      ) : variant.icon === 'loading' ? (
+        <span
+          aria-label={variant.ariaLabel?.(r)}
+          className={cn('grid place-items-center', variant.className)}
+          role={variant.role}
+          title={variant.title?.(r)}
+        >
+          <Codicon className="block leading-none" name="loading" size="0.625rem" spinning />
+        </span>
       ) : (
         <span
           aria-label={variant.ariaLabel?.(r)}
@@ -157,18 +169,4 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
       )}
     </span>
   )
-}
-
-/**
- * Animated activity treatment for session pane tabs. The sidebar row already
- * paints `arc-row` around a running session; open tabs need the same live cue so
- * a background tab visibly reads as working instead of looking like a quiet tab
- * with a small static dot.
- */
-export function SessionTabRunningArc({ storedSessionId }: { storedSessionId: null | string }) {
-  const dotState = useStoreSelector($sessionDotStateById, states =>
-    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
-  )
-
-  return showsRunningArc(dotState) ? <span aria-hidden="true" className="arc-border arc-tab" /> : null
 }

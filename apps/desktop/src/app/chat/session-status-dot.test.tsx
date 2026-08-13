@@ -1,42 +1,63 @@
 import { act, cleanup, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 
-import { SessionTabRunningArc } from './session-status-dot'
+import { SessionStatusDot } from './session-status-dot'
+
+vi.mock('@/i18n', () => ({
+  useI18n: () => ({
+    t: {
+      sidebar: {
+        row: {
+          backgroundRunning: 'Running in background',
+          draftSession: 'Draft session',
+          finishedUnread: 'Finished',
+          needsInput: 'Needs input',
+          sessionRunning: 'Running',
+          waitingForAnswer: 'Waiting for answer'
+        }
+      }
+    }
+  })
+}))
 
 afterEach(() => {
   cleanup()
   clearAllSessionStates()
 })
 
-describe('SessionTabRunningArc', () => {
-  const arc = (container: HTMLElement) => container.querySelector('.arc-tab')
+describe('SessionStatusDot running icon', () => {
+  const spinner = (container: HTMLElement) => container.querySelector('.codicon-loading.codicon-modifier-spin')
+  const normalDot = (container: HTMLElement) => container.querySelector('span[aria-hidden="true"].rounded-full')
 
-  it('does not mark a settled tab', () => {
-    const { container } = render(<SessionTabRunningArc storedSessionId="s1" />)
-
-    expect(arc(container)).toBeNull()
-  })
-
-  it('marks a running tab with the shared arc treatment', () => {
+  it('shows a rotating loading icon while a session is running', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
-    const { container } = render(<SessionTabRunningArc storedSessionId="s1" />)
+    const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    expect(arc(container)).toBeTruthy()
+    expect(spinner(container)).toBeTruthy()
   })
 
-  it('reacts when the tab starts running after render', () => {
-    const { container } = render(<SessionTabRunningArc storedSessionId="s1" />)
+  it('does not show a rotating loading icon for a settled session', () => {
+    const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    expect(arc(container)).toBeNull()
+    expect(spinner(container)).toBeNull()
+    expect(normalDot(container)).toBeTruthy()
+  })
+
+  it('switches back to the normal idle dot when running clears', () => {
+    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    const { container } = render(<SessionStatusDot storedSessionId="s1" />)
+
+    expect(spinner(container)).toBeTruthy()
 
     act(() => {
-      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+      clearAllSessionStates()
     })
 
-    expect(arc(container)).toBeTruthy()
+    expect(spinner(container)).toBeNull()
+    expect(normalDot(container)).toBeTruthy()
   })
 })

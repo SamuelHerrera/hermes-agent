@@ -936,33 +936,6 @@
   --arc-duration: 3.27s;
 }
 
-/* Sidebar session row — a thin, clipped, single-line host, so it differs twice
-   from the default ring:
-
-   1. Flush, not outset. The sidebar scroller is `overflow-x-hidden` and rows sit
-      `gap-px` apart, so an outset ring loses its left/right runs to the clip.
-
-   2. A visible tail. `--arc-c2` defaults to `--dt-background` — invisible
-      against the sidebar. With c0 a transparent sentinel and c2 invisible, only
-      the bright c1 stop survives each pass, and the gradient has three of them:
-      three moving dots instead of an arc. Tying c2 to c1 gives each spike a
-      falloff. (`arc-nous` already overrides c2, so the hero is unaffected.) */
-.arc-border.arc-row,
-:root.dark .arc-border.arc-row {
-  --arc-standoff: 0rem;
-  --arc-c2: color-mix(in srgb, var(--arc-c1) 45%, transparent);
-}
-
-/* Session pane tab — same moving live cue as the sidebar row, clipped to the
-   tab itself so a background running tab is visible without shifting its label. */
-.arc-border.arc-tab,
-:root.dark .arc-border.arc-tab {
-  --arc-standoff: 0rem;
-  --arc-width: 1px;
-  --arc-radius: 0rem;
-  --arc-c2: color-mix(in srgb, var(--arc-c1) 45%, transparent);
-}
-
 /* HUD composer — same travelling arc as a working sidebar row, 2px and pill-
    rounded to match the bar. */
 .arc-border.arc-composer,

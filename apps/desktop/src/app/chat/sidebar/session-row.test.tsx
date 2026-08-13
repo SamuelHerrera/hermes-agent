@@ -154,8 +154,8 @@ const renderRow = (session: SessionInfo) =>
 // The row no longer takes its running state as a prop, so this drives the real
 // store the way the app does. $workingSessionIds is the actual computed here
 // (the mock above only overrides its siblings), which is what makes this cover
-// the wiring rather than the predicate — the arc has gone missing before.
-describe('SidebarSessionRow running arc', () => {
+// the wiring rather than the predicate — the running cue has gone missing before.
+describe('SidebarSessionRow running indicator', () => {
   afterEach(() => {
     clearAllSessionStates()
   })
@@ -166,14 +166,16 @@ describe('SidebarSessionRow running arc', () => {
     const { container } = renderRow(makeSession({ title: 'Settled' }))
 
     expect(arc(container)).toBeNull()
+    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeNull()
   })
 
-  it('paints the arc while the session is running', () => {
+  it('does not paint the removed border arc while the session is running', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
     const { container } = renderRow(makeSession({ title: 'Running' }))
 
-    expect(arc(container)).toBeTruthy()
+    expect(arc(container)).toBeNull()
+    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeTruthy()
   })
 
   // The row owns its status subscription so a turn starting repaints that row
