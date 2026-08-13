@@ -953,6 +953,16 @@
   --arc-c2: color-mix(in srgb, var(--arc-c1) 45%, transparent);
 }
 
+/* Session pane tab — same moving live cue as the sidebar row, clipped to the
+   tab itself so a background running tab is visible without shifting its label. */
+.arc-border.arc-tab,
+:root.dark .arc-border.arc-tab {
+  --arc-standoff: 0rem;
+  --arc-width: 1px;
+  --arc-radius: 0rem;
+  --arc-c2: color-mix(in srgb, var(--arc-c1) 45%, transparent);
+}
+
 /* HUD composer — same travelling arc as a working sidebar row, 2px and pill-
    rounded to match the bar. */
 .arc-border.arc-composer,

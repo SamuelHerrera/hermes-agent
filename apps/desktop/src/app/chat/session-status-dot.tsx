@@ -4,7 +4,7 @@ import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { $sessionColorById, sessionColorFor } from '@/store/session-color'
-import { $sessionDotStateById, type SessionDotState } from '@/store/session-dot-state'
+import { $sessionDotStateById, type SessionDotState, showsRunningArc } from '@/store/session-dot-state'
 import type { SessionInfo } from '@/types/hermes'
 
 // A pure lookup table: each state maps to its className, aria-label, and title.
@@ -157,4 +157,18 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
       )}
     </span>
   )
+}
+
+/**
+ * Animated activity treatment for session pane tabs. The sidebar row already
+ * paints `arc-row` around a running session; open tabs need the same live cue so
+ * a background tab visibly reads as working instead of looking like a quiet tab
+ * with a small static dot.
+ */
+export function SessionTabRunningArc({ storedSessionId }: { storedSessionId: null | string }) {
+  const dotState = useStoreSelector($sessionDotStateById, states =>
+    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
+  )
+
+  return showsRunningArc(dotState) ? <span aria-hidden="true" className="arc-border arc-tab" /> : null
 }

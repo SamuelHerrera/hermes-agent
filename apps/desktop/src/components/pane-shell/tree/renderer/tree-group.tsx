@@ -547,6 +547,7 @@ export function TreeGroup({
                   selected={isSelected}
                   style={{ cursor: 'grab' }}
                 >
+                  {chrome.tabActivity?.()}
                   {chrome.tabLead ? (
                     <span className="ml-2 -mr-1 flex shrink-0 items-center">{chrome.tabLead()}</span>
                   ) : null}

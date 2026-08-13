@@ -63,7 +63,7 @@ import { useComposerActions } from './hooks/use-composer-actions'
 import { paneMirror } from './pane-mirror'
 import { SessionDraftTitle } from './session-draft-title'
 import { startSessionDrag } from './session-drag'
-import { SessionStatusDot } from './session-status-dot'
+import { SessionStatusDot, SessionTabRunningArc } from './session-status-dot'
 import { useSessionTileActions } from './session-tile-actions'
 import { type SessionView, SessionViewProvider } from './session-view'
 import { SessionContextMenu } from './sidebar/session-actions-menu'
@@ -594,6 +594,7 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   tabLead: storedSessionId => (
     <SessionStatusDot session={tileStoredRow(storedSessionId)} storedSessionId={storedSessionId} />
   ),
+  tabActivity: storedSessionId => <SessionTabRunningArc storedSessionId={storedSessionId} />,
   // Until the first turn lists a row there is no title to register, so the tab
   // takes its name from the composer instead — live, without re-registering.
   tabTitle: storedSessionId => (tileStoredRow(storedSessionId) ? null : <SessionDraftTitle scope={storedSessionId} />),
