@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ComposerAttachment } from '@/store/composer'
+import type { SessionInfo } from '@/types/hermes'
 
 import {
   attachmentDisplayText,
@@ -9,10 +10,31 @@ import {
   messageCreatedAt,
   optimisticAttachmentRef,
   parseCommandDispatch,
-  parseSlashCommand
+  parseSlashCommand,
+  sessionTitle
 } from './chat-runtime'
 
 const DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANS'
+
+
+const sessionInfo = (overrides: Partial<SessionInfo> = {}): SessionInfo =>
+  ({
+    ended_at: null,
+    id: 's1',
+    input_tokens: 0,
+    is_active: false,
+    last_active: 0,
+    message_count: 1,
+    model: null,
+    output_tokens: 0,
+    preview: null,
+    source: 'desktop',
+    started_at: 0,
+    title: null,
+    tool_call_count: 0,
+    ...overrides
+  }) as SessionInfo
+
 
 function attachment(overrides: Partial<ComposerAttachment> & Pick<ComposerAttachment, 'kind'>): ComposerAttachment {
   return { id: 'a', label: 'file.png', ...overrides }
@@ -198,5 +220,18 @@ describe('messageCreatedAt', () => {
   it('treats a zero / non-finite timestamp as absent', () => {
     expect(messageCreatedAt({ timestamp: 0 }, NOW).getTime()).toBe(NOW)
     expect(messageCreatedAt({ timestamp: Number.NaN }, NOW).getTime()).toBe(NOW)
+  })
+})
+
+
+describe('sessionTitle', () => {
+  it('does not surface transient Unknown titles', () => {
+    expect(sessionTitle(sessionInfo({ preview: 'real prompt', title: 'Unknown' }))).toBe('real prompt')
+  })
+
+  it('names subagent sessions from the live delegated goal while title generation catches up', () => {
+    expect(sessionTitle(sessionInfo({ source: 'subagent', title: 'Unknown' }), { subagentGoal: 'Review invoices' })).toBe(
+      'Subagent: Review invoices'
+    )
   })
 })

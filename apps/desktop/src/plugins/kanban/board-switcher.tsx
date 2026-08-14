@@ -1,8 +1,6 @@
 /**
- * Titlebar board switcher — the board page projects this into `titleBar.center`
- * (where chat shows the session-title dropdown) via `<Contribute>`, so it
- * exists exactly while the page is mounted — no route sniffing. Same chrome as
- * the session title: quiet label + chevron, menu on click.
+ * Board switcher shown in the Kanban page header. Same chrome as the old
+ * titlebar switcher: quiet label + chevron, menu on click.
  */
 
 import {
@@ -203,9 +201,11 @@ export function BoardSwitcher() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button className="h-7 max-w-56 gap-1.5 px-2" size="sm" variant="ghost">
-            <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium leading-none">{label}</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-none text-foreground">{label}</span>
             {typeof current?.total === 'number' && (
-              <span className="text-[0.6875rem] tabular-nums text-(--ui-text-quaternary)">{current.total}</span>
+              <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-px text-[0.625rem] tabular-nums text-(--ui-text-tertiary)">
+                {current.total}
+              </span>
             )}
             <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="chevron-down" size="0.8125rem" />
           </Button>

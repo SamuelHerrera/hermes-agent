@@ -23,7 +23,7 @@ import {
   setMessages,
   setSessions
 } from '@/store/session'
-import { dropSessionState, publishSessionState } from '@/store/session-states'
+import { clearAllSessionStates, dropSessionState, publishSessionState } from '@/store/session-states'
 import { $wakeWord, resetWakeWordState } from '@/store/wake-word'
 import type { SessionInfo } from '@/types/hermes'
 
@@ -327,6 +327,83 @@ function renderedSeedTexts(seeds: Record<string, unknown>[]): string[] {
 // The HUD floats over the app the user is really working in, so the gateway
 // turns this flag into a per-turn hint: read the window underneath and work in
 // it, rather than reaching for Hermes's own browser and panes.
+describe('usePromptActions first-send sidebar materialization', () => {
+  afterEach(() => {
+    cleanup()
+    setSessions([])
+    clearAllSessionStates()
+    vi.restoreAllMocks()
+  })
+
+  it('inserts an optimistic sidebar row when first sending from an unlisted new tab', async () => {
+    const requestGateway = vi.fn(async () => ({}) as never)
+    const refreshSessions = vi.fn(async () => undefined)
+    let handle: HarnessHandle | null = null
+
+    setSessions([])
+
+    await actRender(
+      <Harness
+        activeSessionId={RUNTIME_SESSION_ID}
+        onReady={h => (handle = h)}
+        refreshSessions={refreshSessions}
+        requestGateway={requestGateway}
+        storedSessionId="stored-unlisted-tab"
+      />
+    )
+
+    await handle!.submitText('hello from an unlisted tab')
+
+    expect(requestGateway).toHaveBeenCalledWith(
+      'prompt.submit',
+      expect.objectContaining({ session_id: RUNTIME_SESSION_ID, text: 'hello from an unlisted tab' }),
+      expect.any(Number)
+    )
+    expect($sessions.get()).toMatchObject([
+      {
+        id: 'stored-unlisted-tab',
+        message_count: 1,
+        preview: 'hello from an unlisted tab',
+        source: 'desktop'
+      }
+    ])
+    expect(refreshSessions).not.toHaveBeenCalled()
+  })
+
+  it('does not duplicate an existing lineage-root row when first-send materializes', async () => {
+    const requestGateway = vi.fn(async () => ({}) as never)
+    const refreshSessions = vi.fn(async () => undefined)
+    let handle: HarnessHandle | null = null
+
+    setSessions([
+      sessionInfo({
+        id: 'compressed-tip-tab',
+        _lineage_root_id: 'stored-lineage-root',
+        preview: 'previous preview'
+      })
+    ])
+
+    await actRender(
+      <Harness
+        activeSessionId={RUNTIME_SESSION_ID}
+        onReady={h => (handle = h)}
+        refreshSessions={refreshSessions}
+        requestGateway={requestGateway}
+        storedSessionId="stored-lineage-root"
+      />
+    )
+
+    await handle!.submitText('hello from a compressed tab')
+
+    expect($sessions.get()).toHaveLength(1)
+    expect($sessions.get()[0]).toMatchObject({
+      id: 'compressed-tip-tab',
+      _lineage_root_id: 'stored-lineage-root'
+    })
+    expect(refreshSessions).not.toHaveBeenCalled()
+  })
+})
+
 describe('usePromptActions HUD surface', () => {
   afterEach(() => {
     cleanup()

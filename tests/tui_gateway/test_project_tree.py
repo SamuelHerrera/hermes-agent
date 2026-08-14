@@ -548,6 +548,82 @@ def test_home_bucket_leads_the_tree_and_is_lossless():
     }
 
 
+def test_delegate_children_render_under_visible_parent_in_hydrated_tree():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    parent = _session("/repo", branch="main", id="parent", title="Parent chat")
+    child = _session(
+        None,
+        id="child",
+        title="Subagent child",
+        source="subagent",
+        delegate_parent_session_id="parent",
+    )
+
+    tree = pt.build_tree([], [parent, child], [], resolve, hydrate=True)
+    project = tree["projects"][0]
+    lane = project["repos"][0]["groups"][0]
+
+    assert [s["id"] for s in lane["sessions"]] == ["parent", "child"]
+    assert lane["sessions"][1]["parent_session_id"] == "parent"
+    assert lane["sessions"][1]["cwd"] == "/repo"
+    assert lane["sessions"][1]["git_branch"] == "main"
+    assert project["sessionCount"] == 2
+    assert tree["scoped_session_ids"] == ["parent", "child"]
+
+
+def test_nested_delegate_children_render_under_their_delegate_parent():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    parent = _session("/repo", branch="main", id="parent", last_active=10)
+    child = _session(None, id="child", source="subagent", delegate_parent_session_id="parent", last_active=20)
+    grandchild = _session(None, id="grandchild", source="subagent", delegate_parent_session_id="child", last_active=30)
+
+    tree = pt.build_tree([], [parent, child, grandchild], [], resolve, hydrate=True)
+    lane = tree["projects"][0]["repos"][0]["groups"][0]
+
+    assert {s["id"] for s in lane["sessions"]} == {"parent", "child", "grandchild"}
+    assert {s["id"]: s.get("parent_session_id") for s in lane["sessions"]} == {
+        "parent": None,
+        "child": "parent",
+        "grandchild": "child",
+    }
+    assert all(s["cwd"] == "/repo" for s in lane["sessions"])
+
+
+def test_delegate_children_are_hidden_when_parent_is_not_visible():
+    orphan = _session(
+        None,
+        id="orphan-child",
+        title="Orphan subagent",
+        source="subagent",
+        delegate_parent_session_id="missing-parent",
+    )
+
+    tree = pt.build_tree([], [orphan], [], resolve=lambda _cwd: None, hydrate=True)
+
+    assert tree["projects"] == []
+    assert tree["scoped_session_ids"] == []
+
+
+def test_delegate_children_appear_in_overview_preview_without_hydrated_lane_rows():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    parent = _session("/repo", branch="main", id="parent", last_active=10)
+    child = _session(
+        None,
+        id="child",
+        title="Recent subagent",
+        source="subagent",
+        delegate_parent_session_id="parent",
+        last_active=20,
+    )
+
+    tree = pt.build_tree([], [parent, child], [], resolve, preview_limit=3, hydrate=False)
+    project = tree["projects"][0]
+
+    assert [s["id"] for s in project["previewSessions"]] == ["child", "parent"]
+    assert project["previewSessions"][0]["parent_session_id"] == "parent"
+    assert all(g["sessions"] == [] for repo in project["repos"] for g in repo["groups"])
+
+
 def test_colliding_repo_basenames_disambiguate_labels():
     resolve = _resolver(
         {

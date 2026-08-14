@@ -390,6 +390,44 @@ def test_comment_happy_path(worker_env):
         conn.close()
 
 
+def test_tag_tools_attach_remove_and_list(worker_env):
+    from tools import kanban_tools as kt
+
+    added = json.loads(kt._handle_tag_add({"name": "  Feature   Alpha  "}))
+    assert added.get("ok") is True, added
+    assert added["tag"]["name"] == "Feature Alpha"
+    assert added["tag"]["normalized_name"] == "feature alpha"
+
+    duplicate = json.loads(kt._handle_tag_add({"name": "FEATURE ALPHA"}))
+    assert duplicate.get("ok") is True, duplicate
+    assert duplicate["tag"]["id"] == added["tag"]["id"]
+
+    tags = json.loads(kt._handle_tags({}))
+    normalized = {t["normalized_name"] for t in tags["tags"]}
+    assert "feature alpha" in normalized
+
+    show = json.loads(kt._handle_show({}))
+    shown_names = {t["normalized_name"] for t in show["task"]["tags"]}
+    assert "feature alpha" in shown_names
+
+    removed = json.loads(kt._handle_tag_remove({"name": "feature alpha"}))
+    assert removed.get("ok") is True, removed
+    assert removed["removed"] is True
+    assert "feature alpha" not in {t["normalized_name"] for t in removed["tags"]}
+
+
+def test_tag_add_rejects_invalid_name(worker_env):
+    from tools import kanban_tools as kt
+
+    empty = json.loads(kt._handle_tag_add({"name": "   "}))
+    assert "error" in empty
+    assert "name is required" in empty["error"]
+
+    control = json.loads(kt._handle_tag_add({"name": "bad\nname"}))
+    assert "error" in control
+    assert "control" in control["error"]
+
+
 def test_comment_ignores_caller_supplied_author(worker_env):
     """``args["author"]`` is no longer honored — the author is always
     derived from ``HERMES_PROFILE`` so a worker can't forge a comment

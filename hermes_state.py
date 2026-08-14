@@ -7306,6 +7306,11 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     f"{where_sql} AND {combined}" if where_sql else f"WHERE {combined}"
                 )
             _sel = self._compact_session_cols() if compact_rows else "s.*"
+            delegate_select = (
+                f", {_delegate_from_json('s.model_config')} AS delegate_parent_session_id"
+                if compact_rows
+                else ""
+            )
             query = f"""
                 WITH RECURSIVE chain(root_id, cur_id) AS (
                     SELECT s.id, s.id FROM sessions s {where_sql}
@@ -7326,7 +7331,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     FROM chain
                     GROUP BY root_id
                 )
-                SELECT {_sel}{prompt_select},
+                SELECT {_sel}{prompt_select}{delegate_select},
                     COALESCE(
                         (SELECT {_PREVIEW_RAW_SELECT}
                          FROM messages m
@@ -7348,8 +7353,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             params = params + params + id_params + [limit, offset]
         else:
             _sel = self._compact_session_cols() if compact_rows else "s.*"
+            delegate_select = (
+                f", {_delegate_from_json('s.model_config')} AS delegate_parent_session_id"
+                if compact_rows
+                else ""
+            )
             query = f"""
-                SELECT {_sel}{prompt_select},
+                SELECT {_sel}{prompt_select}{delegate_select},
                     COALESCE(
                         (SELECT {_PREVIEW_RAW_SELECT}
                          FROM messages m
@@ -7387,8 +7397,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 f"{where_sql} AND s.pinned = 1" if where_sql else "WHERE s.pinned = 1"
             )
             _sel = self._compact_session_cols() if compact_rows else "s.*"
+            delegate_select = (
+                f", {_delegate_from_json('s.model_config')} AS delegate_parent_session_id"
+                if compact_rows
+                else ""
+            )
             pinned_query = f"""
-                SELECT {_sel}{prompt_select},
+                SELECT {_sel}{prompt_select}{delegate_select},
                     COALESCE(
                         (SELECT {_PREVIEW_RAW_SELECT}
                          FROM messages m

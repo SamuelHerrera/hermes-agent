@@ -23,6 +23,7 @@ type KanbanMessages = {
   arcRunning: string
   arcStale: string
   title: string
+  loadingBoard: string
   orchestrationSettings: string
   newTask: string
   filterCards: string
@@ -128,6 +129,13 @@ type KanbanMessages = {
   evtScheduled: string
   evtArchived: string
   evtReprioritized: (priority: string) => string
+  evtTagAttached: (name: string) => string
+  evtTagRemoved: (name: string) => string
+  evtAiTagAttached: (name: string) => string
+  evtAiTagRemoved: (name: string) => string
+  evtAiTagsUpdated: string
+  evtAiTagsAdded: (names: string) => string
+  evtAiTagsRemoved: (names: string) => string
   someone: string
   // drawer — meta + sections
   metaPriority: string
@@ -143,6 +151,17 @@ type KanbanMessages = {
   readyUnassignedBody: string
   diagnosticsN: (n: number) => string
   commandCopied: string
+  taskTitle: string
+  tags: string
+  aiTagBadge: string
+  aiTagTip: string
+  noTags: string
+  tagName: string
+  addTag: string
+  existingTags: string
+  addExistingTag: (name: string) => string
+  removeTag: (name: string) => string
+  editTitle: string
   description: string
   editDescription: string
   cancelEdit: string
@@ -247,6 +266,7 @@ const en: KanbanMessages = {
   arcRunning: 'An agent is working on this now.',
   arcStale: 'Claimed, but no worker heartbeat for 2+ minutes — the dispatcher will reclaim it.',
   title: 'Kanban',
+  loadingBoard: 'Loading board…',
   orchestrationSettings: 'Orchestration settings',
   newTask: 'New task',
   filterCards: 'Filter cards…',
@@ -354,6 +374,13 @@ const en: KanbanMessages = {
   evtScheduled: 'scheduled for later',
   evtArchived: 'archived',
   evtReprioritized: priority => `priority set to ${priority}`,
+  evtTagAttached: name => `tag added: ${name}`,
+  evtTagRemoved: name => `tag removed: ${name}`,
+  evtAiTagAttached: name => `AI tag added: ${name}`,
+  evtAiTagRemoved: name => `AI tag removed: ${name}`,
+  evtAiTagsUpdated: 'AI updated tags automatically',
+  evtAiTagsAdded: names => `added ${names}`,
+  evtAiTagsRemoved: names => `removed ${names}`,
   someone: 'someone',
   metaPriority: 'Priority',
   metaTenant: 'Tenant',
@@ -369,6 +396,17 @@ const en: KanbanMessages = {
     'The dispatcher only claims Ready cards that have an assignee. Pick a profile in the Assignee field above (or set a default assignee in the orchestration settings) and it runs within a minute.',
   diagnosticsN: n => `Diagnostics · ${n}`,
   commandCopied: 'Command copied',
+  taskTitle: 'Title',
+  tags: 'Tags',
+  aiTagBadge: 'AI',
+  aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
+  noTags: 'No tags yet.',
+  tagName: 'Tag name',
+  addTag: 'Add tag',
+  existingTags: 'Existing tags',
+  addExistingTag: name => `Add existing tag ${name}`,
+  removeTag: name => `Remove tag ${name}`,
+  editTitle: 'Edit title',
   description: 'Description',
   editDescription: 'Edit description',
   cancelEdit: 'Cancel edit',
@@ -475,6 +513,7 @@ const ja: KanbanMessages = {
   arcRunning: 'エージェントが現在作業中です。',
   arcStale: '取得済みですが、2分以上ワーカーのハートビートがありません — ディスパッチャが再取得します。',
   title: 'カンバン',
+  loadingBoard: 'ボードを読み込み中…',
   orchestrationSettings: 'オーケストレーション設定',
   newTask: '新しいタスク',
   filterCards: 'カードを絞り込み…',
@@ -581,6 +620,13 @@ const ja: KanbanMessages = {
   evtScheduled: '後で実行するようスケジュール',
   evtArchived: 'アーカイブ済み',
   evtReprioritized: priority => `優先度を ${priority} に設定`,
+  evtTagAttached: name => `タグを追加: ${name}`,
+  evtTagRemoved: name => `タグを削除: ${name}`,
+  evtAiTagAttached: name => `AI タグを追加: ${name}`,
+  evtAiTagRemoved: name => `AI タグを削除: ${name}`,
+  evtAiTagsUpdated: 'AI がタグを自動更新しました',
+  evtAiTagsAdded: names => `${names} を追加`,
+  evtAiTagsRemoved: names => `${names} を削除`,
   someone: '誰か',
   metaPriority: '優先度',
   metaTenant: 'テナント',
@@ -596,6 +642,17 @@ const ja: KanbanMessages = {
     'ディスパッチャは担当のある Ready カードのみ取得します。上の担当フィールドでプロフィールを選ぶ（またはオーケストレーション設定でデフォルトの担当を設定する）と、1分以内に実行されます。',
   diagnosticsN: n => `診断・${n}`,
   commandCopied: 'コマンドをコピーしました',
+  taskTitle: 'タイトル',
+  tags: 'タグ',
+  aiTagBadge: 'AI',
+  aiTagTip: 'AI ワークフロー更新で自動管理されています。手動で削除することもできます。',
+  noTags: 'タグはまだありません。',
+  tagName: 'タグ名',
+  addTag: 'タグを追加',
+  existingTags: '既存のタグ',
+  addExistingTag: name => `既存のタグ ${name} を追加`,
+  removeTag: name => `タグ ${name} を削除`,
+  editTitle: 'タイトルを編集',
   description: '説明',
   editDescription: '説明を編集',
   cancelEdit: '編集をキャンセル',
@@ -702,6 +759,7 @@ const zh: KanbanMessages = {
   arcRunning: '有代理正在处理它。',
   arcStale: '已领取，但超过 2 分钟没有工作单元心跳 — 调度器将重新领取。',
   title: '看板',
+  loadingBoard: '正在加载面板…',
   orchestrationSettings: '编排设置',
   newTask: '新建任务',
   filterCards: '筛选卡片…',
@@ -807,6 +865,13 @@ const zh: KanbanMessages = {
   evtScheduled: '已排期稍后运行',
   evtArchived: '已归档',
   evtReprioritized: priority => `优先级设为 ${priority}`,
+  evtTagAttached: name => `已添加标签：${name}`,
+  evtTagRemoved: name => `已移除标签：${name}`,
+  evtAiTagAttached: name => `AI 已添加标签：${name}`,
+  evtAiTagRemoved: name => `AI 已移除标签：${name}`,
+  evtAiTagsUpdated: 'AI 已自动更新标签',
+  evtAiTagsAdded: names => `已添加 ${names}`,
+  evtAiTagsRemoved: names => `已移除 ${names}`,
   someone: '某人',
   metaPriority: '优先级',
   metaTenant: '租户',
@@ -822,6 +887,17 @@ const zh: KanbanMessages = {
     '调度器只领取有负责人的就绪卡片。在上面的负责人字段选择一个配置档（或在编排设置中设置默认负责人），它会在一分钟内运行。',
   diagnosticsN: n => `诊断・${n}`,
   commandCopied: '命令已复制',
+  taskTitle: '标题',
+  tags: '标签',
+  aiTagBadge: 'AI',
+  aiTagTip: '由 AI 工作流更新自动管理；你仍然可以手动移除。',
+  noTags: '暂无标签。',
+  tagName: '标签名称',
+  addTag: '添加标签',
+  existingTags: '已有标签',
+  addExistingTag: name => `添加已有标签 ${name}`,
+  removeTag: name => `移除标签 ${name}`,
+  editTitle: '编辑标题',
   description: '描述',
   editDescription: '编辑描述',
   cancelEdit: '取消编辑',
@@ -926,6 +1002,7 @@ const zhHant: KanbanMessages = {
   arcRunning: '有代理正在處理它。',
   arcStale: '已領取，但超過 2 分鐘沒有工作單元心跳 — 排程器將重新領取。',
   title: '看板',
+  loadingBoard: '正在載入面板…',
   orchestrationSettings: '編排設定',
   newTask: '新增任務',
   filterCards: '篩選卡片…',
@@ -1031,6 +1108,13 @@ const zhHant: KanbanMessages = {
   evtScheduled: '已排程稍後執行',
   evtArchived: '已封存',
   evtReprioritized: priority => `優先順序設為 ${priority}`,
+  evtTagAttached: name => `已新增標籤：${name}`,
+  evtTagRemoved: name => `已移除標籤：${name}`,
+  evtAiTagAttached: name => `AI 已新增標籤：${name}`,
+  evtAiTagRemoved: name => `AI 已移除標籤：${name}`,
+  evtAiTagsUpdated: 'AI 已自動更新標籤',
+  evtAiTagsAdded: names => `已新增 ${names}`,
+  evtAiTagsRemoved: names => `已移除 ${names}`,
   someone: '某人',
   metaPriority: '優先順序',
   metaTenant: '租戶',
@@ -1046,6 +1130,17 @@ const zhHant: KanbanMessages = {
     '排程器只領取有負責人的就緒卡片。在上方的負責人欄位選擇一個設定檔（或在編排設定中設定預設負責人），它會在一分鐘內執行。',
   diagnosticsN: n => `診斷・${n}`,
   commandCopied: '指令已複製',
+  taskTitle: '標題',
+  tags: '標籤',
+  aiTagBadge: 'AI',
+  aiTagTip: '由 AI 工作流程更新自動管理；你仍可手動移除。',
+  noTags: '尚無標籤。',
+  tagName: '標籤名稱',
+  addTag: '新增標籤',
+  existingTags: '現有標籤',
+  addExistingTag: name => `新增現有標籤 ${name}`,
+  removeTag: name => `移除標籤 ${name}`,
+  editTitle: '編輯標題',
   description: '描述',
   editDescription: '編輯描述',
   cancelEdit: '取消編輯',

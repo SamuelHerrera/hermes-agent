@@ -27,6 +27,7 @@ export function contributedNavItems(navContributions: readonly Contribution[]): 
         id: c.id,
         label: data.label,
         icon: (props: { className?: string }) => <Codicon name={codicon} {...props} />,
+        openAsTile: data.openAsTile,
         route: data.path,
         adornment: renderAdornment
           ? function SidebarNavContributionAdornment() {

@@ -1,8 +1,7 @@
 /**
  * The Kanban board page — mounted at `/kanban` (a ROUTES_AREA contribution) in
  * the workspace pane. The desktop port of the dashboard board: one compact
- * header row (count, filter kebab, search, settings, new task — the board
- * SWITCHER lives in the titlebar, see board-switcher.tsx), columns in
+ * header row (board switcher, filter kebab, search, settings, new task), columns in
  * BOARD_COLUMNS order, drag-to-move (optimistic, workflow-checked),
  * ⌘-click multi-select with a floating bulk bar, right-click actions, and
  * the detail drawer. Dispatch nudges ride every write (see api.ts).
@@ -19,7 +18,6 @@ import {
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-  Contribute,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -43,13 +41,13 @@ import {
   Switch,
   Textarea,
   Tip,
-  TITLEBAR_AREAS,
   useGrabScroll,
   useMutation,
   useQuery,
   useQueryClient,
   useValue
 } from '@hermes/plugin-sdk'
+import { useIsMutating } from '@tanstack/react-query'
 import {
   type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
@@ -85,17 +83,14 @@ import {
 import { BoardSwitcher } from './board-switcher'
 import { TaskDrawer } from './drawer'
 import { EMPTY_OVERRIDE, ModelOverrideField, overrideCreateFields, type TaskModelOverride } from './model-override'
-import {
-  filterNewTaskImageFiles,
-  NEW_TASK_IMAGE_ACCEPT,
-  uploadNewTaskImages
-} from './new-task-images'
+import { filterNewTaskImageFiles, NEW_TASK_IMAGE_ACCEPT, uploadNewTaskImages } from './new-task-images'
 import { OrchestrationPanel } from './orchestration'
 import { clipboardImageFiles } from './paste-images'
 import {
   columnMeta,
   type KanbanAttachment,
   type KanbanBoard,
+  type KanbanTag,
   type KanbanTask,
   type TaskEstimate,
   type TaskSortDirection,
@@ -124,6 +119,8 @@ import {
 export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
 const fmtTaskDateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+export const VISIBLE_BOARD_MUTATION_KEY = ['kanban', 'visible-board-mutation'] as const
+export const $visibleBoardBusy = atom(false)
 
 export interface NewTaskDraft {
   assignee: string
@@ -140,6 +137,8 @@ export interface NewTaskDraft {
   workspaceKind: string
   workspacePath: string
 }
+
+type NewTaskDraftState = Omit<NewTaskDraft, 'id' | 'target'>
 
 let nextNewTaskDraftId = 1
 
@@ -170,10 +169,20 @@ export function minimizedNewTaskDrafts(drafts: readonly NewTaskDraft[]): NewTask
   return [...drafts]
 }
 
+export const draftBarClassName = (hasSelection: boolean): string => (hasSelection ? 'bottom-14' : 'bottom-4')
+
 export const $newTaskDrafts = atom<NewTaskDraft[]>([])
 export const $newTaskRestoreDraft = atom<null | NewTaskDraft>(null)
-export const NEW_TASK_MINIMIZE_BUTTON_CLASS = 'ml-auto mr-8'
+// DialogContent renders its close button as an absolute shell control. Keep the
+// draft minimize button on that same control rail instead of flexing it inside
+// the title row; otherwise its vertical position follows the title line-height
+// while the close button follows the shell inset.
+export const NEW_TASK_MINIMIZE_BUTTON_CLASS =
+  'absolute right-10 top-2.5 z-20 text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
 export const NEW_TASK_MINIMIZE_BUTTON_SIZE = 'icon-xs' as const
+export const KANBAN_LANE_WIDTH_CLASS = 'w-[min(22rem,calc(100vw-2rem))] md:w-80 xl:w-[22rem]'
+export const KANBAN_BOARD_SCROLL_CLASS = 'flex min-w-0 flex-1 gap-3 overflow-auto px-4 pt-1 pb-3'
+export const KANBAN_COLUMN_TASKS_CLASS = 'relative flex flex-1 flex-col gap-2'
 
 // ── optimistic board edits (reconciled by the follow-up refresh) ─────────────
 
@@ -251,6 +260,18 @@ export function taskTimeLabel(task: KanbanTask, display: TaskTimeDisplay, nowMs 
   )
 }
 
+export function taskTagsLabel(task: KanbanTask): string {
+  return task.tags?.map(tag => tag.name).join(' ') ?? ''
+}
+
+const AI_TAG_NORMALIZED_PREFIX = 'ai:'
+
+export function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
+  return (
+    tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
+  )
+}
+
 // ── card ─────────────────────────────────────────────────────────────────────
 
 function Meta({ children, icon }: { children: ReactNode; icon: string }) {
@@ -262,7 +283,15 @@ function Meta({ children, icon }: { children: ReactNode; icon: string }) {
   )
 }
 
-function CardFooter({ arc, task, timeDisplay }: { arc: ArcState | null; task: KanbanTask; timeDisplay: TaskTimeDisplay }) {
+function CardFooter({
+  arc,
+  task,
+  timeDisplay
+}: {
+  arc: ArcState | null
+  task: KanbanTask
+  timeDisplay: TaskTimeDisplay
+}) {
   const k = useKanban()
   const created = taskTimeLabel(task, timeDisplay)
   const links = task.link_counts ? task.link_counts.parents + task.link_counts.children : 0
@@ -275,12 +304,14 @@ function CardFooter({ arc, task, timeDisplay }: { arc: ArcState | null; task: Ka
 
   // The agent on the hook for a queued card: the explicit assignee, else the
   // auto-default (ready), else the specifier that rewrites triage cards.
-  const attached = task.assignee || (task.status === 'ready' ? fallback : task.status === 'triage' ? orchestrator : '')
+  const attached =
+    task.assignee ||
+    (task.status === 'ready' || task.status === 'todo' ? fallback : task.status === 'triage' ? orchestrator : '')
 
   const meta = columnMeta(task.status)
 
   return (
-    <div className="flex items-center gap-2 whitespace-nowrap text-[0.625rem] text-(--ui-text-tertiary)">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.625rem] text-(--ui-text-tertiary)">
       {arc === 'queued' && attached ? (
         // WHO is coming for the card. The arc only animates once the agent is
         // actually working; while queued, the named chip carries "attached".
@@ -326,7 +357,7 @@ function CardFooter({ arc, task, timeDisplay }: { arc: ArcState | null; task: Ka
           </span>
         </Tip>
       )}
-      <div className="ml-auto flex min-w-0 shrink items-center gap-2">
+      <div className="ml-auto flex min-w-0 shrink flex-wrap items-center justify-end gap-x-2 gap-y-1">
         {typeof task.priority === 'number' && task.priority > 0 && (
           <span className="inline-flex items-center gap-0.5 text-amber-500">
             <Codicon name="arrow-up" size="0.7rem" />
@@ -376,8 +407,14 @@ function Card({
   const [dragging, setDragging] = useState(false)
   const meta = columnMeta(task.status)
   const summary = task.latest_summary || task.body
-  const fallback = useDefaultAssignee()
-  const arc = arcState(task, fallback)
+  const orchestration = useOrchestration()
+  const fallback = (orchestration?.dispatch_default_assignee ?? orchestration?.default_assignee ?? '').trim()
+
+  const arc = arcState(task, {
+    autoDecompose: orchestration?.auto_decompose ?? true,
+    fallbackAssignee: fallback,
+    reviewDispatch: orchestration?.review_dispatch ?? true
+  })
 
   return (
     <ContextMenu>
@@ -404,17 +441,44 @@ function Card({
           }}
           style={{ '--kanban-tone': meta.tone, borderLeftColor: meta.tone } as CSSProperties}
         >
-          {/* Machine-activity arc: animates ONLY while an agent is actually on
-              the card (claimed + working; amber when the heartbeat is gone).
-              Queued attachment is the footer's named-agent chip — a moving
-              border on an idle card would lie. Hidden during drag/selection
-              so those states stay legible. */}
-          {(arc === 'running' || arc === 'stale') && !dragging && !selected && (
-            <span aria-hidden className={cn('kanban-arc', arc === 'stale' && 'kanban-arc--stale')} />
+          {/* Machine-activity arc: claimed work uses the running sweep; queued
+              automation-pending cards use a quieter sweep only when the
+              dispatcher/decomposer gates say they are actually eligible. Hidden
+              during drag/selection so those states stay legible. */}
+          {arc && !dragging && !selected && (
+            <span
+              aria-hidden
+              className={cn(
+                'kanban-arc',
+                arc === 'queued' && 'kanban-arc--queued',
+                arc === 'stale' && 'kanban-arc--stale'
+              )}
+            />
           )}
           <span className="line-clamp-2 text-[0.8125rem] font-medium leading-snug text-foreground">
             {task.title || task.id}
           </span>
+          {task.tags && task.tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {task.tags.map(tag => (
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[0.625rem] font-medium',
+                    isAiManagedTag(tag)
+                      ? 'border-sky-400/40 bg-sky-400/10 text-sky-200'
+                      : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-(--ui-text-tertiary)'
+                  )}
+                  key={tag.normalized_name}
+                  title={isAiManagedTag(tag) ? k.aiTagTip : undefined}
+                >
+                  {tag.name}
+                  {isAiManagedTag(tag) && (
+                    <span className="text-[0.5rem] font-semibold uppercase tracking-[0.08em]">{k.aiTagBadge}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
           {summary && (
             <span className="line-clamp-2 text-[0.6875rem] leading-snug text-(--ui-text-tertiary)">{summary}</span>
           )}
@@ -543,38 +607,47 @@ function Column({
   // board regardless of collapse state.
   if (collapsed) {
     return (
-      <button
-        {...dragHandlers}
-        aria-label={k.expand(label)}
-        className={cn(
-          'flex h-full w-8 shrink-0 flex-col items-center gap-1.5 rounded-lg p-2 transition-colors hover:bg-(--ui-bg-quinary)',
-          wash
-        )}
-        onClick={onToggle}
-        type="button"
-      >
-        <span className="grid h-5 shrink-0 place-items-center">
-          <span className="size-1.5 rounded-full" style={{ backgroundColor: meta.tone }} />
-        </span>
-        <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary) [writing-mode:vertical-rl]">
-          {label}
-        </span>
-        {column.tasks.length > 0 && (
-          <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{column.tasks.length}</span>
-        )}
-      </button>
+      <Tip label={columnHelp(k, column.name)} side="right">
+        <button
+          {...dragHandlers}
+          aria-label={k.expand(label)}
+          className={cn(
+            'flex h-full w-8 shrink-0 flex-col items-center gap-1.5 rounded-lg p-2 transition-colors hover:bg-(--ui-bg-quinary)',
+            wash
+          )}
+          onClick={onToggle}
+          type="button"
+        >
+          <span className="grid h-5 shrink-0 place-items-center">
+            <span className="size-1.5 rounded-full" style={{ backgroundColor: meta.tone }} />
+          </span>
+          <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary) [writing-mode:vertical-rl]">
+            {label}
+          </span>
+          {column.tasks.length > 0 && (
+            <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{column.tasks.length}</span>
+          )}
+        </button>
+      </Tip>
     )
   }
 
   return (
     <div
       {...dragHandlers}
-      className={cn('group/col flex h-full w-64 shrink-0 flex-col rounded-lg p-2 transition-colors', wash)}
+      className={cn(
+        'group/col flex min-h-full shrink-0 flex-col rounded-lg p-2 transition-colors',
+        KANBAN_LANE_WIDTH_CLASS,
+        wash
+      )}
     >
       <header className="mb-1.5 flex h-5 items-center gap-1.5 px-1">
         <span className="size-1.5 rounded-full" style={{ backgroundColor: meta.tone }} />
         <Tip label={columnHelp(k, column.name)}>
-          <span className="cursor-help text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary)">
+          <span
+            className="cursor-help rounded-sm text-[0.6875rem] font-medium uppercase tracking-wide text-(--ui-text-tertiary) outline-none focus-visible:ring-1 focus-visible:ring-(--dt-composer-ring)"
+            tabIndex={0}
+          >
             {label}
           </span>
         </Tip>
@@ -590,16 +663,18 @@ function Column({
             <Codicon name={sortDirection === 'asc' ? 'arrow-down' : 'arrow-up'} size="0.75rem" />
           </Button>
         </Tip>
-        <button
-          aria-label={k.collapse(label)}
-          className="grid size-5 place-items-center rounded text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100 group-hover/col:opacity-100"
-          onClick={onToggle}
-          type="button"
-        >
-          <Codicon name="chevron-left" size="0.75rem" />
-        </button>
+        <Tip label={columnHelp(k, column.name)}>
+          <button
+            aria-label={k.collapse(label)}
+            className="grid size-5 place-items-center rounded text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100 group-hover/col:opacity-100"
+            onClick={onToggle}
+            type="button"
+          >
+            <Codicon name="chevron-left" size="0.75rem" />
+          </button>
+        </Tip>
       </header>
-      <div className="relative flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+      <div className={KANBAN_COLUMN_TASKS_CLASS}>
         {lanes
           ? lanes.map(([assignee, tasks]) => (
               <div className="flex flex-col gap-2" key={assignee}>
@@ -674,8 +749,6 @@ function Field({ children, label }: { children: ReactNode; label: string }) {
   )
 }
 
-type NewTaskDraftState = Omit<NewTaskDraft, 'id' | 'target'>
-
 const draftFromState = (target: string, state: NewTaskDraftState) =>
   createNewTaskDraft(target, { ...state, images: [...state.images] })
 
@@ -725,6 +798,7 @@ function NewTaskDialog({
   const [estimate, setEstimate] = useState<null | TaskEstimate>(null)
   const restoreDraft = useValue($newTaskRestoreDraft)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const [initializedTarget, setInitializedTarget] = useState<null | string>(null)
 
   const currentDraftState: NewTaskDraftState = {
     assignee,
@@ -774,36 +848,47 @@ function NewTaskDialog({
     }
   })
 
-  // Reset per open — the dialog is externally controlled (open = target set),
-  // so onOpenChange(true) never fires; key the reset off `target` (and the
-  // resolved board default, which may arrive after the first open).
+  // Reset only once per dialog-open cycle. Board default workspace settings can
+  // arrive after the dialog mounts; changing them must not wipe text or images
+  // the user already entered before minimizing/restoring the draft.
   useEffect(() => {
-    if (target) {
-      const pendingRestore = restoreDraft && restoreDraft.target === target ? restoreDraft : null
-
-      if (pendingRestore) {
-        applyDraft(pendingRestore)
-        $newTaskRestoreDraft.set(null)
-
-        return
+    if (!target) {
+      if (initializedTarget !== null) {
+        setInitializedTarget(null)
       }
 
-      setTitle('')
-      setBodyText('')
-      setAssignee('')
-      setPriority('0')
-      setSkills('')
-      setWorkspaceKind(boardDefaultKind)
-      setWorkspacePath('')
-      setParent('')
-      setModelOverride(EMPTY_OVERRIDE)
-      setGoalMode(false)
-      setImages([])
-      setError(null)
-      setBusy(false)
-      setEstimate(null)
+      return
     }
-  }, [target, boardDefaultKind, restoreDraft, applyDraft])
+
+    if (initializedTarget === target) {
+      return
+    }
+
+    setInitializedTarget(target)
+    const pendingRestore = restoreDraft && restoreDraft.target === target ? restoreDraft : null
+
+    if (pendingRestore) {
+      applyDraft(pendingRestore)
+      $newTaskRestoreDraft.set(null)
+
+      return
+    }
+
+    setTitle('')
+    setBodyText('')
+    setAssignee('')
+    setPriority('0')
+    setSkills('')
+    setWorkspaceKind(boardDefaultKind)
+    setWorkspacePath('')
+    setParent('')
+    setModelOverride(EMPTY_OVERRIDE)
+    setGoalMode(false)
+    setImages([])
+    setError(null)
+    setBusy(false)
+    setEstimate(null)
+  }, [target, initializedTarget, restoreDraft, applyDraft, boardDefaultKind])
 
   const addImages = (files: Iterable<File>) => {
     const next = filterNewTaskImageFiles(files)
@@ -844,6 +929,7 @@ function NewTaskDialog({
     }
 
     setBusy(true)
+    $visibleBoardBusy.set(true)
     setError(null)
 
     try {
@@ -895,6 +981,8 @@ function NewTaskDialog({
     } catch (err) {
       setError(errText(err))
       setBusy(false)
+    } finally {
+      $visibleBoardBusy.set(false)
     }
   }
 
@@ -992,7 +1080,13 @@ function NewTaskDialog({
               ) : (
                 <span className="text-[0.6875rem] text-(--ui-text-quaternary)">{k.noAttachments}</span>
               )}
-              <Button className="self-start" disabled={busy} onClick={() => imageInputRef.current?.click()} size="xs" variant="outline">
+              <Button
+                className="self-start"
+                disabled={busy}
+                onClick={() => imageInputRef.current?.click()}
+                size="xs"
+                variant="outline"
+              >
                 <Codicon name="cloud-upload" size="0.75rem" />
                 {k.uploadAttachment}
               </Button>
@@ -1281,6 +1375,7 @@ function SelectionBar({
   }
 
   const bulk = useMutation({
+    mutationKey: VISIBLE_BOARD_MUTATION_KEY,
     mutationFn: (patch: Record<string, unknown>) => bulkTasks([...selected], patch),
     onError: err => host.notify({ kind: 'error', message: errText(err) }),
     onSuccess: data => finish(data.results.filter(r => !r.ok))
@@ -1288,6 +1383,7 @@ function SelectionBar({
 
   // No bulk-delete on the backend — fan out per id, same partial-failure story.
   const bulkDelete = useMutation({
+    mutationKey: VISIBLE_BOARD_MUTATION_KEY,
     mutationFn: async () => {
       const ids = [...selected]
       const settled = await Promise.allSettled(ids.map(id => deleteTask(id)))
@@ -1384,17 +1480,24 @@ export function KanbanBoardPage() {
   const k = useKanban()
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
+  const visibleBoardBusy = useValue($visibleBoardBusy)
   const [archived, setArchived] = useState(false)
   const sortDirections = useValue($taskSortDirection)
   const timeDisplay = useValue($taskTimeDisplay)
 
   // Live updates ride the events socket (bindApi); this interval is only the
   // slow heartbeat for socketless paths (OAuth remotes, dropped connections).
-  const { data: board, error } = useQuery({
+  const {
+    data: board,
+    error,
+    isLoading: boardInitialLoading
+  } = useQuery({
     queryFn: () => fetchBoard(archived),
     queryKey: boardKey(slug, archived),
     refetchInterval: 60_000
   })
+
+  const visibleMutations = useIsMutating({ mutationKey: VISIBLE_BOARD_MUTATION_KEY })
 
   const [openId, setOpenId] = useState<null | string>(null)
   const [addStatus, setAddStatus] = useState<null | string>(null)
@@ -1480,7 +1583,7 @@ export function KanbanBoardPage() {
     const q = search.trim().toLowerCase()
 
     const keep = (task: KanbanTask) =>
-      (!q || `${task.title} ${task.body ?? ''} ${task.id}`.toLowerCase().includes(q)) &&
+      (!q || `${task.title} ${task.body ?? ''} ${task.id} ${taskTagsLabel(task)}`.toLowerCase().includes(q)) &&
       (!tenant || task.tenant === tenant) &&
       (!assignee || task.assignee === assignee)
 
@@ -1488,8 +1591,10 @@ export function KanbanBoardPage() {
   }, [board, search, tenant, assignee])
 
   const total = filtered?.columns.reduce((sum, col) => sum + col.tasks.length, 0) ?? 0
+  const boardLoading = boardInitialLoading || visibleMutations > 0 || visibleBoardBusy
 
   const moveMut = useMutation({
+    mutationKey: VISIBLE_BOARD_MUTATION_KEY,
     mutationFn: ({ id, status }: { id: string; status: string }) => patchTask(id, { status }),
     onMutate: async ({ id, status }) => {
       await qc.cancelQueries({ queryKey: boardKey(slug, archived) })
@@ -1515,6 +1620,7 @@ export function KanbanBoardPage() {
   })
 
   const deleteMut = useMutation({
+    mutationKey: VISIBLE_BOARD_MUTATION_KEY,
     mutationFn: (id: string) => deleteTask(id),
     onMutate: async id => {
       await qc.cancelQueries({ queryKey: boardKey(slug, archived) })
@@ -1626,16 +1732,18 @@ export function KanbanBoardPage() {
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-(--ui-surface-background)">
-      {/* Page-owned titlebar chrome: exists exactly while this page is mounted. */}
-      <Contribute area={TITLEBAR_AREAS.center} id="kanban:board-switcher">
-        <BoardSwitcher />
-      </Contribute>
-
       <header className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
-        <h1 className="text-sm font-semibold text-foreground">{k.title}</h1>
-        <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-px text-[0.625rem] tabular-nums text-(--ui-text-tertiary)">
-          {total}
-        </span>
+        <BoardSwitcher />
+        {boardLoading && (
+          <span
+            aria-label={k.loadingBoard}
+            className="inline-flex size-5 items-center justify-center text-(--ui-accent)"
+            role="status"
+            title={k.loadingBoard}
+          >
+            <Codicon name="loading" size="0.75rem" spinning />
+          </span>
+        )}
         {board && (
           <FilterMenu
             archived={archived}
@@ -1687,9 +1795,13 @@ export function KanbanBoardPage() {
         <div className="grid flex-1 place-items-center">
           <ErrorState title={errorMessage} />
         </div>
-      ) : !filtered ? (
+      ) : boardInitialLoading && !filtered ? (
         <div className="grid flex-1 place-items-center">
           <Loader type="lemniscate-bloom" />
+        </div>
+      ) : !filtered ? (
+        <div className="grid flex-1 place-items-center px-4 text-center">
+          <p className="text-xs text-(--ui-text-tertiary)">{errorMessage ?? k.noTasks}</p>
         </div>
       ) : total === 0 ? (
         <div className="grid flex-1 place-items-center px-4 text-center">
@@ -1704,7 +1816,7 @@ export function KanbanBoardPage() {
         </div>
       ) : (
         <div
-          className={cn('flex flex-1 gap-2 overflow-x-auto px-4 pt-1 pb-3', grabbing && 'cursor-grabbing')}
+          className={cn(KANBAN_BOARD_SCROLL_CLASS, grabbing && 'cursor-grabbing')}
           onMouseDown={onMouseDown}
           ref={lanesRef}
         >
@@ -1724,7 +1836,9 @@ export function KanbanBoardPage() {
                 onOpen={setOpenId}
                 onToggle={() => toggleLane(col.name, auto)}
                 onToggleSelect={toggleSelect}
-                onToggleSort={status => $taskSortDirection.set(toggleColumnSortDirection($taskSortDirection.get(), status))}
+                onToggleSort={status =>
+                  $taskSortDirection.set(toggleColumnSortDirection($taskSortDirection.get(), status))
+                }
                 selected={selected}
                 sortDirections={sortDirections}
                 timeDisplay={timeDisplay}
@@ -1744,9 +1858,16 @@ export function KanbanBoardPage() {
       )}
 
       {drafts.length > 0 && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4',
+            draftBarClassName(selected.size > 0)
+          )}
+        >
           <div className="pointer-events-auto flex max-w-[min(42rem,calc(100%-2rem))] items-center gap-1 overflow-x-auto rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-elevated) py-1 pr-1 pl-3">
-            <span className="mr-1 shrink-0 text-xs tabular-nums text-(--ui-text-secondary)">{k.minimizedDrafts(drafts.length)}</span>
+            <span className="mr-1 shrink-0 text-xs tabular-nums text-(--ui-text-secondary)">
+              {k.minimizedDrafts(drafts.length)}
+            </span>
             {minimizedNewTaskDrafts(drafts).map(draft => {
               const label = draft.title.trim() || draft.bodyText.trim().slice(0, 28) || k.untitledDraft
 

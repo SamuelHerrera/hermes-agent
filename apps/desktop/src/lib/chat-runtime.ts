@@ -26,6 +26,7 @@ export function createClientSessionState(
     messages,
     branch: '',
     cwd: '',
+    gitRepoRoot: '',
     model: '',
     provider: '',
     reasoningEffort: '',
@@ -47,8 +48,17 @@ export function createClientSessionState(
   }
 }
 
-export function sessionTitle(session: SessionInfo): string {
-  return session.title?.trim() || session.preview?.trim() || 'Untitled session'
+export function sessionTitle(session: SessionInfo, options: { subagentGoal?: string } = {}): string {
+  const rawTitle = session.title?.trim() || ''
+  const title = /^unknown$/i.test(rawTitle) ? '' : rawTitle
+  const preview = session.preview?.trim() || ''
+
+  if (session.source === 'subagent') {
+    const goal = options.subagentGoal?.trim() || ''
+    return title || (goal ? `Subagent: ${goal}` : '') || preview || 'Subagent'
+  }
+
+  return title || preview || 'Untitled session'
 }
 
 /** What a session is called before it has been sent — and before its composer

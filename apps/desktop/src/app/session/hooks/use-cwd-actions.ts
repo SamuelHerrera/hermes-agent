@@ -13,7 +13,7 @@ import type { SessionRuntimeInfo } from '@/types/hermes'
 
 interface CwdActionsOptions {
   activeSessionIdRef: MutableRefObject<string | null>
-  onSessionRuntimeInfo?: (info: Pick<SessionRuntimeInfo, 'branch' | 'cwd'>) => void
+  onSessionRuntimeInfo?: (info: Pick<SessionRuntimeInfo, 'branch' | 'cwd' | 'git_repo_root'>) => void
   requestGateway: <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
 }
 
@@ -98,7 +98,7 @@ export function useCwdActions({ activeSessionIdRef, onSessionRuntimeInfo, reques
 
         setCurrentCwd(info.cwd || trimmed)
         setCurrentBranch(info.branch || '')
-        onSessionRuntimeInfo?.({ branch: info.branch || '', cwd: info.cwd || trimmed })
+        onSessionRuntimeInfo?.({ branch: info.branch || '', cwd: info.cwd || trimmed, git_repo_root: info.git_repo_root || '' })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
 

@@ -47,6 +47,16 @@ function routeTitle(path: string): string {
   return contributedRoutes().find(r => r.path === path)?.title ?? humanizePath(path)
 }
 
+/** Optional live lead for a route tab — plugin pages can mirror their sidebar
+ *  status (Kanban's running-task spinner, for example) into opened page tiles.
+ *  It subscribes to route contributions so already-open route tiles pick up a
+ *  plugin's lead as soon as that plugin registers. */
+function RouteTabLead({ path }: { path: string }) {
+  useContributions(ROUTES_AREA)
+
+  return contributedRoutes().find(r => r.path === path)?.tabLead?.() ?? null
+}
+
 function RouteTilePane({ path }: { path: string }) {
   const builtin = BUILTIN_PAGES[path]
 
@@ -91,6 +101,7 @@ export const watchRouteTiles = paneMirror<RouteTile>({
   dir: t => t.dir,
   minWidth: '22rem',
   title: routeTitle,
+  tabLead: path => <RouteTabLead path={path} />,
   render: path => <RouteTilePane path={path} />,
   close: closeRouteTile
 })

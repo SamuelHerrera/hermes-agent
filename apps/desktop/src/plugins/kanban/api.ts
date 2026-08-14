@@ -18,6 +18,7 @@ import type {
   KanbanBoard,
   KanbanProfile,
   KanbanProject,
+  KanbanTag,
   KanbanTask,
   KanbanTaskDetail,
   OrchestrationSettings,
@@ -172,6 +173,7 @@ export const BOARDS_KEY = ['kanban', 'boards'] as const
 export const PROFILES_KEY = ['kanban', 'profiles'] as const
 export const PROJECTS_KEY = ['kanban', 'projects'] as const
 export const ORCHESTRATION_KEY = ['kanban', 'orchestration'] as const
+export const tagsKey = (slug: string) => ['kanban', 'tags', slug] as const
 
 // ── reads ─────────────────────────────────────────────────────────────────────
 
@@ -191,6 +193,8 @@ export const fetchProfiles = () => call<{ profiles: KanbanProfile[] }>('/profile
 export const fetchProjects = () => call<{ projects: KanbanProject[] }>('/projects')
 
 export const fetchOrchestration = () => call<OrchestrationSettings>('/orchestration')
+
+export const fetchTags = () => call<{ tags: KanbanTag[] }>(withBoard('/tags'))
 
 // ── writes ────────────────────────────────────────────────────────────────────
 
@@ -226,6 +230,12 @@ export const patchTask = (id: string, patch: Record<string, unknown>) =>
 
 export const createTask = (body: Record<string, unknown>) =>
   nudged(call<{ task: KanbanTask | null; warning?: string }>(withBoard('/tasks'), { method: 'POST', body }))
+
+export const addTaskTag = (id: string, name: string) =>
+  nudged(call<{ tag: KanbanTag; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags`), { method: 'POST', body: { name } }))
+
+export const removeTaskTag = (id: string, name: string) =>
+  nudged(call<{ removed: boolean; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags/${encodeURIComponent(name)}`), { method: 'DELETE' }))
 
 // Deleting can unblock dependants (a gone parent no longer gates), so it
 // nudges too.

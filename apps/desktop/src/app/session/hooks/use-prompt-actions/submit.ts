@@ -24,6 +24,7 @@ import { requestDesktopOnboarding } from '@/store/onboarding'
 import {
   $sessions,
   resolveComposerSessionKey,
+  sessionMatchesStoredId,
   setActiveSessionId,
   setAwaitingResponse,
   setBusy,
@@ -34,7 +35,7 @@ import { $sessionStates } from '@/store/session-states'
 
 import type { ClientSessionState } from '../../../types'
 import { sessionContextDrift } from '../session-context-drift'
-import { resolveSessionProfile } from '../use-session-actions/utils'
+import { resolveSessionProfile, upsertOptimisticSession } from '../use-session-actions/utils'
 
 import { finalizeInterruptedMessages } from './rewind'
 import {
@@ -340,6 +341,7 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
       const seedOptimistic = (sid: string) => {
         // Recents jump on send — not stream start, not turn resolve.
         const activity = bubbleText.trim() ? { preview: bubbleText.trim() } : undefined
+
         touchSessionActivity(sid, activity)
 
         if (targetStoredSessionId && targetStoredSessionId !== sid) {
@@ -676,6 +678,20 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
 
         if (submitErr !== null) {
           throw submitErr
+        }
+
+        // A tab-strip "+" chat is intentionally unlisted while blank. Once its
+        // first submit is accepted, the backend/runtime are working but the
+        // state.db row may still be absent until the turn persists, so refreshes
+        // can omit it. Materialize the stored row locally so the left
+        // Sessions/Projects panel updates without View → Reload.
+        if (targetStoredSessionId && !$sessions.get().some(session => sessionMatchesStoredId(session, targetStoredSessionId))) {
+          upsertOptimisticSession(
+            { session_id: liveSessionId, stored_session_id: targetStoredSessionId, message_count: 1 } as never,
+            targetStoredSessionId,
+            null,
+            bubbleText.trim() || null
+          )
         }
 
         if (usingComposerAttachments) {

@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
   ErrorState,
   host,
+  Input,
   Loader,
   LogView,
   Tabs,
@@ -37,21 +38,25 @@ import { type ClipboardEvent, type ReactNode, useEffect, useRef, useState } from
 import {
   $boardSlug,
   addComment,
+  addTaskTag,
   deleteTask,
   estimateTask,
   fetchLog,
   fetchProfiles,
+  fetchTags,
   fetchTask,
   logKey,
   patchTask,
   PROFILES_KEY,
   reassignTask,
   reclaimTask,
+  removeTaskTag,
+  tagsKey,
   taskKey,
   uploadAttachment,
   uploadPastedImage
 } from './api'
-import { KanbanCommentBody } from './comment-body'
+import { KanbanCommentBody, resolveKanbanAttachmentImageSrc } from './comment-body'
 import { ModelOverrideField, overridePatch, type TaskModelOverride } from './model-override'
 import { attachmentMarkdownUrl, buildPastedImageComment, clipboardImageFiles, PastedImageUploadGuard } from './paste-images'
 import {
@@ -60,6 +65,7 @@ import {
   type KanbanAttachment,
   type KanbanEvent,
   type KanbanRun,
+  type KanbanTag,
   type KanbanTaskDetail,
   type KanbanTaskFull,
   type KanbanTaskLink,
@@ -84,6 +90,35 @@ import {
   useDefaultAssignee,
   useKanban
 } from './ui'
+
+const AI_TAG_NORMALIZED_PREFIX = 'ai:'
+
+function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
+  return tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+}
+
+function eventTagName(payload: Record<string, unknown>): string {
+  const tag = payload.tag
+
+  if (tag && typeof tag === 'object' && 'name' in tag && typeof tag.name === 'string') {
+    return tag.name
+  }
+
+  return typeof payload.tag === 'string' ? payload.tag : 'tag'
+}
+
+function aiTagChangeDetail(added: string[], removed: string[], k: KanbanText): string | undefined {
+  const parts = [
+    added.length ? k.evtAiTagsAdded(sentenceList(added)) : null,
+    removed.length ? k.evtAiTagsRemoved(sentenceList(removed)) : null
+  ].filter(Boolean)
+
+  return parts.length ? parts.join(' · ') : undefined
+}
 
 /**
  * Turn a task_events row into an operator-readable line. The backend logs
@@ -170,6 +205,31 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
 
     case 'reprioritized':
       return { label: k.evtReprioritized(String(p.priority ?? '?')) }
+
+    case 'tag_attached': {
+      const name = eventTagName(p)
+
+      return {
+        label: str('source') === 'ai' ? k.evtAiTagAttached(name) : k.evtTagAttached(name),
+        detail: str('source') === 'ai' ? (str('reason') ?? undefined) : undefined
+      }
+    }
+
+    case 'tag_removed': {
+      const name = eventTagName(p)
+
+      return {
+        label: str('source') === 'ai' ? k.evtAiTagRemoved(name) : k.evtTagRemoved(name),
+        detail: str('source') === 'ai' ? (str('reason') ?? undefined) : undefined
+      }
+    }
+
+    case 'ai_tags_updated': {
+      const detail = aiTagChangeDetail(stringArray(p.added), stringArray(p.removed), k)
+
+      return { label: k.evtAiTagsUpdated, detail: detail ?? str('reason') ?? undefined }
+    }
+
     default: {
       const detail = Object.entries(p)
         .filter(([, value]) => value != null && typeof value !== 'object')
@@ -1023,6 +1083,33 @@ function AssigneeMenu({
   )
 }
 
+function PastedImagePreview({ attachment }: { attachment: KanbanAttachment }) {
+  const previewSrc = attachmentMarkdownUrl(attachment)
+  const [resolvedSrc, setResolvedSrc] = useState(previewSrc)
+
+  useEffect(() => {
+    let cancelled = false
+
+    void resolveKanbanAttachmentImageSrc(previewSrc).then(next => {
+      if (!cancelled) {
+        setResolvedSrc(next)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [previewSrc])
+
+  return (
+    <img
+      alt={attachment.filename || 'pasted image'}
+      className="h-16 w-16 object-cover"
+      src={resolvedSrc}
+    />
+  )
+}
+
 // Mirrors the review pane's commit-message field: one row tall to start
 // (button-height), CSS field-sizing grows it with content, button hugs the
 // bottom edge as it grows.
@@ -1124,11 +1211,7 @@ export function CommentComposer({
               className="group relative overflow-hidden rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary)"
               key={attachment.id}
             >
-              <img
-                alt={attachment.filename || 'pasted image'}
-                className="h-16 w-16 object-cover"
-                src={attachmentMarkdownUrl(attachment)}
-              />
+              <PastedImagePreview attachment={attachment} />
               <button
                 aria-label={`Remove ${attachment.filename || 'pasted image'} from comment preview`}
                 className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded bg-black/65 text-white opacity-90 transition-opacity group-hover:opacity-100"
@@ -1151,6 +1234,185 @@ export function CommentComposer({
         </div>
       )}
     </div>
+  )
+}
+
+export function TitleSection({ onSave, title }: { onSave: (title: string) => void; title: string }) {
+  const k = useKanban()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const trimmed = draft.trim()
+
+  return (
+    <Section
+      action={
+        <Button
+          aria-label={editing ? k.cancelEdit : k.editTitle}
+          onClick={() => {
+            setDraft(title)
+            setEditing(!editing)
+          }}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <Codicon name={editing ? 'close' : 'edit'} size="0.75rem" />
+        </Button>
+      }
+      label={k.taskTitle}
+    >
+      {editing ? (
+        <div className="flex flex-col gap-1.5">
+          <Input
+            autoFocus
+            className="text-[0.8125rem] font-semibold"
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+
+                if (trimmed) {
+                  onSave(trimmed)
+                  setEditing(false)
+                }
+              }
+            }}
+            value={draft}
+          />
+          <Button
+            aria-label={k.save}
+            className="self-end"
+            disabled={!trimmed}
+            onClick={() => {
+              if (!trimmed) {
+                return
+              }
+
+              onSave(trimmed)
+              setEditing(false)
+            }}
+            size="xs"
+            variant="secondary"
+          >
+            {k.save}
+          </Button>
+        </div>
+      ) : (
+        <p className="whitespace-pre-wrap text-[0.8125rem] font-semibold text-foreground">{title}</p>
+      )}
+    </Section>
+  )
+}
+
+export function TaskTagsSection({
+  existingTags,
+  onAdd,
+  onRemove,
+  pending,
+  tags
+}: {
+  existingTags: KanbanTag[]
+  onAdd: (name: string) => void
+  onRemove: (name: string) => void
+  pending: boolean
+  tags: KanbanTag[]
+}) {
+  const k = useKanban()
+  const [draft, setDraft] = useState('')
+  const attached = new Set(tags.map(tag => tag.normalized_name))
+  const suggestions = existingTags.filter(tag => !attached.has(tag.normalized_name))
+
+  const addDraft = () => {
+    const name = draft.trim()
+
+    if (!name) {
+      return
+    }
+
+    onAdd(name)
+    setDraft('')
+  }
+
+  return (
+    <Section label={k.tags}>
+      <div className="flex flex-col gap-2">
+        {tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map(tag => (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6875rem] font-medium',
+                  isAiManagedTag(tag)
+                    ? 'border-sky-400/45 bg-sky-400/10 text-sky-200'
+                    : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-(--ui-text-secondary)'
+                )}
+                key={tag.normalized_name}
+                title={isAiManagedTag(tag) ? k.aiTagTip : undefined}
+              >
+                {tag.name}
+                {isAiManagedTag(tag) && (
+                  <span className="rounded-full bg-sky-400/15 px-1 text-[0.55rem] font-semibold uppercase tracking-[0.08em] text-sky-200">
+                    {k.aiTagBadge}
+                  </span>
+                )}
+                <button
+                  aria-label={k.removeTag(tag.name)}
+                  className="grid size-4 place-items-center rounded-full text-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground"
+                  disabled={pending}
+                  onClick={() => onRemove(tag.name)}
+                  type="button"
+                >
+                  <Codicon name="close" size="0.65rem" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noTags}</p>
+        )}
+
+        <div className="flex items-center gap-1.5">
+          <Input
+            aria-label={k.tagName}
+            className="h-7 text-[0.75rem]"
+            disabled={pending}
+            onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                addDraft()
+              }
+            }}
+            placeholder={k.tagName}
+            value={draft}
+          />
+          <Button disabled={pending || !draft.trim()} onClick={addDraft} size="xs" variant="secondary">
+            <Codicon name={pending ? 'loading' : 'tag'} size="0.75rem" spinning={pending} />
+            {k.addTag}
+          </Button>
+        </div>
+
+        {suggestions.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <span className="text-[0.625rem] text-(--ui-text-quaternary)">{k.existingTags}</span>
+            <div className="flex flex-wrap gap-1.5">
+              {suggestions.map(tag => (
+                <button
+                  aria-label={k.addExistingTag(tag.name)}
+                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground"
+                  disabled={pending}
+                  key={tag.normalized_name}
+                  onClick={() => onAdd(tag.name)}
+                  type="button"
+                >
+                  <Codicon name="add" size="0.65rem" />
+                  {tag.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Section>
   )
 }
 
@@ -1184,6 +1446,7 @@ function DescriptionSection({ body, onSave }: { body: null | string | undefined;
             value={draft}
           />
           <Button
+            aria-label={k.save}
             className="self-end"
             onClick={() => {
               onSave(draft)
@@ -1462,6 +1725,8 @@ export function TaskDrawer({
     refetchInterval: running ? 3_000 : 15_000
   })
 
+  const { data: tags } = useQuery({ queryFn: fetchTags, queryKey: tagsKey(slug), staleTime: 30_000 })
+
   // Esc closes the drawer even though it isn't modal (no backdrop to click off).
   useEffect(() => {
     if (!id) {
@@ -1597,6 +1862,16 @@ export function TaskDrawer({
     },
     onError: err => host.notify({ kind: 'error', message: errText(err) }),
     onSettled: invalidate
+  })
+
+  const tagMut = useMutation<unknown, Error, { name: string; op: 'add' | 'remove' }>({
+    mutationFn: ({ name, op }: { name: string; op: 'add' | 'remove' }) =>
+      op === 'add' ? addTaskTag(id!, name) : removeTaskTag(id!, name),
+    onError: err => host.notify({ kind: 'error', message: errText(err) }),
+    onSuccess: () => {
+      invalidate()
+      void qc.invalidateQueries({ queryKey: tagsKey(slug) })
+    }
   })
 
   const pasteImagesAsAttachments = (event: ClipboardEvent<HTMLElement>) => {
@@ -1749,6 +2024,16 @@ export function TaskDrawer({
                   <Diagnostics items={task.diagnostics} onReclaim={() => void mutate(() => reclaimTask(task.id))()} />
                 </Section>
               )}
+
+              <TitleSection onSave={title => void mutate(() => patchTask(task.id, { title }))()} title={task.title || task.id} />
+
+              <TaskTagsSection
+                existingTags={tags?.tags ?? []}
+                onAdd={name => tagMut.mutate({ name, op: 'add' })}
+                onRemove={name => tagMut.mutate({ name, op: 'remove' })}
+                pending={tagMut.isPending}
+                tags={task.tags ?? []}
+              />
 
               <DescriptionSection body={task.body} onSave={body => void mutate(() => patchTask(task.id, { body }))()} />
 

@@ -29,9 +29,15 @@ function row(overrides: Partial<SessionInfo> = {}): SessionInfo {
   }
 }
 
-function seed(preview: string, sessions: SessionInfo[] = $sessions.get()) {
+function seed(
+  preview: string,
+  sessions: SessionInfo[] = $sessions.get(),
+  workspace: { branch?: string; cwd?: string; gitRepoRoot?: string } = { cwd: '/work/repo' }
+) {
   return listTileSessionRow({
-    cwd: '/work/repo',
+    cwd: workspace.cwd,
+    gitBranch: workspace.branch,
+    gitRepoRoot: workspace.gitRepoRoot,
     model: 'claude-opus-5',
     preview,
     runtimeId: RUNTIME,
@@ -78,5 +84,15 @@ describe('listTileSessionRow', () => {
     seed('  padded prompt  ')
 
     expect($sessions.get()[0]?.preview).toBe('padded prompt')
+  })
+
+  it('carries git workspace metadata so project overlays place subdirectory tabs immediately', () => {
+    seed('run tests', $sessions.get(), { branch: 'main', cwd: '/work/repo/packages/desktop', gitRepoRoot: '/work/repo' })
+
+    expect($sessions.get()[0]).toMatchObject({
+      cwd: '/work/repo/packages/desktop',
+      git_branch: 'main',
+      git_repo_root: '/work/repo'
+    })
   })
 })

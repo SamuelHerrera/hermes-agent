@@ -1168,6 +1168,16 @@ class Attachment:
 
 
 @dataclass
+class Tag:
+    """Reusable task tag, normalized for duplicate prevention."""
+
+    id: int
+    name: str
+    normalized_name: str
+    created_at: int
+
+
+@dataclass
 class Event:
     id: int
     task_id: str
@@ -1346,6 +1356,24 @@ CREATE TABLE IF NOT EXISTS task_attachments (
     created_at   INTEGER NOT NULL
 );
 
+-- Reusable task tags. ``normalized_name`` is the duplicate-prevention key;
+-- ``name`` is the display label from the first creator.
+CREATE TABLE IF NOT EXISTS tags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    created_at      INTEGER NOT NULL
+);
+
+-- Many-to-many task↔tag links. Tags are reusable and intentionally survive
+-- task deletion; task_tags rows are explicitly cascaded by delete_task().
+CREATE TABLE IF NOT EXISTS task_tags (
+    task_id    TEXT NOT NULL,
+    tag_id     INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (task_id, tag_id)
+);
+
 -- Subscription from a gateway source (platform + chat + thread) to a
 -- task. The gateway's kanban-notifier watcher tails task_events and
 -- pushes ``completed`` / ``blocked`` / ``spawn_auto_blocked`` events to
@@ -1373,6 +1401,9 @@ CREATE INDEX IF NOT EXISTS idx_events_task           ON task_events(task_id, cre
 CREATE INDEX IF NOT EXISTS idx_runs_task             ON task_runs(task_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_runs_status           ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_attachments_task      ON task_attachments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tags_normalized       ON tags(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_task_tags_task        ON task_tags(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_tags_tag         ON task_tags(tag_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_id);
 """
 
@@ -3308,6 +3339,12 @@ def create_task(
                     },
                 )
                 _inherit_notify_subs(conn, task_id, parents, created_at=now)
+                apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="created",
+                    reason="task created",
+                )
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:
@@ -3442,6 +3479,274 @@ def list_tasks(
     return [Task.from_row(r) for r in rows]
 
 
+def _normalize_tag_name(name: str) -> str:
+    """Canonical tag key: trimmed, single-spaced, and casefolded.
+
+    This avoids accidental duplicates such as ``" API"``, ``"api"``, and
+    ``"API"`` while keeping the first creator's display label in ``tags.name``.
+    """
+    raw = str(name or "")
+    if any(ord(ch) < 32 for ch in raw):
+        raise ValueError("tag name must not contain control characters")
+    normalized = " ".join(raw.strip().split()).casefold()
+    if not normalized:
+        raise ValueError("tag name is required")
+    if len(normalized) > 80:
+        raise ValueError("tag name must be <= 80 characters")
+    return normalized
+
+
+def _display_tag_name(name: str) -> str:
+    cleaned = " ".join(str(name or "").strip().split())
+    # Prefer a readable title-cased display label when the user entered a bare
+    # all-lower/all-upper tag. Mixed-case labels (e.g. "API v2") are preserved.
+    if cleaned.islower() or cleaned.isupper():
+        return cleaned.title()
+    return cleaned
+
+
+def _tag_from_row(row: sqlite3.Row) -> Tag:
+    return Tag(
+        id=int(row["id"]),
+        name=row["name"],
+        normalized_name=row["normalized_name"],
+        created_at=int(row["created_at"]),
+    )
+
+
+def create_tag(conn: sqlite3.Connection, name: str) -> Tag:
+    """Create or return a reusable tag by normalized name."""
+    normalized = _normalize_tag_name(name)
+    display = _display_tag_name(name)
+    now = int(time.time())
+    with write_txn(conn, allow_nested=True):
+        conn.execute(
+            "INSERT OR IGNORE INTO tags (name, normalized_name, created_at) "
+            "VALUES (?, ?, ?)",
+            (display, normalized, now),
+        )
+        row = conn.execute(
+            "SELECT * FROM tags WHERE normalized_name = ?", (normalized,)
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("failed to create tag")
+    return _tag_from_row(row)
+
+
+def list_tags(conn: sqlite3.Connection) -> list[Tag]:
+    rows = conn.execute(
+        "SELECT * FROM tags ORDER BY normalized_name ASC"
+    ).fetchall()
+    return [_tag_from_row(row) for row in rows]
+
+
+def list_task_tags(conn: sqlite3.Connection, task_id: str) -> list[Tag]:
+    rows = conn.execute(
+        """
+        SELECT tags.*
+          FROM tags
+          JOIN task_tags ON task_tags.tag_id = tags.id
+         WHERE task_tags.task_id = ?
+         ORDER BY tags.normalized_name ASC
+        """,
+        (task_id,),
+    ).fetchall()
+    return [_tag_from_row(row) for row in rows]
+
+
+def attach_tag_to_task(conn: sqlite3.Connection, task_id: str, name: str) -> Tag:
+    """Attach an existing or newly-created tag to a task, idempotently."""
+    if get_task(conn, task_id) is None:
+        raise ValueError(f"task {task_id} not found")
+    tag = create_tag(conn, name)
+    now = int(time.time())
+    with write_txn(conn, allow_nested=True):
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (task_id, tag.id, now),
+        ).rowcount
+        if inserted:
+            _append_event(
+                conn,
+                task_id,
+                "tag_attached",
+                {"tag": {"id": tag.id, "name": tag.name, "normalized_name": tag.normalized_name}},
+            )
+    return tag
+
+
+def remove_tag_from_task(conn: sqlite3.Connection, task_id: str, name: str) -> bool:
+    """Detach a tag from a task by any spelling of its normalized name."""
+    normalized = _normalize_tag_name(name)
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT id, name, normalized_name FROM tags WHERE normalized_name = ?",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            return False
+        cur = conn.execute(
+            "DELETE FROM task_tags WHERE task_id = ? AND tag_id = ?",
+            (task_id, row["id"]),
+        )
+        if cur.rowcount:
+            _append_event(
+                conn,
+                task_id,
+                "tag_removed",
+                {"tag": {"id": int(row["id"]), "name": row["name"], "normalized_name": row["normalized_name"]}},
+            )
+            return True
+    return False
+
+
+AI_TAG_PREFIX = "AI:"
+AI_TAG_NORMALIZED_PREFIX = "ai:"
+
+
+def _ai_managed_tag_names(conn: sqlite3.Connection, task: Task) -> list[str]:
+    """Return deterministic AI-managed tag display names for *task*.
+
+    The taxonomy is intentionally small and rule-based: lifecycle code can run
+    it safely from write paths, audit diffs are stable, and tag normalization
+    prevents near-duplicates such as ``AI:Status Ready`` vs ``ai:status ready``.
+    """
+    text = f"{task.title or ''} {task.body or ''}".casefold()
+    names: set[str] = {f"{AI_TAG_PREFIX}Status {str(task.status).title()}"}
+
+    if parent_ids(conn, task.id):
+        names.add(f"{AI_TAG_PREFIX}Has Parents")
+    if child_ids(conn, task.id):
+        names.add(f"{AI_TAG_PREFIX}Has Children")
+    if int(task.priority or 0) >= 5:
+        names.add(f"{AI_TAG_PREFIX}High Priority")
+
+    keyword_tags = (
+        (("kanban", "board", "task"), "Area Kanban"),
+        (("desktop", "ui", "drawer", "editor", "app"), "Surface Desktop"),
+        (("gateway", "telegram", "slack", "whatsapp"), "Surface Gateway"),
+        (("cron", "schedule", "monitor"), "Area Automation"),
+        (("tag", "tags", "tagging"), "Feature Tags"),
+        (("ai", "model", "llm", "agent"), "Feature AI"),
+        (("review", "qa", "verify"), "Needs Review"),
+        (("bug", "fix", "error", "broken", "regression"), "Kind Bug"),
+        (("test", "tests", "typecheck"), "Needs Tests"),
+        (("doc", "docs", "readme"), "Kind Docs"),
+    )
+    for keywords, label in keyword_tags:
+        if any(word in text for word in keywords):
+            names.add(f"{AI_TAG_PREFIX}{label}")
+
+    # Sort by the same normalized key used by list_task_tags/list_tags so event
+    # payloads and task tag ordering are deterministic and easy to diff.
+    return sorted(names, key=_normalize_tag_name)
+
+
+def apply_ai_task_tags(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    trigger: str,
+    reason: Optional[str] = None,
+) -> dict[str, list[str]]:
+    """Refresh the AI-managed tag namespace for a task and audit the diff.
+
+    Only tags whose normalized name starts with ``ai:`` are managed here. User
+    tags outside that namespace are preserved. The function is idempotent and
+    safe to call from inside another ``write_txn``.
+    """
+    task = get_task(conn, task_id)
+    if task is None:
+        return {"added": [], "removed": []}
+
+    desired_names = _ai_managed_tag_names(conn, task)
+    desired_norm_to_name = {_normalize_tag_name(name): name for name in desired_names}
+    desired_norms = set(desired_norm_to_name)
+
+    current_tags = list_task_tags(conn, task_id)
+    current_ai = {
+        tag.normalized_name: tag
+        for tag in current_tags
+        if tag.normalized_name.startswith(AI_TAG_NORMALIZED_PREFIX)
+    }
+    current_norms = set(current_ai)
+
+    to_add = sorted(desired_norms - current_norms)
+    to_remove = sorted(current_norms - desired_norms)
+    if not to_add and not to_remove:
+        return {"added": [], "removed": []}
+
+    added_names: list[str] = []
+    removed_names: list[str] = []
+    with write_txn(conn, allow_nested=True):
+        for normalized in to_remove:
+            tag = current_ai[normalized]
+            cur = conn.execute(
+                "DELETE FROM task_tags WHERE task_id = ? AND tag_id = ?",
+                (task_id, tag.id),
+            )
+            if cur.rowcount:
+                removed_names.append(tag.name)
+                _append_event(
+                    conn,
+                    task_id,
+                    "tag_removed",
+                    {
+                        "tag": {
+                            "id": tag.id,
+                            "name": tag.name,
+                            "normalized_name": tag.normalized_name,
+                        },
+                        "source": "ai",
+                        "trigger": trigger,
+                        "reason": reason,
+                    },
+                )
+
+        now = int(time.time())
+        for normalized in to_add:
+            tag = create_tag(conn, desired_norm_to_name[normalized])
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO task_tags (task_id, tag_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (task_id, tag.id, now),
+            ).rowcount
+            if inserted:
+                added_names.append(tag.name)
+                _append_event(
+                    conn,
+                    task_id,
+                    "tag_attached",
+                    {
+                        "tag": {
+                            "id": tag.id,
+                            "name": tag.name,
+                            "normalized_name": tag.normalized_name,
+                        },
+                        "source": "ai",
+                        "trigger": trigger,
+                        "reason": reason,
+                    },
+                )
+
+        _append_event(
+            conn,
+            task_id,
+            "ai_tags_updated",
+            {
+                "source": "ai",
+                "trigger": trigger,
+                "reason": reason,
+                "added": added_names,
+                "removed": removed_names,
+                "desired": [desired_norm_to_name[n] for n in sorted(desired_norms)],
+            },
+        )
+
+    return {"added": added_names, "removed": removed_names}
+
+
 def assign_task(conn: sqlite3.Connection, task_id: str, profile: Optional[str]) -> bool:
     """Assign or reassign a task.  Returns True on success.
 
@@ -3471,7 +3776,15 @@ def assign_task(conn: sqlite3.Connection, task_id: str, profile: Optional[str]) 
             )
         else:
             conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (profile, task_id))
-        _append_event(conn, task_id, "assigned", {"assignee": profile})
+        _append_event(
+            conn, task_id, "assigned", {"assignee": profile}
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="task assigned",
+        )
         return True
 
 
@@ -3517,6 +3830,12 @@ def set_model_override(
             conn, task_id, "model_override_set",
             {"model": model, "provider": provider},
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="model override updated",
+        )
         return True
 
 
@@ -3555,6 +3874,12 @@ def set_reasoning_effort(
         _append_event(
             conn, task_id, "reasoning_effort_set", {"reasoning_effort": effort}
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="reasoning effort updated",
+        )
         return True
 
 
@@ -3591,6 +3916,12 @@ def link_tasks(conn: sqlite3.Connection, parent_id: str, child_id: str) -> None:
             {"parent": parent_id, "child": child_id},
         )
         _inherit_notify_subs(conn, child_id, (parent_id,))
+        apply_ai_task_tags(
+            conn,
+            child_id,
+            trigger="updated",
+            reason=f"linked to parent {parent_id}",
+        )
 
 
 def _would_cycle(conn: sqlite3.Connection, parent_id: str, child_id: str) -> bool:
@@ -3626,6 +3957,12 @@ def unlink_tasks(conn: sqlite3.Connection, parent_id: str, child_id: str) -> boo
             _append_event(
                 conn, child_id, "unlinked",
                 {"parent": parent_id, "child": child_id},
+            )
+            apply_ai_task_tags(
+                conn,
+                child_id,
+                trigger="updated",
+                reason=f"unlinked from parent {parent_id}",
             )
         removed = cur.rowcount > 0
     if removed:
@@ -3736,6 +4073,12 @@ def add_comment(
             (task_id, author.strip(), body.strip(), now),
         )
         _append_event(conn, task_id, "commented", {"author": author, "len": len(body)})
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="comment added",
+        )
         return int(cur.lastrowid or 0)
 
 
@@ -4331,6 +4674,12 @@ def recompute_ready(
                     conn, task_id, "promoted",
                     {"status": resume_status} if resume_status != "ready" else None,
                 )
+                apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="status",
+                    reason="task promoted",
+                )
                 promoted += 1
     return promoted
 
@@ -4824,6 +5173,12 @@ def release_stale_claims(
                 payload,
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                row["id"],
+                trigger="status",
+                reason="stale claim reclaimed",
+            )
             reclaimed += 1
     return reclaimed
 
@@ -4890,6 +5245,12 @@ def reclaim_task(
             conn, task_id, "reclaimed",
             payload,
             run_id=run_id,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task reclaimed",
         )
     # Operator intervention — they've looked at the task, so the
     # consecutive-failures counter is now stale. Give the next retry
@@ -5265,6 +5626,12 @@ def complete_task(
             conn, task_id, "completed",
             completed_payload,
             run_id=run_id,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task completed",
         )
     # Prose-scan the summary + result for t_<hex> references that do
     # not resolve. Advisory — does not block the completion. Runs in
@@ -5978,6 +6345,12 @@ def block_task(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="task blocked for dependency",
+            )
             _blocked_task = get_task(conn, task_id)
             _fire_kanban_lifecycle_hook(
                 "kanban_task_blocked",
@@ -6038,6 +6411,12 @@ def block_task(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="block loop routed to triage",
+            )
         else:
             if expected_run_id is None:
                 cur = conn.execute(
@@ -6094,6 +6473,12 @@ def block_task(
                     "source_status": source_status,
                 },
                 run_id=run_id,
+            )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="task blocked",
             )
         _blocked_task = get_task(conn, task_id)
     _fire_kanban_lifecycle_hook(
@@ -6282,6 +6667,12 @@ def request_review(
             },
             run_id=run_id,
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task moved to review",
+        )
     return _ret(True)
 
 
@@ -6401,6 +6792,12 @@ def request_changes(
             },
             run_id=run_id,
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="changes requested",
+        )
     return True, implementer
 
 
@@ -6469,6 +6866,12 @@ def promote_task(
             task_id,
             "promoted_manual",
             {"actor": actor, "reason": reason, "forced": force},
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="manual promotion",
         )
 
     return True, None
@@ -6581,6 +6984,12 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
                 else None
             ),
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task unblocked",
+        )
         return True
 
 
@@ -6648,6 +7057,12 @@ def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
             task_id,
             "review_reopened",
             payload if payload != {"status": "ready"} else None,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="review reopened",
         )
         return True
 
@@ -6789,6 +7204,12 @@ def invalidate_descendants_for_parent_reopen(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                row["id"],
+                trigger="status",
+                reason=f"ancestor {task_id} reopened",
+            )
             # Inline comment insert (not add_comment: no txn-opening helper
             # calls inside a txn per file convention).
             conn.execute(
@@ -6903,6 +7324,12 @@ def specify_triage_task(
             task_id,
             "specified",
             {"changed_fields": changed_fields} if changed_fields else None,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="task specified",
         )
     # Outside the write_txn above, so we don't nest BEGIN IMMEDIATE — the
     # ready-promotion pass opens its own IMMEDIATE txn. This runs the same
@@ -7090,6 +7517,12 @@ def decompose_triage_task(
                     conn, child_id, "linked",
                     {"parent": parent_id, "child": child_id},
                 )
+                apply_ai_task_tags(
+                    conn,
+                    child_id,
+                    trigger="updated",
+                    reason=f"linked to parent {parent_id}",
+                )
 
         # Link the ROOT task as a child of every leaf child — i.e. the
         # root waits for the whole graph. Simpler than computing leaves:
@@ -7135,6 +7568,13 @@ def decompose_triage_task(
                 "root_assignee": root_assignee,
             },
         )
+        for tagged_id in [task_id, *child_ids]:
+            apply_ai_task_tags(
+                conn,
+                tagged_id,
+                trigger="split",
+                reason=f"task {task_id} decomposed",
+            )
 
     # Outside the write_txn: promote parent-free children to 'ready'
     # so the dispatcher picks them up on its next tick. Same pattern
@@ -7165,6 +7605,12 @@ def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
             summary="task archived with run still active",
         )
         _append_event(conn, task_id, "archived", None, run_id=run_id)
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task archived",
+        )
     # ``archived`` parents no longer block children, same as ``done``.
     # Promote newly-unblocked dependents immediately instead of waiting
     # for a later dispatcher tick.
@@ -7193,6 +7639,7 @@ def delete_archived_task(conn: sqlite3.Connection, task_id: str) -> bool:
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
         cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         return cur.rowcount == 1
@@ -7216,6 +7663,7 @@ def delete_task(conn: sqlite3.Connection, task_id: str) -> bool:
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
     recompute_ready(conn)
     return True
@@ -7587,6 +8035,12 @@ def schedule_task(
                 summary=reason,
             )
         _append_event(conn, task_id, "scheduled", {"reason": reason}, run_id=run_id)
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task scheduled",
+        )
         return True
 
 
@@ -8144,6 +8598,12 @@ def enforce_max_runtime(
                 _append_event(
                     conn, tid, "timed_out", payload, run_id=run_id,
                 )
+                apply_ai_task_tags(
+                    conn,
+                    tid,
+                    trigger="status",
+                    reason="task timed out",
+                )
                 timed_out.append(tid)
         # Increment the unified failure counter. Outside the write_txn
         # above because ``_record_task_failure`` opens its own. If the
@@ -8287,6 +8747,12 @@ def detect_stale_running(
             )
             _append_event(
                 conn, tid, "stale", payload, run_id=run_id,
+            )
+            apply_ai_task_tags(
+                conn,
+                tid,
+                trigger="status",
+                reason="stale running task reclaimed",
             )
             reclaimed.append(tid)
 

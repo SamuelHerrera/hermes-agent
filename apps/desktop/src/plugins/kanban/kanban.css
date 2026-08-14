@@ -1,6 +1,6 @@
-/* Machine-activity arc — a highlight that travels the card's border while an
-   agent is ACTUALLY working the card (amber-slow when the heartbeat is gone).
-   Queued/attached cards do NOT animate — that's the footer's named-agent chip.
+/* Machine-activity arc — a highlight that travels the card's border while a
+   task is claimed/running or eligible for an imminent automation tick
+   (amber-slow when the heartbeat is gone).
    The tone rides --kanban-tone, set inline from the column meta. Painted as an
    overlay ring (mask keeps only the border band) so the card stays flat. */
 
@@ -31,6 +31,13 @@
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   animation: kanban-arc-spin 2.2s linear infinite;
+}
+
+/* Eligible but not claimed yet: same visual language as running, quieter so it
+   reads as automation-pending rather than an open worker run. */
+.kanban-arc--queued {
+  opacity: 0.72;
+  animation-duration: 3.4s;
 }
 
 /* Running but no heartbeat: amber crawl — still claimed, health unknown. */

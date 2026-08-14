@@ -20,7 +20,14 @@ import {
   toggleSidebarOpen
 } from '@/store/layout'
 
-import { appViewForPath, isOverlayView } from '../routes'
+import {
+  appViewForPath,
+  ARTIFACTS_ROUTE,
+  isOverlayView,
+  MESSAGING_ROUTE,
+  navigateToWorkspacePage,
+  SKILLS_ROUTE
+} from '../routes'
 
 import {
   TITLEBAR_ICON_BADGE_SCALE,
@@ -154,6 +161,35 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
     ...leftTools
   ]
 
+  // Workspace pages live in the main pane but are global app destinations, so
+  // keep their affordances in the app header instead of the sessions sidebar.
+  const workspacePageTools: TitlebarTool[] = [
+    {
+      actionId: 'nav.skills',
+      active: appViewForPath(location.pathname) === 'skills',
+      icon: <TitlebarIcon name="symbol-misc" />,
+      id: 'skills',
+      label: t.sidebar.nav.skills,
+      onSelect: () => navigateToWorkspacePage(navigate, SKILLS_ROUTE)
+    },
+    {
+      actionId: 'nav.messaging',
+      active: appViewForPath(location.pathname) === 'messaging',
+      icon: <TitlebarIcon name="comment" />,
+      id: 'messaging',
+      label: t.sidebar.nav.messaging,
+      onSelect: () => navigateToWorkspacePage(navigate, MESSAGING_ROUTE)
+    },
+    {
+      actionId: 'nav.artifacts',
+      active: appViewForPath(location.pathname) === 'artifacts',
+      icon: <TitlebarIcon name="files" />,
+      id: 'artifacts',
+      label: t.sidebar.nav.artifacts,
+      onSelect: () => navigateToWorkspacePage(navigate, ARTIFACTS_ROUTE)
+    }
+  ]
+
   const rightSidebarTool: TitlebarTool = {
     actionId: 'view.toggleRightSidebar',
     icon: <TitlebarIcon name="layout-sidebar-right" />,
@@ -229,6 +265,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   }
 
   const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
+  const visibleWorkspacePageTools = workspacePageTools.filter(tool => !tool.hidden)
   const visiblePaneTools = tools.filter(tool => !tool.hidden)
 
   return (
@@ -273,6 +310,9 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
+        {visibleWorkspacePageTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
         {visibleSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}

@@ -257,7 +257,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     useSessionListActions({ profileScope })
 
   const updateActiveSessionRuntimeInfo = useCallback(
-    (info: { branch?: string; cwd?: string }) => {
+    (info: { branch?: string; cwd?: string; git_repo_root?: string }) => {
       const sessionId = activeSessionIdRef.current
 
       if (!sessionId) {
@@ -267,7 +267,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       updateSessionState(sessionId, state => ({
         ...state,
         branch: info.branch ?? state.branch,
-        cwd: info.cwd ?? state.cwd
+        cwd: info.cwd ?? state.cwd,
+        gitRepoRoot: info.git_repo_root ?? state.gitRepoRoot
       }))
     },
     [activeSessionIdRef, updateSessionState]
@@ -985,11 +986,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
   const titlebarToolsRight = titlebarToolsRightCss(nativeOverlayWidth, titlebarChrome)
   // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
-  // against the static system cluster — in the tree layout the titlebar band
-  // sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  const SYSTEM_TOOL_COUNT = 4
+  // against the static app-control cluster — in the tree layout the titlebar
+  // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
+  const APP_CONTROL_TOOL_COUNT = 8
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
-  const systemToolsWidth = titlebarToolsWidthCss(SYSTEM_TOOL_COUNT)
+  const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
   const titlebarToolsWidth =
     paneToolCount > 0 ? `calc(${systemToolsWidth} + ${titlebarToolsWidthCss(paneToolCount)})` : systemToolsWidth

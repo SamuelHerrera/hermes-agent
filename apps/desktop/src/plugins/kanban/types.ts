@@ -20,9 +20,21 @@ export interface KanbanTask {
   /** Compact diagnostics rollup — present only when a card has warnings. */
   warnings?: null | { count: number; highest_severity?: null | string }
   /** Worker liveness (present on running cards) — drives the arc + run clock. */
+  current_run_id?: null | number
   started_at?: null | number
   worker_pid?: null | number
   last_heartbeat_at?: null | number
+  /** True when every direct parent is done/archived; used to show todo cards
+   *  that are only waiting for the dispatcher recompute/promotion tick. */
+  parents_satisfied?: null | boolean
+  tags?: KanbanTag[]
+}
+
+export interface KanbanTag {
+  id: number | string
+  name: string
+  normalized_name: string
+  created_at?: number
 }
 
 export type TaskSortDirection = 'asc' | 'desc'
@@ -189,8 +201,13 @@ export interface OrchestrationSettings {
   orchestrator_profile: string
   default_assignee: string
   auto_decompose: boolean
+  auto_promote_children?: boolean
+  review_dispatch?: boolean
+  /** Dispatcher-usable default assignee. Empty when unset or invalid. */
+  dispatch_default_assignee?: string
   resolved_orchestrator_profile: string
   resolved_default_assignee: string
+  active_profile?: string
 }
 
 /** GET /profiles — the roster the decomposer routes across. */

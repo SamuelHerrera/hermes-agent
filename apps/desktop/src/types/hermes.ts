@@ -636,6 +636,7 @@ export interface SessionRuntimeInfo {
   cwd?: string
   desktop_contract?: number
   fast?: boolean
+  git_repo_root?: string
   install_warning?: string
   model?: string
   personality?: string

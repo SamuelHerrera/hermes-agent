@@ -485,6 +485,150 @@ def test_delete_task_removes_task_and_cascades(kanban_home):
         assert len(kb.list_runs(conn, t)) == 0
 
 
+def test_task_tags_normalize_reuse_persist_and_cascade(kanban_home):
+    """Tasks can share multiple normalized tags without duplicate tag rows."""
+    with kb.connect() as conn:
+        first = kb.create_task(conn, title="first")
+        second = kb.create_task(conn, title="second")
+
+        tag = kb.attach_tag_to_task(conn, first, "  Feature   Alpha  ")
+        duplicate = kb.attach_tag_to_task(conn, first, "feature alpha")
+        reused = kb.attach_tag_to_task(conn, second, "FEATURE ALPHA")
+        bug = kb.attach_tag_to_task(conn, first, "Bug")
+
+        assert tag.id == duplicate.id == reused.id
+        assert tag.normalized_name == "feature alpha"
+        manual_first = [
+            t.name for t in kb.list_task_tags(conn, first)
+            if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert manual_first == ["Bug", "Feature Alpha"]
+        assert [t.name for t in kb.list_task_tags(conn, second) if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)] == ["Feature Alpha"]
+        manual_tags = [
+            t.normalized_name for t in kb.list_tags(conn)
+            if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert manual_tags == ["bug", "feature alpha"]
+        assert bug.normalized_name == "bug"
+
+    with kb.connect() as conn:
+        # Tags and task/tag links persist across new DB connections.
+        persisted_manual = [
+            t.normalized_name for t in kb.list_task_tags(conn, first)
+            if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert persisted_manual == [
+            "bug", "feature alpha",
+        ]
+
+        with pytest.raises(ValueError, match="tag name"):
+            kb.create_tag(conn, "   ")
+        with pytest.raises(ValueError, match="control"):
+            kb.create_tag(conn, "bad\nname")
+
+        assert kb.remove_tag_from_task(conn, first, "FEATURE alpha") is True
+        remaining_manual = [
+            t.normalized_name for t in kb.list_task_tags(conn, first)
+            if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert remaining_manual == ["bug"]
+
+        assert kb.delete_task(conn, first)
+        assert conn.execute(
+            "SELECT COUNT(*) FROM task_tags WHERE task_id = ?", (first,)
+        ).fetchone()[0] == 0
+        # Deleting one task does not delete reusable tag records or links on siblings.
+        second_manual = [
+            t.normalized_name for t in kb.list_task_tags(conn, second)
+            if not t.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert second_manual == [
+            "feature alpha"
+        ]
+
+
+def test_ai_tag_manager_applies_deterministic_lifecycle_tags_without_duplicate_noise(kanban_home):
+    """AI-managed lifecycle tags update predictably while preserving user tags."""
+    with kb.connect() as conn:
+        tid = kb.create_task(
+            conn,
+            title="Kanban tag UI bug",
+            assignee="default",
+            priority=9,
+        )
+
+        initial = [t.normalized_name for t in kb.list_task_tags(conn, tid)]
+        assert initial == [
+            "ai:area kanban",
+            "ai:feature tags",
+            "ai:high priority",
+            "ai:kind bug",
+            "ai:status ready",
+            "ai:surface desktop",
+        ]
+
+        # User tags are outside the AI-managed namespace and must survive AI refreshes.
+        kb.attach_tag_to_task(conn, tid, "Manual Customer Tag")
+        kb.block_task(conn, tid, reason="waiting on input", kind="needs_input")
+
+        after_block = [t.normalized_name for t in kb.list_task_tags(conn, tid)]
+        assert "manual customer tag" in after_block
+        assert "ai:status ready" not in after_block
+        assert "ai:status blocked" in after_block
+        assert after_block.count("ai:status blocked") == 1
+
+        # Re-running the manager should not create duplicate tag rows or links.
+        kb.apply_ai_task_tags(conn, tid, trigger="status", reason="idempotency check")
+        assert [t.normalized_name for t in kb.list_task_tags(conn, tid)].count(
+            "ai:status blocked"
+        ) == 1
+
+        tag_names = [t.normalized_name for t in kb.list_tags(conn)]
+        assert tag_names.count("ai:status blocked") == 1
+        assert tag_names.count("ai:status ready") == 1  # reusable tag record survives detach
+
+        ai_events = [e for e in kb.list_events(conn, tid) if e.kind == "ai_tags_updated"]
+        assert ai_events
+        latest = ai_events[-1].payload or {}
+        assert latest["source"] == "ai"
+        assert latest["trigger"] == "status"
+        assert latest["removed"] == ["AI:Status Ready"]
+        assert latest["added"] == ["AI:Status Blocked"]
+
+
+def test_ai_tag_manager_tags_decomposed_children_and_root(kanban_home):
+    """Splitting a task gives generated children related deterministic tags."""
+    with kb.connect() as conn:
+        root = kb.create_task(conn, title="Kanban auto tags feature", triage=True)
+        child_ids = kb.decompose_triage_task(
+            conn,
+            root,
+            root_assignee="default",
+            author="test-decomposer",
+            children=[
+                {"title": "Build desktop tag editor", "assignee": "frontend"},
+                {"title": "Review AI tag update workflow", "assignee": "reviewer", "parents": [0]},
+            ],
+        )
+
+        assert child_ids and len(child_ids) == 2
+        first_tags = [t.normalized_name for t in kb.list_task_tags(conn, child_ids[0])]
+        second_tags = [t.normalized_name for t in kb.list_task_tags(conn, child_ids[1])]
+        root_tags = [t.normalized_name for t in kb.list_task_tags(conn, root)]
+
+        assert "ai:feature tags" in first_tags
+        assert "ai:surface desktop" in first_tags
+        assert "ai:feature ai" in second_tags
+        assert "ai:has parents" in second_tags
+        assert "ai:has parents" in root_tags
+
+        for tid in [root, *child_ids]:
+            events = [e for e in kb.list_events(conn, tid) if e.kind == "ai_tags_updated"]
+            assert events, f"missing AI tag audit event for {tid}"
+            triggers = {(e.payload or {}).get("trigger") for e in events}
+            assert triggers & {"created", "split"}
+
+
 
 
 # ---------------------------------------------------------------------------

@@ -5242,6 +5242,7 @@ def _session_info(agent, session: dict | None = None) -> dict:
         "skills": dict(mirror.get("skills") or {}) if isinstance(mirror.get("skills"), dict) else {},
         "cwd": cwd,
         "branch": _git_branch_for_cwd(cwd),
+        "git_repo_root": _git_common_repo_root_for_cwd(cwd),
         "project": _project_info_for_cwd(cwd),
         "terminal_backend": _effective_terminal_backend(),
         "personality": str(personality or ""),
@@ -11904,10 +11905,10 @@ def _discover_repos_payload(
     return out
 
 
-# Sources excluded from the project tree: cron runs, and kanban dispatcher
-# workers, are not user conversations. Subagent/compression children are
-# already dropped by list_sessions_rich(include_children=False); cron has its
-# own section, and kanban runs are read on the board.
+# Sources excluded from the project tree: cron runs and kanban dispatcher
+# workers are not user conversations. Delegate subagent rows are included as
+# children (via their durable _delegate_from marker) so the Projects main view
+# can show/open the same external child chats the live tree exposes.
 _PROJECT_TREE_EXCLUDED_SOURCES = ["cron", "kanban"]
 
 
@@ -11946,6 +11947,7 @@ def _project_tree_row(r: dict) -> dict:
         "cwd": r.get("cwd"),
         "git_branch": r.get("git_branch"),
         "git_repo_root": r.get("git_repo_root"),
+        "delegate_parent_session_id": r.get("delegate_parent_session_id"),
     }
 
 
@@ -11964,7 +11966,11 @@ def _project_tree_inputs(
         offset=0,
         order_by_last_active=True,
         min_message_count=1,
-        include_children=False,
+        # Include children here so delegate subagent sessions can be re-attached
+        # under their visible parent rows in the Projects tree. The builder still
+        # drops orphan/internal children, and compression tips are projected by
+        # list_sessions_rich.
+        include_children=True,
         exclude_sources=_PROJECT_TREE_EXCLUDED_SOURCES,
         include_archived=False,
         # `_project_tree_row` keeps ~18 fields and drops the rest, so selecting

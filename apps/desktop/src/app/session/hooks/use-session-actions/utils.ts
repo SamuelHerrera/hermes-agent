@@ -795,6 +795,8 @@ export function upsertOptimisticSession(
     // the session was just started in when the create response omits it.
     cwd: created.info?.cwd ?? ($currentCwd.get().trim() || null),
     ended_at: null,
+    git_branch: created.info?.branch ?? null,
+    git_repo_root: created.info?.git_repo_root ?? null,
     id,
     input_tokens: 0,
     is_active: true,
@@ -806,7 +808,7 @@ export function upsertOptimisticSession(
     parent_session_id: parentSessionId,
     preview,
     profile: profileKey,
-    source: 'tui',
+    source: 'desktop',
     started_at: now,
     title,
     tool_call_count: 0
@@ -924,13 +926,29 @@ export async function resolveSessionProfile(storedSessionId: null | string): Pro
 
   const profile = (await resolveStoredSession(storedSessionId))?.profile?.trim()
 
-  return profile || undefined
+  if (!profile) {
+    return undefined
+  }
+
+  const activeProfile = normalizeProfileKey($activeGatewayProfile.get())
+  const singleProfile = $profiles.get().length <= 1
+
+  return singleProfile && profile === activeProfile ? undefined : profile
 }
 
 type SessionRuntimeStatePatch = Partial<
   Pick<
     ClientSessionState,
-    'branch' | 'cwd' | 'fast' | 'model' | 'personality' | 'provider' | 'reasoningEffort' | 'serviceTier' | 'yolo'
+    | 'branch'
+    | 'cwd'
+    | 'fast'
+    | 'gitRepoRoot'
+    | 'model'
+    | 'personality'
+    | 'provider'
+    | 'reasoningEffort'
+    | 'serviceTier'
+    | 'yolo'
   >
 >
 
@@ -1040,6 +1058,10 @@ export function applyRuntimeInfo(
 
   if (info.branch !== undefined) {
     sessionState.branch = info.branch || ''
+  }
+
+  if (typeof info.git_repo_root === 'string') {
+    sessionState.gitRepoRoot = info.git_repo_root
   }
 
   if (typeof info.personality === 'string') {

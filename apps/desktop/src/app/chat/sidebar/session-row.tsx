@@ -25,6 +25,7 @@ import { normalizeProfileKey } from '@/store/profile'
 import { $pullRequestsByBranch, sessionPrKey } from '@/store/pull-requests'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 import { sessionCostUsd } from '@/store/sidebar-archive'
+import { $subagentsBySession, type SubagentProgress } from '@/store/subagents'
 
 import { SessionStatusDot } from '../session-status-dot'
 
@@ -43,6 +44,10 @@ interface SidebarSessionRowProps extends React.ComponentProps<'div'> {
   session: SessionInfo
   /** TUI-style tree stem for branched sessions (`└─ ` / `├─ `). */
   branchStem?: string
+  /** This row owns visible child rows and can be collapsed. */
+  hasBranchChildren?: boolean
+  branchCollapsed?: boolean
+  onToggleBranch?: () => void
   isPinned: boolean
   isSelected: boolean
   onArchive: () => void
@@ -68,6 +73,18 @@ const AGE_KEY = { day: 'ageDay', hour: 'ageHour', minute: 'ageMin' } as const
 const TAIL_HIDES = 'min-w-5 transition-opacity group-hover:opacity-0 group-has-[[data-pr-link]:hover]:opacity-100'
 const KEBAB_YIELDS = 'group-has-[[data-pr-link]:hover]:pointer-events-none group-has-[[data-pr-link]:hover]:opacity-0'
 
+function findLiveSubagent(groups: Record<string, SubagentProgress[]>, sessionId: string): SubagentProgress | undefined {
+  for (const items of Object.values(groups)) {
+    const match = items.find(item => item.sessionId === sessionId)
+
+    if (match) {
+      return match
+    }
+  }
+
+  return undefined
+}
+
 function formatAge(seconds: number, r: Translations['sidebar']['row']): string {
   const { unit, value } = coarseElapsed(Date.now() - seconds * 1000)
 
@@ -78,6 +95,9 @@ function formatAge(seconds: number, r: Translations['sidebar']['row']): string {
 function SidebarSessionRowImpl({
   session,
   branchStem,
+  hasBranchChildren = false,
+  branchCollapsed = false,
+  onToggleBranch,
   isPinned,
   isSelected,
   onArchive,
@@ -97,7 +117,8 @@ function SidebarSessionRowImpl({
   const { t } = useI18n()
   const r = t.sidebar.row
   const { cancelPrewarm, startPrewarm } = useProfilePrewarm(session.profile)
-  const title = sessionTitle(session)
+  const liveSubagent = useStoreSelector($subagentsBySession, groups => findLiveSubagent(groups, session.id))
+  const title = sessionTitle(session, { subagentGoal: liveSubagent?.goal })
   const age = formatAge(session.last_active || session.started_at, r)
   const handleLabel = `Reorder ${title}`
   // Opt-in row metadata from the sidebar's filter menu. Read from the store
@@ -327,6 +348,22 @@ function SidebarSessionRowImpl({
             onResume()
           }}
         >
+          {hasBranchChildren ? (
+            <button
+              aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
+              className="-ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-[3px] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
+              data-row-actions
+              onClick={event => {
+                event.preventDefault()
+                event.stopPropagation()
+                triggerHaptic('selection')
+                onToggleBranch?.()
+              }}
+              type="button"
+            >
+              <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
+            </button>
+          ) : null}
           {reorderable ? (
             <SidebarRowGrab ariaLabel={handleLabel} dragging={dragging} dragHandleProps={dragHandleProps}>
               {lead ?? (
@@ -379,6 +416,8 @@ function rowPropsEqual(a: SidebarSessionRowProps, b: SidebarSessionRowProps): bo
     a.isPinned === b.isPinned &&
     a.isSelected === b.isSelected &&
     a.branchStem === b.branchStem &&
+    a.hasBranchChildren === b.hasBranchChildren &&
+    a.branchCollapsed === b.branchCollapsed &&
     a.reorderable === b.reorderable &&
     a.dragging === b.dragging &&
     a.showProfile === b.showProfile &&

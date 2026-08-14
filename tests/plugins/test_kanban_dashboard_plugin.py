@@ -111,9 +111,210 @@ def test_create_task_appears_on_board(client):
     data = r.json()
     ready = next(c for c in data["columns"] if c["name"] == "ready")
     assert len(ready["tasks"]) == 1
-    assert ready["tasks"][0]["id"] == task_id
+    card = ready["tasks"][0]
+    assert card["id"] == task_id
+    assert card["current_run_id"] is None
+    assert card["parents_satisfied"] is True
     assert "acme" in data["tenants"]
     assert "researcher" in data["assignees"]
+
+
+def test_board_marks_parent_satisfaction_for_todo_cards(client):
+    parent = client.post("/api/plugins/kanban/tasks", json={"title": "parent"}).json()["task"]
+    child = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "child", "parents": [parent["id"]], "assignee": "worker"},
+    ).json()["task"]
+    assert child["status"] == "todo"
+
+    board = client.get("/api/plugins/kanban/board").json()
+    todo = next(c for c in board["columns"] if c["name"] == "todo")
+    child_card = next(t for t in todo["tasks"] if t["id"] == child["id"])
+    assert child_card["parents_satisfied"] is False
+
+    conn = kb.connect()
+    try:
+        kb.complete_task(conn, parent["id"], summary="done")
+        row = conn.execute("SELECT status FROM tasks WHERE id = ?", (child["id"],)).fetchone()
+        assert row["status"] == "ready"
+        conn.execute("UPDATE tasks SET status = 'todo' WHERE id = ?", (child["id"],))
+        conn.commit()
+    finally:
+        conn.close()
+
+    board = client.get("/api/plugins/kanban/board").json()
+    todo = next(c for c in board["columns"] if c["name"] == "todo")
+    child_card = next(t for t in todo["tasks"] if t["id"] == child["id"])
+    assert child_card["parents_satisfied"] is True
+
+
+def test_orchestration_exposes_dispatch_default_only_when_configured_profile_exists(client, monkeypatch):
+    import hermes_cli.config as cfgmod
+    from hermes_cli import profiles as profiles_mod
+
+    monkeypatch.setattr(
+        cfgmod,
+        "load_config",
+        lambda *args, **kwargs: {
+            "kanban": {
+                "auto_decompose": False,
+                "default_assignee": "missing-profile",
+                "review_dispatch": False,
+            }
+        },
+    )
+    monkeypatch.setattr(profiles_mod, "get_active_profile_name", lambda: "default")
+    monkeypatch.setattr(profiles_mod, "profile_exists", lambda name: name == "default")
+
+    settings = client.get("/api/plugins/kanban/orchestration").json()
+    assert settings["auto_decompose"] is False
+    assert settings["review_dispatch"] is False
+    assert settings["default_assignee"] == "missing-profile"
+    assert settings["resolved_default_assignee"] == "default"
+    assert settings["dispatch_default_assignee"] == ""
+
+    monkeypatch.setattr(profiles_mod, "profile_exists", lambda name: name in {"default", "worker"})
+    monkeypatch.setattr(
+        cfgmod,
+        "load_config",
+        lambda *args, **kwargs: {"kanban": {"default_assignee": "worker"}},
+    )
+
+    settings = client.get("/api/plugins/kanban/orchestration").json()
+    assert settings["resolved_default_assignee"] == "worker"
+    assert settings["dispatch_default_assignee"] == "worker"
+
+
+def test_task_tag_rest_api_normalizes_reuses_and_persists(client):
+    first = client.post("/api/plugins/kanban/tasks", json={"title": "first"}).json()["task"]
+    second = client.post("/api/plugins/kanban/tasks", json={"title": "second"}).json()["task"]
+
+    attach = client.post(
+        f"/api/plugins/kanban/tasks/{first['id']}/tags",
+        json={"name": "  Feature   Alpha  "},
+    )
+    assert attach.status_code == 200, attach.text
+    tag = attach.json()["tag"]
+    assert tag["name"] == "Feature Alpha"
+    assert tag["normalized_name"] == "feature alpha"
+
+    duplicate = client.post(
+        f"/api/plugins/kanban/tasks/{first['id']}/tags",
+        json={"name": "FEATURE ALPHA"},
+    ).json()["tag"]
+    reused = client.post(
+        f"/api/plugins/kanban/tasks/{second['id']}/tags",
+        json={"name": "feature alpha"},
+    ).json()["tag"]
+    assert duplicate["id"] == tag["id"] == reused["id"]
+
+    bug = client.post(
+        f"/api/plugins/kanban/tasks/{first['id']}/tags",
+        json={"name": "Bug"},
+    ).json()["tag"]
+    assert bug["normalized_name"] == "bug"
+
+    tags = client.get("/api/plugins/kanban/tags")
+    assert tags.status_code == 200
+    assert [
+        t["normalized_name"] for t in tags.json()["tags"]
+        if not t["normalized_name"].startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+    ] == [
+        "bug", "feature alpha",
+    ]
+
+    detail = client.get(f"/api/plugins/kanban/tasks/{first['id']}").json()
+    assert [
+        t["normalized_name"] for t in detail["task"]["tags"]
+        if not t["normalized_name"].startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+    ] == [
+        "bug", "feature alpha",
+    ]
+    board = client.get("/api/plugins/kanban/board").json()
+    ready = next(c for c in board["columns"] if c["name"] == "ready")
+    card = next(t for t in ready["tasks"] if t["id"] == first["id"])
+    assert [
+        t["name"] for t in card["tags"]
+        if not t["normalized_name"].startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+    ] == ["Bug", "Feature Alpha"]
+
+    removed = client.delete(
+        f"/api/plugins/kanban/tasks/{first['id']}/tags/FEATURE%20alpha"
+    )
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["removed"] is True
+    detail = client.get(f"/api/plugins/kanban/tasks/{first['id']}").json()
+    assert [
+        t["normalized_name"] for t in detail["task"]["tags"]
+        if not t["normalized_name"].startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+    ] == ["bug"]
+
+    board = client.get("/api/plugins/kanban/board").json()
+    ready = next(c for c in board["columns"] if c["name"] == "ready")
+    card = next(t for t in ready["tasks"] if t["id"] == second["id"])
+    assert [
+        t["normalized_name"] for t in card["tags"]
+        if not t["normalized_name"].startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+    ] == ["feature alpha"]
+
+
+def test_dashboard_material_updates_refresh_ai_tags_and_audit_changes(client):
+    task = client.post(
+        "/api/plugins/kanban/tasks",
+        json={"title": "plain work"},
+    ).json()["task"]
+
+    response = client.patch(
+        f"/api/plugins/kanban/tasks/{task['id']}",
+        json={
+            "title": "Kanban AI tag bug",
+            "body": "Desktop UI regression needs tests",
+            "priority": 8,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    detail = client.get(f"/api/plugins/kanban/tasks/{task['id']}").json()
+    names = {t["normalized_name"] for t in detail["task"]["tags"]}
+    assert {
+        "ai:area kanban",
+        "ai:feature ai",
+        "ai:feature tags",
+        "ai:high priority",
+        "ai:kind bug",
+        "ai:needs tests",
+        "ai:surface desktop",
+    }.issubset(names)
+
+    ai_events = [
+        event for event in detail["events"]
+        if event["kind"] == "ai_tags_updated"
+    ]
+    assert ai_events
+    assert any((event["payload"] or {}).get("trigger") == "updated" for event in ai_events)
+
+
+def test_task_tag_rest_api_rejects_invalid_and_unknown_tasks(client):
+    task = client.post("/api/plugins/kanban/tasks", json={"title": "x"}).json()["task"]
+
+    empty = client.post(
+        f"/api/plugins/kanban/tasks/{task['id']}/tags",
+        json={"name": "   "},
+    )
+    assert empty.status_code == 400
+    assert "tag name" in empty.json()["detail"].lower()
+
+    control = client.post(
+        f"/api/plugins/kanban/tasks/{task['id']}/tags",
+        json={"name": "bad\nname"},
+    )
+    assert control.status_code == 400
+
+    missing = client.post(
+        "/api/plugins/kanban/tasks/t_missing/tags",
+        json={"name": "Feature"},
+    )
+    assert missing.status_code == 404
 
 
 def test_patch_board_sets_project_directory(client, tmp_path):

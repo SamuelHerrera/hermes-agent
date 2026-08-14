@@ -160,6 +160,7 @@ def _task_dict(
     task: kanban_db.Task,
     *,
     latest_summary: Optional[str] = None,
+    tags: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     d = asdict(task)
     # Add derived age metrics so the UI can colour stale cards without
@@ -173,8 +174,43 @@ def _task_dict(
     # ``task_runs.summary`` (the kanban-worker pattern) instead of
     # ``tasks.result``. ``None`` when no run has produced a summary yet.
     d["latest_summary"] = latest_summary
+    d["tags"] = tags or []
     # Keep body short on list endpoints; full body comes from /tasks/:id.
     return d
+
+
+def _tag_dict(tag: kanban_db.Tag) -> dict[str, Any]:
+    return {
+        "id": tag.id,
+        "name": tag.name,
+        "normalized_name": tag.normalized_name,
+        "created_at": tag.created_at,
+    }
+
+
+def _tags_by_task(conn: sqlite3.Connection, task_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    if not task_ids:
+        return {}
+    placeholders = ",".join("?" for _ in task_ids)
+    rows = conn.execute(
+        f"""
+        SELECT task_tags.task_id, tags.*
+          FROM task_tags
+          JOIN tags ON tags.id = task_tags.tag_id
+         WHERE task_tags.task_id IN ({placeholders})
+         ORDER BY tags.normalized_name ASC
+        """,
+        tuple(task_ids),
+    ).fetchall()
+    out: dict[str, list[dict[str, Any]]] = {tid: [] for tid in task_ids}
+    for row in rows:
+        out.setdefault(row["task_id"], []).append({
+            "id": int(row["id"]),
+            "name": row["name"],
+            "normalized_name": row["normalized_name"],
+            "created_at": int(row["created_at"]),
+        })
+    return out
 
 
 def _event_dict(event: kanban_db.Event) -> dict[str, Any]:
@@ -478,6 +514,7 @@ def get_board(
         # One pass over task_links joined with child status — cheaper than
         # N per-task queries and the plugin uses it to render "N/M".
         progress: dict[str, dict[str, int]] = {}
+        parents_satisfied: dict[str, bool] = {}
         for row in conn.execute(
             "SELECT l.parent_id AS pid, t.status AS cstatus "
             "FROM task_links l JOIN tasks t ON t.id = l.child_id"
@@ -486,6 +523,13 @@ def get_board(
             p["total"] += 1
             if row["cstatus"] == "done":
                 p["done"] += 1
+        for row in conn.execute(
+            "SELECT l.child_id AS cid, "
+            "SUM(CASE WHEN p.status NOT IN ('done', 'archived') THEN 1 ELSE 0 END) AS open_parents "
+            "FROM task_links l JOIN tasks p ON p.id = l.parent_id "
+            "GROUP BY l.child_id"
+        ).fetchall():
+            parents_satisfied[row["cid"]] = int(row["open_parents"] or 0) == 0
 
         # Diagnostics rollup for this board — see kanban_diagnostics.
         # We get the full structured list per task AND a compact
@@ -505,17 +549,20 @@ def get_board(
         # window-function query (avoids N+1 ``latest_summary`` calls
         # for boards with hundreds of tasks). Truncated to a card-size
         # preview here — the full text is available via /tasks/:id.
-        summary_map = kanban_db.latest_summaries(conn, [t.id for t in tasks])
+        task_ids = [t.id for t in tasks]
+        summary_map = kanban_db.latest_summaries(conn, task_ids)
+        tag_map = _tags_by_task(conn, task_ids)
 
         for t in tasks:
             full = summary_map.get(t.id)
             preview = (
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
-            d = _task_dict(t, latest_summary=preview)
+            d = _task_dict(t, latest_summary=preview, tags=tag_map.get(t.id, []))
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
+            d["parents_satisfied"] = parents_satisfied.get(t.id, True)
             diags = diagnostics_per_task.get(t.id)
             if diags:
                 # Full list goes into the payload so the drawer can render
@@ -593,7 +640,11 @@ def get_task(
         # operators can read the complete worker handoff without making
         # a second round-trip. Cards on /board carry a 200-char preview.
         full_summary = kanban_db.latest_summary(conn, task_id)
-        task_d = _task_dict(task, latest_summary=full_summary)
+        task_d = _task_dict(
+            task,
+            latest_summary=full_summary,
+            tags=[_tag_dict(tag) for tag in kanban_db.list_task_tags(conn, task_id)],
+        )
         links = _links_for(conn, task_id)
         child_ids = links["children"]
         child_summaries = kanban_db.latest_summaries(conn, child_ids)
@@ -722,6 +773,61 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
         return body
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Tags — list / attach / detach
+# ---------------------------------------------------------------------------
+
+class TagBody(BaseModel):
+    name: str
+
+
+@router.get("/tags")
+def list_tags(board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        return {"tags": [_tag_dict(tag) for tag in kanban_db.list_tags(conn)]}
+    finally:
+        conn.close()
+
+
+@router.post("/tasks/{task_id}/tags")
+def attach_task_tag(task_id: str, payload: TagBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if kanban_db.get_task(conn, task_id) is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+        tag = kanban_db.attach_tag_to_task(conn, task_id, payload.name)
+        return {
+            "tag": _tag_dict(tag),
+            "tags": [_tag_dict(t) for t in kanban_db.list_task_tags(conn, task_id)],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.delete("/tasks/{task_id}/tags/{tag_name}")
+def remove_task_tag(task_id: str, tag_name: str, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if kanban_db.get_task(conn, task_id) is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+        try:
+            removed = kanban_db.remove_tag_from_task(conn, task_id, tag_name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "removed": removed,
+            "tags": [_tag_dict(t) for t in kanban_db.list_task_tags(conn, task_id)],
+        }
     finally:
         conn.close()
 
@@ -1184,6 +1290,12 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     (task_id, json.dumps({"priority": int(payload.priority)}),
                      int(time.time())),
                 )
+                kanban_db.apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="updated",
+                    reason="task priority updated",
+                )
 
         # --- title / body -------------------------------------------------
         if payload.title is not None or payload.body is not None:
@@ -1205,6 +1317,12 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     "INSERT INTO task_events (task_id, kind, payload, created_at) "
                     "VALUES (?, 'edited', NULL, ?)",
                     (task_id, int(time.time())),
+                )
+                kanban_db.apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="updated",
+                    reason="task edited",
                 )
 
         updated = kanban_db.get_task(conn, task_id)
@@ -1370,6 +1488,12 @@ def _set_status_direct(
                 ),
                 int(time.time()),
             ),
+        )
+        kanban_db.apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task status updated",
         )
         if reopening_satisfied_parent:
             _invalidate_descendants_for_parent_reopen(
@@ -1572,6 +1696,12 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                             "VALUES (?, 'reprioritized', ?, ?)",
                             (tid, json.dumps({"priority": int(payload.priority)}),
                              int(time.time())),
+                        )
+                        kanban_db.apply_ai_task_tags(
+                            conn,
+                            tid,
+                            trigger="updated",
+                            reason="task priority updated",
                         )
                 if payload.clear_model_override or payload.model_override is not None:
                     new_model = (
@@ -2941,15 +3071,19 @@ def get_orchestration_settings():
     explicit_default = (kanban_cfg.get("default_assignee") or "").strip()
     auto_decompose = bool(kanban_cfg.get("auto_decompose", True))
     auto_promote_children = bool(kanban_cfg.get("auto_promote_children", True))
+    review_dispatch = bool(kanban_cfg.get("review_dispatch", True))
 
     # Resolve fallbacks the same way the decomposer does.
     resolved_orch = explicit_orch
     resolved_default = explicit_default
+    dispatch_default = ""
     try:
         from hermes_cli import profiles as profiles_mod
         active_default = profiles_mod.get_active_profile_name() or "default"
         if not resolved_orch or not profiles_mod.profile_exists(resolved_orch):
             resolved_orch = active_default
+        if explicit_default and profiles_mod.profile_exists(explicit_default):
+            dispatch_default = explicit_default
         if not resolved_default or not profiles_mod.profile_exists(resolved_default):
             resolved_default = active_default
     except Exception:
@@ -2958,12 +3092,18 @@ def get_orchestration_settings():
             resolved_orch = active_default
         if not resolved_default:
             resolved_default = active_default
+        # Match the dispatcher's degraded behavior: if profile lookup itself is
+        # unavailable, trust the operator's configured fallback and let spawn
+        # diagnostics sort out a genuinely missing profile later.
+        dispatch_default = explicit_default
 
     return {
         "orchestrator_profile": explicit_orch,
         "default_assignee": explicit_default,
         "auto_decompose": auto_decompose,
         "auto_promote_children": auto_promote_children,
+        "review_dispatch": review_dispatch,
+        "dispatch_default_assignee": dispatch_default,
         "resolved_orchestrator_profile": resolved_orch,
         "resolved_default_assignee": resolved_default,
         "active_profile": active_default,

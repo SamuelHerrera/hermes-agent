@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { KanbanCommentBody } from './comment-body'
 import {
   AttachmentsSection,
   buildTimelineItems,
@@ -8,7 +9,9 @@ import {
   DependenciesSection,
   TaskDetailHeaderControls,
   TaskDrawerShell,
+  TaskTagsSection,
   TimelineSection,
+  TitleSection,
   WorkerLogSection
 } from './drawer'
 import type { KanbanTaskDetail, WorkerLog } from './types'
@@ -39,6 +42,13 @@ const testKanbanText = {
   evtReprioritized: (priority: string) => `priority ${priority}`,
   evtScheduled: 'scheduled',
   evtSpecified: 'specified',
+  evtTagAttached: (name: string) => `tag added: ${name}`,
+  evtTagRemoved: (name: string) => `tag removed: ${name}`,
+  evtAiTagAttached: (name: string) => `AI tag added: ${name}`,
+  evtAiTagRemoved: (name: string) => `AI tag removed: ${name}`,
+  evtAiTagsUpdated: 'AI updated tags automatically',
+  evtAiTagsAdded: (names: string) => `added ${names}`,
+  evtAiTagsRemoved: (names: string) => `removed ${names}`,
   evtUnassigned: 'unassigned',
   evtUnblocked: (col: string) => `unblocked ${col}`,
   evtWorkerStarted: 'worker started',
@@ -48,7 +58,19 @@ const testKanbanText = {
   openAsSideSheet: 'Open as side sheet',
   requeueWithNote: 'Requeue with note',
   runs: (count: number) => `Runs · ${count}`,
+  save: 'Save',
   send: 'Send',
+  taskTitle: 'Title',
+  tags: 'Tags',
+  aiTagBadge: 'AI',
+  aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
+  noTags: 'No tags yet.',
+  tagName: 'Tag name',
+  addTag: 'Add tag',
+  existingTags: 'Existing tags',
+  addExistingTag: (name: string) => `Add existing tag ${name}`,
+  removeTag: (name: string) => `Remove tag ${name}`,
+  editTitle: 'Edit title',
   someone: 'someone',
   timeline: (count: number) => `Timeline (${count})`,
   timelineArchived: 'Archived',
@@ -82,6 +104,12 @@ vi.mock('./ui', async () => {
   }
 })
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+// jsdom does not exercise the OS clipboard; this covers the same paste-event
+// data path the composer uses when Electron delivers a clipboard image item.
 function pasteFile(target: HTMLElement, file: File) {
   fireEvent.paste(target, {
     clipboardData: {
@@ -89,6 +117,110 @@ function pasteFile(target: HTMLElement, file: File) {
     }
   })
 }
+
+describe('TitleSection', () => {
+  it('edits an existing task title through the same save path as the description', () => {
+    const onSave = vi.fn()
+
+    render(<TitleSection onSave={onSave} title="Original task title" />)
+
+    expect(screen.getByText('Original task title')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+
+    const input = screen.getByDisplayValue('Original task title') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'Updated task title' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onSave).toHaveBeenCalledWith('Updated task title')
+  })
+
+  it('does not save an empty title', () => {
+    const onSave = vi.fn()
+
+    render(<TitleSection onSave={onSave} title="Original task title" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByDisplayValue('Original task title'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+  })
+})
+
+describe('TaskTagsSection', () => {
+  it('renders the current tags and removes a selected tag', () => {
+    const onRemove = vi.fn()
+
+    render(
+      <TaskTagsSection
+        existingTags={[]}
+        onAdd={vi.fn()}
+        onRemove={onRemove}
+        pending={false}
+        tags={[{ id: 1, name: 'Frontend', normalized_name: 'frontend' }]}
+      />
+    )
+
+    expect(screen.getByText('Frontend')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag Frontend' }))
+
+    expect(onRemove).toHaveBeenCalledWith('Frontend')
+  })
+
+  it('marks AI-managed tags while keeping manual removal available', () => {
+    const onRemove = vi.fn()
+
+    render(
+      <TaskTagsSection
+        existingTags={[]}
+        onAdd={vi.fn()}
+        onRemove={onRemove}
+        pending={false}
+        tags={[{ id: 1, name: 'AI:Status Ready', normalized_name: 'ai:status ready' }]}
+      />
+    )
+
+    expect(screen.getByText('AI:Status Ready')).toBeTruthy()
+    expect(screen.getByText('AI')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag AI:Status Ready' }))
+
+    expect(onRemove).toHaveBeenCalledWith('AI:Status Ready')
+  })
+
+  it('lets users attach an existing tag that is not already on the task', () => {
+    const onAdd = vi.fn()
+
+    render(
+      <TaskTagsSection
+        existingTags={[
+          { id: 1, name: 'Backend', normalized_name: 'backend' },
+          { id: 2, name: 'Frontend', normalized_name: 'frontend' }
+        ]}
+        onAdd={onAdd}
+        onRemove={vi.fn()}
+        pending={false}
+        tags={[{ id: 1, name: 'Backend', normalized_name: 'backend' }]}
+      />
+    )
+
+    expect(screen.queryByRole('button', { name: 'Add existing tag Backend' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add existing tag Frontend' }))
+
+    expect(onAdd).toHaveBeenCalledWith('Frontend')
+  })
+
+  it('lets users create and attach a new tag name', () => {
+    const onAdd = vi.fn()
+
+    render(<TaskTagsSection existingTags={[]} onAdd={onAdd} onRemove={vi.fn()} pending={false} tags={[]} />)
+
+    fireEvent.change(screen.getByLabelText('Tag name'), { target: { value: 'release train' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add tag' }))
+
+    expect(onAdd).toHaveBeenCalledWith('release train')
+    expect((screen.getByLabelText('Tag name') as HTMLInputElement).value).toBe('')
+  })
+})
 
 describe('TaskDrawerShell layout', () => {
   it('renders a resizable side sheet with a dialog toggle next to close', () => {
@@ -122,7 +254,52 @@ describe('TaskDrawerShell layout', () => {
 })
 
 describe('CommentComposer pasted images', () => {
-  it('uploads pasted images as previews without submitting the comment until the user clicks Comment', async () => {
+  it('uses the resolved preview image source while submitted comment markdown still renders as an attachment image', async () => {
+    vi.stubGlobal('hermesDesktop', {
+      getConnection: vi.fn().mockResolvedValue({
+        authMode: 'token',
+        baseUrl: 'http://127.0.0.1:8765',
+        token: 'preview-token'
+      })
+    })
+    const onPasteImages = vi.fn().mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
+    const onSubmit = vi.fn()
+
+    render(<CommentComposer onPasteImages={onPasteImages} onSubmit={onSubmit} pending={false} />)
+
+    const textarea = screen.getByPlaceholderText('Add a comment…')
+    fireEvent.change(textarea, { target: { value: 'context' } })
+    pasteFile(textarea, new File(['png-bytes'], 'clip.png', { type: 'image/png' }))
+
+    const preview = await screen.findByRole('img', { name: 'clip.png' })
+    await waitFor(() =>
+      expect(preview.getAttribute('src')).toBe(
+        'http://127.0.0.1:8765/api/plugins/kanban/attachments/7?token=preview-token'
+      )
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+
+    const submittedMarkdown = 'context\n\n![clip.png](/api/plugins/kanban/attachments/7)'
+    expect(onSubmit).toHaveBeenCalledWith(submittedMarkdown)
+
+    render(<KanbanCommentBody body={submittedMarkdown} />)
+    const postedImage = screen.getAllByRole('img', { name: 'clip.png' }).at(-1) as HTMLImageElement
+    await waitFor(() =>
+      expect(postedImage.getAttribute('src')).toBe(
+        'http://127.0.0.1:8765/api/plugins/kanban/attachments/7?token=preview-token'
+      )
+    )
+  })
+
+  it('uploads pasted images as valid resolved previews without submitting the comment until the user clicks Comment', async () => {
+    vi.stubGlobal('hermesDesktop', {
+      getConnection: vi.fn().mockResolvedValue({
+        authMode: 'token',
+        baseUrl: 'http://127.0.0.1:8765',
+        token: 'preview-token'
+      })
+    })
     const onPasteImages = vi.fn().mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
     const onSubmit = vi.fn()
 
@@ -136,7 +313,11 @@ describe('CommentComposer pasted images', () => {
     expect(onSubmit).not.toHaveBeenCalled()
 
     const preview = await screen.findByRole('img', { name: 'clip.png' })
-    expect(preview.getAttribute('src')).toBe('/api/plugins/kanban/attachments/7')
+    await waitFor(() =>
+      expect(preview.getAttribute('src')).toBe(
+        'http://127.0.0.1:8765/api/plugins/kanban/attachments/7?token=preview-token'
+      )
+    )
     expect((textarea as HTMLTextAreaElement).value).toBe('context')
 
     fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
@@ -299,6 +480,51 @@ describe('buildTimelineItems', () => {
     expect(items.at(-1)?.children?.[0].detail).not.toContain('note=')
     expect(items.map(item => item.label)).toContain('default run · timed_out')
     expect(items.find(item => item.id === 'run-9')).toMatchObject({ tone: 'error' })
+  })
+
+  it('shows AI-managed tag changes as readable timeline activity', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [
+        {
+          id: 1,
+          created_at: 1000,
+          kind: 'ai_tags_updated',
+          payload: {
+            added: ['AI:Status Ready', 'AI:Feature Kanban'],
+            reason: 'task status updated',
+            removed: ['AI:Status Todo'],
+            source: 'ai',
+            trigger: 'status'
+          }
+        },
+        {
+          id: 2,
+          created_at: 1001,
+          kind: 'tag_attached',
+          payload: { source: 'ai', tag: { name: 'AI:Status Ready', normalized_name: 'ai:status ready' } }
+        },
+        {
+          id: 3,
+          created_at: 1002,
+          kind: 'tag_removed',
+          payload: { tag: { name: 'Manual Review', normalized_name: 'manual review' } }
+        }
+      ],
+      links: { children: [], parents: [] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'ready', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const items = buildTimelineItems(detail, undefined, testKanbanText as never)
+
+    expect(items.map(item => item.label)).toContain('AI updated tags automatically')
+    expect(items.find(item => item.id === 'event-1')?.detail).toBe(
+      'added AI:Status Ready and AI:Feature Kanban · removed AI:Status Todo'
+    )
+    expect(items.map(item => item.label)).toContain('AI tag added: AI:Status Ready')
+    expect(items.map(item => item.label)).toContain('tag removed: Manual Review')
   })
 
   it('keeps raw worker logs out of the timeline view', () => {

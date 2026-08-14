@@ -40,7 +40,9 @@ export function useOrchestration() {
 /** The dispatcher's configured fallback for unassigned ready cards
  *  (`kanban.default_assignee`) — '' when unset, i.e. unassigned never runs. */
 export function useDefaultAssignee(): string {
-  return useOrchestration()?.default_assignee.trim() ?? ''
+  const orchestration = useOrchestration()
+
+  return (orchestration?.dispatch_default_assignee ?? orchestration?.default_assignee ?? '').trim()
 }
 
 // System-owned drop targets — you can drag a card OUT of these, never INTO
@@ -72,7 +74,8 @@ export function errText(err: unknown): string {
 }
 
 /** Backend timestamps are epoch SECONDS; the canonical formatter takes ms. */
-export const ago = (seconds?: null | number, nowMs = Date.now()): null | string => (seconds ? relativeTime(seconds * 1000, nowMs) : null)
+export const ago = (seconds?: null | number, nowMs = Date.now()): null | string =>
+  seconds ? relativeTime(seconds * 1000, nowMs) : null
 
 const ELAPSED_SUFFIX = { day: 'd', hour: 'h', minute: 'm', second: 's' } as const
 
@@ -114,15 +117,37 @@ function useTicking(start?: null | number): null | string {
 
 export type ArcState = 'queued' | 'running' | 'stale'
 
+export interface ActivitySettings {
+  /** Explicit, valid kanban.default_assignee. Empty means unassigned ready/todo
+   *  cards are intentionally parked and must not look active. */
+  fallbackAssignee?: string
+  /** Gateway auto-decomposer gate; unassigned triage is active only while on. */
+  autoDecompose?: boolean
+  /** Review dispatch gate; review cards may be human-only when off. */
+  reviewDispatch?: boolean
+}
+
 /**
  * The card's machine-activity state. The board looked dead between "I made a
  * card" and "it's suddenly running" — this narrates the in-between. Only the
- * working states animate the border arc (see kanban.css): running = brisk
- * sweep, no-heartbeat = amber crawl. `queued` (triage / assigned-ready /
- * review) renders as the footer's named-agent chip — motion means work.
+ * active states animate the border arc (see kanban.css): running = brisk sweep,
+ * queued = quieter sweep, no-heartbeat = amber crawl. The queued set mirrors the
+ * dispatcher/decomposer gates so parked unassigned cards stay visually idle.
  */
-export function arcState(task: KanbanTask, fallbackAssignee: string): ArcState | null {
+export function arcState(task: KanbanTask, settings: string | ActivitySettings): ArcState | null {
+  const normalized = typeof settings === 'string' ? { fallbackAssignee: settings } : settings
+  const fallbackAssignee = normalized.fallbackAssignee?.trim() ?? ''
+  const autoDecompose = normalized.autoDecompose ?? true
+  const reviewDispatch = normalized.reviewDispatch ?? true
+
   if (task.status === 'running') {
+    const hasCurrentRun = task.current_run_id !== null && task.current_run_id !== undefined
+    const legacyWithoutRunPointer = !Object.hasOwn(task, 'current_run_id')
+
+    if (!hasCurrentRun && !legacyWithoutRunPointer) {
+      return null
+    }
+
     // No heartbeat for 2+ min = the worker may have died; the dispatcher will
     // reclaim it, but be honest instead of sweeping green forever.
     const stale = task.last_heartbeat_at ? Date.now() / 1000 - task.last_heartbeat_at > 120 : false
@@ -130,10 +155,13 @@ export function arcState(task: KanbanTask, fallbackAssignee: string): ArcState |
     return stale ? 'stale' : 'running'
   }
 
+  const routed = Boolean(task.assignee || fallbackAssignee)
+
   const queued =
-    task.status === 'triage' ||
-    task.status === 'review' ||
-    (task.status === 'ready' && Boolean(task.assignee || fallbackAssignee))
+    (task.status === 'triage' && autoDecompose) ||
+    (task.status === 'review' && reviewDispatch && Boolean(task.assignee)) ||
+    (task.status === 'ready' && routed) ||
+    (task.status === 'todo' && Boolean(task.parents_satisfied) && routed)
 
   return queued ? 'queued' : null
 }
@@ -255,7 +283,11 @@ export function Section({
             onClick={() => setOpen(value => !value)}
             type="button"
           >
-            <Codicon className="shrink-0 text-(--ui-text-quaternary)" name={open ? 'chevron-down' : 'chevron-right'} size="0.75rem" />
+            <Codicon
+              className="shrink-0 text-(--ui-text-quaternary)"
+              name={open ? 'chevron-down' : 'chevron-right'}
+              size="0.75rem"
+            />
             <span className={FIELD_LABEL}>{label}</span>
           </button>
         ) : (

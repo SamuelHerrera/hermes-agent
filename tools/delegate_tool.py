@@ -1677,6 +1677,7 @@ def _build_child_agent(
     parent_sid = getattr(parent_agent, "session_id", None)
     if parent_sid and getattr(child, "_session_init_model_config", None) is not None:
         child._session_init_model_config["_delegate_from"] = parent_sid
+        child._session_init_model_config["_delegate_goal"] = goal
 
     # Share a credential pool with the child when possible so subagents can
     # rotate credentials on rate limits instead of getting pinned to one key.
@@ -1698,6 +1699,14 @@ def _build_child_agent(
     # Announce the spawn immediately — the child may sit in a queue
     # for seconds if max_concurrent_children is saturated, so the TUI
     # wants a node in the tree before run starts.
+    session_db = getattr(parent_agent, "_session_db", None)
+    child_sid = getattr(child, "session_id", None)
+    if session_db is not None and child_sid:
+        try:
+            session_db.set_session_title(child_sid, f"Subagent: {goal}")
+        except Exception:
+            logger.debug("subagent session title seed failed", exc_info=True)
+
     if child_progress_cb:
         try:
             child_progress_cb("subagent.spawn_requested", preview=goal)

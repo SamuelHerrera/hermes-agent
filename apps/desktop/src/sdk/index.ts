@@ -26,7 +26,9 @@ import { getLogs, getStatus } from '@/hermes'
 import { $gateway } from '@/store/gateway'
 import { notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile } from '@/store/profile'
+import { openRouteTile as openRouteTileStore } from '@/store/route-tiles'
 import { $activeSessionId, $currentCwd, $currentModel, $gatewayState } from '@/store/session'
+import type { TileDock } from '@/store/session-states'
 import { runGatewayRestart } from '@/store/system-actions'
 
 // -- state: readonly views over the app's live atoms -------------------------
@@ -86,6 +88,9 @@ export const host = {
   navigate: (path: string) => {
     window.location.hash = path.startsWith('#') ? path : `#${path}`
   },
+
+  /** Open a route as a movable layout-tree tab instead of replacing the main workspace page. */
+  openRouteTile: (path: string, dir: TileDock = 'center') => openRouteTileStore(path, dir),
 
   /** HEAR the gateway stream (message deltas, session lifecycle, tool
    *  activity, …) by event type — `'*'` for everything. Returns a disposer.

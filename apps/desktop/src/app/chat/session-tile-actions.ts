@@ -65,6 +65,8 @@ import type { ComposerScope } from './composer/scope'
  * never clobber a real title with a raw message preview.
  */
 export function listTileSessionRow(deps: {
+  gitBranch?: string
+  gitRepoRoot?: string
   cwd?: string
   model?: string
   preview: string
@@ -79,7 +81,11 @@ export function listTileSessionRow(deps: {
   }
 
   upsertOptimisticSession(
-    { info: { cwd: deps.cwd, model: deps.model }, session_id: deps.runtimeId, stored_session_id: deps.storedSessionId },
+    {
+      info: { branch: deps.gitBranch, cwd: deps.cwd, git_repo_root: deps.gitRepoRoot, model: deps.model },
+      session_id: deps.runtimeId,
+      stored_session_id: deps.storedSessionId
+    },
     deps.storedSessionId,
     null,
     preview
@@ -142,6 +148,8 @@ export function useSessionTileActions({ runtimeId, scope, storedSessionId }: Ses
 
     listTileSessionRow({
       cwd: state?.cwd,
+      gitBranch: state?.branch,
+      gitRepoRoot: state?.gitRepoRoot,
       model: state?.model,
       preview,
       runtimeId,
