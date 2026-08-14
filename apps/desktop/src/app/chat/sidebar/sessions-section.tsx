@@ -180,6 +180,11 @@ interface SidebarSessionsSectionProps {
   // pinned, messaging groups, and the project overview, where the order isn't
   // strictly by recency so a bucket would be misleading.
   grouping?: 'date' | 'none' | 'status'
+  // Inbox style: render every flat session row as a three-line card (project ·
+  // age / title / model · size). A render variant that composes with whichever
+  // grouping is active — the flat recents list opts in; dense tree surfaces
+  // (pinned, projects, messaging) keep the one-line row.
+  card?: boolean
 }
 
 export function SidebarSessionsSection({
@@ -221,7 +226,8 @@ export function SidebarSessionsSection({
   projectBackRow,
   dndSensors,
   showProfileTags = false,
-  grouping = 'none'
+  grouping = 'none',
+  card = false
 }: SidebarSessionsSectionProps) {
   const { t } = useI18n()
   const dividerLabels = t.sidebar.dateDivider
@@ -283,6 +289,7 @@ export function SidebarSessionsSection({
         branchCollapsed,
         branchStem,
         hasBranchChildren,
+        card,
         isPinned: pinned,
         isSelected: session.id === activeSessionId,
         onArchive: () => onArchiveSession(session.id),
@@ -307,6 +314,7 @@ export function SidebarSessionsSection({
     },
     [
       activeSessionId,
+      card,
       onArchiveSession,
       onBranchSession,
       onDeleteSession,
@@ -498,6 +506,7 @@ export function SidebarSessionsSection({
     const virtual = (
       <VirtualSessionList
         activeSessionId={activeSessionId}
+        card={card}
         className={contentClassName}
         dividerAction={dividerAction}
         onArchiveSession={onArchiveSession}
@@ -531,8 +540,10 @@ export function SidebarSessionsSection({
   }
 
   // The virtualizer owns its own scroller, so suppress the wrapper's overflow
-  // to avoid a double scroll container.
-  const resolvedContentClassName = cn(contentClassName, flatVirtualized && 'overflow-y-visible')
+  // to avoid a double scroll container. Both axes: `overflow-y-visible` next
+  // to the inherited `overflow-x-hidden` computes to `auto` (CSS spec), which
+  // kept a phantom 4px scrollbar gutter and cut every row short on the right.
+  const resolvedContentClassName = cn(contentClassName, flatVirtualized && 'overflow-visible')
 
   return (
     <SidebarGroup className={rootClassName}>
