@@ -13,7 +13,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
-import { sessionTitle } from '@/lib/chat-runtime'
+import { isSubagentSession, sessionTitle } from '@/lib/chat-runtime'
 import { compactNumber } from '@/lib/format'
 import { triggerHaptic } from '@/lib/haptics'
 import { middleClickHandlers } from '@/lib/middle-click'
@@ -29,7 +29,7 @@ import { promoteSessionTile } from '@/store/session-states'
 import { sessionCostUsd } from '@/store/sidebar-archive'
 import { $subagentsBySession, type SubagentProgress } from '@/store/subagents'
 
-import { SessionStatusDot } from '../session-status-dot'
+import { SessionProjectDot, SessionStatusIcon } from '../session-status-dot'
 
 import {
   SidebarRowBody,
@@ -228,6 +228,22 @@ function SidebarSessionRowImpl({
           // switched on leaves the slot to the kebab alone; hover changes what
           // you can see in it, never how wide it is.
           <div className="relative z-2 flex items-center justify-end gap-1" data-row-actions>
+            {hasBranchChildren ? (
+              <button
+                aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
+                className="flex size-4 shrink-0 items-center justify-center rounded-[3px] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
+                onClick={event => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  triggerHaptic('selection')
+                  onToggleBranch?.()
+                }}
+                type="button"
+              >
+                <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
+              </button>
+            ) : null}
+            {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
             {trailing.map(({ key, node }, index) => (
               <span
                 className={
@@ -357,36 +373,19 @@ function SidebarSessionRowImpl({
             openSession(session.id, () => undefined, 'tab')
           }}
         >
-          {hasBranchChildren ? (
-            <button
-              aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
-              className="-ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-[3px] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
-              data-row-actions
-              onClick={event => {
-                event.preventDefault()
-                event.stopPropagation()
-                triggerHaptic('selection')
-                onToggleBranch?.()
-              }}
-              type="button"
-            >
-              <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
-            </button>
-          ) : null}
           {reorderable ? (
             <SidebarRowGrab ariaLabel={handleLabel} dragging={dragging} dragHandleProps={dragHandleProps}>
               {lead ?? (
-                <SessionStatusDot
+                <SessionProjectDot
                   branchStem={branchStem}
                   className="transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0"
                   session={session}
-                  storedSessionId={session.id}
                 />
               )}
             </SidebarRowGrab>
           ) : (
             <SidebarRowLead className="overflow-hidden">
-              {lead ?? <SessionStatusDot branchStem={branchStem} session={session} storedSessionId={session.id} />}
+              {lead ?? <SessionProjectDot branchStem={branchStem} session={session} />}
             </SidebarRowLead>
           )}
           {handoffSource && handoffLabel ? (

@@ -3,7 +3,6 @@ import { atom, computed } from 'nanostores'
 import type { CSSProperties, ReactElement, PointerEvent as ReactPointerEvent } from 'react'
 
 import { SessionDraftTitle } from '@/app/chat/session-draft-title'
-import { SessionStatusDot } from '@/app/chat/session-status-dot'
 import { PALETTE_AREA, type PaletteContribution, paletteToggle } from '@/app/command-palette/contrib'
 import { type StatusbarItem } from '@/app/shell/statusbar-controls'
 import { IdleMount } from '@/components/idle-mount'
@@ -72,7 +71,7 @@ import {
   watchSessionTiles,
   WorkspaceTabMenu
 } from '../chat/session-tile'
-import { SubagentSessionIcon } from '../chat/subagent-session-icon'
+import { SessionTabLead } from '../chat/subagent-session-icon'
 import { HudShell } from '../hud/hud-shell'
 import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
 import { $workspaceIsPage } from '../routes'
@@ -124,14 +123,6 @@ function storedRowForPaneTitle(selected: string | null) {
   )
 }
 
-function SessionTabLead({ selected, stored }: { selected: null | string; stored: ReturnType<typeof storedRowForPaneTitle> }) {
-  return (
-    <>
-      <SessionStatusDot session={stored} storedSessionId={selected} />
-      <SubagentSessionIcon className="ml-1" session={stored} storedSessionId={selected} />
-    </>
-  )
-}
 
 // Boot-hidden panes mount behind display:none (instant-toggle contract) — defer
 // them to idle so they're off the first-paint path, warm before reveal.
@@ -467,11 +458,10 @@ const syncWorkspaceTitle = () => {
     // that. Keeping it here would re-register the pane on every keystroke.
     title: stored ? storedSessionTitle(stored) : NEW_SESSION_TITLE,
     data: {
-      // The tab's status dot — the SAME primitive the sidebar row and session
-      // tiles render, so the main tab never disagrees with its sidebar row. A
-      // fresh draft has no session to key by, which IS its status: the dot
-      // resolves to `draft` and marks the tab rather than leaving a hole.
-      tabLead: () => <SessionTabLead selected={selected} stored={stored} />,
+      // One tab lead: subagents swap robot -> spinner while running; other
+      // sessions use the normal status/project-color treatment. A fresh draft
+      // has no session to key by, so the status treatment marks it as a draft.
+      tabLead: () => <SessionTabLead session={stored} storedSessionId={selected} />,
       // A draft's name lives in its composer, not in any session row, so the
       // label subscribes to it directly — typing renames the tab without
       // re-registering the pane.

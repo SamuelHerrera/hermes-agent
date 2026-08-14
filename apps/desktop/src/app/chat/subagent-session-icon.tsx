@@ -6,12 +6,29 @@ import { cn } from '@/lib/utils'
 import { $sessionDotStateById, showsRunningArc } from '@/store/session-dot-state'
 import type { SessionInfo } from '@/types/hermes'
 
+import { SessionStatusDot } from './session-status-dot'
+
 export interface SubagentSessionIconProps {
   className?: string
   session: null | Pick<SessionInfo, 'delegate_parent_session_id' | 'source'> | undefined
   size?: number | string
   storedSessionId: null | string
   tooltip?: boolean
+}
+
+export interface SessionTabLeadProps {
+  session: null | SessionInfo | undefined
+  storedSessionId: null | string
+}
+
+/** A tab has one leading glyph: subagent identity owns the slot when present;
+ * every other session uses the normal state/project-color treatment. */
+export function SessionTabLead({ session, storedSessionId }: SessionTabLeadProps) {
+  return isSubagentSession(session) ? (
+    <SubagentSessionIcon session={session} storedSessionId={storedSessionId} />
+  ) : (
+    <SessionStatusDot session={session} storedSessionId={storedSessionId} />
+  )
 }
 
 /** Secondary subagent identity glyph. While the subagent's own turn is running,

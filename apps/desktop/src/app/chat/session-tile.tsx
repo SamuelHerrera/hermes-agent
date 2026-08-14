@@ -64,11 +64,10 @@ import { useComposerActions } from './hooks/use-composer-actions'
 import { paneMirror } from './pane-mirror'
 import { SessionDraftTitle } from './session-draft-title'
 import { startSessionDrag } from './session-drag'
-import { SessionStatusDot } from './session-status-dot'
 import { useSessionTileActions } from './session-tile-actions'
 import { type SessionView, SessionViewProvider } from './session-view'
 import { SessionContextMenu } from './sidebar/session-actions-menu'
-import { SubagentSessionIcon } from './subagent-session-icon'
+import { SessionTabLead } from './subagent-session-icon'
 import { lastVisibleMessageIsUser } from './thread-loading'
 
 import { ChatView } from '.'
@@ -597,19 +596,12 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   before: t => t.before,
   minWidth: '20rem',
   title: tileTitle,
-  // The tab's status dot — the SAME primitive the sidebar row renders, keyed by
-  // the stored id, so a session's status/color can never disagree between the
-  // two surfaces. Self-subscribing (live state + resolved color), so the strip
-  // needn't re-sync when it changes.
+  // One self-subscribing tab lead: subagents swap robot -> spinner while
+  // running; other sessions use the normal state/project-color treatment.
   tabLead: storedSessionId => {
     const stored = tileStoredRow(storedSessionId)
 
-    return (
-      <>
-        <SessionStatusDot session={stored} storedSessionId={storedSessionId} />
-        <SubagentSessionIcon className="ml-1" session={stored} storedSessionId={storedSessionId} />
-      </>
-    )
+    return <SessionTabLead session={stored} storedSessionId={storedSessionId} />
   },
   // Until the first turn lists a row there is no title to register, so the tab
   // takes its name from the composer instead — live, without re-registering.

@@ -8,6 +8,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
 import type * as ComposerStatusStore from '@/store/composer-status'
 import type * as SessionStore from '@/store/session'
+import { setSessionColorOverride } from '@/store/session-color'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 import type * as SessionStatesStore from '@/store/session-states'
 import type * as WindowsStore from '@/store/windows'
@@ -157,7 +158,10 @@ const renderRow = (session: SessionInfo) =>
 // the wiring rather than the predicate — the running cue has gone missing before.
 describe('SidebarSessionRow running indicator', () => {
   afterEach(() => {
-    clearAllSessionStates()
+    act(() => {
+      clearAllSessionStates()
+      setSessionColorOverride('s1', null)
+    })
   })
 
   const arc = (container: HTMLElement) => container.querySelector('.arc-row')
@@ -169,13 +173,31 @@ describe('SidebarSessionRow running indicator', () => {
     expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeNull()
   })
 
-  it('does not paint the removed border arc while the session is running', () => {
+  it('keeps the project dot on the left and shows running status with a tooltip on the right', () => {
+    setSessionColorOverride('s1', '#2f81f7')
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
     const { container } = renderRow(makeSession({ title: 'Running' }))
+    const spinner = container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+    const lead = container.querySelector<HTMLElement>('[data-session-project-dot]')
 
     expect(arc(container)).toBeNull()
-    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeTruthy()
+    expect(lead).toBeTruthy()
+    expect(lead?.querySelector('.rounded-full')).toBeTruthy()
+    expect(lead?.querySelector<HTMLElement>('.rounded-full')?.style.backgroundColor).toBe('rgb(47, 129, 247)')
+    expect(lead?.querySelector('.codicon-loading')).toBeNull()
+    expect(spinner).toBeTruthy()
+    expect(spinner?.closest('[data-row-actions]')).toBeTruthy()
+    expect(tipTrigger(spinner as HTMLElement)).toBeTruthy()
+  })
+
+  it('suppresses transient status for an archived session', () => {
+    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+
+    const { container } = renderRow(makeSession({ archived: true, title: 'Archived' }))
+
+    expect(container.querySelector('.codicon-archive')).toBeTruthy()
+    expect(container.querySelector('[data-session-status]')).toBeNull()
   })
 
   it('swaps the subagent robot glyph to the loading glyph while its turn is running', () => {
@@ -184,7 +206,7 @@ describe('SidebarSessionRow running indicator', () => {
     const { container } = renderRow(makeSession({ delegate_parent_session_id: 'parent', title: 'Review diff' }))
 
     expect(container.querySelector('.codicon-robot')).toBeNull()
-    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(2)
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
   })
 
   // The row owns its status subscription so a turn starting repaints that row
@@ -234,6 +256,32 @@ describe('SidebarSessionRow', () => {
 
     const kebab = screen.getByRole('button', { name: 'Session actions' })
     expect(tipTrigger(kebab)).toBeNull()
+  })
+
+  it('keeps the lead icon aligned by putting the child-chat disclosure in the trailing actions', () => {
+    const { container } = render(
+      <SidebarSessionRow
+        hasBranchChildren
+        isPinned={false}
+        isSelected={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        onToggleBranch={noop}
+        session={makeSession({ title: 'Parent chat' })}
+      />
+    )
+
+    const rowBody = screen.getByText('Parent chat').closest('button')
+    const toggle = screen.getByRole('button', { name: 'Collapse child chats' })
+    const trailingActions = toggle.closest('[data-row-actions]')
+
+    expect(rowBody?.querySelector('[data-session-project-dot]')).toBeTruthy()
+    expect(rowBody?.contains(toggle)).toBe(false)
+    expect(trailingActions).toBeTruthy()
+    expect(trailingActions).not.toBe(toggle)
+    expect(container.querySelectorAll('[data-session-project-dot]')).toHaveLength(1)
   })
 
   it('does not render a handoff avatar for a locally-started session', () => {
