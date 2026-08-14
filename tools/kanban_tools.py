@@ -486,6 +486,7 @@ def _task_summary_dict(kb, conn, task) -> dict[str, Any]:
     """Compact task shape for board-listing tools."""
     parents = kb.parent_ids(conn, task.id)
     children = kb.child_ids(conn, task.id)
+    tags = [_tag_to_dict(tag) for tag in kb.list_task_tags(conn, task.id)]
     return {
         "id": task.id,
         "title": task.title,
@@ -507,6 +508,16 @@ def _task_summary_dict(kb, conn, task) -> dict[str, Any]:
         "children": children,
         "parent_count": len(parents),
         "child_count": len(children),
+        "tags": tags,
+    }
+
+
+def _tag_to_dict(tag) -> dict[str, Any]:
+    return {
+        "id": tag.id,
+        "name": tag.name,
+        "normalized_name": tag.normalized_name,
+        "created_at": tag.created_at,
     }
 
 
@@ -549,6 +560,7 @@ def _handle_show(args: dict, **kw) -> str:
                     "current_run_id": t.current_run_id,
                     "model_override": t.model_override,
                     "provider_override": t.provider_override,
+                    "tags": [_tag_to_dict(tag) for tag in kb.list_task_tags(conn, t.id)],
                 }
 
             def _run_dict(r):
@@ -1115,6 +1127,92 @@ def _handle_comment(args: dict, **kw) -> str:
         return tool_error(f"kanban_comment: {e}")
 
 
+def _handle_tags(args: dict, **kw) -> str:
+    """List reusable tags on the active board."""
+    board = args.get("board")
+    try:
+        kb, conn = _connect(board=board)
+        try:
+            return json.dumps({"tags": [_tag_to_dict(tag) for tag in kb.list_tags(conn)]})
+        finally:
+            conn.close()
+    except ValueError as e:
+        return tool_error(f"kanban_tags: {e}")
+    except Exception as e:
+        logger.exception("kanban_tags failed")
+        return tool_error(f"kanban_tags: {e}")
+
+
+def _handle_tag_add(args: dict, **kw) -> str:
+    """Create/reuse a tag and attach it to a task."""
+    delegated_err = _reject_delegated_child_mutation("kanban_tag_add")
+    if delegated_err:
+        return delegated_err
+    tid = _default_task_id(args.get("task_id"))
+    if not tid:
+        return tool_error("task_id is required (or set HERMES_KANBAN_TASK in the env)")
+    ownership_err = _enforce_worker_task_ownership(tid)
+    if ownership_err:
+        return ownership_err
+    name = args.get("name")
+    if not name or not str(name).strip():
+        return tool_error("name is required")
+    board = args.get("board")
+    try:
+        kb, conn = _connect(board=board)
+        try:
+            if kb.get_task(conn, tid) is None:
+                return tool_error(f"task {tid} not found")
+            tag = kb.attach_tag_to_task(conn, tid, str(name))
+            return _ok(
+                task_id=tid,
+                tag=_tag_to_dict(tag),
+                tags=[_tag_to_dict(t) for t in kb.list_task_tags(conn, tid)],
+            )
+        finally:
+            conn.close()
+    except ValueError as e:
+        return tool_error(f"kanban_tag_add: {e}")
+    except Exception as e:
+        logger.exception("kanban_tag_add failed")
+        return tool_error(f"kanban_tag_add: {e}")
+
+
+def _handle_tag_remove(args: dict, **kw) -> str:
+    """Remove a tag from a task by name."""
+    delegated_err = _reject_delegated_child_mutation("kanban_tag_remove")
+    if delegated_err:
+        return delegated_err
+    tid = _default_task_id(args.get("task_id"))
+    if not tid:
+        return tool_error("task_id is required (or set HERMES_KANBAN_TASK in the env)")
+    ownership_err = _enforce_worker_task_ownership(tid)
+    if ownership_err:
+        return ownership_err
+    name = args.get("name")
+    if not name or not str(name).strip():
+        return tool_error("name is required")
+    board = args.get("board")
+    try:
+        kb, conn = _connect(board=board)
+        try:
+            if kb.get_task(conn, tid) is None:
+                return tool_error(f"task {tid} not found")
+            removed = kb.remove_tag_from_task(conn, tid, str(name))
+            return _ok(
+                task_id=tid,
+                removed=removed,
+                tags=[_tag_to_dict(t) for t in kb.list_task_tags(conn, tid)],
+            )
+        finally:
+            conn.close()
+    except ValueError as e:
+        return tool_error(f"kanban_tag_remove: {e}")
+    except Exception as e:
+        logger.exception("kanban_tag_remove failed")
+        return tool_error(f"kanban_tag_remove: {e}")
+
+
 def _handle_attach(args: dict, **kw) -> str:
     """Attach an inline (base64) file to a task.
 
@@ -1556,9 +1654,12 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
                 return False  # CLI / cron / test — no persistent channel
             platform = "tui"
             chat_id = session_key
+        is_gateway_session = platform != "tui"
+        chat_type = get_session_env("HERMES_SESSION_CHAT_TYPE", "") or None
+        delivery_mode = "notify+wake" if is_gateway_session else None
         thread_id = get_session_env("HERMES_SESSION_THREAD_ID", "") or None
         user_id = get_session_env("HERMES_SESSION_USER_ID", "") or None
-        chat_type = get_session_env("HERMES_SESSION_CHAT_TYPE", "") or None
+        user_id_alt = get_session_env("HERMES_SESSION_USER_ID_ALT", "") or None
         message_id = get_session_env("HERMES_SESSION_MESSAGE_ID", "") or ""
         notifier_profile = (
             get_session_env("HERMES_SESSION_PROFILE", "")
@@ -1591,9 +1692,10 @@ def _maybe_auto_subscribe(conn: Any, task_id: str) -> bool:
         _kb.add_notify_sub(
             conn, task_id=task_id,
             platform=platform, chat_id=chat_id,
+            thread_id=thread_id, user_id=user_id, user_id_alt=user_id_alt,
             chat_type=chat_type,
-            thread_id=thread_id, user_id=user_id,
             notifier_profile=notifier_profile,
+            delivery_mode=delivery_mode,
             delivery_metadata=delivery_metadata or None,
         )
         return True
@@ -1754,6 +1856,47 @@ KANBAN_LIST_SCHEMA = {
             "board": _board_schema_prop(),
         },
         "required": [],
+    },
+}
+
+KANBAN_TAGS_SCHEMA = {
+    "name": "kanban_tags",
+    "description": "List reusable Kanban task tags on the active board.",
+    "parameters": {
+        "type": "object",
+        "properties": {"board": _board_schema_prop()},
+        "required": [],
+    },
+}
+
+KANBAN_TAG_ADD_SCHEMA = {
+    "name": "kanban_tag_add",
+    "description": (
+        "Create or reuse a normalized Kanban tag and attach it to a task. "
+        "Duplicate spellings/case normalize to one reusable tag record."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string", "description": _DESC_TASK_ID_DEFAULT},
+            "name": {"type": "string", "description": "Tag name to attach."},
+            "board": _board_schema_prop(),
+        },
+        "required": ["name"],
+    },
+}
+
+KANBAN_TAG_REMOVE_SCHEMA = {
+    "name": "kanban_tag_remove",
+    "description": "Remove a tag from a Kanban task by name.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string", "description": _DESC_TASK_ID_DEFAULT},
+            "name": {"type": "string", "description": "Tag name to remove."},
+            "board": _board_schema_prop(),
+        },
+        "required": ["name"],
     },
 }
 
@@ -2419,6 +2562,33 @@ registry.register(
     handler=_handle_comment,
     check_fn=_check_kanban_mode,
     emoji="💬",
+)
+
+registry.register(
+    name="kanban_tags",
+    toolset="kanban",
+    schema=KANBAN_TAGS_SCHEMA,
+    handler=_handle_tags,
+    check_fn=_check_kanban_mode,
+    emoji="🏷",
+)
+
+registry.register(
+    name="kanban_tag_add",
+    toolset="kanban",
+    schema=KANBAN_TAG_ADD_SCHEMA,
+    handler=_handle_tag_add,
+    check_fn=_check_kanban_mode,
+    emoji="🏷",
+)
+
+registry.register(
+    name="kanban_tag_remove",
+    toolset="kanban",
+    schema=KANBAN_TAG_REMOVE_SCHEMA,
+    handler=_handle_tag_remove,
+    check_fn=_check_kanban_mode,
+    emoji="🏷",
 )
 
 registry.register(

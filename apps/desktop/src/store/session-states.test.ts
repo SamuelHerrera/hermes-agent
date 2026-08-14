@@ -3,15 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClientSessionState } from '@/app/types'
 import { findGroupOfPane, group, split } from '@/components/pane-shell/tree/model'
 import { $layoutTree } from '@/components/pane-shell/tree/store'
-import { $selectedStoredSessionId } from '@/store/session'
+import { $selectedStoredSessionId, $unreadFinishedSessionIds } from '@/store/session'
 import type { SessionTile } from '@/store/session-states'
 import {
   blankDraftTile,
   focusedSessionNeedsRoute,
+  focusOpenSession,
   markSelectionRestore,
+  openPreviewSessionTile,
   orderTilesByTree,
+  promoteSessionTile,
   selectionHomesToWorkspace
 } from '@/store/session-states'
+import { $sessionTiles } from '@/store/session-states'
 
 const tile = (storedSessionId: string): SessionTile => ({ storedSessionId })
 const tilePane = (id: string) => `session-tile:${id}`
@@ -136,6 +140,49 @@ describe('blankDraftTile', () => {
   it('is null when every open tab holds a conversation', () => {
     expect(blankDraftTile([bound('a', 'run-a')], { 'run-a': state(2) })).toBeNull()
     expect(blankDraftTile([], {})).toBeNull()
+  })
+})
+
+describe('preview session tiles', () => {
+  beforeEach(() => {
+    $layoutTree.set(null)
+    $sessionTiles.set([])
+    $selectedStoredSessionId.set(null)
+    $unreadFinishedSessionIds.set([])
+  })
+
+  it('single-click preview opens one replaceable italic candidate tab', () => {
+    openPreviewSessionTile('first', 'center')
+    openPreviewSessionTile('second', 'center')
+
+    expect($sessionTiles.get()).toEqual([{ dir: 'center', preview: true, storedSessionId: 'second' }])
+  })
+
+  it('promoting a preview keeps it while the next preview gets its own replaceable slot', () => {
+    openPreviewSessionTile('first', 'center')
+    promoteSessionTile('first')
+    openPreviewSessionTile('second', 'center')
+
+    expect($sessionTiles.get()).toEqual([
+      { dir: 'center', preview: false, storedSessionId: 'first' },
+      { dir: 'center', preview: true, storedSessionId: 'second' }
+    ])
+  })
+
+  it('clears unread immediately when a sidebar click opens a preview tab', () => {
+    $unreadFinishedSessionIds.set(['first'])
+
+    openPreviewSessionTile('first', 'center')
+
+    expect($unreadFinishedSessionIds.get()).toEqual([])
+  })
+
+  it('clears unread immediately when focusing an existing tile', () => {
+    $sessionTiles.set([{ dir: 'center', storedSessionId: 'first' }])
+    $unreadFinishedSessionIds.set(['first'])
+
+    expect(focusOpenSession('first')).toBe('tile')
+    expect($unreadFinishedSessionIds.get()).toEqual([])
   })
 })
 

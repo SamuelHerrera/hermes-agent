@@ -1,5 +1,7 @@
 import { useStore } from '@nanostores/react'
 
+import { Codicon } from '@/components/ui/codicon'
+import { Tip } from '@/components/ui/tooltip'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
@@ -13,19 +15,24 @@ import type { SessionInfo } from '@/types/hermes'
 type DotVariant = {
   ariaLabel?: (r: Translations['sidebar']['row']) => string
   className: string
+  icon?: 'loading'
   role?: 'status'
   title?: (r: Translations['sidebar']['row']) => string
+}
+
+type StatusIconVariant = {
+  className: string
+  icon: string
+  label: (r: Translations['sidebar']['row']) => string
+  spinning?: boolean
 }
 
 // Shared base for every active dot; idle is smaller and uses its own class.
 const DOT_BASE = 'size-1.5 rounded-full'
 
-// Three colors and one fill/hollow axis, none of it moving. Motion on a 6px
-// circle can only say "something is happening" — which the row's arc already
-// says, better — while costing a repaint per frame on every row at once. What
-// the dot is for is telling states APART, and that is a job for color and fill:
-// filled means producing, hollow means open but quiet. The two states this
-// replaces differed by 30% opacity and were, in practice, the same dot.
+// Most states are dots: color + fill/hollow tell states apart. A live turn is
+// the exception — it becomes the only moving status treatment, then returns to a
+// normal dot as soon as the session settles.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // Amber — a clarify/approval is blocking the turn. The one "act now" color,
   // and the only state the user is required to do something about.
@@ -35,18 +42,21 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Accent — the turn is running. The row's arc carries the motion.
+  // Accent spinner — the turn is running. This is the only moving session
+  // status treatment; settled states return to a normal dot.
   working: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} bg-(--ui-accent)`,
+    className: 'size-2.5 text-(--ui-accent)',
+    icon: 'loading',
     role: 'status'
   },
-  // Hollow accent — still authoritatively running, but nothing has arrived for
-  // the watchdog window. Same color as working because it IS working; hollow
-  // because nothing is coming out of it right now.
+  // Muted accent spinner — still authoritatively running, but nothing has
+  // arrived for the watchdog window. Motion stays because the turn is alive;
+  // opacity is what says it has gone quiet.
   stalled: {
     ariaLabel: r => r.sessionRunning,
-    className: `${DOT_BASE} border border-(--ui-accent)`,
+    className: 'size-2.5 text-(--ui-accent) opacity-70',
+    icon: 'loading',
     role: 'status',
     title: r => r.sessionRunning
   },
@@ -75,24 +85,65 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     className: `${DOT_BASE} border border-(--ui-text-quaternary)`,
     title: r => r.draftSession
   },
-  // Settled: the project color, or nothing at all. An uncolored session used to
-  // get a grey dot, which put a mark of the same weight as a status next to
-  // every resting row and made "no color" look like a state of its own.
+  // Settled: the project color when there is one, else the faintest filled
+  // grey. Every session shows SOME mark — a row with nothing in the lead slot
+  // reads as broken next to its neighbours, so "no color" falls back to the
+  // quietest ink rather than to an invisible dot.
   idle: {
-    className: 'size-1 rounded-full'
+    className: 'size-1 rounded-full bg-(--ui-text-quaternary)'
+  }
+}
+
+// Sidebar rows keep project identity on the left. Transient state moves to a
+// compact icon on the right, where its tooltip can explain the distinction
+// without replacing the user's chosen project/session color.
+const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconVariant> = {
+  'needs-input': {
+    className: 'text-amber-500',
+    icon: 'question',
+    label: r => r.waitingForAnswer
+  },
+  working: {
+    className: 'text-(--ui-accent)',
+    icon: 'loading',
+    label: r => r.sessionRunning,
+    spinning: true
+  },
+  stalled: {
+    className: 'text-(--ui-accent) opacity-70',
+    icon: 'loading',
+    label: r => r.sessionRunning,
+    spinning: true
+  },
+  background: {
+    className: 'text-(--ui-text-tertiary)',
+    icon: 'terminal',
+    label: r => r.backgroundRunning
+  },
+  unread: {
+    className: 'text-emerald-500',
+    icon: 'check',
+    label: r => r.finishedUnread
+  },
+  draft: {
+    className: 'text-(--ui-text-quaternary)',
+    icon: 'edit',
+    label: r => r.draftSession
   }
 }
 
 /** The dot a state paints, for surfaces that describe a status rather than
  *  render a session — the sidebar's status filter, say. Idle carries no color
  *  of its own (it inherits the project's), so callers supply one. */
-export const sessionDotClassName = (state: SessionDotState): string => DOT_VARIANTS[state].className
+export const sessionDotClassName = (state: SessionDotState): string =>
+  DOT_VARIANTS[state].icon === 'loading' ? `${DOT_BASE} bg-(--ui-accent)` : DOT_VARIANTS[state].className
 
 export interface SessionStatusDotProps {
   /** The STORED session id — the key every live-state atom (working /
-   *  attention / stalled / unread / background) is keyed by, on BOTH surfaces:
-   *  the sidebar row's `session.id` and a pane tile's `storedSessionId` are the
-   *  same stored id (`$workingSessionIds` et al. map `storedSessionId`).
+   *  attention / stalled / unread / background) is keyed by. Pane tabs and the
+   *  switcher pass the same stored id (`$workingSessionIds` et al. map
+   *  `storedSessionId`). Sidebar rows split identity and status between
+   *  SessionProjectDot and SessionStatusIcon instead.
    *
    *  Null on a new chat that has yet to reach the backend — no id to key by,
    *  and no turn behind it, which is the draft state by definition. */
@@ -109,10 +160,68 @@ export interface SessionStatusDotProps {
   className?: string
 }
 
+export type SessionProjectDotProps = Pick<SessionStatusDotProps, 'branchStem' | 'className' | 'session'>
+
+/** Project/session identity only — never replaced by transient runtime state. */
+export function SessionProjectDot({ session, branchStem, className }: SessionProjectDotProps) {
+  useStore($sessionColorById)
+  const color = sessionColorFor(session) ?? null
+
+  return (
+    <span className={cn('flex items-center gap-0.5', className)} data-session-project-dot>
+      {branchStem ? (
+        <span aria-hidden className="shrink-0 font-mono text-[0.625rem] leading-none text-(--ui-text-quaternary)">
+          {branchStem}
+        </span>
+      ) : null}
+      <span
+        aria-hidden="true"
+        className={DOT_VARIANTS.idle.className}
+        style={color ? { backgroundColor: color } : undefined}
+      />
+    </span>
+  )
+}
+
+export interface SessionStatusIconProps {
+  className?: string
+  storedSessionId: null | string
+}
+
+/** Tooltip-backed transient status for the sidebar row's trailing slot. */
+export function SessionStatusIcon({ className, storedSessionId }: SessionStatusIconProps) {
+  const { t } = useI18n()
+  const r = t.sidebar.row
+
+  const dotState = useStoreSelector($sessionDotStateById, states =>
+    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
+  )
+
+  if (dotState === 'idle') {
+    return null
+  }
+
+  const variant = STATUS_ICON_VARIANTS[dotState]
+  const label = variant.label(r)
+
+  return (
+    <Tip label={label}>
+      <span
+        aria-label={label}
+        className={cn('grid size-4 shrink-0 place-items-center', variant.className, className)}
+        data-session-status={dotState}
+        role="status"
+        tabIndex={0}
+      >
+        <Codicon name={variant.icon} size="0.7rem" spinning={variant.spinning} />
+      </span>
+    </Tip>
+  )
+}
+
 /**
- * SESSION STATUS DOT — the ONE primitive the sidebar row, the pane tabs, and
- * the session switcher render, so a session's status can never disagree
- * between surfaces. It resolves everything itself from the stored session id:
+ * SESSION STATUS DOT — the compact combined treatment used by pane tabs and
+ * the session switcher. It resolves everything itself from the stored session id:
  * the live state (via `$sessionDotStateById`, already reduced to one mutually
  * exclusive answer) and the color (override → project, via `sessionColorFor`).
  * An idle session shows its project color; the active states own the dot with
@@ -147,6 +256,15 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
         // keeps every row's title on one left edge, so a session finishing
         // can't shift the list under the pointer.
         <span aria-hidden="true" className={variant.className} style={color ? { backgroundColor: color } : undefined} />
+      ) : variant.icon === 'loading' ? (
+        <span
+          aria-label={variant.ariaLabel?.(r)}
+          className={cn('grid place-items-center', variant.className)}
+          role={variant.role}
+          title={variant.title?.(r)}
+        >
+          <Codicon className="block leading-none" name="loading" size="0.625rem" spinning />
+        </span>
       ) : (
         <span
           aria-label={variant.ariaLabel?.(r)}

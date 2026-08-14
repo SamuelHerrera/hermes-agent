@@ -81,6 +81,31 @@ describe('focused chat zone drives the tab verbs', () => {
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
   })
 
+  it('Close all empties the store-owned workspace tab without removing its pane', async () => {
+    const { model, tree } = await setup()
+    const closed: string[] = []
+
+    tree.registerPaneCloser('workspace', () => {
+      closed.push('workspace')
+      tree.hideLoneTreeTab('workspace')
+    })
+    tree.registerPaneCloser('session-tile:a', () => {
+      closed.push('session-tile:a')
+      tree.dismissTreePane('session-tile:a')
+    })
+    tree.moveTreePane('session-tile:a', { groupId: 'grp-main', pos: 'center' })
+
+    expect(tree.treeTabCloseTargets('session-tile:a').all).toBe(2)
+
+    tree.closeAllTreeTabs('session-tile:a')
+
+    expect(closed).toEqual(['session-tile:a', 'workspace'])
+    // Workspace is a permanent rendering host. Closing its TAB is routed to
+    // the owner above; the pane remains while its now-empty strip disappears.
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
+    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(true)
+  })
+
   // Preview/page tiles share `placement: 'main'` but not the session-tile id
   // prefix — the generic tab verbs must serve their zones too, or ⌘W over a
   // lone Browser tile falls through and empties MAIN instead.

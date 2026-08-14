@@ -1,7 +1,9 @@
 import type { SessionInfo } from '@/types/hermes'
 
 export interface SidebarSessionEntry {
+  branchCollapsed?: boolean
   branchStem?: string
+  hasBranchChildren?: boolean
   session: SessionInfo
 }
 
@@ -13,6 +15,8 @@ export interface FlattenSessionsOptions {
    * their parent; sibling branches stay ordered by their own recency.
    */
   preserveOrder?: boolean
+  /** Session ids whose branch children should stay hidden. */
+  collapsedSessionIds?: ReadonlySet<string>
 }
 
 const recency = (session: SessionInfo): number => session.last_active || session.started_at || 0
@@ -94,16 +98,37 @@ export function flattenSessionsWithBranches(
   const out: SidebarSessionEntry[] = []
   const seen = new Set<string>()
 
+  const markHidden = (session: SessionInfo) => {
+    if (seen.has(session.id)) {
+      return
+    }
+
+    seen.add(session.id)
+    ;(childrenByParent.get(session.id) ?? []).forEach(markHidden)
+  }
+
   const emit = (session: SessionInfo, branchStem?: string) => {
     if (seen.has(session.id)) {
       return
     }
 
     seen.add(session.id)
-    out.push(branchStem ? { branchStem, session } : { session })
+    const children = childrenByParent.get(session.id) ?? []
+    const hasBranchChildren = children.length > 0
+    const branchCollapsed = hasBranchChildren && options.collapsedSessionIds?.has(session.id) === true
 
-    const children = childrenByParent.get(session.id)
-    children?.forEach((child, index) => emit(child, index === children.length - 1 ? '└─ ' : '├─ '))
+    out.push({
+      ...(branchCollapsed ? { branchCollapsed } : {}),
+      ...(branchStem ? { branchStem } : {}),
+      ...(hasBranchChildren ? { hasBranchChildren } : {}),
+      session
+    })
+
+    if (branchCollapsed) {
+      children.forEach(markHidden)
+    } else {
+      children.forEach((child, index) => emit(child, index === children.length - 1 ? '└─ ' : '├─ '))
+    }
   }
 
   const roots = sessions.filter(session => !nestedIds.has(session.id)).map((session, index) => ({ index, session }))

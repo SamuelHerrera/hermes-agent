@@ -23,16 +23,25 @@ _DEFAULT_MAX_ATTEMPTS = 2
 
 
 def kanban_stop_nudge_enabled() -> bool:
-    """Return whether the kanban stop-guard is active for this process.
+    """Return whether the Kanban stop-guard owns this execution.
 
-    On when ``HERMES_KANBAN_TASK`` is set (dispatcher-spawned worker), unless
-    ``HERMES_KANBAN_STOP_NUDGE`` explicitly disables it.
+    ``HERMES_KANBAN_TASK`` alone is insufficient: a long-lived human-facing
+    host can inherit worker variables from the process that launched it. Use the
+    shared ownership predicate so Desktop/TUI/gateway sessions do not receive a
+    worker-only completion nudge.
     """
     env = os.environ.get("HERMES_KANBAN_STOP_NUDGE")
     if env is not None and env.strip().lower() in {"0", "false", "no", "off"}:
         return False
     task = (os.environ.get("HERMES_KANBAN_TASK") or "").strip()
-    return bool(task)
+    if not task:
+        return False
+    try:
+        from agent.delegation_context import is_dispatcher_owned_worker_context
+
+        return is_dispatcher_owned_worker_context()
+    except Exception:
+        return True
 
 
 def _tool_call_name(tc: Any) -> str:

@@ -79,6 +79,16 @@ _write_profile_mcp_servers = late("_write_profile_mcp_servers")
 _write_profile_model = late("_write_profile_model")
 
 
+def _session_row_running(session: Dict[str, Any], now: float) -> bool:
+    """Best-effort live-turn hint for rows read directly from state.db."""
+    last_activity = session.get("last_activity_at") or session.get("last_active") or session.get("started_at") or 0
+    desc = str(session.get("last_activity_description") or "").strip()
+    provenance = str(session.get("last_activity_provenance") or "").strip().lower()
+    has_live_label = bool(desc) or bool(provenance and provenance != "unknown")
+
+    return bool(has_live_label and (now - float(last_activity or 0)) < 300)
+
+
 @sessions_router.get("/api/profiles/sessions")
 def get_profiles_sessions(
     # ``le=500`` caps the per-request page size (idea from #39200) — this
@@ -196,9 +206,13 @@ def get_profiles_sessions(
             for s in rows:
                 s["profile"] = name
                 s["is_default_profile"] = name == "default"
+                s["running"] = _session_row_running(s, now)
                 s["is_active"] = (
-                    s.get("ended_at") is None
-                    and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                    s["running"]
+                    or (
+                        s.get("ended_at") is None
+                        and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                    )
                 )
                 s["archived"] = bool(s.get("archived"))
                 s["pinned"] = bool(s.get("pinned"))
@@ -291,9 +305,13 @@ def get_profiles_sessions_sidebar(
         for s in rows:
             s["profile"] = name
             s["is_default_profile"] = name == "default"
+            s["running"] = _session_row_running(s, now)
             s["is_active"] = (
-                s.get("ended_at") is None
-                and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                s["running"]
+                or (
+                    s.get("ended_at") is None
+                    and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                )
             )
             s["archived"] = bool(s.get("archived"))
             # SQLite stores the pin as 0/1; the sidebar needs a real boolean to

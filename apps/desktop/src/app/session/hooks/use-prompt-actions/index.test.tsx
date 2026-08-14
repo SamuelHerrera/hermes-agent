@@ -23,7 +23,7 @@ import {
   setMessages,
   setSessions
 } from '@/store/session'
-import { dropSessionState, publishSessionState } from '@/store/session-states'
+import { clearAllSessionStates, dropSessionState, publishSessionState } from '@/store/session-states'
 import { $wakeWord, resetWakeWordState } from '@/store/wake-word'
 import type { SessionInfo } from '@/types/hermes'
 
@@ -327,6 +327,83 @@ function renderedSeedTexts(seeds: Record<string, unknown>[]): string[] {
 // The HUD floats over the app the user is really working in, so the gateway
 // turns this flag into a per-turn hint: read the window underneath and work in
 // it, rather than reaching for Hermes's own browser and panes.
+describe('usePromptActions first-send sidebar materialization', () => {
+  afterEach(() => {
+    cleanup()
+    setSessions([])
+    clearAllSessionStates()
+    vi.restoreAllMocks()
+  })
+
+  it('inserts an optimistic sidebar row when first sending from an unlisted new tab', async () => {
+    const requestGateway = vi.fn(async () => ({}) as never)
+    const refreshSessions = vi.fn(async () => undefined)
+    let handle: HarnessHandle | null = null
+
+    setSessions([])
+
+    await actRender(
+      <Harness
+        activeSessionId={RUNTIME_SESSION_ID}
+        onReady={h => (handle = h)}
+        refreshSessions={refreshSessions}
+        requestGateway={requestGateway}
+        storedSessionId="stored-unlisted-tab"
+      />
+    )
+
+    await handle!.submitText('hello from an unlisted tab')
+
+    expect(requestGateway).toHaveBeenCalledWith(
+      'prompt.submit',
+      expect.objectContaining({ session_id: RUNTIME_SESSION_ID, text: 'hello from an unlisted tab' }),
+      expect.any(Number)
+    )
+    expect($sessions.get()).toMatchObject([
+      {
+        id: 'stored-unlisted-tab',
+        message_count: 1,
+        preview: 'hello from an unlisted tab',
+        source: 'desktop'
+      }
+    ])
+    expect(refreshSessions).not.toHaveBeenCalled()
+  })
+
+  it('does not duplicate an existing lineage-root row when first-send materializes', async () => {
+    const requestGateway = vi.fn(async () => ({}) as never)
+    const refreshSessions = vi.fn(async () => undefined)
+    let handle: HarnessHandle | null = null
+
+    setSessions([
+      sessionInfo({
+        id: 'compressed-tip-tab',
+        _lineage_root_id: 'stored-lineage-root',
+        preview: 'previous preview'
+      })
+    ])
+
+    await actRender(
+      <Harness
+        activeSessionId={RUNTIME_SESSION_ID}
+        onReady={h => (handle = h)}
+        refreshSessions={refreshSessions}
+        requestGateway={requestGateway}
+        storedSessionId="stored-lineage-root"
+      />
+    )
+
+    await handle!.submitText('hello from a compressed tab')
+
+    expect($sessions.get()).toHaveLength(1)
+    expect($sessions.get()[0]).toMatchObject({
+      id: 'compressed-tip-tab',
+      _lineage_root_id: 'stored-lineage-root'
+    })
+    expect(refreshSessions).not.toHaveBeenCalled()
+  })
+})
+
 describe('usePromptActions HUD surface', () => {
   afterEach(() => {
     cleanup()
@@ -1983,6 +2060,7 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(requestGateway).toHaveBeenCalledWith('session.resume', {
       session_id: 'stored-session-a',
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     // The prompt must land in the resumed session, NOT the foreground.
@@ -2294,6 +2372,7 @@ describe('usePromptActions restoreToMessage', () => {
         text: 'first prompt',
         confirm_truncate: true,
         truncate_before_user_ordinal: 0,
+        truncate_before_message_id: 'u1',
         confirm_empty_truncate: true
       },
       1_800_000
@@ -2363,6 +2442,7 @@ describe('usePromptActions restoreToMessage', () => {
         text: 'first prompt',
         confirm_truncate: true,
         truncate_before_user_ordinal: 0,
+        truncate_before_message_id: 'u1',
         confirm_empty_truncate: true
       },
       1_800_000
@@ -2410,6 +2490,7 @@ describe('usePromptActions restoreToMessage', () => {
         text: 'first prompt',
         confirm_truncate: true,
         truncate_before_user_ordinal: 0,
+        truncate_before_message_id: 'u1',
         confirm_empty_truncate: true
       },
       1_800_000
@@ -3055,6 +3136,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[1]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID })
@@ -3191,6 +3273,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[1]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[2]?.params).toEqual({
@@ -3238,6 +3321,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[0]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[1]?.params).toMatchObject({ session_id: RECOVERED_SESSION_ID })
@@ -4369,6 +4453,85 @@ describe('uploadComposerAttachment remote read failures', () => {
         { remote: true, requestGateway: vi.fn(async () => ({}) as never), sessionId: RUNTIME_SESSION_ID }
       )
     ).rejects.toThrow('ENOENT: no such file')
+  })
+})
+
+describe('uploadComposerAttachment preview reuse', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('reuses the chip previewUrl instead of re-reading the image off disk', async () => {
+    // attachImagePath already read the full file for the thumbnail; submit
+    // must not pay the disk read + IPC round-trip a second time.
+    const readFileDataUrl = vi.fn(async () => 'data:image/png;base64,ZnJvbS1kaXNr')
+    Object.defineProperty(window, 'hermesDesktop', {
+      configurable: true,
+      value: { readFileDataUrl }
+    })
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'image.attach_bytes') {
+        return { attached: true, path: '/gw/images/shot.png' } as never
+      }
+
+      return {} as never
+    })
+
+    const uploaded = await uploadComposerAttachment(
+      {
+        id: 'image:shot.png',
+        kind: 'image',
+        label: 'shot.png',
+        path: '/local/shot.png',
+        previewUrl: 'data:image/png;base64,ZnJvbS1wcmV2aWV3'
+      },
+      { remote: true, requestGateway, sessionId: RUNTIME_SESSION_ID }
+    )
+
+    expect(readFileDataUrl).not.toHaveBeenCalled()
+    expect(requestGateway).toHaveBeenCalledWith('image.attach_bytes', {
+      content_base64: 'ZnJvbS1wcmV2aWV3',
+      filename: 'shot.png',
+      session_id: RUNTIME_SESSION_ID
+    })
+    expect(uploaded.path).toBe('/gw/images/shot.png')
+  })
+
+  it('falls back to the disk read when previewUrl is not a base64 data URL', async () => {
+    // A non-data previewUrl (e.g. a gateway media URL) carries no bytes —
+    // the upload must still read the real file.
+    const readFileDataUrl = vi.fn(async () => 'data:image/png;base64,ZnJvbS1kaXNr')
+    Object.defineProperty(window, 'hermesDesktop', {
+      configurable: true,
+      value: { readFileDataUrl }
+    })
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'image.attach_bytes') {
+        return { attached: true, path: '/gw/images/shot.png' } as never
+      }
+
+      return {} as never
+    })
+
+    await uploadComposerAttachment(
+      {
+        id: 'image:shot.png',
+        kind: 'image',
+        label: 'shot.png',
+        path: '/local/shot.png',
+        previewUrl: 'https://gateway.example/media/shot.png'
+      },
+      { remote: true, requestGateway, sessionId: RUNTIME_SESSION_ID }
+    )
+
+    expect(readFileDataUrl).toHaveBeenCalledWith('/local/shot.png')
+    expect(requestGateway).toHaveBeenCalledWith('image.attach_bytes', {
+      content_base64: 'ZnJvbS1kaXNr',
+      filename: 'shot.png',
+      session_id: RUNTIME_SESSION_ID
+    })
   })
 })
 

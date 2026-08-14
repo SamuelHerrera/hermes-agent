@@ -10,6 +10,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
 import { $projectScope, $projectTree, ALL_PROJECTS } from '@/store/projects'
+import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionId,
   $activeSessionStoredIdRotation,
@@ -62,6 +63,10 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
   ...(await importOriginal<Record<string, unknown>>()),
   noteActiveTreeGroup: vi.fn(),
   revealTreePane: vi.fn()
+}))
+
+vi.mock('@/store/route-tiles', () => ({
+  openRouteTile: vi.fn()
 }))
 
 const RUNTIME_SESSION_ID = 'rt-new-001'
@@ -960,6 +965,7 @@ describe('resumeSession failure recovery', () => {
             busy: false,
             cwd: '',
             fast: false,
+            gitRepoRoot: '',
             interimBoundaryPending: false,
             interrupted: false,
             messages: [],
@@ -1709,5 +1715,29 @@ describe('selectSidebarItem', () => {
     expect(navigate).toHaveBeenCalledWith('/skills', undefined)
     expect(noteActiveTreeGroup).toHaveBeenCalledWith(null)
     expect(revealTreePane).toHaveBeenCalledWith('workspace')
+  })
+
+  it('opens tile-backed sidebar routes as tabs instead of replacing the main workspace', async () => {
+    const navigate = vi.fn()
+    const requestGateway = vi.fn(async () => ({}) as never)
+    let handle: HarnessHandle | null = null
+
+    render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+    vi.mocked(revealTreePane).mockClear()
+
+    act(() => {
+      handle!.selectSidebarItem({
+        icon: (() => null) as never,
+        id: 'kanban:nav',
+        label: 'Kanban',
+        openAsTile: true,
+        route: '/kanban'
+      })
+    })
+
+    expect(navigate).not.toHaveBeenCalled()
+    expect(openRouteTile).toHaveBeenCalledWith('/kanban', 'center')
+    expect(revealTreePane).not.toHaveBeenCalled()
   })
 })

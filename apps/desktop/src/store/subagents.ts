@@ -1,4 +1,4 @@
-import { atom } from 'nanostores'
+import { atom, computed } from 'nanostores'
 
 import { capitalize } from '@/lib/text'
 
@@ -49,6 +49,20 @@ const PREVIEW_MAX = 220
 const TOOL_PREVIEW_MAX = 96
 
 export const $subagentsBySession = atom<Record<string, SubagentProgress[]>>({})
+
+export const $runningSubagentSessionIds = computed($subagentsBySession, groups => {
+  const ids = new Set<string>()
+
+  for (const items of Object.values(groups)) {
+    for (const item of items) {
+      if (item.sessionId && (item.status === 'queued' || item.status === 'running')) {
+        ids.add(item.sessionId)
+      }
+    }
+  }
+
+  return [...ids]
+})
 
 const isStr = (v: unknown): v is string => typeof v === 'string'
 const str = (v: unknown) => (isStr(v) ? v : '')

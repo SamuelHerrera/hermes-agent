@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Tip } from '@/components/ui/tooltip'
+import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
+import { useContributions } from '@/contrib/react/use-contributions'
 import { type Translations, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
 import { guardGuestPointers } from '@/lib/guest-pointer-guard'
@@ -21,6 +23,7 @@ import {
   PreviewConsolePanel
 } from './preview-console'
 import { type ConsoleEntry } from './preview-console-state'
+import { isPreviewRendererContribution, PREVIEW_RENDERERS_AREA } from './preview-contrib'
 import { LocalFilePreview, PreviewEmptyState } from './preview-file'
 import { registerPreviewPageReader } from './preview-reader'
 import { previewConsoleState, registerPreviewDevTools } from './preview-strip-tools'
@@ -128,6 +131,7 @@ function PreviewLoadError({
 export function PreviewPane({ embedded = false, onRestartServer, reloadRequest = 0, tabId, target }: PreviewPaneProps) {
   const { t } = useI18n()
   const copy = t.preview.web
+  const previewRendererContributions = useContributions(PREVIEW_RENDERERS_AREA)
   // The console store belongs to the TAB, not this render: the toggles live on
   // the tab and must read the same logs this pane appends to.
   const consoleState = previewConsoleState(tabId ?? target.url)
@@ -147,9 +151,35 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const [loadError, setLoadError] = useState<PreviewLoadErrorState | null>(null)
   const [localReloadKey, setLocalReloadKey] = useState(0)
 
+  const previewRenderer = useMemo(() => {
+    for (const contribution of previewRendererContributions) {
+      const renderer = isPreviewRendererContribution(contribution.data) ? contribution.data : null
+
+      if (!renderer) {
+        continue
+      }
+
+      try {
+        if (renderer.matches(target)) {
+          return { contribution, renderer }
+        }
+      } catch (error) {
+        console.warn(`[preview-renderer:${contribution.id}] matches() failed`, error)
+      }
+    }
+
+    return null
+  }, [previewRendererContributions, target])
+
+  const renderPreviewContribution = useMemo(
+    () => (previewRenderer ? () => previewRenderer.renderer.render({ reloadKey: localReloadKey, target }) : undefined),
+    [localReloadKey, previewRenderer, target]
+  )
+
   // Artifacts have no URL to load — they render from the registry, never in a
   // webview.
   const isWebPreview =
+    !previewRenderer &&
     target.kind !== 'artifact' &&
     (target.kind === 'url' || (target.previewKind === 'html' && target.renderMode !== 'source'))
 
@@ -701,6 +731,10 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
           {!isWebPreview &&
             (target.kind === 'artifact' ? (
               <ArtifactPreview target={target} />
+            ) : previewRenderer ? (
+              <ContribBoundary id={previewRenderer.contribution.id}>
+                <ContribRender render={renderPreviewContribution!} />
+              </ContribBoundary>
             ) : (
               <LocalFilePreview reloadKey={localReloadKey} target={target} />
             ))}

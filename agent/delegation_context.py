@@ -98,12 +98,29 @@ def is_dispatcher_owned_worker_context() -> bool:
     """Return True only when this execution owns the dispatcher's Kanban task.
 
     The single predicate every ``HERMES_KANBAN_*`` identity gate should use
-    before trusting those vars.  False for delegate_task children and for cron
-    jobs fired in-process from a worker.
+    before trusting those vars. False for delegate_task children, cron jobs
+    fired in-process from a worker, and human-facing sessions whose backend
+    inherited stale worker variables from its launcher.
+
+    A real dispatcher worker is spawned with ``HERMES_SESSION_SOURCE=kanban``.
+    Empty source remains accepted for legacy/CLI worker paths that predate the
+    source tag. Any other explicit source (desktop, tui, gateway platform, API)
+    is authoritative evidence that this execution does not own the inherited
+    task identity.
     """
-    if _DELEGATED_CHILD_CONTEXT.get():
+    if _DELEGATED_CHILD_CONTEXT.get() or _NON_DISPATCHER_OWNED_CONTEXT.get():
         return False
-    return not _NON_DISPATCHER_OWNED_CONTEXT.get()
+
+    try:
+        from gateway.session_context import get_session_env
+
+        source = get_session_env("HERMES_SESSION_SOURCE", "")
+    except Exception:
+        import os
+
+        source = os.environ.get("HERMES_SESSION_SOURCE", "")
+
+    return not source or source == "kanban"
 
 
 def enter_non_dispatcher_owned_context() -> Token[bool]:

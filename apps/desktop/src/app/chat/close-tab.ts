@@ -1,7 +1,7 @@
 import { mainChatOccupied } from '@/app/open-session'
 import { closeActiveTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { $workspaceIsPage } from '@/app/routes'
-import { closeFocusedSessionTab, closeFocusedToolTab } from '@/components/pane-shell/tree/store'
+import { closeFocusedSessionTab, closeFocusedToolTab, hideLoneTreeTab } from '@/components/pane-shell/tree/store'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { requestFreshSession } from '@/store/profile'
 import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
@@ -20,9 +20,10 @@ import { closeSessionTile, nextSessionTileForWorkspace } from '@/store/session-s
  * ⌘W / ⌘-click / middle-click used to be a dead key there, since the only
  * available answer was "remove the pane", which this app never does.
  *
- * Returns false when there is nothing to close — a blank draft (already the
- * post-close state) or a full-page view (skills / artifacts, which isn't a
- * chat and owns no tab). ⌘W then stays a no-op; it never closes the window.
+ * A blank lone draft still honors Close by hiding its tab strip; the permanent
+ * workspace pane remains mounted as the empty editor host. Returns false only
+ * for a full-page view or when a blank workspace is still stacked with another
+ * pane and therefore cannot hide the shared strip.
  *
  * `loadSessionIntoWorkspace` carries the app's route-based "load this session
  * into main"; omitting it disables the promotion half.
@@ -41,11 +42,16 @@ export function closeWorkspaceTab(loadSessionIntoWorkspace?: (storedSessionId: s
     }
   }
 
-  if ($workspaceIsPage.get() || !mainChatOccupied($activeSessionId.get(), $selectedStoredSessionId.get())) {
+  if ($workspaceIsPage.get()) {
     return false
   }
 
+  if (!mainChatOccupied($activeSessionId.get(), $selectedStoredSessionId.get())) {
+    return hideLoneTreeTab('workspace')
+  }
+
   requestFreshSession()
+  hideLoneTreeTab('workspace')
 
   return true
 }

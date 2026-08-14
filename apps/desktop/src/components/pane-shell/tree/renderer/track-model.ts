@@ -76,6 +76,9 @@ interface PaneChrome extends PaneSizing {
    *  (artifacts/skills/plugin pages) are not tab-able surfaces. The flag is
    *  live: the workspace contribution re-registers it on route changes. */
   headerVeto?: boolean
+  /** Tab-level decoration rendered inside the tab shell but outside the label
+   *  flow — e.g. a running arc that should wrap the whole tab. */
+  tabActivity?: () => React.ReactNode
   /** A lead NODE for this pane's TAB, rendered before the label. A session
    *  pane (main workspace + tiles) passes its live `SessionStatusDot` here so
    *  the tab and the sidebar row render status/color from the ONE primitive
@@ -87,6 +90,8 @@ interface PaneChrome extends PaneSizing {
    *  whole panes area, so the label subscribes for itself instead. Absent, or
    *  returning nothing, falls back to `title`. */
   tabTitle?: () => React.ReactNode
+  /** Whether the tab is a replaceable preview tab (VS Code-style italic cue). */
+  tabPreview?: () => boolean
   /** Glyph buttons this pane contributes to the strip, rendered after the last
    *  tab (where "+" sits) while the pane is ACTIVE — controls that act on the
    *  pane, not on any one tab: a preview's console / DevTools toggles. DATA, not

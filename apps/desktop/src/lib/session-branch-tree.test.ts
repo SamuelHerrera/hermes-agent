@@ -29,7 +29,7 @@ describe('flattenSessionsWithBranches', () => {
     const branchB = session('branch-b', { last_active: 10, parent_session_id: 'parent' })
 
     expect(flattenSessionsWithBranches([parent, branchA, branchB])).toEqual([
-      { session: parent },
+      { hasBranchChildren: true, session: parent },
       { branchStem: '├─ ', session: branchA },
       { branchStem: '└─ ', session: branchB }
     ])
@@ -40,7 +40,7 @@ describe('flattenSessionsWithBranches', () => {
     const branch = session('branch', { parent_session_id: 'root', last_active: 10 })
 
     expect(flattenSessionsWithBranches([tip, branch])).toEqual([
-      { session: tip },
+      { hasBranchChildren: true, session: tip },
       { branchStem: '└─ ', session: branch }
     ])
   })
@@ -78,6 +78,15 @@ describe('flattenSessionsWithBranches', () => {
       { id: 'important', stem: undefined },
       { id: 'branch', stem: '└─ ' },
       { id: 'background', stem: undefined }
+    ])
+  })
+
+  it('hides child rows for collapsed branch parents while keeping the parent expandable', () => {
+    const parent = session('parent', { last_active: 20 })
+    const branch = session('branch', { last_active: 10, parent_session_id: 'parent' })
+
+    expect(flattenSessionsWithBranches([parent, branch], { collapsedSessionIds: new Set(['parent']) })).toEqual([
+      { branchCollapsed: true, hasBranchChildren: true, session: parent }
     ])
   })
 })

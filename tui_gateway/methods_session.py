@@ -150,6 +150,7 @@ def _(rid, params: dict) -> dict:
                 "skills": {},
                 "cwd": _sessions[sid]["cwd"],
                 "branch": _git_branch_for_cwd(_sessions[sid]["cwd"]),
+                "git_repo_root": _git_common_repo_root_for_cwd(_sessions[sid]["cwd"]),  # pyright: ignore[reportUndefinedVariable]
                 "project": _project_info_for_cwd(_sessions[sid]["cwd"]),
                 "lazy": True,
                 "desktop_contract": DESKTOP_BACKEND_CONTRACT,
@@ -456,7 +457,9 @@ def _(rid, params: dict) -> dict:
                 # history becomes the resumed session record's working conversation),
                 # so heal a durable ``user;user`` violation once here instead of
                 # re-firing the pre-request repair on every subsequent turn.
-                history = db.get_messages_as_conversation(target, repair_alternation=True)
+                history = db.get_messages_as_conversation(
+                    target, repair_alternation=True, include_row_ids=True
+                )
             except Exception as e:
                 if lease is not None:
                     lease.release()
@@ -825,6 +828,7 @@ def _(rid, params: dict) -> dict:
     info = _session_info(agent, session) if agent is not None else {
         "cwd": cwd,
         "branch": _git_branch_for_cwd(cwd),
+        "git_repo_root": _git_common_repo_root_for_cwd(cwd),  # pyright: ignore[reportUndefinedVariable]
         "project": _project_info_for_cwd(cwd),
         "lazy": True,
     }
@@ -898,6 +902,7 @@ def _(rid, params: dict) -> dict:
         info = _session_info(agent, live) if agent is not None else {
             "cwd": resolved,
             "branch": branch,
+            "git_repo_root": root,
             "project": _project_info_for_cwd(resolved),
             "lazy": True,
         }

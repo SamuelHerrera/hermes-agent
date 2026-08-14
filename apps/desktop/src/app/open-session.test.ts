@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const focusOpenSession = vi.fn()
+const openPreviewSessionTile = vi.fn()
 const openSessionTile = vi.fn()
 const reuseBlankDraftTile = vi.fn()
 const openSessionInNewWindow = vi.fn()
@@ -11,6 +12,7 @@ vi.mock('@/store/session-states', () => ({
   focusedSessionNeedsRoute: (focused: 'main' | 'tile' | null, workspaceIsPage: boolean) =>
     !focused || (focused === 'main' && workspaceIsPage),
   focusOpenSession: (...args: unknown[]) => focusOpenSession(...args),
+  openPreviewSessionTile: (...args: unknown[]) => openPreviewSessionTile(...args),
   openSessionTile: (...args: unknown[]) => openSessionTile(...args),
   reuseBlankDraftTile: (...args: unknown[]) => reuseBlankDraftTile(...args)
 }))
@@ -84,6 +86,7 @@ describe('openSession', () => {
   beforeEach(() => {
     navigate.mockClear()
     focusOpenSession.mockReset()
+    openPreviewSessionTile.mockReset()
     openSessionTile.mockReset()
     openSessionInNewWindow.mockReset()
     canOpenSessionWindow.mockReturnValue(true)
@@ -118,6 +121,21 @@ describe('openSession', () => {
     focusOpenSession.mockReturnValue(null)
     openSession('s1', navigate)
     expect(navigate).toHaveBeenCalledWith('/c/s1')
+  })
+
+  it('preview opens a replaceable session tile instead of spending the workspace', () => {
+    focusOpenSession.mockReturnValue(null)
+    openSession('s1', navigate, 'preview')
+    expect(openPreviewSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(navigate).not.toHaveBeenCalled()
+    expect(openSessionTile).not.toHaveBeenCalled()
+  })
+
+  it('preview focuses an already-open session instead of replacing it', () => {
+    focusOpenSession.mockReturnValue('tile')
+    openSession('s1', navigate, 'preview')
+    expect(focusOpenSession).toHaveBeenCalledWith('s1')
+    expect(openPreviewSessionTile).not.toHaveBeenCalled()
   })
 
   it('tab focuses an existing open session instead of stacking another', () => {

@@ -69,7 +69,7 @@ import {
   toggleTabSelected
 } from '../tab-selection'
 
-import { type DoubleTapContext, startPaneDrag } from './drag-session'
+import { startPaneDrag } from './drag-session'
 import { forceLoneHeaderForPanes } from './lone-header'
 import { useActiveTabVisible } from './tab-strip-scroll'
 import { paneChrome } from './track-model'
@@ -271,16 +271,6 @@ export function TreeGroup({
     tabCount: shown.length
   })
 
-  // Drag handles preventDefault pointerdown (no native dblclick), so the
-  // header + chips share a synthesized double-tap: restore if collapsed
-  // (undoing the first tap's minimize toggle) and hide the chrome.
-  const hideHeaderDoubleTap: DoubleTapContext = {
-    key: `hide-header-${node.id}`,
-    onDoubleTap: () => {
-      setTreeGroupMinimized(node.id, false)
-      setTreeGroupHeaderHidden(node.id, true)
-    }
-  }
 
   // Zone-menu close targets read the layout tree, but this component must NOT
   // subscribe to it: `useStore($layoutTree)` here wires every zone — and
@@ -292,12 +282,16 @@ export function TreeGroup({
   // when it OPENS, so they read the tree with `.get()` at that moment instead.
   const targetPane = () => menuPane ?? activeId
 
-  // Close targets the right-clicked chip (falling back to the active pane);
-  // only panes that declare `uncloseable` (the main workspace) are exempt.
+  // A pane whose store owns Close keeps both the gesture and the menu action
+  // even when the backing pane is permanent — workspace empties its loaded tab
+  // instead of leaving the layout tree.
+  const closeableTab = (paneId: string) => !paneChrome(paneFor(paneId)).uncloseable || panesWithCloser.has(paneId)
+
+  // Close targets the right-clicked chip (falling back to the active pane).
   const closable = () => {
     const paneId = targetPane()
 
-    return paneChrome(paneFor(paneId)).uncloseable ? undefined : paneId
+    return closeableTab(paneId) ? paneId : undefined
   }
 
   // The zone hosting the uncloseable workspace never minimizes — collapsing
@@ -308,10 +302,6 @@ export function TreeGroup({
   // one the zone menu's Close and ⌘W use.
   const closeTab = (paneId: string) => closeTabPane(paneId)
 
-  // A pane whose store owns Close keeps the gesture even when the pane itself
-  // is uncloseable — the workspace tab empties to a fresh draft rather than
-  // leaving the tree.
-  const closeableTab = (paneId: string) => !paneChrome(paneFor(paneId)).uncloseable || panesWithCloser.has(paneId)
 
   // A pane's own live label when it has one, else its registered string.
   const tabLabel = (paneId: string) => paneChrome(paneFor(paneId)).tabTitle?.() ?? paneFor(paneId)?.title ?? paneId
@@ -418,13 +408,15 @@ export function TreeGroup({
             onPointerDown={e =>
               // Tap the header to collapse to it / expand back — the DetailPane
               // / sidebar-section gesture (never for the main zone). Double-tap
-              // hides the header entirely. Drag still moves the pane.
+              // Drag still moves the pane. The old double-click-to-hide-header
+              // shortcut is intentionally gone; header visibility now changes
+              // only through the explicit context-menu command.
               startPaneDrag(
                 activeId,
                 e,
                 () => minimizable && toggleCollapse(),
                 undefined,
-                hideHeaderDoubleTap,
+                undefined,
                 active?.title ?? activeId
               )
             }
@@ -520,7 +512,7 @@ export function TreeGroup({
                         e,
                         onTap,
                         stripRef.current ? { groupId: node.id, strip: stripRef.current } : undefined,
-                        hideHeaderDoubleTap,
+                        undefined,
                         t.zones.tabCount(dragSelection.length),
                         dragSelection
                       )
@@ -532,21 +524,23 @@ export function TreeGroup({
                     // session drop language — link/stack/split); `false` defers
                     // to the generic pane move (the workspace tab on a fresh
                     // draft has no session to link).
-                    if (!chrome.tabDrag?.(e, onTap, hideHeaderDoubleTap)) {
+                    if (!chrome.tabDrag?.(e, onTap, undefined)) {
                       startPaneDrag(
                         paneId,
                         e,
                         onTap,
                         stripRef.current ? { groupId: node.id, strip: stripRef.current } : undefined,
-                        hideHeaderDoubleTap,
+                        undefined,
                         title
                       )
                     }
                   }}
+                  preview={chrome.tabPreview?.()}
                   role="tab"
                   selected={isSelected}
                   style={{ cursor: 'grab' }}
                 >
+                  {chrome.tabActivity?.()}
                   {chrome.tabLead ? (
                     <span className="ml-2 -mr-1 flex shrink-0 items-center">{chrome.tabLead()}</span>
                   ) : null}

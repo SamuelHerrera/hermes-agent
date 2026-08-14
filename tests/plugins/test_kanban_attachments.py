@@ -221,6 +221,85 @@ def test_upload_sanitizes_traversal_filename(client):
     assert Path(stored_path).resolve().is_relative_to(task_dir)
 
 
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR"
+    b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"
+    b"\x1f\x15\xc4\x89"
+)
+
+
+def test_pasted_image_upload_validates_and_returns_render_metadata(client):
+    task_id = _create_task_via_api(client)
+    r = client.post(
+        f"/api/plugins/kanban/tasks/{task_id}/attachments/pasted-image",
+        files={"file": ("../../clipboard.png", PNG_BYTES, "image/png")},
+    )
+
+    assert r.status_code == 200, r.text
+    att = r.json()["attachment"]
+    assert att["id"]
+    assert att["filename"] == "clipboard.png"
+    assert att["content_type"] == "image/png"
+    assert att["size"] == len(PNG_BYTES)
+    assert att["url"] == f"/api/plugins/kanban/attachments/{att['id']}"
+    assert Path(att["stored_path"]).read_bytes() == PNG_BYTES
+
+
+def test_pasted_image_upload_rejects_non_image_mime(client):
+    task_id = _create_task_via_api(client)
+    r = client.post(
+        f"/api/plugins/kanban/tasks/{task_id}/attachments/pasted-image",
+        files={"file": ("note.txt", b"not an image", "text/plain")},
+    )
+
+    assert r.status_code == 400
+    assert "image" in r.json()["detail"].lower()
+
+
+def test_pasted_image_upload_rejects_type_that_does_not_match_bytes(client):
+    task_id = _create_task_via_api(client)
+    r = client.post(
+        f"/api/plugins/kanban/tasks/{task_id}/attachments/pasted-image",
+        files={"file": ("fake.png", b"not really png", "image/png")},
+    )
+
+    assert r.status_code == 400
+    assert "content" in r.json()["detail"].lower()
+
+
+def test_pasted_image_upload_uses_attachment_size_cap(client, monkeypatch):
+    plugin_mod = sys.modules["hermes_dashboard_plugin_kanban_attach_test"]
+    monkeypatch.setattr(plugin_mod, "KANBAN_ATTACHMENT_MAX_BYTES", len(PNG_BYTES) - 1)
+    task_id = _create_task_via_api(client)
+
+    r = client.post(
+        f"/api/plugins/kanban/tasks/{task_id}/attachments/pasted-image",
+        files={"file": ("clip.png", PNG_BYTES, "image/png")},
+    )
+
+    assert r.status_code == 413
+    assert "limit" in r.json()["detail"].lower()
+
+
+def test_pasted_image_upload_reports_storage_failure(client, monkeypatch):
+    plugin_mod = sys.modules["hermes_dashboard_plugin_kanban_attach_test"]
+
+    def fail_store_attachment_bytes(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(plugin_mod.kanban_db, "store_attachment_bytes", fail_store_attachment_bytes)
+    task_id = _create_task_via_api(client)
+
+    r = client.post(
+        f"/api/plugins/kanban/tasks/{task_id}/attachments/pasted-image",
+        files={"file": ("clip.png", PNG_BYTES, "image/png")},
+    )
+
+    assert r.status_code == 500
+    assert "failed to store pasted image" in r.json()["detail"].lower()
+
+
 def test_download_unknown_attachment_404(client):
     assert client.get("/api/plugins/kanban/attachments/424242").status_code == 404
 

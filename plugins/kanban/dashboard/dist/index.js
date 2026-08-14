@@ -247,6 +247,66 @@
     return `${url}${sep}board=${encodeURIComponent(board)}`;
   }
 
+  function imageExtensionFromType(type) {
+    const clean = String(type || "").toLowerCase().split(";", 1)[0];
+    if (clean === "image/jpeg" || clean === "image/jpg") return "jpg";
+    if (clean === "image/gif") return "gif";
+    if (clean === "image/webp") return "webp";
+    if (clean === "image/svg+xml") return "svg";
+    return "png";
+  }
+
+  function clipboardImageFiles(data) {
+    const items = data && data.items ? Array.prototype.slice.call(data.items) : [];
+    const files = [];
+    items.forEach(function (item) {
+      const type = String((item && item.type) || "");
+      if (!type.toLowerCase().startsWith("image/")) return;
+      const file = item.getAsFile ? item.getAsFile() : null;
+      if (!file) return;
+      if (file.name) {
+        files.push(file);
+        return;
+      }
+      const name = `pasted-image-${files.length + 1}.${imageExtensionFromType(file.type || type)}`;
+      try {
+        files.push(new File([file], name, { type: file.type || type || "image/png" }));
+      } catch (_e) {
+        // Very old browsers may not construct File from Blob; fall back to a
+        // named Blob-like object. FormData accepts it as the file body.
+        try { Object.defineProperty(file, "name", { value: name }); } catch (_ignored) { /* best effort */ }
+        files.push(file);
+      }
+    });
+    return files;
+  }
+
+  function buildPastedImageComment(prefix, attachments, board) {
+    const text = String(prefix || "").trim();
+    const imageLines = (attachments || [])
+      .filter(function (att) { return att && att.id; })
+      .map(function (att) {
+        const name = att.filename || "pasted image";
+        const url = withBoard(`${API}/attachments/${encodeURIComponent(att.id)}`, board);
+        return `![${name}](${url})`;
+      });
+    if (!imageLines.length) return text;
+    return [text, imageLines.join("\n")].filter(Boolean).join("\n\n");
+  }
+
+  function attachmentImageRenderSrc(src) {
+    if (!String(src || "").startsWith(API + "/attachments/")) return src;
+    const token = window.__HERMES_SESSION_TOKEN__;
+    if (!token || window.__HERMES_AUTH_REQUIRED__) return src;
+    try {
+      const url = new URL(src, window.location.origin);
+      if (!url.searchParams.has("token")) url.searchParams.set("token", token);
+      return url.pathname + url.search + url.hash;
+    } catch (_e) {
+      return src;
+    }
+  }
+
   // The SDK's Select component fires ``onValueChange(value)`` directly
   // (it's a shadcn-style popup, not a native <select>). Older plugin
   // code calls ``onChange({target: {value}})`` which silently never
@@ -291,6 +351,14 @@
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
       // italic
       .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+      // task attachment images emitted by pasted-image comments. Restrict the
+      // source to this plugin's own attachment endpoint; arbitrary remote images
+      // stay as plain text so comments can't be used as cross-site trackers.
+      .replace(
+        /!\[([^\]\n]*)\]\((\/api\/plugins\/kanban\/attachments\/[^\s)]+)\)/g,
+        (_m, alt, src) =>
+          `<img src="${attachmentImageRenderSrc(src)}" alt="${alt}" class="hermes-kanban-comment-image" loading="lazy" />`,
+      )
       // safe links — only http(s) and mailto
       .replace(
         /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
@@ -345,6 +413,7 @@
     "h2",
     "h3",
     "h4",
+    "img",
     "li",
     "p",
     "pre",
@@ -362,6 +431,18 @@
       const href = hrefMatch ? (hrefMatch[2] || hrefMatch[1] || "").trim() : "";
       if (!/^(https?:\/\/|mailto:)/i.test(href)) return "";
       return ` href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer"`;
+    }
+    if (tag === "img") {
+      const srcMatch =
+        /\ssrc=(["'])(.*?)\1/i.exec(attrs) ||
+        /\ssrc=([^\s>]+)/i.exec(attrs);
+      const altMatch =
+        /\salt=(["'])(.*?)\1/i.exec(attrs) ||
+        /\salt=([^\s>]+)/i.exec(attrs);
+      const src = srcMatch ? (srcMatch[2] || srcMatch[1] || "").trim() : "";
+      const alt = altMatch ? (altMatch[2] || altMatch[1] || "").trim() : "";
+      if (!src.startsWith(API + "/attachments/")) return "";
+      return ` src="${escapeAttribute(attachmentImageRenderSrc(src))}" alt="${escapeAttribute(alt)}" class="hermes-kanban-comment-image" loading="lazy"`;
     }
     if (tag === "pre" && /\sclass=(["'])hermes-kanban-md-code\1/i.test(attrs)) {
       return ' class="hermes-kanban-md-code"';
@@ -3188,14 +3269,18 @@
       return function () { window.removeEventListener("keydown", onKey); };
     }, [props.onClose, editing]);
 
-    const handleComment = function () {
-      const body = newComment.trim();
-      if (!body) return;
-      SDK.fetchJSON(withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/comments`, boardSlug), {
+    const postComment = function (body) {
+      return SDK.fetchJSON(withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/comments`, boardSlug), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body }),
-      }).then(function () {
+      });
+    };
+
+    const handleComment = function () {
+      const body = newComment.trim();
+      if (!body) return;
+      postComment(body).then(function () {
         setNewComment("");
         load();
         props.onRefresh();
@@ -3205,21 +3290,24 @@
     // File upload uses raw fetch (not SDK.fetchJSON, which JSON-encodes)
     // so the browser sets the multipart boundary. Auth rides the session
     // cookie + bearer token, matching the rest of the dashboard.
-    const handleUpload = function (fileList) {
+    const uploadFiles = function (fileList, opts) {
       const files = Array.prototype.slice.call(fileList || []);
-      if (!files.length) return;
+      if (!files.length) return Promise.resolve([]);
+      const pastedImage = !!(opts && opts.pastedImage);
       setUploadBusy(true);
       setUploadErr(null);
-      const url = withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/attachments`, boardSlug);
+      const endpoint = pastedImage ? "attachments/pasted-image" : "attachments";
+      const url = withBoard(`${API}/tasks/${encodeURIComponent(props.taskId)}/${endpoint}`, boardSlug);
+      const uploaded = [];
       // Upload sequentially so a partial failure leaves a clear state.
       let chain = Promise.resolve();
       files.forEach(function (f) {
         chain = chain.then(function () {
           const fd = new FormData();
-          fd.append("file", f, f.name);
+          fd.append("file", f, f.name || (pastedImage ? "pasted-image.png" : "attachment"));
           // SDK.authedFetch handles auth in BOTH modes (loopback token header /
           // gated cookie) and applies the dashboard base-path prefix. The old
-          // hand-rolled Authorization:Bearer + credentials:'same-origin' sent
+          // hand-rolled Authorization:Bearer *** credentials:'same-origin' sent
           // an empty token and 401'd in gated mode.
           return SDK.authedFetch(url, { method: "POST", body: fd })
             .then(function (resp) {
@@ -3228,18 +3316,55 @@
                   throw new Error(parseApiErrorMessage(new Error(resp.status + ": " + txt)));
                 });
               }
+              return resp.json();
+            })
+            .then(function (payload) {
+              if (payload && payload.attachment) uploaded.push(payload.attachment);
             });
         });
       });
-      chain.then(function () {
-        load();
-        props.onRefresh();
+      return chain.then(function () {
+        return uploaded;
       }).catch(function (e) {
         setUploadErr(String(e.message || e));
+        throw e;
       }).finally(function () {
         setUploadBusy(false);
       });
     };
+
+    const handleUpload = function (fileList) {
+      return uploadFiles(fileList).then(function () {
+        load();
+        props.onRefresh();
+      }).catch(function () { /* uploadFiles already surfaced the error */ });
+    };
+
+    function handleCommentPaste(e) {
+      const files = clipboardImageFiles(e.clipboardData);
+      if (!files.length) return;
+      e.preventDefault();
+      uploadFiles(files, { pastedImage: true }).then(function (attachments) {
+        const body = buildPastedImageComment(newComment, attachments, boardSlug).trim();
+        if (!body) return null;
+        return postComment(body).then(function () { setNewComment(""); });
+      }).then(function () {
+        load();
+        props.onRefresh();
+      }).catch(function (err) {
+        setErr(String(err.message || err));
+      });
+    }
+
+    function handleAttachmentPaste(e) {
+      const files = clipboardImageFiles(e.clipboardData);
+      if (!files.length) return;
+      e.preventDefault();
+      uploadFiles(files, { pastedImage: true }).then(function () {
+        load();
+        props.onRefresh();
+      }).catch(function () { /* uploadFiles already surfaced the error */ });
+    }
 
     const handleDeleteAttachment = function (attachmentId) {
       return SDK.fetchJSON(withBoard(`${API}/attachments/${attachmentId}`, boardSlug), { method: "DELETE" })
@@ -3405,6 +3530,7 @@
           onToggleHomeSub: toggleHomeSubscription,
           onRefresh: props.onRefresh,
           onUpload: handleUpload,
+          onPasteImages: handleAttachmentPaste,
           onDeleteAttachment: handleDeleteAttachment,
           uploadBusy: uploadBusy,
           uploadErr: uploadErr,
@@ -3432,7 +3558,8 @@
                   e.preventDefault(); handleComment();
                 }
               },
-              placeholder: tx(t, "addComment", "Add a comment… (Enter to submit)"),
+              onPaste: function (e) { handleCommentPaste(e); },
+              placeholder: tx(t, "addComment", "Add a comment… (Enter to submit; paste images to attach)"),
               className: "h-8 text-sm flex-1",
             }),
             h(Button, {
@@ -3493,7 +3620,12 @@
         })
         .catch(function (e) { setDlErr(String(e.message || e)); });
     }
-    return h("div", { className: "hermes-kanban-section" },
+    return h("div", {
+      className: "hermes-kanban-section",
+      onPaste: function (e) { if (props.onPasteImages) props.onPasteImages(e); },
+      tabIndex: 0,
+      title: tx(i18n, "pasteImagesHere", "Paste images here to add them as attachments"),
+    },
       h("div", { className: "hermes-kanban-section-head" },
         `${tx(i18n, "attachments", "Attachments")} (${atts.length})`),
       h("input", {
@@ -3691,6 +3823,7 @@
         attachments: attachments,
         boardSlug: props.boardSlug,
         onUpload: props.onUpload,
+        onPasteImages: props.onPasteImages,
         onDelete: props.onDeleteAttachment,
         uploadBusy: props.uploadBusy,
         uploadErr: props.uploadErr,

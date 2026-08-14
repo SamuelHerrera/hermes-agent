@@ -799,6 +799,15 @@
   color: var(--color-ring);
   text-decoration: underline;
 }
+.hermes-kanban-comment-image {
+  display: block;
+  max-width: 100%;
+  max-height: 18rem;
+  margin: 0.35rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm, 0.25rem);
+  object-fit: contain;
+}
 .hermes-kanban-md code {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.8rem;

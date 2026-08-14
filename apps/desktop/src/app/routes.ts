@@ -85,17 +85,30 @@ export const ROUTES_AREA = 'routes'
 export interface RouteContribution {
   /** Absolute path, e.g. `/kanban`. One segment; no params. */
   path: string
+  /** Optional live lead shown before the label when the route is opened as a tile tab. */
+  tabLead?: () => ReactNode
 }
 
-export function contributedRoutes(): Array<{ key: string; path: string; title?: string; render: () => ReactNode }> {
+export function contributedRoutes(): Array<{
+  key: string
+  path: string
+  render: () => ReactNode
+  tabLead?: () => ReactNode
+  title?: string
+}> {
   return registry
     .getArea(ROUTES_AREA)
-    .map(c => ({
-      key: `${c.source ?? 'core'}:${c.id}`,
-      path: (c.data as RouteContribution | undefined)?.path ?? '',
-      title: c.title,
-      render: c.render!
-    }))
+    .map(c => {
+      const data = c.data as RouteContribution | undefined
+
+      return {
+        key: `${c.source ?? 'core'}:${c.id}`,
+        path: data?.path ?? '',
+        render: c.render!,
+        tabLead: data?.tabLead,
+        title: c.title
+      }
+    })
     .filter(route => Boolean(route.path.startsWith('/') && route.render) && !RESERVED_PATHS.has(route.path))
 }
 
@@ -117,6 +130,8 @@ export interface SidebarNavContribution {
   label: string
   /** Route to navigate to (usually a contributed page's path). */
   path: string
+  /** Plain sidebar clicks open the route as a movable tab instead of main. */
+  openAsTile?: boolean
 }
 
 // Views that render as a full-screen modal card (OverlayView) over the shell.

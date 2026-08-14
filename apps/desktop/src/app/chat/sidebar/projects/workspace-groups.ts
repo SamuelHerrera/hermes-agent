@@ -448,8 +448,35 @@ export function sessionProjectColor(session: SessionInfo, projects: ProjectInfo[
   return projects.find(project => project.id === projectId)?.color ?? null
 }
 
-const upsertSession = (rows: SessionInfo[], session: SessionInfo): SessionInfo[] =>
-  [session, ...rows.filter(row => row.id !== session.id)].sort((a, b) => b.started_at - a.started_at)
+const sessionHasUsefulTitle = (session: SessionInfo): boolean => {
+  const title = session.title?.trim() || ''
+
+  return Boolean(title && !/^(unknown|untitled session)$/i.test(title))
+}
+
+const mergeSessionRow = (live: SessionInfo, snapshot: SessionInfo | undefined): SessionInfo => {
+  if (!snapshot) {
+    return live
+  }
+
+  return {
+    ...snapshot,
+    ...live,
+    delegate_parent_session_id: live.delegate_parent_session_id ?? snapshot.delegate_parent_session_id,
+    parent_session_id: live.parent_session_id ?? snapshot.parent_session_id,
+    preview: live.preview || snapshot.preview,
+    source: live.source || snapshot.source,
+    title: sessionHasUsefulTitle(live) ? live.title : snapshot.title
+  }
+}
+
+const upsertSession = (rows: SessionInfo[], session: SessionInfo): SessionInfo[] => {
+  const existing = rows.find(row => row.id === session.id)
+
+  return [mergeSessionRow(session, existing), ...rows.filter(row => row.id !== session.id)].sort(
+    (a, b) => b.started_at - a.started_at
+  )
+}
 
 /**
  * The lane a live session belongs to WITHIN a known repo root, by path — the

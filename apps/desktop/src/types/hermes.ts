@@ -492,8 +492,15 @@ export interface SessionInfo {
   message_count: number
   model: null | string
   output_tokens: number
+  /** Backend-derived live-turn hint for sessions running outside this desktop
+   *  renderer (CLI, TUI, another Desktop window/process). Local websocket
+   *  state remains authoritative when present; this fills the list-row gap for
+   *  sessions discovered only through REST refreshes. */
+  running?: boolean
   /** Parent conversation when this row is a /branch fork. */
   parent_session_id?: null | string
+  /** Durable spawning parent for delegate/subagent child sessions. */
+  delegate_parent_session_id?: null | string
   /** Durable server-side pin flag (`sessions.pinned`). The list endpoints
    *  back-fill pinned conversations past their LIMIT, so a pinned row is
    *  always present in a page — which makes this authoritative for the
@@ -636,6 +643,7 @@ export interface SessionRuntimeInfo {
   cwd?: string
   desktop_contract?: number
   fast?: boolean
+  git_repo_root?: string
   install_warning?: string
   model?: string
   personality?: string
@@ -1268,6 +1276,22 @@ export interface StaleAuxAssignment {
   model: string
 }
 
+export type CronModelDriftAxis = 'model' | 'provider'
+
+export interface CronModelImpactJob {
+  id: string
+  name: string
+  drifted_axes: CronModelDriftAxis[]
+}
+
+export interface CronModelImpact {
+  available: boolean
+  guard_enabled: boolean
+  affected_count: number
+  truncated: boolean
+  jobs: CronModelImpactJob[]
+}
+
 /** One skill-hub source (official index, GitHub, skills.sh, …) as reported by
  *  `GET /api/skills/hub/sources`. */
 export interface SkillHubSource {
@@ -1423,6 +1447,10 @@ export interface ModelAssignmentResponse {
    *  switching the main provider to Nous. Empty unless provider === 'nous'
    *  and the user is a paid subscriber with unconfigured tools. */
   gateway_tools?: string[]
+  /** Additive profile-local cron impact returned after a persisted main assignment. */
+  cron_model_impact?: CronModelImpact
+  confirm_message?: string
+  confirm_required?: boolean
   model?: string
   ok: boolean
   provider?: string

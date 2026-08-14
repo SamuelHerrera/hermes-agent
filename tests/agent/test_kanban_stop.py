@@ -13,7 +13,11 @@ from agent.kanban_stop import (
 
 @pytest.fixture
 def clear_kanban_env(monkeypatch):
-    for var in ("HERMES_KANBAN_TASK", "HERMES_KANBAN_STOP_NUDGE"):
+    for var in (
+        "HERMES_KANBAN_TASK",
+        "HERMES_KANBAN_STOP_NUDGE",
+        "HERMES_SESSION_SOURCE",
+    ):
         monkeypatch.delenv(var, raising=False)
     return monkeypatch
 
@@ -25,6 +29,14 @@ def clear_kanban_env(monkeypatch):
 def test_env_can_disable(clear_kanban_env):
     clear_kanban_env.setenv("HERMES_KANBAN_TASK", "t_abc")
     clear_kanban_env.setenv("HERMES_KANBAN_STOP_NUDGE", "0")
+    assert kanban_stop_nudge_enabled() is False
+    assert build_kanban_stop_nudge(messages=[]) is None
+
+
+def test_no_nudge_for_desktop_session_with_leaked_worker_env(clear_kanban_env):
+    clear_kanban_env.setenv("HERMES_KANBAN_TASK", "t_leaked")
+    clear_kanban_env.setenv("HERMES_SESSION_SOURCE", "desktop")
+
     assert kanban_stop_nudge_enabled() is False
     assert build_kanban_stop_nudge(messages=[]) is None
 

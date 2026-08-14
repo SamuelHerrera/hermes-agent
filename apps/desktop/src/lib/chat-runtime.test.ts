@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ComposerAttachment } from '@/store/composer'
+import type { SessionInfo } from '@/types/hermes'
 
 import {
   attachmentDisplayText,
@@ -9,10 +10,31 @@ import {
   messageCreatedAt,
   optimisticAttachmentRef,
   parseCommandDispatch,
-  parseSlashCommand
+  parseSlashCommand,
+  sessionTitle
 } from './chat-runtime'
 
 const DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANS'
+
+
+const sessionInfo = (overrides: Partial<SessionInfo> = {}): SessionInfo =>
+  ({
+    ended_at: null,
+    id: 's1',
+    input_tokens: 0,
+    is_active: false,
+    last_active: 0,
+    message_count: 1,
+    model: null,
+    output_tokens: 0,
+    preview: null,
+    source: 'desktop',
+    started_at: 0,
+    title: null,
+    tool_call_count: 0,
+    ...overrides
+  }) as SessionInfo
+
 
 function attachment(overrides: Partial<ComposerAttachment> & Pick<ComposerAttachment, 'kind'>): ComposerAttachment {
   return { id: 'a', label: 'file.png', ...overrides }
@@ -69,6 +91,34 @@ describe('attachmentDisplayText', () => {
 
   it('still resolves a normal file ref', () => {
     expect(attachmentDisplayText(attachment({ kind: 'file', refText: '@file:src/a.ts' }))).toBe('@file:src/a.ts')
+  })
+
+  it('expands a review attachment into an anchored fenced block', () => {
+    const detail = JSON.stringify({
+      author: 'teknium1',
+      body: 'this cap looks wrong',
+      diffHunk: '@@ -1,2 +1,2 @@\n-const CAP = 5\n+const CAP = 50',
+      kind: 'review',
+      line: 12,
+      path: 'src/limits.ts',
+      prNumber: 123,
+      startLine: null,
+      url: 'https://github.com/o/r/pull/123#discussion_r1'
+    })
+
+    const block = attachmentDisplayText(attachment({ kind: 'review', detail, refText: '@url:`https://x`' }))
+
+    // The contract: anchor (file:line), author, body, and the hunk all ride.
+    expect(block).toContain('review-comment src/limits.ts:12')
+    expect(block).toContain('@teknium1')
+    expect(block).toContain('this cap looks wrong')
+    expect(block).toContain('const CAP = 50')
+  })
+
+  it('falls back to the url ref when a review detail is malformed', () => {
+    expect(attachmentDisplayText(attachment({ kind: 'review', detail: 'not json', refText: '@url:`https://x`' }))).toBe(
+      '@url:`https://x`'
+    )
   })
 })
 
@@ -198,5 +248,27 @@ describe('messageCreatedAt', () => {
   it('treats a zero / non-finite timestamp as absent', () => {
     expect(messageCreatedAt({ timestamp: 0 }, NOW).getTime()).toBe(NOW)
     expect(messageCreatedAt({ timestamp: Number.NaN }, NOW).getTime()).toBe(NOW)
+  })
+})
+
+
+describe('sessionTitle', () => {
+  it('does not surface transient Unknown titles', () => {
+    expect(sessionTitle(sessionInfo({ preview: 'real prompt', title: 'Unknown' }))).toBe('real prompt')
+  })
+
+  it('names subagent sessions from the live delegated goal while title generation catches up', () => {
+    expect(sessionTitle(sessionInfo({ source: 'subagent', title: 'Unknown' }), { subagentGoal: 'Review invoices' })).toBe(
+      'Review invoices'
+    )
+  })
+
+
+  it('treats delegate child sessions as subagents even when their persisted source is desktop', () => {
+    expect(
+      sessionTitle(
+        sessionInfo({ delegate_parent_session_id: 'parent', preview: 'Review the staged diff', source: 'desktop', title: null })
+      )
+    ).toBe('Review the staged diff')
   })
 })

@@ -44,6 +44,8 @@ const TAB_SELECTED =
 interface PaneTabProps extends React.ComponentProps<'div'> {
   active?: boolean
   dirty?: boolean
+  /** Replaceable preview tab cue (VS Code-style italic label). */
+  preview?: boolean
   /** Close gesture, no hover X (too easy to hit on small tabs): middle-click,
    *  or ⌘-click as the trackpad-friendly Mac equivalent. */
   onClose?: () => void
@@ -72,6 +74,7 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
     onPointerDown,
     onPointerUp,
     onClickCapture,
+    preview = false,
     selected = false,
     vertical = false,
     side = 'left',
@@ -99,6 +102,7 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
         className
       )}
       data-active={active}
+      data-preview={preview || undefined}
       data-selected={selected || undefined}
       data-vertical={vertical || undefined}
       onClickCapture={event => {
@@ -175,7 +179,7 @@ export const PaneTabLabel = React.forwardRef<HTMLElement, PaneTabLabelProps>(fun
       ref={ref}
       {...props}
     >
-      <span className={cn('block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase', className)}>
+      <span className={cn('block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase group-data-[preview]/tab:italic', className)}>
         {children}
       </span>
     </Comp>

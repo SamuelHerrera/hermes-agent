@@ -43,6 +43,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect, status as http_status
 from fastapi.responses import FileResponse
@@ -159,6 +160,7 @@ def _task_dict(
     task: kanban_db.Task,
     *,
     latest_summary: Optional[str] = None,
+    tags: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     d = asdict(task)
     # Add derived age metrics so the UI can colour stale cards without
@@ -172,8 +174,43 @@ def _task_dict(
     # ``task_runs.summary`` (the kanban-worker pattern) instead of
     # ``tasks.result``. ``None`` when no run has produced a summary yet.
     d["latest_summary"] = latest_summary
+    d["tags"] = tags or []
     # Keep body short on list endpoints; full body comes from /tasks/:id.
     return d
+
+
+def _tag_dict(tag: kanban_db.Tag) -> dict[str, Any]:
+    return {
+        "id": tag.id,
+        "name": tag.name,
+        "normalized_name": tag.normalized_name,
+        "created_at": tag.created_at,
+    }
+
+
+def _tags_by_task(conn: sqlite3.Connection, task_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    if not task_ids:
+        return {}
+    placeholders = ",".join("?" for _ in task_ids)
+    rows = conn.execute(
+        f"""
+        SELECT task_tags.task_id, tags.*
+          FROM task_tags
+          JOIN tags ON tags.id = task_tags.tag_id
+         WHERE task_tags.task_id IN ({placeholders})
+         ORDER BY tags.normalized_name ASC
+        """,
+        tuple(task_ids),
+    ).fetchall()
+    out: dict[str, list[dict[str, Any]]] = {tid: [] for tid in task_ids}
+    for row in rows:
+        out.setdefault(row["task_id"], []).append({
+            "id": int(row["id"]),
+            "name": row["name"],
+            "normalized_name": row["normalized_name"],
+            "created_at": int(row["created_at"]),
+        })
+    return out
 
 
 def _event_dict(event: kanban_db.Event) -> dict[str, Any]:
@@ -197,9 +234,21 @@ def _comment_dict(c: kanban_db.Comment) -> dict[str, Any]:
     }
 
 
-def _attachment_dict(a: kanban_db.Attachment) -> dict[str, Any]:
+def _attachment_url(a: kanban_db.Attachment, board: Optional[str] = None) -> str:
+    """Return the plugin-relative download URL for an attachment.
+
+    The ``id`` remains the stable identifier for API clients; ``url`` is
+    included as convenience render metadata for image/comment clients.
+    """
+    url = f"/api/plugins/kanban/attachments/{quote(str(a.id))}"
+    if board and board != kanban_db.DEFAULT_BOARD:
+        url = f"{url}?board={quote(board)}"
+    return url
+
+
+def _attachment_dict(a: kanban_db.Attachment, board: Optional[str] = None) -> dict[str, Any]:
     """Serialise an Attachment for the drawer. ``stored_path`` is the
-    absolute on-disk path workers read; the UI uses ``id`` for download."""
+    absolute on-disk path workers read; the UI uses ``id``/``url`` for download."""
     return {
         "id": a.id,
         "task_id": a.task_id,
@@ -209,6 +258,7 @@ def _attachment_dict(a: kanban_db.Attachment) -> dict[str, Any]:
         "uploaded_by": a.uploaded_by,
         "stored_path": a.stored_path,
         "created_at": a.created_at,
+        "url": _attachment_url(a, board=board),
     }
 
 
@@ -373,6 +423,38 @@ def _links_for(conn: sqlite3.Connection, task_id: str) -> dict[str, list[str]]:
     return {"parents": parents, "children": children}
 
 
+def _link_details_for(
+    conn: sqlite3.Connection,
+    links: dict[str, list[str]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return display metadata for the task ids in ``links``.
+
+    ``links`` stays as the legacy id-only shape for older dashboard clients;
+    this companion payload lets newer UIs render human task titles while still
+    navigating by id.
+    """
+    details: dict[str, list[dict[str, Any]]] = {}
+    for side, ids in links.items():
+        if not ids:
+            details[side] = []
+            continue
+
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT id, title, status FROM tasks WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        by_id = {
+            r["id"]: {"id": r["id"], "title": r["title"], "status": r["status"]}
+            for r in rows
+        }
+        details[side] = [
+            by_id.get(task_id, {"id": task_id, "title": task_id, "status": None})
+            for task_id in ids
+        ]
+    return details
+
+
 # ---------------------------------------------------------------------------
 # GET /board
 # ---------------------------------------------------------------------------
@@ -432,6 +514,7 @@ def get_board(
         # One pass over task_links joined with child status — cheaper than
         # N per-task queries and the plugin uses it to render "N/M".
         progress: dict[str, dict[str, int]] = {}
+        parents_satisfied: dict[str, bool] = {}
         for row in conn.execute(
             "SELECT l.parent_id AS pid, t.status AS cstatus "
             "FROM task_links l JOIN tasks t ON t.id = l.child_id"
@@ -440,6 +523,13 @@ def get_board(
             p["total"] += 1
             if row["cstatus"] == "done":
                 p["done"] += 1
+        for row in conn.execute(
+            "SELECT l.child_id AS cid, "
+            "SUM(CASE WHEN p.status NOT IN ('done', 'archived') THEN 1 ELSE 0 END) AS open_parents "
+            "FROM task_links l JOIN tasks p ON p.id = l.parent_id "
+            "GROUP BY l.child_id"
+        ).fetchall():
+            parents_satisfied[row["cid"]] = int(row["open_parents"] or 0) == 0
 
         # Diagnostics rollup for this board — see kanban_diagnostics.
         # We get the full structured list per task AND a compact
@@ -459,17 +549,20 @@ def get_board(
         # window-function query (avoids N+1 ``latest_summary`` calls
         # for boards with hundreds of tasks). Truncated to a card-size
         # preview here — the full text is available via /tasks/:id.
-        summary_map = kanban_db.latest_summaries(conn, [t.id for t in tasks])
+        task_ids = [t.id for t in tasks]
+        summary_map = kanban_db.latest_summaries(conn, task_ids)
+        tag_map = _tags_by_task(conn, task_ids)
 
         for t in tasks:
             full = summary_map.get(t.id)
             preview = (
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
-            d = _task_dict(t, latest_summary=preview)
+            d = _task_dict(t, latest_summary=preview, tags=tag_map.get(t.id, []))
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
+            d["parents_satisfied"] = parents_satisfied.get(t.id, True)
             diags = diagnostics_per_task.get(t.id)
             if diags:
                 # Full list goes into the payload so the drawer can render
@@ -547,7 +640,11 @@ def get_task(
         # operators can read the complete worker handoff without making
         # a second round-trip. Cards on /board carry a 200-char preview.
         full_summary = kanban_db.latest_summary(conn, task_id)
-        task_d = _task_dict(task, latest_summary=full_summary)
+        task_d = _task_dict(
+            task,
+            latest_summary=full_summary,
+            tags=[_tag_dict(tag) for tag in kanban_db.list_task_tags(conn, task_id)],
+        )
         links = _links_for(conn, task_id)
         child_ids = links["children"]
         child_summaries = kanban_db.latest_summaries(conn, child_ids)
@@ -574,8 +671,9 @@ def get_task(
             "task": task_d,
             "comments": [_comment_dict(c) for c in kanban_db.list_comments(conn, task_id)],
             "events": [_event_dict(e) for e in kanban_db.list_events(conn, task_id)],
-            "attachments": [_attachment_dict(a) for a in kanban_db.list_attachments(conn, task_id)],
+            "attachments": [_attachment_dict(a, board=board) for a in kanban_db.list_attachments(conn, task_id)],
             "links": links,
+            "link_details": _link_details_for(conn, links),
             "child_results": child_results,
             "runs": [
                 _run_dict(r)
@@ -680,6 +778,61 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
 
 
 # ---------------------------------------------------------------------------
+# Tags — list / attach / detach
+# ---------------------------------------------------------------------------
+
+class TagBody(BaseModel):
+    name: str
+
+
+@router.get("/tags")
+def list_tags(board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        return {"tags": [_tag_dict(tag) for tag in kanban_db.list_tags(conn)]}
+    finally:
+        conn.close()
+
+
+@router.post("/tasks/{task_id}/tags")
+def attach_task_tag(task_id: str, payload: TagBody, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if kanban_db.get_task(conn, task_id) is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+        tag = kanban_db.attach_tag_to_task(conn, task_id, payload.name)
+        return {
+            "tag": _tag_dict(tag),
+            "tags": [_tag_dict(t) for t in kanban_db.list_task_tags(conn, task_id)],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.delete("/tasks/{task_id}/tags/{tag_name}")
+def remove_task_tag(task_id: str, tag_name: str, board: Optional[str] = Query(None)):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if kanban_db.get_task(conn, task_id) is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+        try:
+            removed = kanban_db.remove_tag_from_task(conn, task_id, tag_name)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        return {
+            "removed": removed,
+            "tags": [_tag_dict(t) for t in kanban_db.list_task_tags(conn, task_id)],
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Attachments — upload / list / download / delete (#35338)
 # ---------------------------------------------------------------------------
 
@@ -694,6 +847,80 @@ from hermes_cli.kanban_db import (  # noqa: E402
     _safe_attachment_name,
 )
 
+_PASTED_IMAGE_EXTENSIONS = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+}
+_PASTED_IMAGE_SIGNATURES = {
+    "image/png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
+    "image/jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
+    "image/gif": lambda data: data.startswith((b"GIF87a", b"GIF89a")),
+    "image/webp": lambda data: len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP",
+}
+
+
+def _canonical_pasted_image_type(raw: Optional[str]) -> str:
+    content_type = (raw or "").split(";", 1)[0].strip().lower()
+    if content_type == "image/jpg":
+        content_type = "image/jpeg"
+    if content_type not in _PASTED_IMAGE_EXTENSIONS:
+        allowed = ", ".join(sorted(_PASTED_IMAGE_EXTENSIONS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"pasted image uploads require one of: {allowed}",
+        )
+    return content_type
+
+
+def _safe_pasted_image_filename(raw: Optional[str], content_type: str) -> str:
+    ext = _PASTED_IMAGE_EXTENSIONS[content_type]
+    try:
+        safe = _safe_attachment_name(raw or f"pasted-image.{ext}")
+    except ValueError:
+        safe = f"pasted-image.{ext}"
+    path = Path(safe)
+    stem = (path.stem or "pasted-image").strip().lstrip(".") or "pasted-image"
+    suffix = path.suffix.lower().lstrip(".")
+    valid_suffixes = {ext}
+    if content_type == "image/jpeg":
+        valid_suffixes = {"jpg", "jpeg"}
+    if suffix not in valid_suffixes:
+        max_stem_len = max(1, 200 - len(ext) - 1)
+        safe = f"{stem[:max_stem_len]}.{ext}"
+    return safe
+
+
+def _validate_pasted_image_bytes(data: bytes, content_type: str) -> None:
+    if not data:
+        raise HTTPException(status_code=400, detail="pasted image content is empty")
+    check = _PASTED_IMAGE_SIGNATURES[content_type]
+    if not check(data):
+        raise HTTPException(
+            status_code=400,
+            detail="pasted image content does not match its declared type",
+        )
+
+
+async def _read_upload_bytes_with_cap(file: UploadFile) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > KANBAN_ATTACHMENT_MAX_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"attachment exceeds {KANBAN_ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB limit"
+                ),
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.get("/tasks/{task_id}/attachments")
 def list_task_attachments(task_id: str, board: Optional[str] = Query(None)):
@@ -704,7 +931,7 @@ def list_task_attachments(task_id: str, board: Optional[str] = Query(None)):
             raise HTTPException(status_code=404, detail=f"task {task_id} not found")
         return {
             "attachments": [
-                _attachment_dict(a) for a in kanban_db.list_attachments(conn, task_id)
+                _attachment_dict(a, board=board) for a in kanban_db.list_attachments(conn, task_id)
             ]
         }
     finally:
@@ -774,7 +1001,57 @@ async def upload_task_attachment(
             uploaded_by=(uploaded_by or "dashboard"),
         )
         att = kanban_db.get_attachment(conn, att_id)
-        return {"attachment": _attachment_dict(att) if att else None}
+        return {"attachment": _attachment_dict(att, board=board) if att else None}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/tasks/{task_id}/attachments/pasted-image")
+async def upload_pasted_image_attachment(
+    task_id: str,
+    file: UploadFile = File(...),
+    board: Optional[str] = Query(None),
+    uploaded_by: Optional[str] = Form(None),
+):
+    """Store a pasted image blob as a task attachment.
+
+    This is the image-specific attachment path used by paste/comment flows: it
+    keeps the existing storage/auth/size policy but adds MIME allow-listing and
+    lightweight signature validation before the blob can be rendered inline.
+    """
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        if kanban_db.get_task(conn, task_id) is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+        content_type = _canonical_pasted_image_type(file.content_type)
+        data = await _read_upload_bytes_with_cap(file)
+        _validate_pasted_image_bytes(data, content_type)
+        filename = _safe_pasted_image_filename(file.filename, content_type)
+
+        try:
+            att_id = kanban_db.store_attachment_bytes(
+                conn,
+                task_id,
+                filename,
+                data,
+                content_type=content_type,
+                uploaded_by=(uploaded_by or "dashboard"),
+                board=board,
+                max_bytes=KANBAN_ATTACHMENT_MAX_BYTES,
+            )
+        except kanban_db.AttachmentTooLarge as exc:
+            raise HTTPException(status_code=413, detail=str(exc))
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"failed to store pasted image: {exc}")
+
+        att = kanban_db.get_attachment(conn, att_id)
+        return {"attachment": _attachment_dict(att, board=board) if att else None}
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     finally:
@@ -1013,6 +1290,18 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     (task_id, json.dumps({"priority": int(payload.priority)}),
                      int(time.time())),
                 )
+                kanban_db.apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="updated",
+                    reason="task priority updated",
+                )
+            # Mutation-boundary observer (RFC #58548): this direct-SQL write
+            # bypasses every kanban_db mutator, so report it here — after
+            # the txn commits.
+            kanban_db.notify_task_updated(
+                conn, task_id, ("priority",), board=board,
+            )
 
         # --- title / body -------------------------------------------------
         if payload.title is not None or payload.body is not None:
@@ -1035,6 +1324,19 @@ def update_task(task_id: str, payload: UpdateTaskBody, board: Optional[str] = Qu
                     "VALUES (?, 'edited', NULL, ?)",
                     (task_id, int(time.time())),
                 )
+                kanban_db.apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="updated",
+                    reason="task edited",
+                )
+            # Mutation-boundary observer (RFC #58548), post-commit. Field
+            # names only — values never leave the DB via this payload.
+            kanban_db.notify_task_updated(
+                conn, task_id,
+                [f for f in ("title", "body") if getattr(payload, f) is not None],
+                board=board,
+            )
 
         updated = kanban_db.get_task(conn, task_id)
         return {"task": _task_dict(updated) if updated else None}
@@ -1199,6 +1501,12 @@ def _set_status_direct(
                 ),
                 int(time.time()),
             ),
+        )
+        kanban_db.apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task status updated",
         )
         if reopening_satisfied_parent:
             _invalidate_descendants_for_parent_reopen(
@@ -1402,6 +1710,18 @@ def bulk_update(payload: BulkTaskBody, board: Optional[str] = Query(None)):
                             (tid, json.dumps({"priority": int(payload.priority)}),
                              int(time.time())),
                         )
+                        kanban_db.apply_ai_task_tags(
+                            conn,
+                            tid,
+                            trigger="updated",
+                            reason="task priority updated",
+                        )
+                    # Mutation-boundary observer (RFC #58548): the bulk
+                    # editor writes with direct SQL too — report each task's
+                    # committed write.
+                    kanban_db.notify_task_updated(
+                        conn, tid, ("priority",), board=board,
+                    )
                 if payload.clear_model_override or payload.model_override is not None:
                     new_model = (
                         None if payload.clear_model_override
@@ -2770,15 +3090,19 @@ def get_orchestration_settings():
     explicit_default = (kanban_cfg.get("default_assignee") or "").strip()
     auto_decompose = bool(kanban_cfg.get("auto_decompose", True))
     auto_promote_children = bool(kanban_cfg.get("auto_promote_children", True))
+    review_dispatch = bool(kanban_cfg.get("review_dispatch", True))
 
     # Resolve fallbacks the same way the decomposer does.
     resolved_orch = explicit_orch
     resolved_default = explicit_default
+    dispatch_default = ""
     try:
         from hermes_cli import profiles as profiles_mod
         active_default = profiles_mod.get_active_profile_name() or "default"
         if not resolved_orch or not profiles_mod.profile_exists(resolved_orch):
             resolved_orch = active_default
+        if explicit_default and profiles_mod.profile_exists(explicit_default):
+            dispatch_default = explicit_default
         if not resolved_default or not profiles_mod.profile_exists(resolved_default):
             resolved_default = active_default
     except Exception:
@@ -2787,12 +3111,18 @@ def get_orchestration_settings():
             resolved_orch = active_default
         if not resolved_default:
             resolved_default = active_default
+        # Match the dispatcher's degraded behavior: if profile lookup itself is
+        # unavailable, trust the operator's configured fallback and let spawn
+        # diagnostics sort out a genuinely missing profile later.
+        dispatch_default = explicit_default
 
     return {
         "orchestrator_profile": explicit_orch,
         "default_assignee": explicit_default,
         "auto_decompose": auto_decompose,
         "auto_promote_children": auto_promote_children,
+        "review_dispatch": review_dispatch,
+        "dispatch_default_assignee": dispatch_default,
         "resolved_orchestrator_profile": resolved_orch,
         "resolved_default_assignee": resolved_default,
         "active_profile": active_default,

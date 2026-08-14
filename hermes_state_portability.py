@@ -26,6 +26,10 @@ from hermes_state_common import (
 logger = logging.getLogger("hermes_state")
 
 
+def _delegate_from_json(col: str = "model_config") -> str:
+    return f"json_extract(COALESCE({col}, '{{}}'), '$._delegate_from')"
+
+
 class SessionPortabilityMixin:
     """See module docstring — mixin for SessionDB (Port cluster)."""
 
@@ -176,6 +180,11 @@ class SessionPortabilityMixin:
         # Same read-your-writes guarantee as list_sessions_rich.
         self.flush_token_counts()
         _sel = self._compact_session_cols() if compact_rows else "s.*"
+        delegate_select = (
+            f", {_delegate_from_json('s.model_config')} AS delegate_parent_session_id"
+            if compact_rows
+            else ""
+        )
         placeholders = ",".join("?" for _ in ids)
         prompt_select = (
             "" if compact_rows
@@ -186,7 +195,7 @@ class SessionPortabilityMixin:
             else "LEFT JOIN system_prompts sp ON sp.hash = s.system_prompt_hash"
         )
         query = f"""
-            SELECT {_sel}{prompt_select},
+            SELECT {_sel}{prompt_select}{delegate_select},
                 COALESCE(
                     (SELECT {_PREVIEW_RAW_SELECT}
                      FROM messages m

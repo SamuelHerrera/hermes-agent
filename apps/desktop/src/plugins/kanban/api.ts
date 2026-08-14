@@ -14,13 +14,18 @@ import { atom, type PluginRestOptions, type PluginStorage, queryClient } from '@
 import type {
   BoardMeta,
   BoardsResponse,
+  KanbanAttachment,
   KanbanBoard,
   KanbanProfile,
   KanbanProject,
+  KanbanTag,
   KanbanTask,
   KanbanTaskDetail,
   OrchestrationSettings,
   TaskEstimate,
+  TaskSortDirection,
+  TaskSortDirections,
+  TaskTimeDisplay,
   WorkerLog
 } from './types'
 
@@ -43,10 +48,37 @@ export const $lanesByProfile = atom<boolean>(false)
  *  auto: empty lanes collapse to a rail, occupied lanes expand. Persisted. */
 export const $collapsedLanes = atom<Record<string, boolean>>({})
 
+/** Per-board, per-column card order preference. Omitted lanes are oldest-first. */
+export const $taskSortDirection = atom<TaskSortDirections>({})
+
+/** Timestamp rendering preference for card footers. */
+export const $taskTimeDisplay = atom<TaskTimeDisplay>('relative')
+
 const BOARD_SLUG_KEY = 'boardSlug'
 const INTRO_KEY = 'introDismissed'
 const LANES_KEY = 'lanesByProfile'
 const COLLAPSED_KEY = 'collapsedLanes'
+const SORT_DIRECTION_KEY = 'taskSortDirection'
+const TIME_DISPLAY_KEY = 'taskTimeDisplay'
+
+const KANBAN_COLUMN_NAMES = ['triage', 'todo', 'scheduled', 'ready', 'running', 'blocked', 'review', 'done', 'archived']
+
+const isTaskSortDirection = (value: unknown): value is TaskSortDirection => value === 'asc' || value === 'desc'
+
+function normalizeTaskSortDirections(value: unknown): TaskSortDirections {
+  // Older desktop builds persisted one global 'asc'/'desc' string. Preserve a
+  // previous global desc by expanding it to every known lane; asc remains the
+  // implicit default so the stored object stays sparse.
+  if (isTaskSortDirection(value)) {
+    return value === 'desc' ? Object.fromEntries(KANBAN_COLUMN_NAMES.map(name => [name, 'desc'])) : {}
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(Object.entries(value).filter(([, direction]) => isTaskSortDirection(direction)))
+}
 
 /** One live `task_events` frame → precise cache invalidation: the board, plus
  *  each touched task's detail. The polls (8s board / 4s drawer) stay as the
@@ -93,6 +125,9 @@ export function bindApi(r: Rest, storage: PluginStorage, socket: Socket): () => 
   persist($introDismissed, INTRO_KEY, false)
   persist($lanesByProfile, LANES_KEY, false)
   persist($collapsedLanes, COLLAPSED_KEY, {})
+  $taskSortDirection.set(normalizeTaskSortDirections(storage.get(SORT_DIRECTION_KEY, {})))
+  unsubs.push($taskSortDirection.listen(value => storage.set(SORT_DIRECTION_KEY, normalizeTaskSortDirections(value))))
+  persist($taskTimeDisplay, TIME_DISPLAY_KEY, 'relative')
 
   let close: (() => void) | null = null
 
@@ -138,6 +173,7 @@ export const BOARDS_KEY = ['kanban', 'boards'] as const
 export const PROFILES_KEY = ['kanban', 'profiles'] as const
 export const PROJECTS_KEY = ['kanban', 'projects'] as const
 export const ORCHESTRATION_KEY = ['kanban', 'orchestration'] as const
+export const tagsKey = (slug: string) => ['kanban', 'tags', slug] as const
 
 // ── reads ─────────────────────────────────────────────────────────────────────
 
@@ -157,6 +193,8 @@ export const fetchProfiles = () => call<{ profiles: KanbanProfile[] }>('/profile
 export const fetchProjects = () => call<{ projects: KanbanProject[] }>('/projects')
 
 export const fetchOrchestration = () => call<OrchestrationSettings>('/orchestration')
+
+export const fetchTags = () => call<{ tags: KanbanTag[] }>(withBoard('/tags'))
 
 // ── writes ────────────────────────────────────────────────────────────────────
 
@@ -193,6 +231,12 @@ export const patchTask = (id: string, patch: Record<string, unknown>) =>
 export const createTask = (body: Record<string, unknown>) =>
   nudged(call<{ task: KanbanTask | null; warning?: string }>(withBoard('/tasks'), { method: 'POST', body }))
 
+export const addTaskTag = (id: string, name: string) =>
+  nudged(call<{ tag: KanbanTag; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags`), { method: 'POST', body: { name } }))
+
+export const removeTaskTag = (id: string, name: string) =>
+  nudged(call<{ removed: boolean; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags/${encodeURIComponent(name)}`), { method: 'DELETE' }))
+
 // Deleting can unblock dependants (a gone parent no longer gates), so it
 // nudges too.
 export const deleteTask = (id: string) => nudged(call(withBoard(`/tasks/${id}`), { method: 'DELETE' }))
@@ -216,7 +260,13 @@ export const reassignTask = (id: string, profile: string) =>
 export const reclaimTask = (id: string) => nudged(call(withBoard(`/tasks/${id}/reclaim`), { method: 'POST', body: {} }))
 
 export const uploadAttachment = (id: string, upload: { filename: string; contentType?: string; bytes: ArrayBuffer }) =>
-  call(withBoard(`/tasks/${id}/attachments`), { method: 'POST', upload })
+  call<{ attachment: KanbanAttachment | null }>(withBoard(`/tasks/${id}/attachments`), { method: 'POST', upload })
+
+export const uploadPastedImage = (id: string, upload: { filename: string; contentType?: string; bytes: ArrayBuffer }) =>
+  call<{ attachment: KanbanAttachment | null }>(withBoard(`/tasks/${id}/attachments/pasted-image`), {
+    method: 'POST',
+    upload
+  })
 
 export const createBoard = (slug: string, name: string, projectId?: string) =>
   call<{ board: { slug: string } }>('/boards', {

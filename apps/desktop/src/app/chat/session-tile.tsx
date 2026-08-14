@@ -34,7 +34,7 @@ import { transcribeAudio } from '@/hermes'
 import { useI18n } from '@/i18n'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { NEW_SESSION_TITLE, sessionTitle } from '@/lib/chat-runtime'
-import { createComposerAttachmentScope, draftTitleFor } from '@/store/composer'
+import { $draftTitles, createComposerAttachmentScope, draftTitleFor, draftTitleIn } from '@/store/composer'
 import { $pinnedSessionIds, pinSession, unpinSession } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $projectTree } from '@/store/projects'
@@ -52,6 +52,7 @@ import {
   closeSessionTile,
   discardSessionTile,
   patchSessionTile,
+  promoteSessionTile,
   type SessionTile,
   sessionTileDelegate
 } from '@/store/session-states'
@@ -63,10 +64,10 @@ import { useComposerActions } from './hooks/use-composer-actions'
 import { paneMirror } from './pane-mirror'
 import { SessionDraftTitle } from './session-draft-title'
 import { startSessionDrag } from './session-drag'
-import { SessionStatusDot } from './session-status-dot'
 import { useSessionTileActions } from './session-tile-actions'
 import { type SessionView, SessionViewProvider } from './session-view'
 import { SessionContextMenu } from './sidebar/session-actions-menu'
+import { SessionTabLead } from './subagent-session-icon'
 import { lastVisibleMessageIsUser } from './thread-loading'
 
 import { ChatView } from '.'
@@ -142,6 +143,14 @@ function TileChat({
   )
 
   const actions = useSessionTileActions({ runtimeId, scope, storedSessionId })
+  const draftTitles = useStore($draftTitles)
+  const draftTitle = draftTitleIn(draftTitles, scope.target) || draftTitleIn(draftTitles, storedSessionId)
+
+  useEffect(() => {
+    if (draftTitle) {
+      promoteSessionTile(storedSessionId)
+    }
+  }, [draftTitle, storedSessionId])
 
   // The same attach/pick/paste/drop pipeline the primary composer uses,
   // pointed at this tile's chips + session.
@@ -149,7 +158,7 @@ function TileChat({
     activeSessionId: runtimeId,
     currentCwd: cwd,
     requestGateway,
-    scope: { add: attachments.add, remove: attachments.remove, target: scope.target }
+    scope: { add: attachments.add, remove: attachments.remove, target: scope.target, update: attachments.update }
   })
 
   // ChatView is memo()d — every callback prop must be referentially stable or
@@ -200,6 +209,7 @@ function TileChat({
           onAddUrl={onAddUrl}
           onAttachDroppedItems={composer.attachDroppedItems}
           onAttachImageBlob={composer.attachImageBlob}
+          onAttachPrCommentUrl={composer.attachPrCommentUrl}
           onCancel={actions.cancelRun}
           onDeleteSelectedSession={noop}
           onDismissError={actions.dismissError}
@@ -587,16 +597,17 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   before: t => t.before,
   minWidth: '20rem',
   title: tileTitle,
-  // The tab's status dot — the SAME primitive the sidebar row renders, keyed by
-  // the stored id, so a session's status/color can never disagree between the
-  // two surfaces. Self-subscribing (live state + resolved color), so the strip
-  // needn't re-sync when it changes.
-  tabLead: storedSessionId => (
-    <SessionStatusDot session={tileStoredRow(storedSessionId)} storedSessionId={storedSessionId} />
-  ),
+  // One self-subscribing tab lead: subagents swap robot -> spinner while
+  // running; other sessions use the normal state/project-color treatment.
+  tabLead: storedSessionId => {
+    const stored = tileStoredRow(storedSessionId)
+
+    return <SessionTabLead session={stored} storedSessionId={storedSessionId} />
+  },
   // Until the first turn lists a row there is no title to register, so the tab
   // takes its name from the composer instead — live, without re-registering.
   tabTitle: storedSessionId => (tileStoredRow(storedSessionId) ? null : <SessionDraftTitle scope={storedSessionId} />),
+  tabPreview: storedSessionId => $sessionTiles.get().some(t => t.storedSessionId === storedSessionId && t.preview),
   render: storedSessionId => <SessionTilePane storedSessionId={storedSessionId} />,
   tabWrap: (storedSessionId, tab) => (
     <SessionTabMenu
@@ -608,9 +619,17 @@ export const watchSessionTiles = paneMirror<SessionTile>({
     </SessionTabMenu>
   ),
   // A tile's tab drags like a sidebar row — stack / split / drop-to-link — with
-  // its tap (activate) + double-tap (hide bar) preserved. Always takes the drag.
-  tabDrag: (storedSessionId, event, onTap, double) => {
-    startSessionDrag(tileDragPayload(storedSessionId), event, { double, onTap })
+  // its tap (activate) preserved. Preview tabs use double-tap to become
+  // permanent instead of the old global "hide the tab bar" gesture.
+  tabDrag: (storedSessionId, event, onTap) => {
+    const preview = $sessionTiles.get().some(t => t.storedSessionId === storedSessionId && t.preview)
+
+    startSessionDrag(tileDragPayload(storedSessionId), event, {
+      double: preview
+        ? { key: `promote-session-preview:${storedSessionId}`, onDoubleTap: () => promoteSessionTile(storedSessionId) }
+        : undefined,
+      onTap
+    })
 
     return true
   },

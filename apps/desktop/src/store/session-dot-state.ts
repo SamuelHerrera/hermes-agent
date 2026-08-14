@@ -24,6 +24,7 @@ import { stableRecord } from '@/lib/stable-array'
 import { $backgroundRunningSessionIds } from './composer-status'
 import { $sessions, $unreadFinishedSessionIds, lineageAliases } from './session'
 import { $attentionSessionIds, $draftSessionIds, $stalledSessionIds, $workingSessionIds } from './session-states'
+import { $runningSubagentSessionIds } from './subagents'
 
 export type SessionDotState = 'background' | 'draft' | 'idle' | 'needs-input' | 'stalled' | 'unread' | 'working'
 
@@ -65,9 +66,10 @@ export const $sessionDotStateById = computed(
     $backgroundRunningSessionIds,
     $unreadFinishedSessionIds,
     $draftSessionIds,
+    $runningSubagentSessionIds,
     $sessions
   ],
-  (attention, working, stalled, background, unread, draft, sessions) => {
+  (attention, working, stalled, background, unread, draft, runningSubagents, sessions) => {
     const next: Record<string, SessionDotState> = {}
 
     const claim = (ids: readonly string[], state: SessionDotState) => {
@@ -87,6 +89,16 @@ export const $sessionDotStateById = computed(
     claim(draft, 'draft')
     claim(unread, 'unread')
     claim(background, 'background')
+    // Sessions running in another Hermes surface/process do not publish into
+    // this renderer's `$sessionStates`, but REST list rows can still carry a
+    // backend-derived `running` hint. Treat it like a working turn so the
+    // sidebar row paints the same loader while the selected transcript remains
+    // readable. Local websocket state below stays stronger and clears faster.
+    claim(
+      sessions.filter(session => session.running).map(session => session.id),
+      'working'
+    )
+    claim(runningSubagents, 'working')
     claim(working, 'working')
 
     // Stalled REFINES working rather than rivalling it — the turn is still

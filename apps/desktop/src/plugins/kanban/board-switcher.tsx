@@ -1,8 +1,6 @@
 /**
- * Titlebar board switcher — the board page projects this into `titleBar.center`
- * (where chat shows the session-title dropdown) via `<Contribute>`, so it
- * exists exactly while the page is mounted — no route sniffing. Same chrome as
- * the session title: quiet label + chevron, menu on click.
+ * Board switcher shown in the Kanban page header. Same chrome as the old
+ * titlebar switcher: quiet label + chevron, menu on click.
  */
 
 import {
@@ -34,7 +32,7 @@ import { useEffect, useState } from 'react'
 
 import { $boardSlug, BOARDS_KEY, createBoard, fetchBoards, fetchProjects, PROJECTS_KEY, updateBoard } from './api'
 import type { BoardMeta } from './types'
-import { errText, FIELD_LABEL, useKanban } from './ui'
+import { errText, FIELD_LABEL, KanbanLaneCounts, kanbanLaneCountsFromStatusCounts, useKanban } from './ui'
 
 const NO_PROJECT = '__none__'
 
@@ -197,32 +195,33 @@ export function BoardSwitcher() {
   const currentSlug = slug || boards.current
   const current = boards.boards.find(meta => meta.slug === currentSlug)
   const label = current?.name || current?.slug || k.board
+  const currentCounts = kanbanLaneCountsFromStatusCounts(current?.counts, k)
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button className="h-7 max-w-56 gap-1.5 px-2" size="sm" variant="ghost">
-            <span className="min-w-0 flex-1 truncate text-[0.75rem] font-medium leading-none">{label}</span>
-            {typeof current?.total === 'number' && (
-              <span className="text-[0.6875rem] tabular-nums text-(--ui-text-quaternary)">{current.total}</span>
-            )}
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-none text-foreground">{label}</span>
+            <KanbanLaneCounts className="shrink-0" counts={currentCounts} />
             <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="chevron-down" size="0.8125rem" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center">
-          {boards.boards.map(meta => (
-            <DropdownMenuItem
-              key={meta.slug}
-              onSelect={() => $boardSlug.set(meta.slug === boards.current ? '' : meta.slug)}
-            >
-              {meta.name || meta.slug}
-              {typeof meta.total === 'number' && (
-                <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{meta.total}</span>
-              )}
-              {meta.slug === currentSlug && <Codicon className="ml-auto" name="check" size="0.8rem" />}
-            </DropdownMenuItem>
-          ))}
+          {boards.boards.map(meta => {
+            const counts = kanbanLaneCountsFromStatusCounts(meta.counts, k)
+
+            return (
+              <DropdownMenuItem
+                key={meta.slug}
+                onSelect={() => $boardSlug.set(meta.slug === boards.current ? '' : meta.slug)}
+              >
+                <span className="min-w-0 flex-1 truncate">{meta.name || meta.slug}</span>
+                <KanbanLaneCounts className="shrink-0" counts={counts} />
+                {meta.slug === currentSlug && <Codicon className="ml-auto" name="check" size="0.8rem" />}
+              </DropdownMenuItem>
+            )
+          })}
           <DropdownMenuSeparator />
           {current && (
             <DropdownMenuItem onSelect={() => setSettingsFor(current)}>

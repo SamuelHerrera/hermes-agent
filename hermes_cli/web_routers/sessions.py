@@ -50,6 +50,23 @@ _session_latest_descendant = late("_session_latest_descendant")
 _strip_session_list_rows = late("_strip_session_list_rows")
 
 
+def _session_row_running(session: Dict[str, Any], now: float) -> bool:
+    """Best-effort live-turn hint for REST-only session rows.
+
+    Desktop-owned sessions get exact websocket `running` events, but a CLI/TUI
+    turn only reaches Desktop through state.db refreshes. During a turn the
+    agent writes `last_activity_description` / provenance and clears those
+    labels in turn teardown; pair that with a freshness window so a crashed
+    process cannot leave the row spinning forever.
+    """
+    last_activity = session.get("last_activity_at") or session.get("last_active") or session.get("started_at") or 0
+    desc = str(session.get("last_activity_description") or "").strip()
+    provenance = str(session.get("last_activity_provenance") or "").strip().lower()
+    has_live_label = bool(desc) or bool(provenance and provenance != "unknown")
+
+    return bool(has_live_label and (now - float(last_activity or 0)) < 300)
+
+
 @list_router.get("/api/sessions")
 def get_sessions(
     # ``le=100`` caps the page size (idea from #39200): an unbounded limit
@@ -145,9 +162,13 @@ def get_sessions(
             # scoped, so default-profile rows never circulate unowned.
             row_profile = profile_name or _cron_default_profile()
             for s in sessions:
+                s["running"] = _session_row_running(s, now)
                 s["is_active"] = (
-                    s.get("ended_at") is None
-                    and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                    s["running"]
+                    or (
+                        s.get("ended_at") is None
+                        and (now - s.get("last_active", s.get("started_at", 0))) < 300
+                    )
                 )
                 s["profile"] = row_profile
                 s["is_default_profile"] = row_profile == "default"

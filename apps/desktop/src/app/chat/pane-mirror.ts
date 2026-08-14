@@ -36,10 +36,15 @@ export interface PaneMirror<T> {
    *  self-subscribing component (e.g. a session's status dot) so the strip needn't
    *  re-sync on status/color change — only `title` drives re-registration. */
   tabLead?: (key: string) => ReactNode
+  /** Custom tab-level decoration rendered in the tab shell but outside the
+   *  label flow — e.g. the session-running arc around a tab. */
+  tabActivity?: (key: string) => ReactNode
   /** Custom label NODE for the tile's tab, self-subscribing for the same reason
    *  as `tabLead` — a name that moves faster than re-registration (see
    *  PaneChrome.tabTitle). Falls back to `title`. */
   tabTitle?: (key: string) => ReactNode
+  /** VS Code-style preview tab cue: italic and replaceable until promoted. */
+  tabPreview?: (key: string) => boolean
   /** Glyph buttons the tile contributes to the strip, after the last tab (where
    *  "+" sits), while it is the ACTIVE pane — e.g. a preview's console /
    *  DevTools toggles. DATA, not markup: the strip's `PaneStripGlyph` owns the
@@ -63,7 +68,7 @@ export interface PaneMirror<T> {
 /** Build a `watch*` fn: syncs once, then re-syncs on every source/also change.
  *  Module-level state lives in the returned closure, so call it once per app. */
 export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
-  const registered = new Map<string, { dispose: () => void; title: string }>()
+  const registered = new Map<string, { dispose: () => void; signature: string }>()
   const paneId = (key: string) => `${cfg.prefix}:${key}`
 
   const sync = () => {
@@ -73,10 +78,12 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
     for (const tile of tiles) {
       const key = cfg.key(tile)
       const title = cfg.title(key)
+      const preview = cfg.tabPreview?.(key) ?? false
+      const signature = `${title}\u0000${preview ? 'preview' : 'normal'}`
       const current = registered.get(key)
 
       // register() replaces same-id in place — safe for live title refreshes.
-      if (current && current.title === title) {
+      if (current && current.signature === signature) {
         continue
       }
 
@@ -85,7 +92,9 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         area: 'panes',
         title,
         data: {
+          tabActivity: cfg.tabActivity ? () => cfg.tabActivity!(key) : undefined,
           tabLead: cfg.tabLead ? () => cfg.tabLead!(key) : undefined,
+          tabPreview: cfg.tabPreview ? () => preview : undefined,
           tabTitle: cfg.tabTitle ? () => cfg.tabTitle!(key) : undefined,
           stripTools: cfg.stripTools ? () => cfg.stripTools!(key) : undefined,
           dock: {
@@ -107,7 +116,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         render: () => cfg.render(key)
       })
 
-      registered.set(key, { dispose, title })
+      registered.set(key, { dispose, signature })
 
       if (!current) {
         registerPaneCloser(paneId(key), () => cfg.close(key))

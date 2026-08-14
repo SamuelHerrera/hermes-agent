@@ -29,6 +29,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
+DELEGATE_FROM_KEY = "_delegate_from"
+
 # A cwd -> git identity resolver. Returns ``{"repo_root", "worktree_root"}`` where
 # ``repo_root`` is the COMMON (main) repo root shared across worktrees and
 # ``worktree_root`` is this cwd's own checkout root. Returns ``None`` when the
@@ -273,6 +275,82 @@ def _session_repo_root(session: dict, resolve: Optional[Resolve]) -> str:
         if info and info.get("repo_root"):
             return info["repo_root"]
     return (session.get("git_repo_root") or "").strip()
+
+
+def _delegate_parent_id(session: dict) -> str:
+    """Parent session id for a delegated child row, if present.
+
+    SessionDB stores this as model_config._delegate_from. API/gateway callers can
+    pre-project it to a flat ``delegate_parent_session_id`` so this pure builder
+    never needs to know about JSON decoding.
+    """
+    return (session.get("delegate_parent_session_id") or session.get(DELEGATE_FROM_KEY) or "").strip()
+
+
+def _with_delegate_children(sessions: list[dict]) -> list[dict]:
+    """Return sessions plus delegate children whose visible ancestor is present.
+
+    The Projects overview/drill-in tree scopes by parent conversation: a child
+    subagent usually has no cwd of its own (and should not become a top-level
+    Home row), but it should be selectable under the chat that spawned it. Keep
+    orphans hidden so the main view does not turn internal worker sessions into
+    standalone projects.
+    """
+    by_id = {s.get("id"): s for s in sessions if s.get("id")}
+    visible_ids = {sid for sid, session in by_id.items() if not _delegate_parent_id(session)}
+
+    changed = True
+    while changed:
+        changed = False
+        for sid, session in by_id.items():
+            if sid in visible_ids:
+                continue
+            parent_id = _delegate_parent_id(session)
+            if parent_id and parent_id in visible_ids:
+                visible_ids.add(sid)
+                changed = True
+
+    shaped: dict[str, dict] = {}
+
+    def shape(sid: str, stack: Optional[set[str]] = None) -> Optional[dict]:
+        if sid in shaped:
+            return shaped[sid]
+        if sid not in visible_ids:
+            return None
+        session = by_id.get(sid)
+        if session is None:
+            return None
+
+        stack = set(stack or ())
+        if sid in stack:
+            return None
+        stack.add(sid)
+
+        parent_id = _delegate_parent_id(session)
+        next_session = dict(session)
+        if parent_id:
+            parent = shape(parent_id, stack)
+            if parent is None:
+                return None
+            next_session["parent_session_id"] = parent_id
+            # Place the delegate child in the same project/lane as its parent so
+            # the renderer's existing branch-tree flattening can nest it directly
+            # under the spawning chat instead of promoting it to Home/another lane.
+            for key in ("cwd", "git_branch", "git_repo_root"):
+                if parent.get(key):
+                    next_session[key] = parent.get(key)
+
+        shaped[sid] = next_session
+        return next_session
+
+    out: list[dict] = []
+    for session in sessions:
+        sid = session.get("id")
+        next_session = shape(sid) if sid else None
+        if next_session is not None:
+            out.append(next_session)
+
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -586,6 +664,7 @@ def build_tree(
     _junk_cwd = is_junk_cwd or (lambda _cwd: False)
     _exists = exists or (lambda _path: True)
     folder_index = _FolderIndex(active_projects)
+    sessions = _with_delegate_children(sessions)
 
     by_project: dict[str, list[dict]] = {}
     unowned: list[dict] = []

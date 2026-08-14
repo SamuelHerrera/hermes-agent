@@ -10,7 +10,8 @@ import {
   hermesManagedNodePathEntries,
   normalizeHermesHomeRoot,
   pathEnvKey,
-  POSIX_SANE_PATH_ENTRIES
+  POSIX_SANE_PATH_ENTRIES,
+  scrubDesktopBackendParentEnv
 } from './backend-env'
 
 test('desktop backend PATH adds Hermes-managed bins and missing POSIX sane entries', () => {
@@ -184,6 +185,32 @@ test('Windows PATH casing and delimiter are preserved without POSIX sane entries
   assert.ok(env.Path.includes('\\venv\\Scripts;'))
   assert.ok(env.Path.includes(';C:\\Windows\\System32;C:\\Windows'))
   assert.equal(env.Path.includes('/opt/homebrew/bin'), false)
+})
+
+test('desktop backend scrubs inherited worker and session routing identity', () => {
+  const env = scrubDesktopBackendParentEnv({
+    HOME: '/Users/test',
+    HERMES_HOME: '/Users/test/.hermes',
+    HERMES_KANBAN_TASK: 't_leaked',
+    HERMES_KANBAN_RUN_ID: '53',
+    HERMES_KANBAN_WORKSPACE: '/tmp/task',
+    HERMES_KANBAN_BOARD: 'default',
+    HERMES_KANBAN_DB: '/tmp/kanban.db',
+    HERMES_KANBAN_GOAL_MODE: '1',
+    HERMES_KANBAN_BRANCH: 'wt/t_leaked',
+    HERMES_SESSION_ID: 'worker-session',
+    HERMES_SESSION_KEY: 'worker-session',
+    HERMES_SESSION_SOURCE: 'kanban',
+    HERMES_SESSION_PLATFORM: 'telegram',
+    HERMES_TENANT: 'tenant-a',
+    PATH: '/usr/bin'
+  })
+
+  assert.deepEqual(env, {
+    HOME: '/Users/test',
+    HERMES_HOME: '/Users/test/.hermes',
+    PATH: '/usr/bin'
+  })
 })
 
 test('appendUniquePathEntries drops empty entries and keeps first occurrence', () => {

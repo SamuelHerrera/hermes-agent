@@ -20,10 +20,26 @@ export interface KanbanTask {
   /** Compact diagnostics rollup — present only when a card has warnings. */
   warnings?: null | { count: number; highest_severity?: null | string }
   /** Worker liveness (present on running cards) — drives the arc + run clock. */
+  current_run_id?: null | number
   started_at?: null | number
   worker_pid?: null | number
   last_heartbeat_at?: null | number
+  /** True when every direct parent is done/archived; used to show todo cards
+   *  that are only waiting for the dispatcher recompute/promotion tick. */
+  parents_satisfied?: null | boolean
+  tags?: KanbanTag[]
 }
+
+export interface KanbanTag {
+  id: number | string
+  name: string
+  normalized_name: string
+  created_at?: number
+}
+
+export type TaskSortDirection = 'asc' | 'desc'
+export type TaskSortDirections = Partial<Record<string, TaskSortDirection>>
+export type TaskTimeDisplay = 'datetime' | 'relative'
 
 export interface KanbanColumn {
   name: string
@@ -88,7 +104,15 @@ export interface KanbanEvent {
 export interface KanbanAttachment {
   id: number | string
   filename: string
+  content_type?: null | string
   size?: null | number
+  url?: null | string
+}
+
+export interface KanbanTaskLink {
+  id: string
+  title?: null | string
+  status?: null | string
 }
 
 /** Fields present only on the detail endpoint (beyond the card's KanbanTask).
@@ -119,6 +143,7 @@ export interface KanbanTaskDetail {
   events: KanbanEvent[]
   attachments: KanbanAttachment[]
   links: { parents: string[]; children: string[] }
+  link_details?: { parents?: KanbanTaskLink[]; children?: KanbanTaskLink[] }
   runs: KanbanRun[]
 }
 
@@ -128,6 +153,8 @@ export interface BoardMeta {
   name?: null | string
   description?: null | string
   is_current?: boolean
+  /** Per-status task totals returned by GET /boards for switcher badges. */
+  counts?: Record<string, number>
   total?: number
   /** Board-level project directory new tasks inherit (empty = none). */
   default_workdir?: null | string
@@ -176,8 +203,13 @@ export interface OrchestrationSettings {
   orchestrator_profile: string
   default_assignee: string
   auto_decompose: boolean
+  auto_promote_children?: boolean
+  review_dispatch?: boolean
+  /** Dispatcher-usable default assignee. Empty when unset or invalid. */
+  dispatch_default_assignee?: string
   resolved_orchestrator_profile: string
   resolved_default_assignee: string
+  active_profile?: string
 }
 
 /** GET /profiles — the roster the decomposer routes across. */

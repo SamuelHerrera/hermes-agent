@@ -19,6 +19,25 @@ import pytest
 # Gating
 # ---------------------------------------------------------------------------
 
+def test_kanban_tools_hidden_with_leaked_worker_env_in_desktop(monkeypatch, tmp_path):
+    """An inherited worker task id must not turn a Desktop chat into that worker."""
+    monkeypatch.setenv("HERMES_KANBAN_TASK", "t_leaked")
+    monkeypatch.setenv("HERMES_SESSION_SOURCE", "desktop")
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    import tools.kanban_tools  # ensure registered
+    from tools.registry import invalidate_check_fn_cache, registry
+    from toolsets import resolve_toolset
+
+    invalidate_check_fn_cache()
+    schema = registry.get_definitions(set(resolve_toolset("hermes-cli")), quiet=True)
+    names = {s["function"].get("name") for s in schema if "function" in s}
+    kanban = {n for n in names if n and n.startswith("kanban_")}
+    assert kanban == set(), f"worker tools leaked into Desktop schema: {kanban}"
+
+
 def test_kanban_tools_hidden_without_env_var(monkeypatch, tmp_path):
     """Normal `hermes chat` sessions (no HERMES_KANBAN_TASK) must have
     zero kanban_* tools in their schema."""
@@ -369,6 +388,44 @@ def test_comment_happy_path(worker_env):
         assert comments[0].body == "hello thread"
     finally:
         conn.close()
+
+
+def test_tag_tools_attach_remove_and_list(worker_env):
+    from tools import kanban_tools as kt
+
+    added = json.loads(kt._handle_tag_add({"name": "  Feature   Alpha  "}))
+    assert added.get("ok") is True, added
+    assert added["tag"]["name"] == "Feature Alpha"
+    assert added["tag"]["normalized_name"] == "feature alpha"
+
+    duplicate = json.loads(kt._handle_tag_add({"name": "FEATURE ALPHA"}))
+    assert duplicate.get("ok") is True, duplicate
+    assert duplicate["tag"]["id"] == added["tag"]["id"]
+
+    tags = json.loads(kt._handle_tags({}))
+    normalized = {t["normalized_name"] for t in tags["tags"]}
+    assert "feature alpha" in normalized
+
+    show = json.loads(kt._handle_show({}))
+    shown_names = {t["normalized_name"] for t in show["task"]["tags"]}
+    assert "feature alpha" in shown_names
+
+    removed = json.loads(kt._handle_tag_remove({"name": "feature alpha"}))
+    assert removed.get("ok") is True, removed
+    assert removed["removed"] is True
+    assert "feature alpha" not in {t["normalized_name"] for t in removed["tags"]}
+
+
+def test_tag_add_rejects_invalid_name(worker_env):
+    from tools import kanban_tools as kt
+
+    empty = json.loads(kt._handle_tag_add({"name": "   "}))
+    assert "error" in empty
+    assert "name is required" in empty["error"]
+
+    control = json.loads(kt._handle_tag_add({"name": "bad\nname"}))
+    assert "error" in control
+    assert "control" in control["error"]
 
 
 def test_comment_ignores_caller_supplied_author(worker_env):
@@ -836,6 +893,89 @@ def _sub_index(subs):
                 "notifier_profile": getattr(s, "notifier_profile", None),
             })
     return out
+
+
+def test_create_subscribes_gateway_session(monkeypatch, worker_env):
+    """A gateway session (platform + chat_id set) gets auto-subscribed
+    to its own kanban_create result, and the response surfaces the
+    ``subscribed`` flag so the orchestrator can react."""
+    from tools import kanban_tools as kt
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
+    monkeypatch.setenv("HERMES_SESSION_CHAT_ID", "chat-42")
+    monkeypatch.setenv("HERMES_SESSION_THREAD_ID", "thread-7")
+    monkeypatch.setenv("HERMES_SESSION_USER_ID", "user-9")
+    monkeypatch.setenv("HERMES_SESSION_USER_ID_ALT", "alt-user-9")
+    monkeypatch.setenv("HERMES_SESSION_CHAT_TYPE", "forum")
+
+    out = kt._handle_create({
+        "title": "auto-sub gateway",
+        "assignee": "peer",
+    })
+    d = json.loads(out)
+    assert d["ok"] is True
+    new_tid = d["task_id"]
+    assert d["subscribed"] is True, d
+
+    subs = _sub_index(_list_subs_for_task(new_tid))
+    assert len(subs) == 1
+    s = subs[0]
+    assert s["platform"] == "telegram"
+    assert s["chat_id"] == "chat-42"
+    assert s["thread_id"] == "thread-7"
+    assert s["user_id"] == "user-9"
+    assert s["user_id_alt"] == "alt-user-9"
+    assert s["chat_type"] == "forum"
+    assert s["delivery_mode"] == "notify+wake"
+
+
+def test_create_subscribes_tui_session_via_session_key(monkeypatch, worker_env):
+    """TUI / desktop sessions don't have a platform/chat_id (single
+    local channel), but the parent process exports HERMES_SESSION_KEY.
+    We should still auto-subscribe, with platform='tui' and
+    chat_id=<key>."""
+    from tools import kanban_tools as kt
+    monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_THREAD_ID", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_USER_ID", raising=False)
+    monkeypatch.setenv("HERMES_SESSION_KEY", "tui-session-abc")
+    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
+
+    out = kt._handle_create({
+        "title": "auto-sub tui",
+        "assignee": "peer",
+    })
+    d = json.loads(out)
+    assert d["ok"] is True
+    new_tid = d["task_id"]
+    assert d["subscribed"] is True, d
+
+    subs = _sub_index(_list_subs_for_task(new_tid))
+    assert len(subs) == 1
+    assert subs[0]["platform"] == "tui"
+    assert subs[0]["chat_id"] == "tui-session-abc"
+    assert subs[0]["chat_type"] == "dm"
+    assert subs[0]["delivery_mode"] == "notify"
+
+
+def test_create_does_not_subscribe_in_cli_session(monkeypatch, worker_env):
+    """CLI / cron / test sessions have no persistent delivery channel.
+    _maybe_auto_subscribe returns False and no row is written."""
+    from tools import kanban_tools as kt
+    monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_CHAT_ID", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_KEY", raising=False)
+    monkeypatch.delenv("HERMES_SESSION_ID", raising=False)
+
+    out = kt._handle_create({
+        "title": "no sub cli",
+        "assignee": "peer",
+    })
+    d = json.loads(out)
+    assert d["ok"] is True
+    assert d["subscribed"] is False, d
+
+    assert _list_subs_for_task(d["task_id"]) == []
 
 
 def test_create_respects_auto_subscribe_on_create_false(monkeypatch, worker_env, tmp_path):

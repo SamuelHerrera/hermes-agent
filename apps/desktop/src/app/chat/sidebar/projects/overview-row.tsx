@@ -1,3 +1,4 @@
+import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useRef } from 'react'
 
@@ -5,6 +6,7 @@ import { Codicon } from '@/components/ui/codicon'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { $sessionDotStateById, showsRunningArc } from '@/store/session-dot-state'
 
 import {
   SIDEBAR_LEAD_ICON_SIZE,
@@ -96,6 +98,14 @@ export function ProjectOverviewRow({
   const rowRef = useRef<HTMLDivElement>(null)
   const fetched = (previewSessions ?? []).slice(0, PROJECT_PREVIEW_COUNT)
   const preview = renderRows ? (fetched.length ? fetched : latestProjectSessions(project, PROJECT_PREVIEW_COUNT)) : []
+  const dotStates = useStore($sessionDotStateById)
+
+  // In the overview/base view, keep active work visible even when the project is
+  // collapsed. Entering the project shows the full lane; the base view should
+  // still surface the live subagent row and its robot/loading glyph.
+  const visiblePreview = open
+    ? preview
+    : preview.filter(session => session.running || showsRunningArc(dotStates[session.id] ?? 'idle'))
 
   const lead = reorderable ? (
     <SidebarRowGrab
@@ -158,7 +168,11 @@ export function ProjectOverviewRow({
   )
 
   return (
-    <div className={cn(dragging && 'relative z-10')} ref={ref} style={style}>
+    // Tag each project sibling with its id so a custom skin can target one
+    // project in the overview — the parallel to the entered-project wrapper's
+    // `data-sessions-project` (index.tsx), which only fires once you've drilled
+    // in. Here it's present on every row of the list.
+    <div className={cn(dragging && 'relative z-10')} data-sessions-project={project.id} ref={ref} style={style}>
       {/* Home has no per-project actions, so it gets no right-click menu. */}
       {project.isNoProject ? (
         shell
@@ -167,7 +181,7 @@ export function ProjectOverviewRow({
           {shell}
         </ProjectContextMenu>
       )}
-      {open && preview.length > 0 && <SidebarRowNest>{renderRows?.(preview)}</SidebarRowNest>}
+      {visiblePreview.length > 0 && <SidebarRowNest>{renderRows?.(visiblePreview)}</SidebarRowNest>}
     </div>
   )
 }

@@ -21,6 +21,7 @@ import {
   tombstoneSessions,
   untombstoneSessions
 } from '@/store/projects'
+import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionStoredIdRotation,
   $currentCwd,
@@ -477,6 +478,12 @@ export function useSessionActions({
       }
 
       if (item.route) {
+        if (item.openAsTile) {
+          openRouteTile(item.route, 'center')
+
+          return
+        }
+
         navigateToWorkspacePage(navigate, item.route)
       }
     },

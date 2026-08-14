@@ -9,6 +9,8 @@
  *   - `stack` (⌘K, notifications — anything that opens a chat from outside the
  *     workspace) — like `tab`, but may spend main or an open blank draft tab
  *     when either is empty.
+ *   - `preview` (sidebar single-click) — focus if already on screen, else open
+ *     one replaceable VS Code-style preview tab.
  *   - `tab` (⌘/⌃-click / ⌘-Enter / session refs) — focus if already on screen,
  *     else open as a stacked session tab (never steals main from under you).
  *   - `window` (⇧⌘-click) — pop into its own window; falls back to `tab` when
@@ -18,6 +20,7 @@ import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
 import {
   focusedSessionNeedsRoute,
   focusOpenSession,
+  openPreviewSessionTile,
   openSessionTile,
   reuseBlankDraftTile
 } from '@/store/session-states'
@@ -25,7 +28,7 @@ import { canOpenSessionWindow, openSessionInNewWindow } from '@/store/windows'
 
 import { $workspaceIsPage, sessionRoute } from './routes'
 
-export type OpenSessionIntent = 'in-place' | 'stack' | 'tab' | 'window'
+export type OpenSessionIntent = 'in-place' | 'preview' | 'stack' | 'tab' | 'window'
 
 export type OpenSessionNavigate = (to: string, options?: { replace?: boolean }) => void
 
@@ -118,6 +121,16 @@ export function openSession(
     }
 
     openSessionTile(storedSessionId, 'center')
+
+    return
+  }
+
+  if (resolved === 'preview') {
+    if (focusOpenSession(storedSessionId)) {
+      return
+    }
+
+    openPreviewSessionTile(storedSessionId, 'center')
 
     return
   }

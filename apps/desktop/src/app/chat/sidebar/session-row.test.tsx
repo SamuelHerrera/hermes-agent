@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { atom } from 'nanostores'
 import type * as React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,8 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
 import type * as ComposerStatusStore from '@/store/composer-status'
 import type * as SessionStore from '@/store/session'
+import { setSessionColorOverride } from '@/store/session-color'
+import { setSessions } from '@/store/session'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 import type * as SessionStatesStore from '@/store/session-states'
 import type * as WindowsStore from '@/store/windows'
@@ -26,6 +28,7 @@ vi.mock('@/i18n', () => ({
           backgroundRunning: 'Running in background',
           finishedUnread: 'Finished',
           handoffOrigin: (platform: string) => `Started on ${platform}`,
+          messageCount: (count: number) => `${count} messages`,
           needsInput: 'Needs input',
           sessionActions: 'Session actions',
           sessionRunning: 'Running',
@@ -45,8 +48,8 @@ vi.mock('@/app/chat/session-drag', () => ({ startSessionDrag: vi.fn() }))
 // component does. This file exercises the actual production component so a
 // regression in its ref/prop forwarding fails here again.
 // Only `sessionTitle` is overridden (makeSession fakes a bare `title` the real
-// one wouldn't read); the rest of the module is genuine so the arc test can
-// build session state with the same factory the app uses. It is a spy because
+// one wouldn't read); the rest of the module is genuine so the running-status
+// test can build session state with the same factory the app uses. It is a spy because
 // the row calls it exactly once per render, which is how the isolation test
 // below counts repaints.
 const sessionTitle = vi.fn((s: SessionInfo) => (s as unknown as { title: string }).title)
@@ -138,8 +141,12 @@ const handoffAvatar = (container: HTMLElement) =>
 
 const noop = vi.fn()
 
-const renderRow = (session: SessionInfo) =>
-  render(
+const renderRow = (session: SessionInfo) => {
+  act(() => {
+    setSessions([session])
+  })
+
+  return render(
     <SidebarSessionRow
       isPinned={false}
       isSelected={false}
@@ -150,36 +157,73 @@ const renderRow = (session: SessionInfo) =>
       session={session}
     />
   )
+}
 
 // The row no longer takes its running state as a prop, so this drives the real
 // store the way the app does. $workingSessionIds is the actual computed here
 // (the mock above only overrides its siblings), which is what makes this cover
-// the wiring rather than the predicate — the arc has gone missing before.
-describe('SidebarSessionRow running arc', () => {
+// the wiring rather than the predicate — Samuel's preferred cue is identity dot
+// on the left plus a separate transient status icon on the right, not a row arc.
+describe('SidebarSessionRow running indicator', () => {
   afterEach(() => {
-    clearAllSessionStates()
+    act(() => {
+      clearAllSessionStates()
+      setSessionColorOverride('s1', null)
+    })
   })
 
   const arc = (container: HTMLElement) => container.querySelector('.arc-row')
 
-  it('paints no arc for a settled session', () => {
-    const { container } = renderRow(makeSession({ title: 'Settled' }))
-
-    expect(arc(container)).toBeNull()
-  })
-
-  it('paints the arc while the session is running', () => {
-    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+  it('keeps the project dot on the left and shows running status with a tooltip on the right', () => {
+    act(() => {
+      setSessionColorOverride('s1', '#2f81f7')
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
 
     const { container } = renderRow(makeSession({ title: 'Running' }))
+    const spinner = container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+    const lead = container.querySelector<HTMLElement>('[data-session-project-dot]')
 
-    expect(arc(container)).toBeTruthy()
+    expect(arc(container)).toBeNull()
+    expect(lead).toBeTruthy()
+    expect(lead?.querySelector('.rounded-full')).toBeTruthy()
+    expect(lead?.querySelector<HTMLElement>('.rounded-full')?.style.backgroundColor).toBe('rgb(47, 129, 247)')
+    expect(lead?.querySelector('.codicon-loading')).toBeNull()
+    expect(spinner).toBeTruthy()
+    expect(spinner?.closest('[data-row-actions]')).toBeTruthy()
+    expect(tipTrigger(spinner as HTMLElement)).toBeTruthy()
+  })
+
+  it('suppresses transient status for an archived session', () => {
+    act(() => {
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
+
+    const { container } = renderRow(makeSession({ archived: true, title: 'Archived' }))
+
+    expect(container.querySelector('.codicon-archive')).toBeTruthy()
+    expect(container.querySelector('[data-session-status]')).toBeNull()
+  })
+
+  it('swaps the subagent robot glyph to the loading glyph while its turn is running', () => {
+    act(() => {
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
+
+    const { container } = renderRow(makeSession({ delegate_parent_session_id: 'parent', title: 'Review diff' }))
+
+    expect(container.querySelector('.codicon-robot')).toBeNull()
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
   })
 
   // The row owns its status subscription so a turn starting repaints that row
   // and nothing else — not its siblings, and not the list around them. Rows
   // render once per fiber, so counting `sessionTitle` counts repaints.
   it('repaints only the session whose turn started', () => {
+    act(() => {
+      setSessions([makeSession({ id: 's1', title: 'One' }), makeSession({ id: 's2', title: 'Two' })])
+    })
+
     render(
       <>
         {[makeSession({ id: 's1', title: 'One' }), makeSession({ id: 's2', title: 'Two' })].map(session => (
@@ -223,6 +267,101 @@ describe('SidebarSessionRow', () => {
 
     const kebab = screen.getByRole('button', { name: 'Session actions' })
     expect(tipTrigger(kebab)).toBeNull()
+  })
+
+  it('keeps the lead icon aligned by putting the child-chat disclosure in the trailing actions', () => {
+    const { container } = render(
+      <SidebarSessionRow
+        hasBranchChildren
+        isPinned={false}
+        isSelected={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        onToggleBranch={noop}
+        session={makeSession({ title: 'Parent chat' })}
+      />
+    )
+
+    const rowBody = screen.getByText('Parent chat').closest('button')
+    const toggle = screen.getByRole('button', { name: 'Collapse child chats' })
+    const trailingActions = toggle.closest('[data-row-actions]')
+
+    expect(rowBody?.contains(toggle)).toBe(false)
+    expect(trailingActions).toBeTruthy()
+    expect(trailingActions).not.toBe(toggle)
+  })
+
+  // Full-title tooltip on hover (#83000-class ask): the label is a tooltip
+  // trigger, but the tip only opens when the title is actually truncated.
+  describe('full-title overflow tooltip', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const title = 'A very long session title that the sidebar cannot possibly fit'
+
+    /** The rendered title label (tooltip trigger is the label itself). */
+    const label = () => screen.getByText(title).closest('[data-slot="tooltip-trigger"]') as HTMLElement
+
+    const setWidths = (el: HTMLElement, scrollWidth: number, clientWidth: number) => {
+      Object.defineProperty(el, 'scrollWidth', { configurable: true, value: scrollWidth })
+      Object.defineProperty(el, 'clientWidth', { configurable: true, value: clientWidth })
+    }
+
+    it('wraps the title in a tooltip trigger', () => {
+      renderRow(makeSession({ title }))
+
+      expect(label()).toBeTruthy()
+    })
+
+    it('opens with the full title after a settled hover when the title overflows', () => {
+      vi.useFakeTimers()
+      renderRow(makeSession({ title }))
+
+      const el = label()
+      setWidths(el, 300, 100)
+
+      act(() => {
+        fireEvent.pointerEnter(el)
+        vi.advanceTimersByTime(700)
+      })
+
+      expect(screen.getByRole('tooltip').textContent).toContain(title)
+    })
+
+    it('stays closed when the title fits', () => {
+      vi.useFakeTimers()
+      renderRow(makeSession({ title }))
+
+      const el = label()
+      setWidths(el, 100, 100)
+
+      act(() => {
+        fireEvent.pointerEnter(el)
+        vi.advanceTimersByTime(700)
+      })
+
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    })
+
+    it('cancels a pending open when the pointer leaves before the delay', () => {
+      vi.useFakeTimers()
+      renderRow(makeSession({ title }))
+
+      const el = label()
+      setWidths(el, 300, 100)
+
+      act(() => {
+        fireEvent.pointerEnter(el)
+        vi.advanceTimersByTime(200)
+        fireEvent.pointerLeave(el)
+        vi.advanceTimersByTime(700)
+      })
+
+      expect(screen.queryByRole('tooltip')).toBeNull()
+    })
   })
 
   it('does not render a handoff avatar for a locally-started session', () => {

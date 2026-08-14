@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   FadeScroll,
+  GlyphSpinner,
   profileColor,
   profileColorSoft,
   relativeTime,
@@ -19,7 +20,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { fetchOrchestration, ORCHESTRATION_KEY } from './api'
 import { columnLabel, useKanban } from './i18n'
-import { columnMeta, type KanbanTask } from './types'
+import { COLUMN_META, columnMeta, type KanbanColumn, type KanbanTask } from './types'
 
 // Plugin-scoped i18n lives in ./i18n; re-exported so components import strings
 // and chrome from one place (./ui).
@@ -40,7 +41,9 @@ export function useOrchestration() {
 /** The dispatcher's configured fallback for unassigned ready cards
  *  (`kanban.default_assignee`) — '' when unset, i.e. unassigned never runs. */
 export function useDefaultAssignee(): string {
-  return useOrchestration()?.default_assignee.trim() ?? ''
+  const orchestration = useOrchestration()
+
+  return (orchestration?.dispatch_default_assignee ?? orchestration?.default_assignee ?? '').trim()
 }
 
 // System-owned drop targets — you can drag a card OUT of these, never INTO
@@ -72,7 +75,129 @@ export function errText(err: unknown): string {
 }
 
 /** Backend timestamps are epoch SECONDS; the canonical formatter takes ms. */
-export const ago = (seconds?: null | number): null | string => (seconds ? relativeTime(seconds * 1000) : null)
+export const ago = (seconds?: null | number, nowMs = Date.now()): null | string =>
+  seconds ? relativeTime(seconds * 1000, nowMs) : null
+
+export type KanbanLaneCount = {
+  count: number
+  label: string
+  name: string
+  tone: string
+}
+
+export const formatKanbanLaneCount = (count: number) => (count > 99 ? '99+' : String(count))
+
+export function pluralKanbanTask(count: number) {
+  return `task${count === 1 ? '' : 's'}`
+}
+
+const columnOrder = Object.keys(COLUMN_META)
+
+function byColumnOrder(a: string, b: string) {
+  const ai = columnOrder.indexOf(a)
+  const bi = columnOrder.indexOf(b)
+
+  if (ai === -1 && bi === -1) {
+    return a.localeCompare(b)
+  }
+  if (ai === -1) {
+    return 1
+  }
+  if (bi === -1) {
+    return -1
+  }
+
+  return ai - bi
+}
+
+function laneCount(name: string, count: number, k: ReturnType<typeof useKanban>): KanbanLaneCount | null {
+  if (count <= 0) {
+    return null
+  }
+
+  return { count, label: columnLabel(k, name), name, tone: columnMeta(name).tone }
+}
+
+export function kanbanLaneCountsFromColumns(
+  columns: readonly KanbanColumn[] | undefined,
+  k: ReturnType<typeof useKanban>
+): KanbanLaneCount[] {
+  if (!columns) {
+    return []
+  }
+
+  return [...columns]
+    .sort((a, b) => byColumnOrder(a.name, b.name))
+    .flatMap(col => {
+      const count = col.tasks.length
+      const item = laneCount(col.name, count, k)
+
+      return item ? [item] : []
+    })
+}
+
+export function kanbanLaneCountsFromStatusCounts(
+  counts: null | Record<string, number> | undefined,
+  k: ReturnType<typeof useKanban>,
+  { includeArchived = false }: { includeArchived?: boolean } = {}
+): KanbanLaneCount[] {
+  if (!counts) {
+    return []
+  }
+
+  return Object.entries(counts)
+    .filter(([name]) => includeArchived || name !== 'archived')
+    .sort(([a], [b]) => byColumnOrder(a, b))
+    .flatMap(([name, count]) => {
+      const item = laneCount(name, count, k)
+
+      return item ? [item] : []
+    })
+}
+
+export function kanbanLaneCountsTip(prefix: string, counts: readonly KanbanLaneCount[]) {
+  return `${prefix} — ${counts
+    .map(({ count, label }) => `${count} ${label.toLowerCase()} ${pluralKanbanTask(count)}`)
+    .join(', ')}`
+}
+
+export function KanbanLaneCounts({
+  className,
+  counts,
+  labelPrefix = 'Kanban'
+}: {
+  className?: string
+  counts: readonly KanbanLaneCount[]
+  labelPrefix?: string
+}) {
+  if (counts.length === 0) {
+    return null
+  }
+
+  return (
+    <span className={['inline-flex items-center gap-1 text-(--ui-text-secondary)', className].filter(Boolean).join(' ')}>
+      {counts.map(({ count, label, name, tone }) => {
+        const aria = `${count} ${labelPrefix} ${label} ${pluralKanbanTask(count)}`
+
+        if (name === 'running') {
+          return (
+            <span aria-label={aria} className="inline-flex items-center gap-1" key={name} title={aria}>
+              <GlyphSpinner ariaLabel="Kanban tasks running" className="text-[0.6875rem] text-emerald-400" />
+              <span className="text-[0.625rem] font-medium tabular-nums">{formatKanbanLaneCount(count)}</span>
+            </span>
+          )
+        }
+
+        return (
+          <span aria-label={aria} className="inline-flex items-center gap-0.5" key={name} title={aria}>
+            <span aria-hidden="true" className="size-1.5 rounded-full" style={{ backgroundColor: tone }} />
+            <span className="text-[0.625rem] font-medium tabular-nums">{formatKanbanLaneCount(count)}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
 
 const ELAPSED_SUFFIX = { day: 'd', hour: 'h', minute: 'm', second: 's' } as const
 
@@ -114,15 +239,37 @@ function useTicking(start?: null | number): null | string {
 
 export type ArcState = 'queued' | 'running' | 'stale'
 
+export interface ActivitySettings {
+  /** Explicit, valid kanban.default_assignee. Empty means unassigned ready/todo
+   *  cards are intentionally parked and must not look active. */
+  fallbackAssignee?: string
+  /** Gateway auto-decomposer gate; unassigned triage is active only while on. */
+  autoDecompose?: boolean
+  /** Review dispatch gate; review cards may be human-only when off. */
+  reviewDispatch?: boolean
+}
+
 /**
  * The card's machine-activity state. The board looked dead between "I made a
  * card" and "it's suddenly running" — this narrates the in-between. Only the
- * working states animate the border arc (see kanban.css): running = brisk
- * sweep, no-heartbeat = amber crawl. `queued` (triage / assigned-ready /
- * review) renders as the footer's named-agent chip — motion means work.
+ * active states animate the border arc (see kanban.css): running = brisk sweep,
+ * queued = quieter sweep, no-heartbeat = amber crawl. The queued set mirrors the
+ * dispatcher/decomposer gates so parked unassigned cards stay visually idle.
  */
-export function arcState(task: KanbanTask, fallbackAssignee: string): ArcState | null {
+export function arcState(task: KanbanTask, settings: string | ActivitySettings): ArcState | null {
+  const normalized = typeof settings === 'string' ? { fallbackAssignee: settings } : settings
+  const fallbackAssignee = normalized.fallbackAssignee?.trim() ?? ''
+  const autoDecompose = normalized.autoDecompose ?? true
+  const reviewDispatch = normalized.reviewDispatch ?? true
+
   if (task.status === 'running') {
+    const hasCurrentRun = task.current_run_id !== null && task.current_run_id !== undefined
+    const legacyWithoutRunPointer = !Object.hasOwn(task, 'current_run_id')
+
+    if (!hasCurrentRun && !legacyWithoutRunPointer) {
+      return null
+    }
+
     // No heartbeat for 2+ min = the worker may have died; the dispatcher will
     // reclaim it, but be honest instead of sweeping green forever.
     const stale = task.last_heartbeat_at ? Date.now() / 1000 - task.last_heartbeat_at > 120 : false
@@ -130,10 +277,13 @@ export function arcState(task: KanbanTask, fallbackAssignee: string): ArcState |
     return stale ? 'stale' : 'running'
   }
 
+  const routed = Boolean(task.assignee || fallbackAssignee)
+
   const queued =
-    task.status === 'triage' ||
-    task.status === 'review' ||
-    (task.status === 'ready' && Boolean(task.assignee || fallbackAssignee))
+    (task.status === 'triage' && autoDecompose) ||
+    (task.status === 'review' && reviewDispatch && Boolean(task.assignee)) ||
+    (task.status === 'ready' && routed) ||
+    (task.status === 'todo' && Boolean(task.parents_satisfied) && routed)
 
   return queued ? 'queued' : null
 }
@@ -231,14 +381,43 @@ export function StatusMenu({
 // create dialog's Field, and the orchestration panel all read identically.
 export const FIELD_LABEL = 'text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)'
 
-export function Section({ action, children, label }: { action?: ReactNode; children: ReactNode; label: string }) {
+export function Section({
+  action,
+  children,
+  collapsible = false,
+  defaultOpen = true,
+  label
+}: {
+  action?: ReactNode
+  children: ReactNode
+  collapsible?: boolean
+  defaultOpen?: boolean
+  label: string
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+
   return (
     <section className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <div className={FIELD_LABEL}>{label}</div>
+      <div className="flex items-center justify-between gap-2">
+        {collapsible ? (
+          <button
+            className="-ml-1 inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left transition-colors hover:bg-(--chrome-action-hover)"
+            onClick={() => setOpen(value => !value)}
+            type="button"
+          >
+            <Codicon
+              className="shrink-0 text-(--ui-text-quaternary)"
+              name={open ? 'chevron-down' : 'chevron-right'}
+              size="0.75rem"
+            />
+            <span className={FIELD_LABEL}>{label}</span>
+          </button>
+        ) : (
+          <div className={FIELD_LABEL}>{label}</div>
+        )}
         {action}
       </div>
-      {children}
+      {(!collapsible || open) && children}
     </section>
   )
 }
@@ -274,9 +453,19 @@ export function Callout({
 // A short, edge-masked scroll area. Thin wrapper over the app's FadeScroll so
 // the drawer's scrollers behave exactly like the ones in chat; kept as a local
 // name because every call site here passes `max`.
-export function ScrollFade({ children, deps, max = '9rem' }: { children: ReactNode; deps?: unknown; max?: string }) {
+export function ScrollFade({
+  children,
+  className,
+  deps,
+  max = '9rem'
+}: {
+  children: ReactNode
+  className?: string
+  deps?: unknown
+  max?: string
+}) {
   return (
-    <FadeScroll deps={deps} maxHeight={max}>
+    <FadeScroll className={className} deps={deps} maxHeight={max}>
       {children}
     </FadeScroll>
   )

@@ -158,14 +158,18 @@ export type CommandDispatchResponse =
   | SendCommandDispatchResponse
   | PrefillCommandDispatchResponse
 
-export type SidebarNavId = 'artifacts' | 'command-center' | 'messaging' | 'new-session' | 'settings' | 'skills'
+export type SidebarNavId = 'artifacts' | 'command-center' | 'cron' | 'messaging' | 'new-session' | 'settings' | 'skills'
 
 export interface SidebarNavItem {
   /** Built-in view id, or a contributed row's namespaced contribution id. */
   id: SidebarNavId | (string & {})
   label: string
   icon: React.ComponentType<{ className?: string }>
+  /** Optional right-side chrome for live status badges/spinners. */
+  adornment?: React.ComponentType
   route?: string
+  /** Plain sidebar clicks open the route as a movable tab instead of main. */
+  openAsTile?: boolean
   action?: 'new-session'
   /** Keybind action id — when set, the tooltip shows the keybind hint. */
   keybindActionId?: string
@@ -176,6 +180,9 @@ export interface ClientSessionState {
   messages: ChatMessage[]
   branch: string
   cwd: string
+  /** Common git repo root for cwd, when the backend resolved one. Used by
+   *  sidebar project overlays before the first persisted row arrives. */
+  gitRepoRoot: string
   model: string
   provider: string
   reasoningEffort: string

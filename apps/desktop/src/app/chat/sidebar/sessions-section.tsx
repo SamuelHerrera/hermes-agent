@@ -1,7 +1,7 @@
 import type { useSensors } from '@dnd-kit/core'
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import { SidebarPanelLabel } from '@/app/shell/sidebar-label'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
@@ -18,7 +18,7 @@ import {
 } from '@/lib/session-date-groups'
 import { sessionBucketLabel } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { sessionPinId } from '@/store/session'
+import { sessionMatchesStoredId, sessionPinId, setSessions } from '@/store/session'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 
 import { SidebarDateDivider, SidebarSectionMeta } from './chrome'
@@ -38,6 +38,23 @@ import { SidebarSessionRow } from './session-row'
 import { VirtualSessionList } from './virtual-session-list'
 
 export const VIRTUALIZE_THRESHOLD = 25
+
+
+function seedSessionForOpen(session: SessionInfo): void {
+  setSessions(prev => {
+    const existing = prev.find(row => sessionMatchesStoredId(row, session.id))
+    const next: SessionInfo = {
+      ...existing,
+      ...session,
+      delegate_parent_session_id: session.delegate_parent_session_id ?? existing?.delegate_parent_session_id,
+      parent_session_id: session.parent_session_id ?? existing?.parent_session_id,
+      preview: session.preview || existing?.preview || null,
+      title: session.title || existing?.title || null
+    }
+
+    return [next, ...prev.filter(row => !sessionMatchesStoredId(row, session.id))]
+  })
+}
 
 interface SidebarSectionHeaderProps {
   label: string
@@ -163,6 +180,11 @@ interface SidebarSessionsSectionProps {
   // pinned, messaging groups, and the project overview, where the order isn't
   // strictly by recency so a bucket would be misleading.
   grouping?: 'date' | 'none' | 'status'
+  // Inbox style: render every flat session row as a three-line card (project ·
+  // age / title / model · size). A render variant that composes with whichever
+  // grouping is active — the flat recents list opts in; dense tree surfaces
+  // (pinned, projects, messaging) keep the one-line row.
+  card?: boolean
 }
 
 export function SidebarSessionsSection({
@@ -204,12 +226,14 @@ export function SidebarSessionsSection({
   projectBackRow,
   dndSensors,
   showProfileTags = false,
-  grouping = 'none'
+  grouping = 'none',
+  card = false
 }: SidebarSessionsSectionProps) {
   const { t } = useI18n()
   const dividerLabels = t.sidebar.dateDivider
   const statusDividerLabels = t.sidebar.statusDivider
   const dotStates = useStore($sessionDotStateById)
+  const [collapsedBranchIds, setCollapsedBranchIds] = useState<Set<string>>(() => new Set())
   const sectionOpen = collapsible ? open : true
   const hasGroupedSessions = Boolean(groups?.some(group => group.sessions.length > 0))
   // A defined project list is itself content (even an empty project should
@@ -235,21 +259,48 @@ export function SidebarSessionsSection({
   // recency sort — the drag order is layered on per date group below, so the
   // buckets stay truthful and a reorder never costs the list its dividers.
   const displayEntries = useMemo(
-    () => flattenSessionsWithBranches(sessions, { preserveOrder: pinned }),
-    [sessions, pinned]
+    () => flattenSessionsWithBranches(sessions, { collapsedSessionIds: collapsedBranchIds, preserveOrder: pinned }),
+    [sessions, collapsedBranchIds, pinned]
   )
 
+  const toggleBranchCollapsed = useCallback((sessionId: string) => {
+    setCollapsedBranchIds(current => {
+      const next = new Set(current)
+
+      if (next.has(sessionId)) {
+        next.delete(sessionId)
+      } else {
+        next.add(sessionId)
+      }
+
+      return next
+    })
+  }, [])
+
   const renderRow = useCallback(
-    (session: SessionInfo, draggable: boolean, branchStem?: string) => {
+    (
+      session: SessionInfo,
+      draggable: boolean,
+      branchStem?: string,
+      hasBranchChildren = false,
+      branchCollapsed = false
+    ) => {
       const rowProps = {
+        branchCollapsed,
         branchStem,
+        hasBranchChildren,
+        card,
         isPinned: pinned,
         isSelected: session.id === activeSessionId,
         onArchive: () => onArchiveSession(session.id),
         onBranch: onBranchSession ? () => onBranchSession(session.id, session.profile) : undefined,
         onDelete: () => onDeleteSession(session.id),
         onPin: () => onTogglePin(sessionPinId(session)),
-        onResume: () => onResumeSession(session.id),
+        onToggleBranch: hasBranchChildren ? () => toggleBranchCollapsed(session.id) : undefined,
+        onResume: () => {
+          seedSessionForOpen(session)
+          onResumeSession(session.id)
+        },
         reorderable: draggable && !branchStem,
         session,
         showProfile: showProfileTags
@@ -263,13 +314,15 @@ export function SidebarSessionsSection({
     },
     [
       activeSessionId,
+      card,
       onArchiveSession,
       onBranchSession,
       onDeleteSession,
       onResumeSession,
       onTogglePin,
       pinned,
-      showProfileTags
+      showProfileTags,
+      toggleBranchCollapsed
     ]
   )
 
@@ -285,7 +338,13 @@ export function SidebarSessionsSection({
   const renderListRow = useCallback(
     (row: SidebarListRow, draggable: boolean, action?: React.ReactNode) => {
       if (row.kind === 'session') {
-        return renderRow(row.entry.session, draggable, row.entry.branchStem)
+        return renderRow(
+          row.entry.session,
+          draggable,
+          row.entry.branchStem,
+          row.entry.hasBranchChildren,
+          row.entry.branchCollapsed
+        )
       }
 
       return (
@@ -302,8 +361,11 @@ export function SidebarSessionsSection({
   // Sessions inside repos/worktrees are date-ordered and static.
   const renderRows = useCallback(
     (items: SessionInfo[]) =>
-      flattenSessionsWithBranches(items).map(({ branchStem, session }) => renderRow(session, false, branchStem)),
-    [renderRow]
+      flattenSessionsWithBranches(items, { collapsedSessionIds: collapsedBranchIds }).map(
+        ({ branchCollapsed, branchStem, hasBranchChildren, session }) =>
+          renderRow(session, false, branchStem, hasBranchChildren, branchCollapsed)
+      ),
+    [collapsedBranchIds, renderRow]
   )
 
   // Same as `renderRows`, but with date dividers folded in — used for
@@ -311,13 +373,13 @@ export function SidebarSessionsSection({
   // chronologically, matching the flat recents list.
   const renderRowsDated = useCallback(
     (items: SessionInfo[]) => {
-      const entries = flattenSessionsWithBranches(items)
+      const entries = flattenSessionsWithBranches(items, { collapsedSessionIds: collapsedBranchIds })
 
       return (grouping === 'date' ? groupEntriesByRecency(entries) : toSessionRows(entries)).map(row =>
         renderListRow(row, false)
       )
     },
-    [grouping, renderListRow]
+    [collapsedBranchIds, grouping, renderListRow]
   )
 
   // Flat recents as list rows: grouped by recency when enabled, plain otherwise.
@@ -444,6 +506,7 @@ export function SidebarSessionsSection({
     const virtual = (
       <VirtualSessionList
         activeSessionId={activeSessionId}
+        card={card}
         className={contentClassName}
         dividerAction={dividerAction}
         onArchiveSession={onArchiveSession}
@@ -477,8 +540,10 @@ export function SidebarSessionsSection({
   }
 
   // The virtualizer owns its own scroller, so suppress the wrapper's overflow
-  // to avoid a double scroll container.
-  const resolvedContentClassName = cn(contentClassName, flatVirtualized && 'overflow-y-visible')
+  // to avoid a double scroll container. Both axes: `overflow-y-visible` next
+  // to the inherited `overflow-x-hidden` computes to `auto` (CSS spec), which
+  // kept a phantom 4px scrollbar gutter and cut every row short on the right.
+  const resolvedContentClassName = cn(contentClassName, flatVirtualized && 'overflow-visible')
 
   return (
     <SidebarGroup className={rootClassName}>

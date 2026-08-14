@@ -23,6 +23,7 @@ type KanbanMessages = {
   arcRunning: string
   arcStale: string
   title: string
+  loadingBoard: string
   orchestrationSettings: string
   newTask: string
   filterCards: string
@@ -50,6 +51,18 @@ type KanbanMessages = {
   allTenants: string
   showArchived: string
   groupRunning: string
+  sortOldestFirst: string
+  sortNewestFirst: string
+  sortColumnOldestFirst: (label: string) => string
+  sortColumnNewestFirst: (label: string) => string
+  timeAgo: string
+  timeAgoShort: string
+  datetime: string
+  datetimeShort: string
+  minimizeDraft: string
+  minimizedDrafts: (n: number) => string
+  restoreDraft: (title: string) => string
+  untitledDraft: string
   nSelected: (n: number) => string
   moveToShort: string
   assign: string
@@ -116,6 +129,13 @@ type KanbanMessages = {
   evtScheduled: string
   evtArchived: string
   evtReprioritized: (priority: string) => string
+  evtTagAttached: (name: string) => string
+  evtTagRemoved: (name: string) => string
+  evtAiTagAttached: (name: string) => string
+  evtAiTagRemoved: (name: string) => string
+  evtAiTagsUpdated: string
+  evtAiTagsAdded: (names: string) => string
+  evtAiTagsRemoved: (names: string) => string
   someone: string
   // drawer — meta + sections
   metaPriority: string
@@ -123,10 +143,25 @@ type KanbanMessages = {
   metaCreatedBy: string
   metaCreated: string
   metaWorkerPid: string
+  details: string
+  tabDetails: string
+  tabActivity: string
+  tabDiscussion: string
   readyUnassignedTitle: string
   readyUnassignedBody: string
   diagnosticsN: (n: number) => string
   commandCopied: string
+  taskTitle: string
+  tags: string
+  aiTagBadge: string
+  aiTagTip: string
+  noTags: string
+  tagName: string
+  addTag: string
+  existingTags: string
+  addExistingTag: (name: string) => string
+  removeTag: (name: string) => string
+  editTitle: string
   description: string
   editDescription: string
   cancelEdit: string
@@ -146,14 +181,34 @@ type KanbanMessages = {
   deliveredLive: string
   requeueWithNote: string
   notePosted: string
+  timeline: (n: number) => string
+  timelineArchived: string
+  timelineAssigned: (assignee: string) => string
+  timelineCommented: (author: string) => string
+  timelineCompleted: string
+  timelineCreated: string
+  timelineLastAction: (action: string) => string
+  timelineLastHeartbeat: (when: string) => string
+  timelineNeedsInput: string
+  timelineRecentAction: string
+  timelineNoActivity: string
+  timelineNoAssignee: string
+  timelineReview: string
+  timelineRunDetail: (profile: string, duration: string) => string
+  timelineRunProfile: (profile: string) => string
+  timelineWaitingIn: (column: string) => string
+  timelineWorking: string
   activity: (n: number) => string
   runs: (n: number) => string
   workerLog: string
   workerLogTail: string
+  workerLogEmpty: string
   attachments: (n: number) => string
   noAttachments: string
   uploadAttachment: string
   taskActions: string
+  openAsDialog: string
+  openAsSideSheet: string
   copyTaskId: string
   copyTitle: string
   copiedId: (id: string) => string
@@ -211,6 +266,7 @@ const en: KanbanMessages = {
   arcRunning: 'An agent is working on this now.',
   arcStale: 'Claimed, but no worker heartbeat for 2+ minutes — the dispatcher will reclaim it.',
   title: 'Kanban',
+  loadingBoard: 'Loading board…',
   orchestrationSettings: 'Orchestration settings',
   newTask: 'New task',
   filterCards: 'Filter cards…',
@@ -239,6 +295,18 @@ const en: KanbanMessages = {
   allTenants: 'All tenants',
   showArchived: 'Show archived',
   groupRunning: 'Group Running by profile',
+  sortOldestFirst: 'Oldest first',
+  sortNewestFirst: 'Newest first',
+  sortColumnOldestFirst: label => `${label}: oldest first`,
+  sortColumnNewestFirst: label => `${label}: newest first`,
+  timeAgo: 'Time ago',
+  timeAgoShort: 'Ago',
+  datetime: 'Date/time',
+  datetimeShort: 'Date',
+  minimizeDraft: 'Minimize draft',
+  minimizedDrafts: n => `${n} draft${n === 1 ? '' : 's'}`,
+  restoreDraft: title => `Restore ${title}`,
+  untitledDraft: 'Untitled draft',
   nSelected: n => `${n} selected`,
   moveToShort: 'Move to',
   assign: 'Assign',
@@ -306,17 +374,39 @@ const en: KanbanMessages = {
   evtScheduled: 'scheduled for later',
   evtArchived: 'archived',
   evtReprioritized: priority => `priority set to ${priority}`,
+  evtTagAttached: name => `tag added: ${name}`,
+  evtTagRemoved: name => `tag removed: ${name}`,
+  evtAiTagAttached: name => `AI tag added: ${name}`,
+  evtAiTagRemoved: name => `AI tag removed: ${name}`,
+  evtAiTagsUpdated: 'AI updated tags automatically',
+  evtAiTagsAdded: names => `added ${names}`,
+  evtAiTagsRemoved: names => `removed ${names}`,
   someone: 'someone',
   metaPriority: 'Priority',
   metaTenant: 'Tenant',
   metaCreatedBy: 'Created by',
   metaCreated: 'Created',
   metaWorkerPid: 'Worker pid',
+  details: 'Details',
+  tabDetails: 'Details',
+  tabActivity: 'Activity',
+  tabDiscussion: 'Discussion',
   readyUnassignedTitle: 'Ready, but unassigned — this card will never run.',
   readyUnassignedBody:
     'The dispatcher only claims Ready cards that have an assignee. Pick a profile in the Assignee field above (or set a default assignee in the orchestration settings) and it runs within a minute.',
   diagnosticsN: n => `Diagnostics · ${n}`,
   commandCopied: 'Command copied',
+  taskTitle: 'Title',
+  tags: 'Tags',
+  aiTagBadge: 'AI',
+  aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
+  noTags: 'No tags yet.',
+  tagName: 'Tag name',
+  addTag: 'Add tag',
+  existingTags: 'Existing tags',
+  addExistingTag: name => `Add existing tag ${name}`,
+  removeTag: name => `Remove tag ${name}`,
+  editTitle: 'Edit title',
   description: 'Description',
   editDescription: 'Edit description',
   cancelEdit: 'Cancel edit',
@@ -338,14 +428,34 @@ const en: KanbanMessages = {
   deliveredLive: 'Delivered to the running worker within a few seconds.',
   requeueWithNote: 'Requeue with note',
   notePosted: 'Note posted — worker requeued',
+  timeline: n => `Timeline · ${n}`,
+  timelineArchived: 'Archived',
+  timelineAssigned: assignee => `Assigned to ${assignee}`,
+  timelineCommented: author => `Comment from ${author}`,
+  timelineCompleted: 'Work completed',
+  timelineCreated: 'Task created',
+  timelineLastAction: action => `latest action: ${action}`,
+  timelineLastHeartbeat: when => `last heartbeat ${when}`,
+  timelineNeedsInput: 'Needs human input',
+  timelineRecentAction: 'Recent action',
+  timelineNoActivity: 'No timeline activity yet.',
+  timelineNoAssignee: 'No assignee yet — pick a profile to start work.',
+  timelineReview: 'Waiting for review',
+  timelineRunDetail: (profile, duration) => `${profile} run · ${duration}`,
+  timelineRunProfile: profile => `${profile} run`,
+  timelineWaitingIn: column => `Waiting in ${column}`,
+  timelineWorking: 'Agent is working now',
   activity: n => `Activity · ${n}`,
   runs: n => `Runs · ${n}`,
   workerLog: 'Worker log',
   workerLogTail: 'Worker log · tail',
+  workerLogEmpty: 'No worker log yet.',
   attachments: n => `Attachments · ${n}`,
   noAttachments: 'No attachments yet.',
   uploadAttachment: 'Upload attachment',
   taskActions: 'Task actions',
+  openAsDialog: 'Open as dialog',
+  openAsSideSheet: 'Open as side sheet',
   copyTaskId: 'Copy task id',
   copyTitle: 'Copy title',
   copiedId: id => `Copied ${id}`,
@@ -403,6 +513,7 @@ const ja: KanbanMessages = {
   arcRunning: 'エージェントが現在作業中です。',
   arcStale: '取得済みですが、2分以上ワーカーのハートビートがありません — ディスパッチャが再取得します。',
   title: 'カンバン',
+  loadingBoard: 'ボードを読み込み中…',
   orchestrationSettings: 'オーケストレーション設定',
   newTask: '新しいタスク',
   filterCards: 'カードを絞り込み…',
@@ -431,6 +542,18 @@ const ja: KanbanMessages = {
   allTenants: 'すべてのテナント',
   showArchived: 'アーカイブを表示',
   groupRunning: '実行中をプロフィールでグループ化',
+  sortOldestFirst: '古い順',
+  sortNewestFirst: '新しい順',
+  sortColumnOldestFirst: label => `${label}: 古い順`,
+  sortColumnNewestFirst: label => `${label}: 新しい順`,
+  timeAgo: '経過時間',
+  timeAgoShort: '経過',
+  datetime: '日時',
+  datetimeShort: '日時',
+  minimizeDraft: '下書きを最小化',
+  minimizedDrafts: n => `下書き ${n} 件`,
+  restoreDraft: title => `${title} を復元`,
+  untitledDraft: '無題の下書き',
   nSelected: n => `${n} 件選択中`,
   moveToShort: '移動',
   assign: '割り当て',
@@ -497,17 +620,39 @@ const ja: KanbanMessages = {
   evtScheduled: '後で実行するようスケジュール',
   evtArchived: 'アーカイブ済み',
   evtReprioritized: priority => `優先度を ${priority} に設定`,
+  evtTagAttached: name => `タグを追加: ${name}`,
+  evtTagRemoved: name => `タグを削除: ${name}`,
+  evtAiTagAttached: name => `AI タグを追加: ${name}`,
+  evtAiTagRemoved: name => `AI タグを削除: ${name}`,
+  evtAiTagsUpdated: 'AI がタグを自動更新しました',
+  evtAiTagsAdded: names => `${names} を追加`,
+  evtAiTagsRemoved: names => `${names} を削除`,
   someone: '誰か',
   metaPriority: '優先度',
   metaTenant: 'テナント',
   metaCreatedBy: '作成者',
   metaCreated: '作成',
   metaWorkerPid: 'ワーカー PID',
+  details: '詳細',
+  tabDetails: '詳細',
+  tabActivity: 'アクティビティ',
+  tabDiscussion: '議論',
   readyUnassignedTitle: 'Ready ですが未割り当て — このカードは実行されません。',
   readyUnassignedBody:
     'ディスパッチャは担当のある Ready カードのみ取得します。上の担当フィールドでプロフィールを選ぶ（またはオーケストレーション設定でデフォルトの担当を設定する）と、1分以内に実行されます。',
   diagnosticsN: n => `診断・${n}`,
   commandCopied: 'コマンドをコピーしました',
+  taskTitle: 'タイトル',
+  tags: 'タグ',
+  aiTagBadge: 'AI',
+  aiTagTip: 'AI ワークフロー更新で自動管理されています。手動で削除することもできます。',
+  noTags: 'タグはまだありません。',
+  tagName: 'タグ名',
+  addTag: 'タグを追加',
+  existingTags: '既存のタグ',
+  addExistingTag: name => `既存のタグ ${name} を追加`,
+  removeTag: name => `タグ ${name} を削除`,
+  editTitle: 'タイトルを編集',
   description: '説明',
   editDescription: '説明を編集',
   cancelEdit: '編集をキャンセル',
@@ -529,14 +674,34 @@ const ja: KanbanMessages = {
   deliveredLive: '数秒以内に実行中のワーカーへ届きます。',
   requeueWithNote: 'メモを付けて再キュー',
   notePosted: 'メモを投稿しました — ワーカーを再キューしました',
+  timeline: n => `タイムライン・${n}`,
+  timelineArchived: 'アーカイブ済み',
+  timelineAssigned: assignee => `${assignee} に割り当て`,
+  timelineCommented: author => `${author} のコメント`,
+  timelineCompleted: '作業完了',
+  timelineCreated: 'タスク作成',
+  timelineLastAction: action => `最新の操作: ${action}`,
+  timelineLastHeartbeat: when => `最終ハートビート ${when}`,
+  timelineNeedsInput: '人間の入力待ち',
+  timelineRecentAction: '最近の操作',
+  timelineNoActivity: 'タイムラインのアクティビティはまだありません。',
+  timelineNoAssignee: '担当が未設定です — プロフィールを選ぶと作業が始まります。',
+  timelineReview: 'レビュー待ち',
+  timelineRunDetail: (profile, duration) => `${profile} の実行・${duration}`,
+  timelineRunProfile: profile => `${profile} の実行`,
+  timelineWaitingIn: column => `${column} で待機中`,
+  timelineWorking: 'エージェントが作業中',
   activity: n => `アクティビティ・${n}`,
   runs: n => `実行・${n}`,
   workerLog: 'ワーカーログ',
   workerLogTail: 'ワーカーログ・末尾',
-  attachments: n => `添付・${n}`,
+  workerLogEmpty: 'ワーカーログはまだありません。',
+  attachments: n => `添付ファイル・${n}`,
   noAttachments: 'まだ添付はありません。',
   uploadAttachment: '添付をアップロード',
   taskActions: 'タスクの操作',
+  openAsDialog: 'ダイアログで開く',
+  openAsSideSheet: 'サイドシートで開く',
   copyTaskId: 'タスク ID をコピー',
   copyTitle: 'タイトルをコピー',
   copiedId: id => `${id} をコピーしました`,
@@ -594,6 +759,7 @@ const zh: KanbanMessages = {
   arcRunning: '有代理正在处理它。',
   arcStale: '已领取，但超过 2 分钟没有工作单元心跳 — 调度器将重新领取。',
   title: '看板',
+  loadingBoard: '正在加载面板…',
   orchestrationSettings: '编排设置',
   newTask: '新建任务',
   filterCards: '筛选卡片…',
@@ -621,6 +787,18 @@ const zh: KanbanMessages = {
   allTenants: '所有租户',
   showArchived: '显示已归档',
   groupRunning: '按配置档分组运行中',
+  sortOldestFirst: '最旧优先',
+  sortNewestFirst: '最新优先',
+  sortColumnOldestFirst: label => `${label}：最旧优先`,
+  sortColumnNewestFirst: label => `${label}：最新优先`,
+  timeAgo: '多久前',
+  timeAgoShort: '多久前',
+  datetime: '日期时间',
+  datetimeShort: '日期',
+  minimizeDraft: '最小化草稿',
+  minimizedDrafts: n => `${n} 个草稿`,
+  restoreDraft: title => `恢复 ${title}`,
+  untitledDraft: '无标题草稿',
   nSelected: n => `已选择 ${n} 个`,
   moveToShort: '移动到',
   assign: '分配',
@@ -687,17 +865,39 @@ const zh: KanbanMessages = {
   evtScheduled: '已排期稍后运行',
   evtArchived: '已归档',
   evtReprioritized: priority => `优先级设为 ${priority}`,
+  evtTagAttached: name => `已添加标签：${name}`,
+  evtTagRemoved: name => `已移除标签：${name}`,
+  evtAiTagAttached: name => `AI 已添加标签：${name}`,
+  evtAiTagRemoved: name => `AI 已移除标签：${name}`,
+  evtAiTagsUpdated: 'AI 已自动更新标签',
+  evtAiTagsAdded: names => `已添加 ${names}`,
+  evtAiTagsRemoved: names => `已移除 ${names}`,
   someone: '某人',
   metaPriority: '优先级',
   metaTenant: '租户',
   metaCreatedBy: '创建者',
   metaCreated: '创建于',
   metaWorkerPid: '工作单元 PID',
+  details: '详情',
+  tabDetails: '详情',
+  tabActivity: '活动',
+  tabDiscussion: '讨论',
   readyUnassignedTitle: '就绪但未分配 — 这张卡片永远不会运行。',
   readyUnassignedBody:
     '调度器只领取有负责人的就绪卡片。在上面的负责人字段选择一个配置档（或在编排设置中设置默认负责人），它会在一分钟内运行。',
   diagnosticsN: n => `诊断・${n}`,
   commandCopied: '命令已复制',
+  taskTitle: '标题',
+  tags: '标签',
+  aiTagBadge: 'AI',
+  aiTagTip: '由 AI 工作流更新自动管理；你仍然可以手动移除。',
+  noTags: '暂无标签。',
+  tagName: '标签名称',
+  addTag: '添加标签',
+  existingTags: '已有标签',
+  addExistingTag: name => `添加已有标签 ${name}`,
+  removeTag: name => `移除标签 ${name}`,
+  editTitle: '编辑标题',
   description: '描述',
   editDescription: '编辑描述',
   cancelEdit: '取消编辑',
@@ -718,14 +918,34 @@ const zh: KanbanMessages = {
   deliveredLive: '几秒内送达运行中的工作单元。',
   requeueWithNote: '附带备注重新入队',
   notePosted: '备注已发布 — 工作单元已重新入队',
+  timeline: n => `时间线・${n}`,
+  timelineArchived: '已归档',
+  timelineAssigned: assignee => `分配给 ${assignee}`,
+  timelineCommented: author => `${author} 的评论`,
+  timelineCompleted: '工作已完成',
+  timelineCreated: '任务已创建',
+  timelineLastAction: action => `最新操作：${action}`,
+  timelineLastHeartbeat: when => `最后心跳 ${when}`,
+  timelineNeedsInput: '需要人工输入',
+  timelineRecentAction: '最近操作',
+  timelineNoActivity: '暂无时间线活动。',
+  timelineNoAssignee: '尚未分配负责人 — 选择一个配置档即可开始。',
+  timelineReview: '等待审查',
+  timelineRunDetail: (profile, duration) => `${profile} 运行・${duration}`,
+  timelineRunProfile: profile => `${profile} 运行`,
+  timelineWaitingIn: column => `在 ${column} 中等待`,
+  timelineWorking: '代理正在处理',
   activity: n => `活动・${n}`,
   runs: n => `运行・${n}`,
   workerLog: '工作单元日志',
   workerLogTail: '工作单元日志・末尾',
+  workerLogEmpty: '暂无工作单元日志。',
   attachments: n => `附件・${n}`,
   noAttachments: '暂无附件。',
   uploadAttachment: '上传附件',
   taskActions: '任务操作',
+  openAsDialog: '以对话框打开',
+  openAsSideSheet: '以侧边表单打开',
   copyTaskId: '复制任务 ID',
   copyTitle: '复制标题',
   copiedId: id => `已复制 ${id}`,
@@ -782,6 +1002,7 @@ const zhHant: KanbanMessages = {
   arcRunning: '有代理正在處理它。',
   arcStale: '已領取，但超過 2 分鐘沒有工作單元心跳 — 排程器將重新領取。',
   title: '看板',
+  loadingBoard: '正在載入面板…',
   orchestrationSettings: '編排設定',
   newTask: '新增任務',
   filterCards: '篩選卡片…',
@@ -809,6 +1030,18 @@ const zhHant: KanbanMessages = {
   allTenants: '所有租戶',
   showArchived: '顯示已封存',
   groupRunning: '依設定檔分組執行中',
+  sortOldestFirst: '最舊優先',
+  sortNewestFirst: '最新優先',
+  sortColumnOldestFirst: label => `${label}：最舊優先`,
+  sortColumnNewestFirst: label => `${label}：最新優先`,
+  timeAgo: '多久前',
+  timeAgoShort: '多久前',
+  datetime: '日期時間',
+  datetimeShort: '日期',
+  minimizeDraft: '最小化草稿',
+  minimizedDrafts: n => `${n} 個草稿`,
+  restoreDraft: title => `恢復 ${title}`,
+  untitledDraft: '無標題草稿',
   nSelected: n => `已選取 ${n} 個`,
   moveToShort: '移至',
   assign: '指派',
@@ -875,17 +1108,39 @@ const zhHant: KanbanMessages = {
   evtScheduled: '已排程稍後執行',
   evtArchived: '已封存',
   evtReprioritized: priority => `優先順序設為 ${priority}`,
+  evtTagAttached: name => `已新增標籤：${name}`,
+  evtTagRemoved: name => `已移除標籤：${name}`,
+  evtAiTagAttached: name => `AI 已新增標籤：${name}`,
+  evtAiTagRemoved: name => `AI 已移除標籤：${name}`,
+  evtAiTagsUpdated: 'AI 已自動更新標籤',
+  evtAiTagsAdded: names => `已新增 ${names}`,
+  evtAiTagsRemoved: names => `已移除 ${names}`,
   someone: '某人',
   metaPriority: '優先順序',
   metaTenant: '租戶',
   metaCreatedBy: '建立者',
   metaCreated: '建立於',
   metaWorkerPid: '工作單元 PID',
+  details: '詳情',
+  tabDetails: '詳情',
+  tabActivity: '活動',
+  tabDiscussion: '討論',
   readyUnassignedTitle: '就緒但未指派 — 這張卡片永遠不會執行。',
   readyUnassignedBody:
     '排程器只領取有負責人的就緒卡片。在上方的負責人欄位選擇一個設定檔（或在編排設定中設定預設負責人），它會在一分鐘內執行。',
   diagnosticsN: n => `診斷・${n}`,
   commandCopied: '指令已複製',
+  taskTitle: '標題',
+  tags: '標籤',
+  aiTagBadge: 'AI',
+  aiTagTip: '由 AI 工作流程更新自動管理；你仍可手動移除。',
+  noTags: '尚無標籤。',
+  tagName: '標籤名稱',
+  addTag: '新增標籤',
+  existingTags: '現有標籤',
+  addExistingTag: name => `新增現有標籤 ${name}`,
+  removeTag: name => `移除標籤 ${name}`,
+  editTitle: '編輯標題',
   description: '描述',
   editDescription: '編輯描述',
   cancelEdit: '取消編輯',
@@ -906,14 +1161,34 @@ const zhHant: KanbanMessages = {
   deliveredLive: '幾秒內送達執行中的工作單元。',
   requeueWithNote: '附上備註重新排入佇列',
   notePosted: '備註已發布 — 工作單元已重新排入佇列',
+  timeline: n => `時間軸・${n}`,
+  timelineArchived: '已封存',
+  timelineAssigned: assignee => `指派給 ${assignee}`,
+  timelineCommented: author => `${author} 的留言`,
+  timelineCompleted: '工作已完成',
+  timelineCreated: '任務已建立',
+  timelineLastAction: action => `最新操作：${action}`,
+  timelineLastHeartbeat: when => `最後心跳 ${when}`,
+  timelineNeedsInput: '需要人工輸入',
+  timelineRecentAction: '最近操作',
+  timelineNoActivity: '尚無時間軸活動。',
+  timelineNoAssignee: '尚未指派負責人 — 選擇一個設定檔即可開始。',
+  timelineReview: '等待審查',
+  timelineRunDetail: (profile, duration) => `${profile} 執行・${duration}`,
+  timelineRunProfile: profile => `${profile} 執行`,
+  timelineWaitingIn: column => `在 ${column} 中等待`,
+  timelineWorking: '代理正在處理',
   activity: n => `活動・${n}`,
   runs: n => `執行・${n}`,
   workerLog: '工作單元日誌',
   workerLogTail: '工作單元日誌・末尾',
+  workerLogEmpty: '尚無工作單元日誌。',
   attachments: n => `附件・${n}`,
   noAttachments: '尚無附件。',
   uploadAttachment: '上傳附件',
   taskActions: '任務操作',
+  openAsDialog: '以對話框開啟',
+  openAsSideSheet: '以側邊表單開啟',
   copyTaskId: '複製任務 ID',
   copyTitle: '複製標題',
   copiedId: id => `已複製 ${id}`,

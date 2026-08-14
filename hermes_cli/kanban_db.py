@@ -210,6 +210,154 @@ def _fire_kanban_lifecycle_hook(event: str, task_id: str, **fields: Any) -> None
         _log.debug("kanban lifecycle hook %s failed: %s", event, exc)
 
 
+def _kanban_observer_consumed(event: str) -> bool:
+    """Return whether any first-party observer or plugin consumes *event*.
+
+    Hot-path short-circuit for the worker-lifecycle / task-mutation /
+    dispatch-tick observers (RFC #58548): those fire on every dispatcher
+    tick and every task write, so call sites skip payload assembly entirely
+    when nothing subscribes. Best-effort — if inspection fails the event is
+    treated as unconsumed (the invoke path would fail the same way, and
+    these are observers, so dropping is always safe).
+    """
+    try:
+        from hermes_cli.lifecycle import has_hook
+
+        return has_hook(event)
+    except Exception:  # pragma: no cover - defensive
+        return False
+
+
+def _fire_worker_spawned_hook(
+    conn: sqlite3.Connection,
+    task: "Task",
+    workspace_path: str,
+    pid: Optional[int],
+    *,
+    board: Optional[str] = None,
+) -> None:
+    """Fire ``on_kanban_worker_spawned`` for one dispatched spawn.
+
+    Called by the dispatch loop AFTER ``spawn_fn`` returned and the worker
+    PID (when one was reported) has been durably persisted — the RFC #58548
+    timing contract. Fully best-effort: any failure is swallowed so a
+    misbehaving observer can never break the dispatch loop.
+    """
+    if not _kanban_observer_consumed("on_kanban_worker_spawned"):
+        return
+    try:
+        _fire_kanban_lifecycle_hook(
+            "on_kanban_worker_spawned",
+            task.id,
+            board=board or get_current_board(),
+            assignee=task.assignee,
+            run_id=_current_run_id(conn, task.id),
+            worker_pid=int(pid) if pid else None,
+            workspace_path=str(workspace_path),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        _log.debug("kanban worker spawned hook failed: %s", exc)
+
+
+def notify_task_updated(
+    conn: sqlite3.Connection,
+    task_id: str,
+    changed_fields: Iterable[str],
+    *,
+    board: Optional[str] = None,
+) -> None:
+    """Fire ``on_kanban_task_updated`` for a committed task-row mutation.
+
+    Task-mutation boundary primitive from RFC #58548: a surface that mutates
+    a task row outside the claim/complete/block lifecycle calls this AFTER
+    its write txn has committed — including surfaces that write with direct
+    SQL and bypass every ``kanban_db`` mutator (the dashboard plugin API's
+    priority/title/body editors). ``changed_fields`` carries field NAMES
+    only, never values. Observer-only and fully best-effort: it can never
+    fail a task mutation, and it costs one ``has_hook`` probe when nothing
+    subscribes.
+    """
+    if not _kanban_observer_consumed("on_kanban_task_updated"):
+        return
+    try:
+        row = conn.execute(
+            "SELECT assignee, current_run_id FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        _fire_kanban_lifecycle_hook(
+            "on_kanban_task_updated",
+            task_id,
+            board=board or get_current_board(),
+            assignee=row["assignee"] if row else None,
+            run_id=row["current_run_id"] if row else None,
+            changed_fields=list(changed_fields),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        _log.debug("kanban task updated hook failed: %s", exc)
+
+
+def _fire_dispatch_tick_hook(
+    result: "DispatchResult",
+    *,
+    board: Optional[str] = None,
+    dry_run: bool = False,
+) -> None:
+    """Fire ``on_kanban_dispatch_tick`` after one dispatcher tick.
+
+    Re-port of PR #56066 per the #64231 batch disposition: renamed to the
+    taxonomy form and called by ``dispatch_once`` strictly AFTER
+    ``_dispatch_tick_lock`` has been released — the original fired inside
+    the lock, so a slow subscriber could extend the single-writer critical
+    section and stall a sibling dispatcher's tick. Observer-only and fully
+    best-effort: any subscriber failure is swallowed.
+    """
+    if not _kanban_observer_consumed("on_kanban_dispatch_tick"):
+        return
+    try:
+        from hermes_cli.lifecycle import invoke_hook
+        from hermes_cli.profiles import get_active_profile_name
+
+        try:
+            profile_name = get_active_profile_name()
+        except Exception:
+            profile_name = "default"
+        if board is None:
+            try:
+                board = get_current_board()
+            except Exception:
+                board = None
+        outcome = "ok"
+        if result.skipped_locked:
+            outcome = "skipped_locked"
+        elif not any((
+            result.spawned,
+            result.reclaimed,
+            result.promoted,
+            result.reconciled_orphans,
+            result.crashed,
+            result.stale,
+            result.timed_out,
+            result.auto_blocked,
+            result.rate_limited,
+            result.auto_assigned_default,
+            result.respawn_guarded,
+            result.skipped_per_profile_capped,
+            result.skipped_unassigned,
+            result.skipped_nonspawnable,
+        )):
+            outcome = "idle"
+        invoke_hook(
+            "on_kanban_dispatch_tick",
+            board=board,
+            profile_name=profile_name,
+            dry_run=bool(dry_run),
+            outcome=outcome,
+            result=result,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        _log.debug("kanban dispatch tick hook failed: %s", exc)
+
+
 # A running task's claim is valid for 15 minutes by default; after that the
 # next dispatcher tick reclaims it. Workers that outlive this window should
 # call ``heartbeat_claim(task_id)`` periodically. In practice most kanban
@@ -1168,6 +1316,16 @@ class Attachment:
 
 
 @dataclass
+class Tag:
+    """Reusable task tag, normalized for duplicate prevention."""
+
+    id: int
+    name: str
+    normalized_name: str
+    created_at: int
+
+
+@dataclass
 class Event:
     id: int
     task_id: str
@@ -1346,6 +1504,24 @@ CREATE TABLE IF NOT EXISTS task_attachments (
     created_at   INTEGER NOT NULL
 );
 
+-- Reusable task tags. ``normalized_name`` is the duplicate-prevention key;
+-- ``name`` is the display label from the first creator.
+CREATE TABLE IF NOT EXISTS tags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT NOT NULL,
+    normalized_name TEXT NOT NULL UNIQUE,
+    created_at      INTEGER NOT NULL
+);
+
+-- Many-to-many task↔tag links. Tags are reusable and intentionally survive
+-- task deletion; task_tags rows are explicitly cascaded by delete_task().
+CREATE TABLE IF NOT EXISTS task_tags (
+    task_id    TEXT NOT NULL,
+    tag_id     INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (task_id, tag_id)
+);
+
 -- Subscription from a gateway source (platform + chat + thread) to a
 -- task. The gateway's kanban-notifier watcher tails task_events and
 -- pushes ``completed`` / ``blocked`` / ``spawn_auto_blocked`` events to
@@ -1354,10 +1530,12 @@ CREATE TABLE IF NOT EXISTS kanban_notify_subs (
     task_id       TEXT NOT NULL,
     platform      TEXT NOT NULL,
     chat_id       TEXT NOT NULL,
-    chat_type     TEXT,
     thread_id     TEXT NOT NULL DEFAULT '',
     user_id       TEXT,
+    user_id_alt   TEXT,
+    chat_type     TEXT,
     notifier_profile TEXT,
+    delivery_mode TEXT NOT NULL DEFAULT 'notify',
     delivery_metadata TEXT,
     created_at    INTEGER NOT NULL,
     last_event_id INTEGER NOT NULL DEFAULT 0,
@@ -1373,6 +1551,9 @@ CREATE INDEX IF NOT EXISTS idx_events_task           ON task_events(task_id, cre
 CREATE INDEX IF NOT EXISTS idx_runs_task             ON task_runs(task_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_runs_status           ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_attachments_task      ON task_attachments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tags_normalized       ON tags(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_task_tags_task        ON task_tags(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_tags_tag         ON task_tags(tag_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_id);
 """
 
@@ -1617,11 +1798,19 @@ def _dispatch_tick_lock(db_path: Path):
 
 # Periodic WAL checkpoint state for the dispatcher tick path. The kanban
 # connections run with ``wal_autocheckpoint=100``, but a passive
-# autocheckpoint can be starved forever on a busy multi-process board (any
-# reader with an open snapshot blocks the WAL reset), letting the -wal file
-# grow without bound between gateway restarts. Once per coarse interval the
-# dispatcher — the board's single writer during a tick, and holding the
-# dispatch flock — issues an explicit ``wal_checkpoint(TRUNCATE)``.
+# autocheckpoint can be starved on a busy multi-process board (any reader
+# with an open snapshot blocks the WAL reset), letting the -wal file grow
+# between gateway restarts. Once per coarse interval the dispatcher issues
+# an explicit ``wal_checkpoint(PASSIVE)``.
+#
+# PASSIVE, not TRUNCATE (same class fix as the state.db checkpoints,
+# #45383/#80255/#44795): the dispatch flock only makes the dispatcher the
+# sole *dispatcher* — CLI kanban commands in other processes write to the
+# same board without taking that flock, so a TRUNCATE here races live
+# writers exactly like the state.db close() path did. PASSIVE never takes
+# the exclusive checkpoint lock; the WAL file size is instead bounded by
+# ``journal_size_limit`` (set at connection init) which truncates the file
+# on the writer's natural post-checkpoint reset.
 # Best-effort: a busy/locked checkpoint is logged at DEBUG and retried next
 # interval. Keyed per resolved DB path so multi-board dispatchers checkpoint
 # each board on its own clock.
@@ -1631,7 +1820,7 @@ _WAL_CHECKPOINT_LOCK = threading.Lock()
 
 
 def _maybe_checkpoint_wal(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Run ``PRAGMA wal_checkpoint(TRUNCATE)`` at a coarse interval.
+    """Run ``PRAGMA wal_checkpoint(PASSIVE)`` at a coarse interval.
 
     Called from the dispatcher tick while the board's dispatch lock is
     held. No-ops (cheaply) until ``_WAL_CHECKPOINT_INTERVAL_SECONDS`` has
@@ -1651,9 +1840,9 @@ def _maybe_checkpoint_wal(conn: sqlite3.Connection, db_path: Path) -> None:
         # threads in this process) don't double-checkpoint on the boundary.
         _LAST_WAL_CHECKPOINT[key] = now
     try:
-        row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        row = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
         _log.debug(
-            "kanban WAL checkpoint (TRUNCATE) on %s -> %s "
+            "kanban WAL checkpoint (PASSIVE) on %s -> %s "
             "(busy, wal_frames, checkpointed_frames)",
             key, tuple(row) if row is not None else None,
         )
@@ -2195,6 +2384,11 @@ def connect(
                 apply_wal_with_fallback(conn, db_label=f"kanban.db ({path.name})")
                 conn.execute("PRAGMA synchronous=FULL")
                 conn.execute("PRAGMA wal_autocheckpoint=100")
+                # Bound the WAL file size now that the periodic explicit
+                # checkpoint is PASSIVE (never truncates): on the writer's
+                # natural post-checkpoint reset SQLite trims the -wal file
+                # to this limit. 8 MiB is generous for a kanban board.
+                conn.execute("PRAGMA journal_size_limit=8388608")
                 conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA secure_delete=ON")
                 conn.execute("PRAGMA cell_size_check=ON")
@@ -2235,6 +2429,11 @@ def connect(
                 # crash window that can leave a b-tree page header torn.
                 conn.execute("PRAGMA synchronous=FULL")
                 conn.execute("PRAGMA wal_autocheckpoint=100")
+                # Bound the WAL file size now that the periodic explicit
+                # checkpoint is PASSIVE (never truncates): on the writer's
+                # natural post-checkpoint reset SQLite trims the -wal file
+                # to this limit. 8 MiB is generous for a kanban board.
+                conn.execute("PRAGMA journal_size_limit=8388608")
                 conn.execute("PRAGMA foreign_keys=ON")
                 # Zero freed pages so a later torn write cannot expose stale
                 # cell content; persisted in the DB header for new DBs.
@@ -2514,9 +2713,45 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
             _add_column_if_missing(
                 conn, "kanban_notify_subs", "notifier_profile", "notifier_profile TEXT"
             )
+        if "delivery_mode" not in notify_cols:
+            _add_column_if_missing(
+                conn,
+                "kanban_notify_subs",
+                "delivery_mode",
+                "delivery_mode TEXT NOT NULL DEFAULT 'notify'",
+            )
+            # Backfill: before this column existed, the notifier woke the
+            # originating session unconditionally whenever the task carried a
+            # session_id — every pre-existing gateway subscription had de
+            # facto active wake. Defaulting them to plain 'notify' would
+            # silently disable that behavior on upgrade. TUI/CLI rows keep
+            # 'notify' (matching _maybe_auto_subscribe, which only requests
+            # 'notify+wake' for gateway sessions). Runs ONLY on first-add of
+            # the column, so a user's later explicit downgrade is never
+            # overwritten by a re-migration.
+            conn.execute(
+                "UPDATE kanban_notify_subs SET delivery_mode = 'notify+wake' "
+                "WHERE platform != 'tui'"
+            )
         if "chat_type" not in notify_cols:
             _add_column_if_missing(
-                conn, "kanban_notify_subs", "chat_type", "chat_type TEXT"
+                conn,
+                "kanban_notify_subs",
+                "chat_type",
+                "chat_type TEXT",
+            )
+        if "user_id_alt" not in notify_cols:
+            # Records the originating source's platform-specific stable alt ID
+            # (Signal UUID, Feishu union_id, ...) alongside ``user_id`` so an
+            # active-wake replay reconstructs the SAME ``build_session_key`` as
+            # the original event. ``build_session_key`` prefers ``user_id_alt``
+            # over ``user_id`` when both are present (gateway/session.py); a
+            # wake that only replayed ``user_id`` would key to a different,
+            # context-less session whenever the two diverge. Legacy rows
+            # default to NULL, which is inert: ``user_id_alt or user_id`` falls
+            # back to the already-persisted ``user_id``.
+            _add_column_if_missing(
+                conn, "kanban_notify_subs", "user_id_alt", "user_id_alt TEXT"
             )
         if "delivery_metadata" not in notify_cols:
             _add_column_if_missing(
@@ -2644,8 +2879,10 @@ _REBUILD_SPECS = {
     "kanban_notify_subs": (
         "CREATE TABLE kanban_notify_subs ("
         " task_id TEXT NOT NULL, platform TEXT NOT NULL, chat_id TEXT NOT NULL,"
-        " chat_type TEXT, thread_id TEXT NOT NULL DEFAULT '', user_id TEXT,"
-        " notifier_profile TEXT, delivery_metadata TEXT, created_at INTEGER NOT NULL,"
+        " thread_id TEXT NOT NULL DEFAULT '', user_id TEXT, user_id_alt TEXT,"
+        " chat_type TEXT,"
+        " notifier_profile TEXT, delivery_mode TEXT NOT NULL DEFAULT 'notify',"
+        " delivery_metadata TEXT, created_at INTEGER NOT NULL,"
         " last_event_id INTEGER NOT NULL DEFAULT 0,"
         " PRIMARY KEY (task_id, platform, chat_id, thread_id))",
         ("CREATE INDEX idx_notify_task ON kanban_notify_subs(task_id)",),
@@ -3288,6 +3525,10 @@ def create_task(
                         "INSERT OR IGNORE INTO task_links (parent_id, child_id) VALUES (?, ?)",
                         (pid, task_id),
                     )
+                # Notify-sub inheritance (ACK-edge: the originating channel
+                # still hears about a child that BLOCKs, not just the final
+                # fan-in) is handled by the single-owner helper below —
+                # _inherit_notify_subs copies every routing/delivery column.
                 _append_event(
                     conn,
                     task_id,
@@ -3308,6 +3549,12 @@ def create_task(
                     },
                 )
                 _inherit_notify_subs(conn, task_id, parents, created_at=now)
+                apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="created",
+                    reason="task created",
+                )
             return task_id
         except sqlite3.IntegrityError:
             if attempt == 1:
@@ -3343,6 +3590,13 @@ def _inherit_notify_subs(
     cursor. This makes manual `link_tasks(parent, existing_child)` safe: the
     parent chat receives future child terminal events without replaying the
     child's pre-link history.
+
+    Copies EVERY routing/delivery column (chat_type, user_id_alt,
+    delivery_mode, delivery_metadata included) — this helper is the single
+    owner of subscription inheritance for create_task, link_tasks, and triage
+    decomposition. Omitting columns here silently degrades routing: a
+    DM-originated child completion falls back to chat_type='group' and wakes
+    a fresh group-scoped session instead of the originating DM (issue #73030).
     """
     parent_ids = tuple(dict.fromkeys(p for p in parents if p))
     if not parent_ids:
@@ -3356,9 +3610,12 @@ def _inherit_notify_subs(
     conn.execute(
         f"""
         INSERT OR IGNORE INTO kanban_notify_subs
-            (task_id, platform, chat_id, thread_id, user_id,
-             notifier_profile, created_at, last_event_id)
-        SELECT ?, platform, chat_id, thread_id, user_id, notifier_profile, ?, ?
+            (task_id, platform, chat_id, thread_id, user_id, user_id_alt,
+             chat_type, notifier_profile, delivery_mode, delivery_metadata,
+             created_at, last_event_id)
+        SELECT ?, platform, chat_id, thread_id, user_id, user_id_alt,
+               COALESCE(chat_type, 'dm'), notifier_profile,
+               COALESCE(delivery_mode, 'notify'), delivery_metadata, ?, ?
           FROM kanban_notify_subs
          WHERE task_id IN ({placeholders})
         """,
@@ -3442,6 +3699,274 @@ def list_tasks(
     return [Task.from_row(r) for r in rows]
 
 
+def _normalize_tag_name(name: str) -> str:
+    """Canonical tag key: trimmed, single-spaced, and casefolded.
+
+    This avoids accidental duplicates such as ``" API"``, ``"api"``, and
+    ``"API"`` while keeping the first creator's display label in ``tags.name``.
+    """
+    raw = str(name or "")
+    if any(ord(ch) < 32 for ch in raw):
+        raise ValueError("tag name must not contain control characters")
+    normalized = " ".join(raw.strip().split()).casefold()
+    if not normalized:
+        raise ValueError("tag name is required")
+    if len(normalized) > 80:
+        raise ValueError("tag name must be <= 80 characters")
+    return normalized
+
+
+def _display_tag_name(name: str) -> str:
+    cleaned = " ".join(str(name or "").strip().split())
+    # Prefer a readable title-cased display label when the user entered a bare
+    # all-lower/all-upper tag. Mixed-case labels (e.g. "API v2") are preserved.
+    if cleaned.islower() or cleaned.isupper():
+        return cleaned.title()
+    return cleaned
+
+
+def _tag_from_row(row: sqlite3.Row) -> Tag:
+    return Tag(
+        id=int(row["id"]),
+        name=row["name"],
+        normalized_name=row["normalized_name"],
+        created_at=int(row["created_at"]),
+    )
+
+
+def create_tag(conn: sqlite3.Connection, name: str) -> Tag:
+    """Create or return a reusable tag by normalized name."""
+    normalized = _normalize_tag_name(name)
+    display = _display_tag_name(name)
+    now = int(time.time())
+    with write_txn(conn, allow_nested=True):
+        conn.execute(
+            "INSERT OR IGNORE INTO tags (name, normalized_name, created_at) "
+            "VALUES (?, ?, ?)",
+            (display, normalized, now),
+        )
+        row = conn.execute(
+            "SELECT * FROM tags WHERE normalized_name = ?", (normalized,)
+        ).fetchone()
+    if row is None:
+        raise RuntimeError("failed to create tag")
+    return _tag_from_row(row)
+
+
+def list_tags(conn: sqlite3.Connection) -> list[Tag]:
+    rows = conn.execute(
+        "SELECT * FROM tags ORDER BY normalized_name ASC"
+    ).fetchall()
+    return [_tag_from_row(row) for row in rows]
+
+
+def list_task_tags(conn: sqlite3.Connection, task_id: str) -> list[Tag]:
+    rows = conn.execute(
+        """
+        SELECT tags.*
+          FROM tags
+          JOIN task_tags ON task_tags.tag_id = tags.id
+         WHERE task_tags.task_id = ?
+         ORDER BY tags.normalized_name ASC
+        """,
+        (task_id,),
+    ).fetchall()
+    return [_tag_from_row(row) for row in rows]
+
+
+def attach_tag_to_task(conn: sqlite3.Connection, task_id: str, name: str) -> Tag:
+    """Attach an existing or newly-created tag to a task, idempotently."""
+    if get_task(conn, task_id) is None:
+        raise ValueError(f"task {task_id} not found")
+    tag = create_tag(conn, name)
+    now = int(time.time())
+    with write_txn(conn, allow_nested=True):
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO task_tags (task_id, tag_id, created_at) "
+            "VALUES (?, ?, ?)",
+            (task_id, tag.id, now),
+        ).rowcount
+        if inserted:
+            _append_event(
+                conn,
+                task_id,
+                "tag_attached",
+                {"tag": {"id": tag.id, "name": tag.name, "normalized_name": tag.normalized_name}},
+            )
+    return tag
+
+
+def remove_tag_from_task(conn: sqlite3.Connection, task_id: str, name: str) -> bool:
+    """Detach a tag from a task by any spelling of its normalized name."""
+    normalized = _normalize_tag_name(name)
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT id, name, normalized_name FROM tags WHERE normalized_name = ?",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            return False
+        cur = conn.execute(
+            "DELETE FROM task_tags WHERE task_id = ? AND tag_id = ?",
+            (task_id, row["id"]),
+        )
+        if cur.rowcount:
+            _append_event(
+                conn,
+                task_id,
+                "tag_removed",
+                {"tag": {"id": int(row["id"]), "name": row["name"], "normalized_name": row["normalized_name"]}},
+            )
+            return True
+    return False
+
+
+AI_TAG_PREFIX = "AI:"
+AI_TAG_NORMALIZED_PREFIX = "ai:"
+
+
+def _ai_managed_tag_names(conn: sqlite3.Connection, task: Task) -> list[str]:
+    """Return deterministic AI-managed tag display names for *task*.
+
+    The taxonomy is intentionally small and rule-based: lifecycle code can run
+    it safely from write paths, audit diffs are stable, and tag normalization
+    prevents near-duplicates such as ``AI:Status Ready`` vs ``ai:status ready``.
+    """
+    text = f"{task.title or ''} {task.body or ''}".casefold()
+    names: set[str] = {f"{AI_TAG_PREFIX}Status {str(task.status).title()}"}
+
+    if parent_ids(conn, task.id):
+        names.add(f"{AI_TAG_PREFIX}Has Parents")
+    if child_ids(conn, task.id):
+        names.add(f"{AI_TAG_PREFIX}Has Children")
+    if int(task.priority or 0) >= 5:
+        names.add(f"{AI_TAG_PREFIX}High Priority")
+
+    keyword_tags = (
+        (("kanban", "board", "task"), "Area Kanban"),
+        (("desktop", "ui", "drawer", "editor", "app"), "Surface Desktop"),
+        (("gateway", "telegram", "slack", "whatsapp"), "Surface Gateway"),
+        (("cron", "schedule", "monitor"), "Area Automation"),
+        (("tag", "tags", "tagging"), "Feature Tags"),
+        (("ai", "model", "llm", "agent"), "Feature AI"),
+        (("review", "qa", "verify"), "Needs Review"),
+        (("bug", "fix", "error", "broken", "regression"), "Kind Bug"),
+        (("test", "tests", "typecheck"), "Needs Tests"),
+        (("doc", "docs", "readme"), "Kind Docs"),
+    )
+    for keywords, label in keyword_tags:
+        if any(word in text for word in keywords):
+            names.add(f"{AI_TAG_PREFIX}{label}")
+
+    # Sort by the same normalized key used by list_task_tags/list_tags so event
+    # payloads and task tag ordering are deterministic and easy to diff.
+    return sorted(names, key=_normalize_tag_name)
+
+
+def apply_ai_task_tags(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    trigger: str,
+    reason: Optional[str] = None,
+) -> dict[str, list[str]]:
+    """Refresh the AI-managed tag namespace for a task and audit the diff.
+
+    Only tags whose normalized name starts with ``ai:`` are managed here. User
+    tags outside that namespace are preserved. The function is idempotent and
+    safe to call from inside another ``write_txn``.
+    """
+    task = get_task(conn, task_id)
+    if task is None:
+        return {"added": [], "removed": []}
+
+    desired_names = _ai_managed_tag_names(conn, task)
+    desired_norm_to_name = {_normalize_tag_name(name): name for name in desired_names}
+    desired_norms = set(desired_norm_to_name)
+
+    current_tags = list_task_tags(conn, task_id)
+    current_ai = {
+        tag.normalized_name: tag
+        for tag in current_tags
+        if tag.normalized_name.startswith(AI_TAG_NORMALIZED_PREFIX)
+    }
+    current_norms = set(current_ai)
+
+    to_add = sorted(desired_norms - current_norms)
+    to_remove = sorted(current_norms - desired_norms)
+    if not to_add and not to_remove:
+        return {"added": [], "removed": []}
+
+    added_names: list[str] = []
+    removed_names: list[str] = []
+    with write_txn(conn, allow_nested=True):
+        for normalized in to_remove:
+            tag = current_ai[normalized]
+            cur = conn.execute(
+                "DELETE FROM task_tags WHERE task_id = ? AND tag_id = ?",
+                (task_id, tag.id),
+            )
+            if cur.rowcount:
+                removed_names.append(tag.name)
+                _append_event(
+                    conn,
+                    task_id,
+                    "tag_removed",
+                    {
+                        "tag": {
+                            "id": tag.id,
+                            "name": tag.name,
+                            "normalized_name": tag.normalized_name,
+                        },
+                        "source": "ai",
+                        "trigger": trigger,
+                        "reason": reason,
+                    },
+                )
+
+        now = int(time.time())
+        for normalized in to_add:
+            tag = create_tag(conn, desired_norm_to_name[normalized])
+            inserted = conn.execute(
+                "INSERT OR IGNORE INTO task_tags (task_id, tag_id, created_at) "
+                "VALUES (?, ?, ?)",
+                (task_id, tag.id, now),
+            ).rowcount
+            if inserted:
+                added_names.append(tag.name)
+                _append_event(
+                    conn,
+                    task_id,
+                    "tag_attached",
+                    {
+                        "tag": {
+                            "id": tag.id,
+                            "name": tag.name,
+                            "normalized_name": tag.normalized_name,
+                        },
+                        "source": "ai",
+                        "trigger": trigger,
+                        "reason": reason,
+                    },
+                )
+
+        _append_event(
+            conn,
+            task_id,
+            "ai_tags_updated",
+            {
+                "source": "ai",
+                "trigger": trigger,
+                "reason": reason,
+                "added": added_names,
+                "removed": removed_names,
+                "desired": [desired_norm_to_name[n] for n in sorted(desired_norms)],
+            },
+        )
+
+    return {"added": added_names, "removed": removed_names}
+
+
 def assign_task(conn: sqlite3.Connection, task_id: str, profile: Optional[str]) -> bool:
     """Assign or reassign a task.  Returns True on success.
 
@@ -3472,7 +3997,16 @@ def assign_task(conn: sqlite3.Connection, task_id: str, profile: Optional[str]) 
         else:
             conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?", (profile, task_id))
         _append_event(conn, task_id, "assigned", {"assignee": profile})
-        return True
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="task assigned",
+        )
+    # Task-mutation observer (RFC #58548), fired AFTER the assignment txn
+    # has committed so subscribers always observe durable board state.
+    notify_task_updated(conn, task_id, ("assignee",))
+    return True
 
 
 def set_model_override(
@@ -3517,7 +4051,15 @@ def set_model_override(
             conn, task_id, "model_override_set",
             {"model": model, "provider": provider},
         )
-        return True
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="model override updated",
+        )
+    # Task-mutation observer (RFC #58548), fired AFTER the txn commits.
+    notify_task_updated(conn, task_id, ("model_override", "provider_override"))
+    return True
 
 
 def set_reasoning_effort(
@@ -3555,7 +4097,15 @@ def set_reasoning_effort(
         _append_event(
             conn, task_id, "reasoning_effort_set", {"reasoning_effort": effort}
         )
-        return True
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="reasoning effort updated",
+        )
+    # Task-mutation observer (RFC #58548), fired AFTER the txn commits.
+    notify_task_updated(conn, task_id, ("reasoning_effort",))
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -3591,6 +4141,12 @@ def link_tasks(conn: sqlite3.Connection, parent_id: str, child_id: str) -> None:
             {"parent": parent_id, "child": child_id},
         )
         _inherit_notify_subs(conn, child_id, (parent_id,))
+        apply_ai_task_tags(
+            conn,
+            child_id,
+            trigger="updated",
+            reason=f"linked to parent {parent_id}",
+        )
 
 
 def _would_cycle(conn: sqlite3.Connection, parent_id: str, child_id: str) -> bool:
@@ -3626,6 +4182,12 @@ def unlink_tasks(conn: sqlite3.Connection, parent_id: str, child_id: str) -> boo
             _append_event(
                 conn, child_id, "unlinked",
                 {"parent": parent_id, "child": child_id},
+            )
+            apply_ai_task_tags(
+                conn,
+                child_id,
+                trigger="updated",
+                reason=f"unlinked from parent {parent_id}",
             )
         removed = cur.rowcount > 0
     if removed:
@@ -3736,6 +4298,12 @@ def add_comment(
             (task_id, author.strip(), body.strip(), now),
         )
         _append_event(conn, task_id, "commented", {"author": author, "len": len(body)})
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="comment added",
+        )
         return int(cur.lastrowid or 0)
 
 
@@ -4331,6 +4899,12 @@ def recompute_ready(
                     conn, task_id, "promoted",
                     {"status": resume_status} if resume_status != "ready" else None,
                 )
+                apply_ai_task_tags(
+                    conn,
+                    task_id,
+                    trigger="status",
+                    reason="task promoted",
+                )
                 promoted += 1
     return promoted
 
@@ -4714,7 +5288,8 @@ def release_stale_claims(
     reclaimed = 0
     host_prefix = f"{_claimer_id().split(':', 1)[0]}:"
     stale = conn.execute(
-        "SELECT id, claim_lock, worker_pid, claim_expires, last_heartbeat_at "
+        "SELECT id, claim_lock, worker_pid, claim_expires, last_heartbeat_at, "
+        "       assignee "
         "FROM tasks "
         "WHERE status = 'running' AND claim_expires IS NOT NULL "
         "  AND claim_expires < ?",
@@ -4824,7 +5399,31 @@ def release_stale_claims(
                 payload,
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                row["id"],
+                trigger="status",
+                reason="stale claim reclaimed",
+            )
             reclaimed += 1
+        # Worker-lifecycle observer (RFC #58548): the reclaim txn above has
+        # committed. The ``continue`` branches (rowcount mismatch, claim
+        # extension, deferred reclaim) never reach this point, so only a
+        # genuinely reclaimed stale claim fires.
+        if _kanban_observer_consumed("on_kanban_worker_stale_claim"):
+            _fire_kanban_lifecycle_hook(
+                "on_kanban_worker_stale_claim",
+                row["id"],
+                board=get_current_board(),
+                assignee=row["assignee"],
+                run_id=run_id,
+                worker_pid=(
+                    int(row["worker_pid"])
+                    if row["worker_pid"] is not None else None
+                ),
+                heartbeat_stale=bool(heartbeat_stale),
+                retry_status=retry_status,
+            )
     return reclaimed
 
 
@@ -4890,6 +5489,12 @@ def reclaim_task(
             conn, task_id, "reclaimed",
             payload,
             run_id=run_id,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task reclaimed",
         )
     # Operator intervention — they've looked at the task, so the
     # consecutive-failures counter is now stale. Give the next retry
@@ -5265,6 +5870,12 @@ def complete_task(
             conn, task_id, "completed",
             completed_payload,
             run_id=run_id,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task completed",
         )
     # Prose-scan the summary + result for t_<hex> references that do
     # not resolve. Advisory — does not block the completion. Runs in
@@ -5978,6 +6589,12 @@ def block_task(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="task blocked for dependency",
+            )
             _blocked_task = get_task(conn, task_id)
             _fire_kanban_lifecycle_hook(
                 "kanban_task_blocked",
@@ -6038,6 +6655,12 @@ def block_task(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="block loop routed to triage",
+            )
         else:
             if expected_run_id is None:
                 cur = conn.execute(
@@ -6094,6 +6717,12 @@ def block_task(
                     "source_status": source_status,
                 },
                 run_id=run_id,
+            )
+            apply_ai_task_tags(
+                conn,
+                task_id,
+                trigger="status",
+                reason="task blocked",
             )
         _blocked_task = get_task(conn, task_id)
     _fire_kanban_lifecycle_hook(
@@ -6282,6 +6911,12 @@ def request_review(
             },
             run_id=run_id,
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task moved to review",
+        )
     return _ret(True)
 
 
@@ -6401,6 +7036,12 @@ def request_changes(
             },
             run_id=run_id,
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="changes requested",
+        )
     return True, implementer
 
 
@@ -6469,6 +7110,12 @@ def promote_task(
             task_id,
             "promoted_manual",
             {"actor": actor, "reason": reason, "forced": force},
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="manual promotion",
         )
 
     return True, None
@@ -6581,6 +7228,12 @@ def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
                 else None
             ),
         )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task unblocked",
+        )
         return True
 
 
@@ -6648,6 +7301,12 @@ def reopen_review_task(conn: sqlite3.Connection, task_id: str) -> bool:
             task_id,
             "review_reopened",
             payload if payload != {"status": "ready"} else None,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="review reopened",
         )
         return True
 
@@ -6789,6 +7448,12 @@ def invalidate_descendants_for_parent_reopen(
                 },
                 run_id=run_id,
             )
+            apply_ai_task_tags(
+                conn,
+                row["id"],
+                trigger="status",
+                reason=f"ancestor {task_id} reopened",
+            )
             # Inline comment insert (not add_comment: no txn-opening helper
             # calls inside a txn per file convention).
             conn.execute(
@@ -6903,6 +7568,12 @@ def specify_triage_task(
             task_id,
             "specified",
             {"changed_fields": changed_fields} if changed_fields else None,
+        )
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="updated",
+            reason="task specified",
         )
     # Outside the write_txn above, so we don't nest BEGIN IMMEDIATE — the
     # ready-promotion pass opens its own IMMEDIATE txn. This runs the same
@@ -7090,6 +7761,12 @@ def decompose_triage_task(
                     conn, child_id, "linked",
                     {"parent": parent_id, "child": child_id},
                 )
+                apply_ai_task_tags(
+                    conn,
+                    child_id,
+                    trigger="updated",
+                    reason=f"linked to parent {parent_id}",
+                )
 
         # Link the ROOT task as a child of every leaf child — i.e. the
         # root waits for the whole graph. Simpler than computing leaves:
@@ -7135,6 +7812,13 @@ def decompose_triage_task(
                 "root_assignee": root_assignee,
             },
         )
+        for tagged_id in [task_id, *child_ids]:
+            apply_ai_task_tags(
+                conn,
+                tagged_id,
+                trigger="split",
+                reason=f"task {task_id} decomposed",
+            )
 
     # Outside the write_txn: promote parent-free children to 'ready'
     # so the dispatcher picks them up on its next tick. Same pattern
@@ -7165,6 +7849,12 @@ def archive_task(conn: sqlite3.Connection, task_id: str) -> bool:
             summary="task archived with run still active",
         )
         _append_event(conn, task_id, "archived", None, run_id=run_id)
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task archived",
+        )
     # ``archived`` parents no longer block children, same as ``done``.
     # Promote newly-unblocked dependents immediately instead of waiting
     # for a later dispatcher tick.
@@ -7193,6 +7883,7 @@ def delete_archived_task(conn: sqlite3.Connection, task_id: str) -> bool:
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
         cur = conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
         return cur.rowcount == 1
@@ -7216,6 +7907,7 @@ def delete_task(conn: sqlite3.Connection, task_id: str) -> bool:
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
     recompute_ready(conn)
     return True
@@ -7587,6 +8279,12 @@ def schedule_task(
                 summary=reason,
             )
         _append_event(conn, task_id, "scheduled", {"reason": reason}, run_id=run_id)
+        apply_ai_task_tags(
+            conn,
+            task_id,
+            trigger="status",
+            reason="task scheduled",
+        )
         return True
 
 
@@ -8144,6 +8842,12 @@ def enforce_max_runtime(
                 _append_event(
                     conn, tid, "timed_out", payload, run_id=run_id,
                 )
+                apply_ai_task_tags(
+                    conn,
+                    tid,
+                    trigger="status",
+                    reason="task timed out",
+                )
                 timed_out.append(tid)
         # Increment the unified failure counter. Outside the write_txn
         # above because ``_record_task_failure`` opens its own. If the
@@ -8287,6 +8991,12 @@ def detect_stale_running(
             )
             _append_event(
                 conn, tid, "stale", payload, run_id=run_id,
+            )
+            apply_ai_task_tags(
+                conn,
+                tid,
+                trigger="status",
+                reason="stale running task reclaimed",
             )
             reclaimed.append(tid)
 
@@ -8513,9 +9223,13 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # counter (see the post-txn loop below).
     crash_details: list[tuple[str, int, str, bool, str]] = []
     # (task_id, pid, claimer, protocol_violation, error_text)
+    # Worker-exit observer payloads (RFC #58548), collected inside the main
+    # txn and fired only after every reclaim/accounting txn has committed.
+    exited_hook_payloads: list[dict] = []
     with write_txn(conn):
         rows = conn.execute(
-            "SELECT id, worker_pid, claim_lock, started_at FROM tasks "
+            "SELECT id, worker_pid, claim_lock, started_at, assignee "
+            "FROM tasks "
             "WHERE status = 'running' AND worker_pid IS NOT NULL"
         ).fetchall()
         host_prefix = f"{_claimer_id().split(':', 1)[0]}:"
@@ -8624,6 +9338,16 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
                     event_payload,
                     run_id=run_id,
                 )
+                exited_hook_payloads.append({
+                    "task_id": row["id"],
+                    "assignee": row["assignee"],
+                    "run_id": run_id,
+                    "worker_pid": pid,
+                    "exit_kind": kind,
+                    "exit_code": code,
+                    "outcome": _run_outcome,
+                    "retry_status": retry_status,
+                })
                 if rate_limited_exit:
                     # Stamp the failure-error column so ``check_respawn_guard``
                     # recognizes this as a quota blocker and defers the
@@ -8744,6 +9468,20 @@ def detect_crashed_workers(conn: sqlite3.Connection) -> list[str]:
     # Same side-channel for rate-limited requeues — these did NOT count a
     # failure and are NOT crashes, so they stay out of the ``crashed`` return.
     detect_crashed_workers._last_rate_limited = rate_limited  # type: ignore[attr-defined]
+    # Worker-lifecycle observer (RFC #58548): exit events are tick-derived
+    # from this reclaim pass — fired only now, after the main reclaim txn
+    # AND the breaker accounting above have committed, so subscribers always
+    # observe fully durable board state.
+    if exited_hook_payloads and _kanban_observer_consumed("on_kanban_worker_exited"):
+        _board = get_current_board()
+        for hook_fields in exited_hook_payloads:
+            hook_fields = dict(hook_fields)
+            _fire_kanban_lifecycle_hook(
+                "on_kanban_worker_exited",
+                hook_fields.pop("task_id"),
+                board=_board,
+                **hook_fields,
+            )
     return crashed
 
 
@@ -9244,23 +9982,6 @@ def dispatch_once(
         # Path resolution should never fail, but if it somehow does we
         # must not lose the tick — fall through to an unguarded dispatch
         # rather than dropping work.
-        return _dispatch_once_locked(
-            conn,
-            spawn_fn=spawn_fn,
-            ttl_seconds=ttl_seconds,
-            dry_run=dry_run,
-            max_spawn=max_spawn,
-            max_in_progress=max_in_progress,
-            failure_limit=failure_limit,
-            stale_timeout_seconds=stale_timeout_seconds,
-            board=board,
-            default_assignee=default_assignee,
-            max_in_progress_per_profile=max_in_progress_per_profile,
-            reconcile_orphans=reconcile_orphans,
-        )
-    with _dispatch_tick_lock(db_path) as held:
-        if not held:
-            return DispatchResult(skipped_locked=True)
         result = _dispatch_once_locked(
             conn,
             spawn_fn=spawn_fn,
@@ -9275,10 +9996,36 @@ def dispatch_once(
             max_in_progress_per_profile=max_in_progress_per_profile,
             reconcile_orphans=reconcile_orphans,
         )
-        # Still under the dispatch lock: opportunistically truncate the WAL
-        # at a coarse interval so it cannot grow unbounded between restarts.
-        _maybe_checkpoint_wal(conn, db_path)
+        _fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
         return result
+    with _dispatch_tick_lock(db_path) as held:
+        if not held:
+            result = DispatchResult(skipped_locked=True)
+        else:
+            result = _dispatch_once_locked(
+                conn,
+                spawn_fn=spawn_fn,
+                ttl_seconds=ttl_seconds,
+                dry_run=dry_run,
+                max_spawn=max_spawn,
+                max_in_progress=max_in_progress,
+                failure_limit=failure_limit,
+                stale_timeout_seconds=stale_timeout_seconds,
+                board=board,
+                default_assignee=default_assignee,
+                max_in_progress_per_profile=max_in_progress_per_profile,
+                reconcile_orphans=reconcile_orphans,
+            )
+            # Still under the dispatch lock: run the periodic PASSIVE WAL
+            # checkpoint (see _maybe_checkpoint_wal; the -wal file size is
+            # bounded by journal_size_limit on the writer's natural reset).
+            _maybe_checkpoint_wal(conn, db_path)
+    # The dispatch lock has been released here. Fire the tick observer
+    # strictly OUTSIDE the single-writer critical section (#56066 sweeper
+    # finding / #64231 disposition): a slow subscriber must never extend
+    # the lock hold and stall a sibling dispatcher's tick.
+    _fire_dispatch_tick_hook(result, board=board, dry_run=dry_run)
+    return result
 
 
 def _dispatch_once_locked(
@@ -9577,6 +10324,13 @@ def _dispatch_once_locked(
                 pid = _spawn(claimed, str(workspace))
             if pid:
                 _set_worker_pid(conn, claimed.id, int(pid))
+            # Worker-lifecycle observer (RFC #58548): fires AFTER spawn_fn
+            # returned and the PID (when reported) is durably persisted,
+            # per the RFC timing contract. Best-effort — can never break
+            # the dispatch loop.
+            _fire_worker_spawned_hook(
+                conn, claimed, str(workspace), pid, board=board,
+            )
             # NOTE: we intentionally do NOT reset consecutive_failures
             # here. A successful spawn proves the worker can start but
             # doesn't prove the run will succeed. Under unified
@@ -9702,6 +10456,11 @@ def _dispatch_once_locked(
                 pid = _spawn(claimed, str(workspace))
             if pid:
                 _set_worker_pid(conn, claimed.id, int(pid))
+            # Worker-lifecycle observer (RFC #58548): same contract as the
+            # ready-lane fire above — after spawn + PID persistence.
+            _fire_worker_spawned_hook(
+                conn, claimed, str(workspace), pid, board=board,
+            )
             result.spawned.append((claimed.id, claimed.assignee or "", str(workspace)))
             spawned += 1
             if _per_profile_cap is not None and claimed.assignee:
@@ -10622,6 +11381,14 @@ def task_age(task: Task) -> dict:
 # Notification subscriptions (used by the gateway kanban-notifier)
 # ---------------------------------------------------------------------------
 
+# How the gateway kanban-notifier reacts to a terminal event for a
+# subscription:
+#   "notify"       -> passive ``adapter.send`` only (default)
+#   "notify+wake"  -> passive send AND wake the destination gateway agent
+#   "wake"         -> wake the agent only; no passive message is sent
+_NOTIFY_DELIVERY_MODES = ("notify", "notify+wake", "wake")
+
+
 def _encode_notify_delivery_metadata(
     metadata: Optional[Mapping[str, Any]],
 ) -> Optional[str]:
@@ -10663,15 +11430,34 @@ def add_notify_sub(
     task_id: str,
     platform: str,
     chat_id: str,
-    chat_type: Optional[str] = None,
     thread_id: Optional[str] = None,
     user_id: Optional[str] = None,
+    user_id_alt: Optional[str] = None,
+    chat_type: Optional[str] = None,
     notifier_profile: Optional[str] = None,
+    delivery_mode: Optional[str] = None,
     delivery_metadata: Optional[Mapping[str, Any]] = None,
 ) -> None:
     """Register a gateway source that wants terminal-state notifications
     for ``task_id``. Idempotent on (task, platform, chat, thread).
 
+    ``user_id_alt`` records the originating source's platform-specific stable
+    alt ID (Signal UUID, Feishu union_id, ...) alongside ``user_id``. Active-wake
+    replay must reproduce it so the woken turn's ``build_session_key`` matches
+    the original event's — ``build_session_key`` prefers ``user_id_alt`` over
+    ``user_id`` (gateway/session.py), so replaying only ``user_id`` would key a
+    wake into a different session whenever the two diverge for this source.
+
+    ``chat_type`` records the originating source's chat type; the active-wake
+    delivery modes replay it so the woken turn resolves the operator's real
+    channel. ``None`` keeps an existing row's value.
+
+    ``delivery_mode`` (see ``_NOTIFY_DELIVERY_MODES``) selects how the
+    kanban-notifier reacts to a terminal event for this subscription. ``None``
+    leaves an existing row's mode untouched (and inserts the ``"notify"``
+    default for a fresh row); an explicit value is last-write-wins, so an
+    operator can intentionally re-subscribe to change the mode (e.g.
+    ``notify`` -> ``wake``). An unknown value falls back to ``"notify"``.
     New subscriptions start "caught up": ``last_event_id`` snaps to the
     task's current ``MAX(task_events.id)`` at creation instead of the
     schema default 0. A cursor of 0 on an already-active task made the
@@ -10681,44 +11467,66 @@ def add_notify_sub(
     AFTER they subscribe; the gateway/tool auto-subscribe paths run at
     task creation, where the snapshot is 0 anyway.
     """
+    insert_mode = delivery_mode if delivery_mode in _NOTIFY_DELIVERY_MODES else (
+        # api_server is stateless: the adapter has no send() — the wake
+        # self-post IS the delivery on that path (see gateway/wake.py and
+        # test_kanban_notifier_apiserver_wake). A plain-'notify' default
+        # would leave those subscriptions with no delivery mechanism at
+        # all, regressing the pre-delivery_mode behavior where a task
+        # carrying a session_id always woke. Explicit modes still win.
+        "notify+wake" if platform == "api_server" else "notify"
+    )
+    insert_chat_type = chat_type or "dm"
     now = int(time.time())
     metadata_json = _encode_notify_delivery_metadata(delivery_metadata)
     with write_txn(conn):
         conn.execute(
             """
             INSERT OR IGNORE INTO kanban_notify_subs
-                (task_id, platform, chat_id, chat_type, thread_id, user_id,
-                 notifier_profile, delivery_metadata, created_at, last_event_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                (task_id, platform, chat_id, thread_id, user_id, user_id_alt,
+                 chat_type, notifier_profile, delivery_mode, delivery_metadata,
+                 created_at, last_event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     COALESCE((SELECT MAX(id) FROM task_events WHERE task_id = ?), 0))
             """,
             (
                 task_id,
                 platform,
                 chat_id,
-                chat_type,
                 thread_id or "",
                 user_id,
+                user_id_alt,
+                insert_chat_type,
                 notifier_profile,
+                insert_mode,
                 metadata_json,
                 now,
                 task_id,
             ),
         )
         if chat_type:
-            # Self-heal rows created before chat_type was persisted.
+            # Explicit chat_type is last-write-wins on re-subscribe.
             conn.execute(
                 """
                 UPDATE kanban_notify_subs
                    SET chat_type = ?
                  WHERE task_id = ? AND platform = ? AND chat_id = ? AND thread_id = ?
-                   AND (chat_type IS NULL OR chat_type = '')
                 """,
                 (chat_type, task_id, platform, chat_id, thread_id or ""),
             )
+        if user_id_alt:
+            # Self-heal legacy rows created before alternate IDs were tracked.
+            conn.execute(
+                """
+                UPDATE kanban_notify_subs
+                   SET user_id_alt = ?
+                 WHERE task_id = ? AND platform = ? AND chat_id = ? AND thread_id = ?
+                   AND (user_id_alt IS NULL OR user_id_alt = '')
+                """,
+                (user_id_alt, task_id, platform, chat_id, thread_id or ""),
+            )
         if notifier_profile:
-            # Self-heal legacy rows that predate notifier ownership by
-            # backfilling only when the existing value is unset.
+            # Self-heal legacy rows that predate notifier ownership.
             conn.execute(
                 """
                 UPDATE kanban_notify_subs
@@ -10728,10 +11536,18 @@ def add_notify_sub(
                 """,
                 (notifier_profile, task_id, platform, chat_id, thread_id or ""),
             )
+        if delivery_mode in _NOTIFY_DELIVERY_MODES:
+            # Explicit delivery_mode is last-write-wins on re-subscribe.
+            conn.execute(
+                """
+                UPDATE kanban_notify_subs
+                   SET delivery_mode = ?
+                 WHERE task_id = ? AND platform = ? AND chat_id = ? AND thread_id = ?
+                """,
+                (delivery_mode, task_id, platform, chat_id, thread_id or ""),
+            )
         if metadata_json:
-            # A duplicate subscribe from the same chat/thread should refresh
-            # the routing anchor. Telegram DM-topic notifications need the
-            # latest reply anchor to stay inside the visible topic lane.
+            # Refresh the routing anchor for duplicate subscriptions.
             conn.execute(
                 """
                 UPDATE kanban_notify_subs
@@ -10893,6 +11709,51 @@ def remove_notify_sub(
             (task_id, platform, chat_id, thread_id or ""),
         )
     return cur.rowcount > 0
+
+
+def purge_stale_done_notify_subs(
+    conn: sqlite3.Connection,
+    *,
+    max_age_days: int = 30,
+) -> int:
+    """Delete notify subscriptions whose task has sat in ``done`` untouched
+    for longer than ``max_age_days``.
+
+    The notifier keeps subscriptions alive through ``done`` because a
+    completed task can be reopened (review corrections, continuation) and
+    the reopened cycle must still notify its origin session. On boards
+    that never archive, that retention would otherwise accumulate
+    subscription rows forever — each one scanned every notifier tick.
+    This GC bounds that: a task that has been ``done`` with no new events
+    for the retention window is treated as settled and its subscriptions
+    are purged. Age is measured from the task's most recent event
+    (falling back to ``completed_at`` then ``created_at``), so ANY
+    activity — including a reopen, which also moves the task off
+    ``done`` — resets or exempts it.
+
+    ``max_age_days <= 0`` disables the sweep entirely. Returns the number
+    of subscription rows deleted.
+    """
+    try:
+        days = int(max_age_days)
+    except (TypeError, ValueError):
+        days = 30
+    if days <= 0:
+        return 0
+    cutoff = int(time.time()) - days * 86400
+    with write_txn(conn):
+        cur = conn.execute(
+            "DELETE FROM kanban_notify_subs WHERE task_id IN ("
+            " SELECT t.id FROM tasks t"
+            " WHERE t.status = 'done'"
+            " AND COALESCE("
+            "  (SELECT MAX(e.created_at) FROM task_events e"
+            "   WHERE e.task_id = t.id),"
+            "  t.completed_at, t.created_at, 0"
+            " ) < ?)",
+            (cutoff,),
+        )
+    return int(cur.rowcount or 0)
 
 
 def unseen_events_for_sub(

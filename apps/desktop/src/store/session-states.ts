@@ -39,6 +39,7 @@ import {
   $sessions,
   $unreadFinishedSessionIds,
   lineageAliases,
+  markSessionRead,
   sessionMatchesStoredId,
   setActiveSessionStoredIdRotation,
   setSessions
@@ -410,6 +411,8 @@ export interface SessionTile {
   runtimeId?: string
   /** Resume failed terminally (shown in the tile; retryable). */
   error?: string
+  /** VS Code-style preview tab: replaceable until promoted by double-click. */
+  preview?: boolean
 }
 
 // Tiles are persisted PER PROFILE: a session belongs to one profile, and the
@@ -425,12 +428,13 @@ const TILE_PANE_PREFIX = 'session-tile:'
 /** Persisted placement — `dir` + strip slot (`before`) + dock `anchor` so a
  *  restart / profile swap re-adopts tiles in the same order, not all stacked
  *  right of workspace. */
-type StoredTile = Pick<SessionTile, 'anchor' | 'before' | 'dir' | 'storedSessionId'>
+type StoredTile = Pick<SessionTile, 'anchor' | 'before' | 'dir' | 'preview' | 'storedSessionId'>
 
 const toStored = (t: SessionTile): StoredTile => ({
   anchor: t.anchor,
   before: t.before,
   dir: t.dir,
+  preview: t.preview,
   storedSessionId: t.storedSessionId
 })
 
@@ -445,6 +449,7 @@ function parseTileList(value: unknown): StoredTile[] {
             anchor: typeof raw.anchor === 'string' ? raw.anchor : undefined,
             before: typeof raw.before === 'string' || raw.before === null ? raw.before : undefined,
             dir: raw.dir,
+            preview: typeof raw.preview === 'boolean' ? raw.preview : undefined,
             storedSessionId: raw.storedSessionId
           }
         })
@@ -665,9 +670,75 @@ export function openSessionTile(
 
   if (target) {
     moveTreePane(`${TILE_PANE_PREFIX}${storedSessionId}`, { before: before ?? null, groupId: target, pos: dir })
-    patchSessionTile(storedSessionId, { anchor: dock, before: before ?? undefined, dir })
+    patchSessionTile(storedSessionId, { anchor: dock, before: before ?? undefined, dir, preview: false })
     syncTileStripOrder()
   }
+}
+
+function dropTileStateIfIdle(tile: SessionTile | undefined) {
+  const runtimeId = tile?.runtimeId
+  const state = runtimeId ? $sessionStates.get()[runtimeId] : undefined
+
+  if (runtimeId && state && evictable(runtimeId, state)) {
+    dropSessionState(runtimeId)
+  }
+}
+
+function removeReplaceablePreviewTile(tile: SessionTile | undefined) {
+  if (!tile) {
+    return
+  }
+
+  saveTiles($sessionTiles.get().filter(t => t.storedSessionId !== tile.storedSessionId))
+  dropTileStateIfIdle(tile)
+}
+
+/** Sidebar single-click opens a VS Code-style preview tab: there is at most one
+ *  replaceable preview tile, and double-click promotion makes it permanent. */
+export function openPreviewSessionTile(
+  storedSessionId: string,
+  dir: TileDock = 'center',
+  anchor?: string,
+  before?: null | string
+) {
+  if (!storedSessionId || storedSessionId === $selectedStoredSessionId.get()) {
+    markSessionRead(storedSessionId)
+
+    return
+  }
+
+  markSessionRead(storedSessionId)
+
+  if ($sessionTiles.get().some(t => t.storedSessionId === storedSessionId)) {
+    focusOpenSession(storedSessionId)
+
+    return
+  }
+
+  const dock = anchor ?? focusedSessionTabAnchor() ?? undefined
+  const preview = $sessionTiles.get().find(t => t.preview)
+  const nextTile: SessionTile = { dir: preview?.dir ?? dir, preview: true, storedSessionId }
+  const nextAnchor = preview?.anchor ?? dock
+  const nextBefore = preview?.before ?? before
+
+  if (nextAnchor) {
+    nextTile.anchor = nextAnchor
+  }
+
+  if (nextBefore !== undefined) {
+    nextTile.before = nextBefore
+  }
+
+  if (preview) {
+    removeReplaceablePreviewTile(preview)
+  }
+
+  saveTiles([...$sessionTiles.get(), nextTile])
+  revealTreePane(`${TILE_PANE_PREFIX}${storedSessionId}`)
+}
+
+export function promoteSessionTile(storedSessionId: string): void {
+  patchSessionTile(storedSessionId, { preview: false })
 }
 
 /** ⌘W on the MAIN tab: the next session tab stacked WITH the workspace, to
@@ -711,6 +782,7 @@ export function nextSessionTileForWorkspace(): null | string {
  *  showing the chat, whereas a tile renders in its own pane regardless. */
 export function focusOpenSession(storedSessionId: string): 'main' | 'tile' | null {
   if ($sessionTiles.get().some(t => t.storedSessionId === storedSessionId)) {
+    markSessionRead(storedSessionId)
     const paneId = `${TILE_PANE_PREFIX}${storedSessionId}`
     revealTreePane(paneId) // un-dismiss + adopt + front in its group
     const tree = $layoutTree.get()
@@ -726,6 +798,7 @@ export function focusOpenSession(storedSessionId: string): 'main' | 'tile' | nul
   // Already the main session: front the workspace tab and drop tile focus so
   // the readouts + sidebar highlight come home (a no-op when main is focused).
   if (storedSessionId === $selectedStoredSessionId.get()) {
+    markSessionRead(storedSessionId)
     revealTreePane('workspace')
     noteActiveTreeGroup(null)
 
@@ -789,7 +862,7 @@ const closedStack = (): SessionTile[] => (closedTilesByProfile[profileKey()] ??=
 export function closeSessionTile(storedSessionId: string) {
   const tile = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)
 
-  if (tile) {
+  if (tile && !tile.preview) {
     closedStack().push({ anchor: tile.anchor, before: tile.before, dir: tile.dir, storedSessionId })
   }
 
@@ -800,12 +873,7 @@ export function closeSessionTile(storedSessionId: string) {
   // BUSY one stays: its turn keeps streaming in the background, the sidebar
   // dot reads it, and settle evicts it. ⌘⇧T reopen re-publishes from the
   // wiring cache (resumeTile's warm path), so nothing is lost.
-  const runtimeId = tile?.runtimeId
-  const state = runtimeId ? $sessionStates.get()[runtimeId] : undefined
-
-  if (runtimeId && state && evictable(runtimeId, state)) {
-    dropSessionState(runtimeId)
-  }
+  dropTileStateIfIdle(tile)
 }
 
 /** Drop a DEAD tile — a persisted tile whose session no longer exists on the

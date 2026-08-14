@@ -172,9 +172,11 @@ function frontPaneInGroup(paneId: string) {
  *  - a registered closer (core panes whose visibility an app store owns:
  *    review/terminal/preview/sessions) closes through that store, so the
  *    titlebar/statusbar toggles stay truthful;
- *  - everything else (plugin panes, unbound core panes) is DISMISSED: removed
- *    from the tree and remembered so adoption doesn't re-add it. Reveal
- *    intent (a preview target, ⌘G) or a layout reset un-dismisses.
+ *  - unbound core panes and panes from multi-pane plugins are DISMISSED:
+ *    removed from the tree and remembered so adoption doesn't re-add them.
+ *    Reveal intent (a preview target, ⌘G) or a layout reset un-dismisses;
+ *  - closing the sole pane from a plugin disables that plugin, preserving the
+ *    discoverable Settings → Plugins recovery path for single-pane plugins.
  */
 const DISMISSED_KEY = 'hermes.desktop.dismissedPanes.v1'
 
@@ -417,6 +419,11 @@ const isUncloseablePane = (paneId: string): boolean =>
     (registry.getArea('panes').find(c => c.id === paneId)?.data as { uncloseable?: boolean } | undefined)?.uncloseable
   )
 
+/** Whether a TAB can honor Close. `uncloseable` protects the backing pane from
+ * dismissal; it does not block a registered owner from closing the tab's
+ * contents (the permanent workspace empties to a fresh draft this way). */
+const isCloseableTreeTab = (paneId: string): boolean => !isUncloseablePane(paneId) || Boolean(paneClosers[paneId])
+
 /** A pane that belongs to a CHAT tab strip — the workspace or a session tile.
  *  Chat surfaces only: this gates where a session may DOCK (drops, ⌘T's "+"),
  *  not which zones the generic tab verbs serve — that's `isMainStripPane`. */
@@ -514,8 +521,8 @@ function closeableTreeSiblings(paneId: string): { others: string[]; right: strin
   const idx = panes.indexOf(paneId)
 
   return {
-    others: panes.filter(id => id !== paneId && !isUncloseablePane(id)),
-    right: panes.filter((id, i) => i > idx && !isUncloseablePane(id))
+    others: panes.filter(id => id !== paneId && isCloseableTreeTab(id)),
+    right: panes.filter((id, i) => i > idx && isCloseableTreeTab(id))
   }
 }
 
@@ -523,7 +530,7 @@ function closeableTreeSiblings(paneId: string): { others: string[]; right: strin
 export function treeTabCloseTargets(paneId: string): { all: number; others: number; right: number } {
   const { others, right } = closeableTreeSiblings(paneId)
 
-  return { all: others.length + (isUncloseablePane(paneId) ? 0 : 1), others: others.length, right: right.length }
+  return { all: others.length + (isCloseableTreeTab(paneId) ? 1 : 0), others: others.length, right: right.length }
 }
 
 /**
@@ -552,20 +559,32 @@ export function closeTabPane(paneId: string) {
   }
 }
 
+/** Close ordinary panes before permanent store-owned hosts. Workspace's owner
+ * promotes a surviving sibling when it closes individually; running it last
+ * prevents Close all from reloading a tab that the same command is removing. */
+function closeTreeTabsInOrder(paneIds: string[]): void {
+  const closeable = paneIds.filter(isCloseableTreeTab)
+
+  closeable.filter(id => !isUncloseablePane(id)).forEach(closeTabPane)
+  closeable.filter(isUncloseablePane).forEach(closeTabPane)
+}
+
 export function closeOtherTreeTabs(paneId: string): void {
-  closeableTreeSiblings(paneId).others.forEach(closeTabPane)
+  closeTreeTabsInOrder(closeableTreeSiblings(paneId).others)
 }
 
 export function closeTreeTabsToRight(paneId: string): void {
-  closeableTreeSiblings(paneId).right.forEach(closeTabPane)
+  closeTreeTabsInOrder(closeableTreeSiblings(paneId).right)
 }
 
-/** Close every closeable tab in `paneId`'s group (the uncloseable workspace stays). */
+/** Close every semantically closeable tab in `paneId`'s group. A permanent
+ * pane such as workspace stays in the tree while its registered closer empties
+ * the loaded tab, leaving the editor host ready for the next session. */
 export function closeAllTreeTabs(paneId: string): void {
   const tree = $layoutTree.get()
   const panes = (tree ? findGroupOfPane(tree, paneId) : null)?.panes ?? []
 
-  panes.filter(id => !isUncloseablePane(id)).forEach(closeTabPane)
+  closeTreeTabsInOrder(panes)
 }
 
 /** Pane ids in the tree under a `${prefix}:` namespace — lets a mirror prune
@@ -762,14 +781,24 @@ export function closeTreePane(paneId: string) {
     return
   }
 
-  // A plugin's pane: Close = DISABLE the plugin — the same switch as
-  // Settings → Plugins, so recovery is discoverable and symmetric. The
-  // contribution unregisters but the pane id STAYS in the tree, so
-  // re-enabling restores it exactly where it was. (Dismissal + removal
-  // would strand the pane with no way back short of a layout reset.)
-  const source = registry.getArea('panes').find(c => c.id === paneId)?.source
+  const panes = registry.getArea('panes')
+  const source = panes.find(c => c.id === paneId)?.source
 
   if (source?.startsWith('plugin:')) {
+    // A plugin may own several independent panes. Closing one of them must not
+    // unload every contribution from that plugin (for example, closing Bot
+    // Mode's Cronjobs pane must leave its Bots roster and composer middleware
+    // alive). Dismiss just that pane; Layout reset remains the explicit way to
+    // restore dismissed contributed panes.
+    if (panes.filter(c => c.source === source).length > 1) {
+      dismissTreePane(paneId)
+
+      return
+    }
+
+    // A single-pane plugin keeps the existing symmetric behavior: Close uses
+    // the same switch as Settings → Plugins. Its contribution unregisters but
+    // the pane id stays in the tree, so re-enabling restores its exact place.
     const pluginId = source.slice('plugin:'.length)
     void setPluginEnabled(pluginId, false)
     notify({
@@ -1110,15 +1139,6 @@ function adoptContributedPanes(): void {
   const placementOf = (paneId: string) => dataOf(paneId)?.placement
   const mainId = panes.find(c => placementOf(c.id) === 'main')?.id
   const inTree = new Set(allPaneIds(tree))
-
-  // Plugin panes are never dismissed anymore (Close disables the plugin
-  // instead) — drop stale entries so panes stranded by the old behavior
-  // re-adopt on their own.
-  for (const pane of panes) {
-    if (pane.source?.startsWith('plugin:') && $dismissedPanes.get().has(pane.id)) {
-      setDismissed(pane.id, false)
-    }
-  }
 
   const dismissed = $dismissedPanes.get()
 
@@ -1647,6 +1667,22 @@ export function setTreeGroupHeaderHidden(groupId: string, headerHidden: boolean)
   if (tree) {
     commit(setGroupHeaderHiddenOp(tree, groupId, headerHidden))
   }
+}
+
+/** Hide the strip when `paneId` is the only pane left in its zone. The pane
+ * remains mounted as the editor host; only the now-empty tab chrome disappears.
+ * Returns whether a lone tab was found and hidden. */
+export function hideLoneTreeTab(paneId: string): boolean {
+  const tree = $layoutTree.get()
+  const group = tree ? findGroupOfPane(tree, paneId) : null
+
+  if (!group || group.panes.length !== 1) {
+    return false
+  }
+
+  setTreeGroupHeaderHidden(group.id, true)
+
+  return true
 }
 
 export function setTreeSplitWeights(splitId: string, weights: number[]) {
