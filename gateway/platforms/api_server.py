@@ -3277,6 +3277,15 @@ class APIServerAdapter(BasePlatformAdapter):
         return min(parsed, maximum)
 
     @staticmethod
+    def _session_row_running(session: Dict[str, Any]) -> bool:
+        last_activity = session.get("last_activity_at") or session.get("last_active") or session.get("started_at") or 0
+        desc = str(session.get("last_activity_description") or "").strip()
+        provenance = str(session.get("last_activity_provenance") or "").strip().lower()
+        has_live_label = bool(desc) or bool(provenance and provenance != "unknown")
+
+        return bool(has_live_label and (time.time() - float(last_activity or 0)) < 300)
+
+    @staticmethod
     def _session_response(session: Dict[str, Any]) -> Dict[str, Any]:
         """Return a stable, client-safe session representation."""
         safe_keys = (
@@ -3284,14 +3293,15 @@ class APIServerAdapter(BasePlatformAdapter):
             "end_reason", "message_count", "tool_call_count", "input_tokens",
             "output_tokens", "cache_read_tokens", "cache_write_tokens",
             "reasoning_tokens", "estimated_cost_usd", "actual_cost_usd",
-            "api_call_count", "parent_session_id", "last_active", "preview",
-            "_lineage_root_id", "pinned", "archived",
+            "api_call_count", "parent_session_id", "delegate_parent_session_id",
+            "last_active", "preview", "_lineage_root_id", "pinned", "archived",
         )
         payload = {key: session.get(key) for key in safe_keys if key in session}
         # SQLite stores these as 0/1; clients reconcile against a real boolean.
         for flag in ("pinned", "archived"):
             if flag in payload:
                 payload[flag] = bool(payload[flag])
+        payload["running"] = APIServerAdapter._session_row_running(session)
         # Avoid exposing full system prompts/model_config through the client API;
         # callers only need to know whether those snapshots exist.
         payload["has_system_prompt"] = bool(session.get("system_prompt"))
@@ -3324,7 +3334,10 @@ class APIServerAdapter(BasePlatformAdapter):
         # API server is single-threaded aiohttp; a sync SessionDB call here
         # freezes every in-flight request, see PR discussion on event-loop
         # blocking SQLite in the gateway surface).
-        session = await asyncio.to_thread(db.get_session, session_id)
+        if hasattr(db, "get_session_rich_row"):
+            session = await asyncio.to_thread(db.get_session_rich_row, session_id, True)
+        else:
+            session = await asyncio.to_thread(db.get_session, session_id)
         if not session:
             return None, web.json_response(_openai_error(f"Session not found: {session_id}", code="session_not_found"), status=404)
         return session, None

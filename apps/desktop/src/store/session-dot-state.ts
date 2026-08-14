@@ -89,6 +89,15 @@ export const $sessionDotStateById = computed(
     claim(draft, 'draft')
     claim(unread, 'unread')
     claim(background, 'background')
+    // Sessions running in another Hermes surface/process do not publish into
+    // this renderer's `$sessionStates`, but REST list rows can still carry a
+    // backend-derived `running` hint. Treat it like a working turn so the
+    // sidebar row paints the same loader while the selected transcript remains
+    // readable. Local websocket state below stays stronger and clears faster.
+    claim(
+      sessions.filter(session => session.running).map(session => session.id),
+      'working'
+    )
     claim(runningSubagents, 'working')
     claim(working, 'working')
 
