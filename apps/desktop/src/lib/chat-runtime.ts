@@ -50,12 +50,13 @@ export function createClientSessionState(
 
 export function sessionTitle(session: SessionInfo, options: { subagentGoal?: string } = {}): string {
   const rawTitle = session.title?.trim() || ''
-  const title = /^unknown$/i.test(rawTitle) ? '' : rawTitle
+  const title = /^(unknown|untitled session)$/i.test(rawTitle) ? '' : rawTitle
   const preview = session.preview?.trim() || ''
+  const isSubagent = session.source === 'subagent' || Boolean(session.delegate_parent_session_id?.trim())
 
-  if (session.source === 'subagent') {
+  if (isSubagent) {
     const goal = options.subagentGoal?.trim() || ''
-    return title || (goal ? `Subagent: ${goal}` : '') || preview || 'Subagent'
+    return title || (goal ? `Subagent: ${goal}` : '') || (preview ? `Subagent: ${preview}` : '') || 'Subagent'
   }
 
   return title || preview || 'Untitled session'

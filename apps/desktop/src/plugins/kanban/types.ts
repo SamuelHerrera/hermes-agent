@@ -153,6 +153,8 @@ export interface BoardMeta {
   name?: null | string
   description?: null | string
   is_current?: boolean
+  /** Per-status task totals returned by GET /boards for switcher badges. */
+  counts?: Record<string, number>
   total?: number
   /** Board-level project directory new tasks inherit (empty = none). */
   default_workdir?: null | string

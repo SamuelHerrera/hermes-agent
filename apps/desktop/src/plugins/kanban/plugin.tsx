@@ -14,7 +14,6 @@ import './kanban.css'
 import {
   cn,
   Codicon,
-  GlyphSpinner,
   type HermesPlugin,
   host,
   type KeybindContribution,
@@ -33,9 +32,8 @@ import {
 
 import { $boardSlug, bindApi, boardKey, fetchBoard } from './api'
 import { KanbanBoardPage } from './board'
-import { columnLabel, KANBAN_LOCALES } from './i18n'
-import { columnMeta } from './types'
-import { $newTaskLane, useKanban } from './ui'
+import { KANBAN_LOCALES } from './i18n'
+import { $newTaskLane, KanbanLaneCounts, kanbanLaneCountsFromColumns, kanbanLaneCountsTip, useKanban } from './ui'
 
 type KanbanCounts = {
   active: number
@@ -52,42 +50,6 @@ function boardCounts(board: Awaited<ReturnType<typeof fetchBoard>> | undefined):
   const attention = count('blocked') + count('review')
 
   return { active: running + ready, attention, ready, running }
-}
-
-type KanbanNavColumnCount = {
-  count: number
-  label: string
-  name: string
-  tone: string
-}
-
-const formatNavCount = (count: number) => (count > 99 ? '99+' : String(count))
-
-function pluralTask(count: number) {
-  return `task${count === 1 ? '' : 's'}`
-}
-
-function boardNavCounts(
-  board: Awaited<ReturnType<typeof fetchBoard>> | undefined,
-  k: ReturnType<typeof useKanban>
-): KanbanNavColumnCount[] {
-  if (!board) {
-    return []
-  }
-
-  return board.columns.flatMap(col => {
-    const count = col.tasks.length
-
-    if (count === 0) {
-      return []
-    }
-
-    return [{ count, label: columnLabel(k, col.name), name: col.name, tone: columnMeta(col.name).tone }]
-  })
-}
-
-function navCountsTip(counts: readonly KanbanNavColumnCount[]) {
-  return `Kanban — ${counts.map(({ count, label }) => `${count} ${label.toLowerCase()} ${pluralTask(count)}`).join(', ')}`
 }
 
 // Live "N running / ready" pill — one glance at fleet activity from anywhere,
@@ -141,35 +103,15 @@ export function KanbanNavStatus() {
     refetchInterval: 60_000
   })
 
-  const counts = boardNavCounts(board, k)
+  const counts = kanbanLaneCountsFromColumns(board?.columns, k)
 
   if (counts.length === 0) {
     return null
   }
 
   return (
-    <Tip label={navCountsTip(counts)}>
-      <span className="inline-flex items-center gap-1 text-(--ui-text-secondary)">
-        {counts.map(({ count, label, name, tone }) => {
-          const aria = `${count} Kanban ${label} ${pluralTask(count)}`
-
-          if (name === 'running') {
-            return (
-              <span aria-label={aria} className="inline-flex items-center gap-1" key={name} title={aria}>
-                <GlyphSpinner ariaLabel="Kanban tasks running" className="text-[0.6875rem] text-emerald-400" />
-                <span className="text-[0.625rem] font-medium tabular-nums">{formatNavCount(count)}</span>
-              </span>
-            )
-          }
-
-          return (
-            <span aria-label={aria} className="inline-flex items-center gap-0.5" key={name} title={aria}>
-              <span aria-hidden="true" className="size-1.5 rounded-full" style={{ backgroundColor: tone }} />
-              <span className="text-[0.625rem] font-medium tabular-nums">{formatNavCount(count)}</span>
-            </span>
-          )
-        })}
-      </span>
+    <Tip label={kanbanLaneCountsTip('Kanban', counts)}>
+      <KanbanLaneCounts counts={counts} />
     </Tip>
   )
 }

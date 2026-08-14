@@ -32,7 +32,7 @@ import { useEffect, useState } from 'react'
 
 import { $boardSlug, BOARDS_KEY, createBoard, fetchBoards, fetchProjects, PROJECTS_KEY, updateBoard } from './api'
 import type { BoardMeta } from './types'
-import { errText, FIELD_LABEL, useKanban } from './ui'
+import { errText, FIELD_LABEL, KanbanLaneCounts, kanbanLaneCountsFromStatusCounts, useKanban } from './ui'
 
 const NO_PROJECT = '__none__'
 
@@ -195,6 +195,7 @@ export function BoardSwitcher() {
   const currentSlug = slug || boards.current
   const current = boards.boards.find(meta => meta.slug === currentSlug)
   const label = current?.name || current?.slug || k.board
+  const currentCounts = kanbanLaneCountsFromStatusCounts(current?.counts, k)
 
   return (
     <>
@@ -202,27 +203,25 @@ export function BoardSwitcher() {
         <DropdownMenuTrigger asChild>
           <Button className="h-7 max-w-56 gap-1.5 px-2" size="sm" variant="ghost">
             <span className="min-w-0 flex-1 truncate text-sm font-semibold leading-none text-foreground">{label}</span>
-            {typeof current?.total === 'number' && (
-              <span className="rounded-full bg-(--ui-bg-quaternary) px-1.5 py-px text-[0.625rem] tabular-nums text-(--ui-text-tertiary)">
-                {current.total}
-              </span>
-            )}
+            <KanbanLaneCounts className="shrink-0" counts={currentCounts} />
             <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="chevron-down" size="0.8125rem" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="center">
-          {boards.boards.map(meta => (
-            <DropdownMenuItem
-              key={meta.slug}
-              onSelect={() => $boardSlug.set(meta.slug === boards.current ? '' : meta.slug)}
-            >
-              {meta.name || meta.slug}
-              {typeof meta.total === 'number' && (
-                <span className="text-[0.625rem] tabular-nums text-(--ui-text-quaternary)">{meta.total}</span>
-              )}
-              {meta.slug === currentSlug && <Codicon className="ml-auto" name="check" size="0.8rem" />}
-            </DropdownMenuItem>
-          ))}
+          {boards.boards.map(meta => {
+            const counts = kanbanLaneCountsFromStatusCounts(meta.counts, k)
+
+            return (
+              <DropdownMenuItem
+                key={meta.slug}
+                onSelect={() => $boardSlug.set(meta.slug === boards.current ? '' : meta.slug)}
+              >
+                <span className="min-w-0 flex-1 truncate">{meta.name || meta.slug}</span>
+                <KanbanLaneCounts className="shrink-0" counts={counts} />
+                {meta.slug === currentSlug && <Codicon className="ml-auto" name="check" size="0.8rem" />}
+              </DropdownMenuItem>
+            )
+          })}
           <DropdownMenuSeparator />
           {current && (
             <DropdownMenuItem onSelect={() => setSettingsFor(current)}>

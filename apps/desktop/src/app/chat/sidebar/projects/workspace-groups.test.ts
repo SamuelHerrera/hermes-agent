@@ -697,6 +697,39 @@ describe('overlayLiveLanes', () => {
     expect(overlaid.repos[0].groups.flatMap(g => g.sessions.map(s => s.id))).toEqual(['dup'])
   })
 
+
+  it('preserves snapshot title metadata when an active child row is only a bare live session', () => {
+    const snapshot = makeSession('/www/app', {
+      delegate_parent_session_id: 'parent',
+      id: 'child',
+      git_branch: 'main',
+      preview: 'Review the staged patch',
+      title: null
+    })
+    const live = makeSession('/www/app', { id: 'child', git_branch: 'main', preview: null, title: null })
+
+    const project = projectNode({
+      id: '/www/app',
+      repos: [
+        {
+          id: '/www/app',
+          label: 'app',
+          path: '/www/app',
+          sessionCount: 1,
+          groups: [
+            lane({ id: '/www/app::branch::main', label: 'main', isMain: true, path: '/www/app', sessions: [snapshot] })
+          ]
+        }
+      ]
+    })
+
+    const overlaid = overlayLiveLanes(project, [live])
+    const row = overlaid.repos[0].groups[0].sessions[0]
+
+    expect(row.preview).toBe('Review the staged patch')
+    expect(row.delegate_parent_session_id).toBe('parent')
+  })
+
   it('adds a new session to an existing worktree lane keyed by a divergent id (matches by path)', () => {
     // Backend keyed the worktree lane off a branch-style id (no live git probe),
     // but the lane PATH is the worktree dir. A new session under that worktree

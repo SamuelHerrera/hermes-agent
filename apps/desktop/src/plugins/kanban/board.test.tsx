@@ -36,7 +36,13 @@ const testKanbanText = {
   cancel: 'Cancel',
   clearSelection: 'Clear selection',
   col: {
+    blocked: { help: 'Blocked cards need human input.', label: 'Blocked' },
+    done: { help: 'Completed cards.', label: 'Done' },
     ready: { help: 'Ready cards are waiting for dispatch.', label: 'Ready' },
+    review: { help: 'Cards waiting for review.', label: 'Review' },
+    running: { help: 'Cards currently running.', label: 'Running' },
+    scheduled: { help: 'Cards waiting for their scheduled time.', label: 'Scheduled' },
+    todo: { help: 'Cards waiting on dependencies or routing.', label: 'Todo' },
     triage: { help: 'Triage cards need a clearer spec.', label: 'Triage' }
   },
   collapse: (label: string) => `Collapse ${label}`,
@@ -138,8 +144,20 @@ vi.mock('./api', async () => {
     fetchBoards: vi.fn(() =>
       Promise.resolve({
         boards: [
-          { default_workspace_kind: 'scratch', name: 'Default', slug: 'default', total: 5 },
-          { default_workspace_kind: 'scratch', name: 'Ops', slug: 'ops', total: 2 }
+          {
+            counts: { ready: 3, scheduled: 2, todo: 0, triage: 0 },
+            default_workspace_kind: 'scratch',
+            name: 'Default',
+            slug: 'default',
+            total: 5
+          },
+          {
+            counts: { blocked: 1, ready: 0, review: 1 },
+            default_workspace_kind: 'scratch',
+            name: 'Ops',
+            slug: 'ops',
+            total: 2
+          }
         ],
         current: 'default'
       })
@@ -418,12 +436,22 @@ describe('KanbanBoardPage header', () => {
     expect(screen.queryByRole('heading', { name: 'Kanban' })).toBeNull()
 
     const switcher = await screen.findByRole('button', { name: /Default/i })
-    expect(switcher.textContent).toContain('5')
+    expect(switcher.textContent).toContain('2')
+    expect(switcher.textContent).toContain('3')
+    expect(switcher.textContent).not.toContain('5')
+    expect(screen.getByTitle('2 Kanban Scheduled tasks')).toBeTruthy()
+    expect(screen.getByTitle('3 Kanban Ready tasks')).toBeTruthy()
+    expect(screen.queryByTitle('0 Kanban Todo tasks')).toBeNull()
 
     fireEvent.pointerDown(switcher, { button: 0, pointerType: 'mouse' })
     fireEvent.mouseDown(switcher, { button: 0 })
     fireEvent.click(switcher)
-    fireEvent.click(await screen.findByRole('menuitem', { name: /Ops/i }))
+    const opsItem = await screen.findByRole('menuitem', { name: /Ops/i })
+    expect(opsItem.textContent).toContain('1')
+    expect(opsItem.textContent).not.toContain('2')
+    expect(screen.getByTitle('1 Kanban Blocked task')).toBeTruthy()
+    expect(screen.getByTitle('1 Kanban Review task')).toBeTruthy()
+    fireEvent.click(opsItem)
 
     expect($boardSlug.get()).toBe('ops')
   })

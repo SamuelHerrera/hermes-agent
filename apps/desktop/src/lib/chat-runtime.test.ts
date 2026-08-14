@@ -234,4 +234,13 @@ describe('sessionTitle', () => {
       'Subagent: Review invoices'
     )
   })
+
+
+  it('treats delegate child sessions as subagents even when their persisted source is desktop', () => {
+    expect(
+      sessionTitle(
+        sessionInfo({ delegate_parent_session_id: 'parent', preview: 'Review the staged diff', source: 'desktop', title: null })
+      )
+    ).toBe('Subagent: Review the staged diff')
+  })
 })

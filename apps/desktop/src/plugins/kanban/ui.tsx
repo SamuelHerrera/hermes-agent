@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   FadeScroll,
+  GlyphSpinner,
   profileColor,
   profileColorSoft,
   relativeTime,
@@ -19,7 +20,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { fetchOrchestration, ORCHESTRATION_KEY } from './api'
 import { columnLabel, useKanban } from './i18n'
-import { columnMeta, type KanbanTask } from './types'
+import { COLUMN_META, columnMeta, type KanbanColumn, type KanbanTask } from './types'
 
 // Plugin-scoped i18n lives in ./i18n; re-exported so components import strings
 // and chrome from one place (./ui).
@@ -76,6 +77,127 @@ export function errText(err: unknown): string {
 /** Backend timestamps are epoch SECONDS; the canonical formatter takes ms. */
 export const ago = (seconds?: null | number, nowMs = Date.now()): null | string =>
   seconds ? relativeTime(seconds * 1000, nowMs) : null
+
+export type KanbanLaneCount = {
+  count: number
+  label: string
+  name: string
+  tone: string
+}
+
+export const formatKanbanLaneCount = (count: number) => (count > 99 ? '99+' : String(count))
+
+export function pluralKanbanTask(count: number) {
+  return `task${count === 1 ? '' : 's'}`
+}
+
+const columnOrder = Object.keys(COLUMN_META)
+
+function byColumnOrder(a: string, b: string) {
+  const ai = columnOrder.indexOf(a)
+  const bi = columnOrder.indexOf(b)
+
+  if (ai === -1 && bi === -1) {
+    return a.localeCompare(b)
+  }
+  if (ai === -1) {
+    return 1
+  }
+  if (bi === -1) {
+    return -1
+  }
+
+  return ai - bi
+}
+
+function laneCount(name: string, count: number, k: ReturnType<typeof useKanban>): KanbanLaneCount | null {
+  if (count <= 0) {
+    return null
+  }
+
+  return { count, label: columnLabel(k, name), name, tone: columnMeta(name).tone }
+}
+
+export function kanbanLaneCountsFromColumns(
+  columns: readonly KanbanColumn[] | undefined,
+  k: ReturnType<typeof useKanban>
+): KanbanLaneCount[] {
+  if (!columns) {
+    return []
+  }
+
+  return [...columns]
+    .sort((a, b) => byColumnOrder(a.name, b.name))
+    .flatMap(col => {
+      const count = col.tasks.length
+      const item = laneCount(col.name, count, k)
+
+      return item ? [item] : []
+    })
+}
+
+export function kanbanLaneCountsFromStatusCounts(
+  counts: null | Record<string, number> | undefined,
+  k: ReturnType<typeof useKanban>,
+  { includeArchived = false }: { includeArchived?: boolean } = {}
+): KanbanLaneCount[] {
+  if (!counts) {
+    return []
+  }
+
+  return Object.entries(counts)
+    .filter(([name]) => includeArchived || name !== 'archived')
+    .sort(([a], [b]) => byColumnOrder(a, b))
+    .flatMap(([name, count]) => {
+      const item = laneCount(name, count, k)
+
+      return item ? [item] : []
+    })
+}
+
+export function kanbanLaneCountsTip(prefix: string, counts: readonly KanbanLaneCount[]) {
+  return `${prefix} — ${counts
+    .map(({ count, label }) => `${count} ${label.toLowerCase()} ${pluralKanbanTask(count)}`)
+    .join(', ')}`
+}
+
+export function KanbanLaneCounts({
+  className,
+  counts,
+  labelPrefix = 'Kanban'
+}: {
+  className?: string
+  counts: readonly KanbanLaneCount[]
+  labelPrefix?: string
+}) {
+  if (counts.length === 0) {
+    return null
+  }
+
+  return (
+    <span className={['inline-flex items-center gap-1 text-(--ui-text-secondary)', className].filter(Boolean).join(' ')}>
+      {counts.map(({ count, label, name, tone }) => {
+        const aria = `${count} ${labelPrefix} ${label} ${pluralKanbanTask(count)}`
+
+        if (name === 'running') {
+          return (
+            <span aria-label={aria} className="inline-flex items-center gap-1" key={name} title={aria}>
+              <GlyphSpinner ariaLabel="Kanban tasks running" className="text-[0.6875rem] text-emerald-400" />
+              <span className="text-[0.625rem] font-medium tabular-nums">{formatKanbanLaneCount(count)}</span>
+            </span>
+          )
+        }
+
+        return (
+          <span aria-label={aria} className="inline-flex items-center gap-0.5" key={name} title={aria}>
+            <span aria-hidden="true" className="size-1.5 rounded-full" style={{ backgroundColor: tone }} />
+            <span className="text-[0.625rem] font-medium tabular-nums">{formatKanbanLaneCount(count)}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
 
 const ELAPSED_SUFFIX = { day: 'd', hour: 'h', minute: 'm', second: 's' } as const
 
