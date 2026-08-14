@@ -5,6 +5,7 @@ import type * as React from 'react'
 import { PrTag } from '@/app/chat/pr-tag'
 import { ProfileTag } from '@/app/chat/profile-tag'
 import { startSessionDrag } from '@/app/chat/session-drag'
+import { SubagentSessionIcon } from '@/app/chat/subagent-session-icon'
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
 import { openSession } from '@/app/open-session'
 import { Button } from '@/components/ui/button'
@@ -12,7 +13,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { OverflowTip, Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
-import { sessionTitle } from '@/lib/chat-runtime'
+import { isSubagentSession, sessionTitle } from '@/lib/chat-runtime'
 import { pathLeaf } from '@/lib/display-path'
 import { compactNumber } from '@/lib/format'
 import { triggerHaptic } from '@/lib/haptics'
@@ -27,12 +28,12 @@ import { $sidebarRowMeta } from '@/store/layout'
 import { normalizeProfileKey } from '@/store/profile'
 import { $projects } from '@/store/projects'
 import { $pullRequestsByBranch, sessionPrKey } from '@/store/pull-requests'
-import { $sessionDotStateById, hasLiveTurn, showsRunningArc } from '@/store/session-dot-state'
+import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 import { promoteSessionTile } from '@/store/session-states'
 import { sessionCostUsd } from '@/store/sidebar-archive'
 import { $todoProgressBySession } from '@/store/todos'
 
-import { SessionStatusDot } from '../session-status-dot'
+import { SessionProjectDot, SessionStatusIcon } from '../session-status-dot'
 
 import {
   SIDEBAR_ROW_CARD_MIN_H,
@@ -282,6 +283,7 @@ function SidebarSessionRowImpl({
           <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
         </button>
       ) : null}
+      {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
       {trailing.map(({ key, node }, index) => (
         <span
           className={
@@ -373,7 +375,6 @@ function SidebarSessionRowImpl({
         style={style}
         {...rest}
       >
-        {showsRunningArc(dotState) && <span aria-hidden="true" className="arc-border arc-row" />}
         <SidebarRowBody
           // Every trailing figure lives in the actions slot, which the row
           // measures — so the title needs a gap from it and nothing else. Hover
@@ -438,17 +439,16 @@ function SidebarSessionRowImpl({
             const leadNode = reorderable ? (
               <SidebarRowGrab ariaLabel={handleLabel} dragging={dragging} dragHandleProps={dragHandleProps}>
                 {lead ?? (
-                  <SessionStatusDot
+                  <SessionProjectDot
                     branchStem={branchStem}
                     className="transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0"
                     session={session}
-                    storedSessionId={session.id}
                   />
                 )}
               </SidebarRowGrab>
             ) : (
               <SidebarRowLead className="overflow-hidden">
-                {lead ?? <SessionStatusDot branchStem={branchStem} session={session} storedSessionId={session.id} />}
+                {lead ?? <SessionProjectDot branchStem={branchStem} session={session} />}
               </SidebarRowLead>
             )
 
@@ -468,6 +468,7 @@ function SidebarSessionRowImpl({
                 <>
                   {leadNode}
                   {handoffBadge}
+                  <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
                   <OverflowTip label={title}>
                     <SidebarRowLabel
                       className="hover-marquee flex-1 font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90"
@@ -499,7 +500,9 @@ function SidebarSessionRowImpl({
                 {/* Title + preview: ONE grouped cell with its own tight
                     internal gap — it does not inherit the card's rhythm. */}
                 <div className="-mt-[0.2em] flex min-w-0 flex-col gap-[0.3rem]">
-                  <OverflowTip label={title}>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
+                    <OverflowTip label={title}>
                     <SidebarRowLabel
                       className="hover-marquee text-[0.8125rem] leading-none font-medium text-(--ui-text-primary) group-data-[working=true]:text-foreground"
                       onPointerEnter={armMarquee}
@@ -507,7 +510,8 @@ function SidebarSessionRowImpl({
                     >
                       <span className="hover-marquee-inner">{title}</span>
                     </SidebarRowLabel>
-                  </OverflowTip>
+                    </OverflowTip>
+                  </div>
                   {session.preview && rowMeta.includes('preview') ? (
                     <span className="min-w-0 truncate text-[0.625rem] leading-none text-(--ui-text-quaternary)">
                       {session.preview}

@@ -8,6 +8,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
 import type * as ComposerStatusStore from '@/store/composer-status'
 import type * as SessionStore from '@/store/session'
+import { setSessionColorOverride } from '@/store/session-color'
 import { setSessions } from '@/store/session'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 import type * as SessionStatesStore from '@/store/session-states'
@@ -47,8 +48,8 @@ vi.mock('@/app/chat/session-drag', () => ({ startSessionDrag: vi.fn() }))
 // component does. This file exercises the actual production component so a
 // regression in its ref/prop forwarding fails here again.
 // Only `sessionTitle` is overridden (makeSession fakes a bare `title` the real
-// one wouldn't read); the rest of the module is genuine so the arc test can
-// build session state with the same factory the app uses. It is a spy because
+// one wouldn't read); the rest of the module is genuine so the running-status
+// test can build session state with the same factory the app uses. It is a spy because
 // the row calls it exactly once per render, which is how the isolation test
 // below counts repaints.
 const sessionTitle = vi.fn((s: SessionInfo) => (s as unknown as { title: string }).title)
@@ -161,24 +162,58 @@ const renderRow = (session: SessionInfo) => {
 // The row no longer takes its running state as a prop, so this drives the real
 // store the way the app does. $workingSessionIds is the actual computed here
 // (the mock above only overrides its siblings), which is what makes this cover
-// the wiring rather than the predicate — the arc has gone missing before.
-describe('SidebarSessionRow running arc', () => {
+// the wiring rather than the predicate — Samuel's preferred cue is identity dot
+// on the left plus a separate transient status icon on the right, not a row arc.
+describe('SidebarSessionRow running indicator', () => {
   afterEach(() => {
-    clearAllSessionStates()
+    act(() => {
+      clearAllSessionStates()
+      setSessionColorOverride('s1', null)
+    })
   })
 
   const arc = (container: HTMLElement) => container.querySelector('.arc-row')
 
-  it('paints no arc for a settled session', () => {
-    const { container } = renderRow(makeSession({ title: 'Settled' }))
+  it('keeps the project dot on the left and shows running status with a tooltip on the right', () => {
+    act(() => {
+      setSessionColorOverride('s1', '#2f81f7')
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
+
+    const { container } = renderRow(makeSession({ title: 'Running' }))
+    const spinner = container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+    const lead = container.querySelector<HTMLElement>('[data-session-project-dot]')
 
     expect(arc(container)).toBeNull()
+    expect(lead).toBeTruthy()
+    expect(lead?.querySelector('.rounded-full')).toBeTruthy()
+    expect(lead?.querySelector<HTMLElement>('.rounded-full')?.style.backgroundColor).toBe('rgb(47, 129, 247)')
+    expect(lead?.querySelector('.codicon-loading')).toBeNull()
+    expect(spinner).toBeTruthy()
+    expect(spinner?.closest('[data-row-actions]')).toBeTruthy()
+    expect(tipTrigger(spinner as HTMLElement)).toBeTruthy()
   })
 
-  it('paints the arc while the session carries a backend running hint', () => {
-    const { container } = renderRow(makeSession({ running: true, title: 'Running' }))
+  it('suppresses transient status for an archived session', () => {
+    act(() => {
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
 
-    expect(arc(container)).toBeTruthy()
+    const { container } = renderRow(makeSession({ archived: true, title: 'Archived' }))
+
+    expect(container.querySelector('.codicon-archive')).toBeTruthy()
+    expect(container.querySelector('[data-session-status]')).toBeNull()
+  })
+
+  it('swaps the subagent robot glyph to the loading glyph while its turn is running', () => {
+    act(() => {
+      publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+    })
+
+    const { container } = renderRow(makeSession({ delegate_parent_session_id: 'parent', title: 'Review diff' }))
+
+    expect(container.querySelector('.codicon-robot')).toBeNull()
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
   })
 
   // The row owns its status subscription so a turn starting repaints that row
