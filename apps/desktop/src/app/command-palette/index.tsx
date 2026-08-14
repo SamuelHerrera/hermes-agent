@@ -77,7 +77,8 @@ import {
   $desktopVersion,
   $updateApply,
   $updateStatus,
-  requestActiveUpdate
+  requestActiveUpdate,
+  UPDATE_UI_DISABLED_FOR_LOCAL_FORK
 } from '@/store/updates'
 import { canOpenNewWindow, openNewWindow } from '@/store/windows'
 import { luminance } from '@/themes/color'
@@ -871,14 +872,18 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             label: cc.restartGateway,
             run: () => void runGatewayRestart()
           },
-          {
-            detail: updateVersionLabel,
-            icon: Download,
-            id: 'cc-update-hermes',
-            keywords: ['update', 'upgrade', 'hermes', 'version', 'system', 'restart'],
-            label: cc.updateHermes,
-            run: () => requestActiveUpdate()
-          }
+          ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK
+            ? []
+            : [
+                {
+                  detail: updateVersionLabel,
+                  icon: Download,
+                  id: 'cc-update-hermes',
+                  keywords: ['update', 'upgrade', 'hermes', 'version', 'system', 'restart'],
+                  label: cc.updateHermes,
+                  run: () => requestActiveUpdate()
+                }
+              ])
         ]
       },
       {

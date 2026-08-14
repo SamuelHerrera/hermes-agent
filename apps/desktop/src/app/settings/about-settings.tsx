@@ -15,6 +15,7 @@ import {
   checkUpdates,
   openUpdatesWindow,
   refreshDesktopVersion,
+  UPDATE_UI_DISABLED_FOR_LOCAL_FORK,
   startActiveUpdate
 } from '@/store/updates'
 
@@ -78,7 +79,10 @@ export function AboutSettings() {
   let statusLine: string
   let statusTone: 'idle' | 'available' | 'error' = 'idle'
 
-  if (!supported) {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    statusLine = 'Updates are disabled for this local fork build.'
+    statusTone = 'idle'
+  } else if (!supported) {
     statusLine = status?.message ?? a.cantUpdate
     statusTone = 'error'
   } else if (status?.error) {
@@ -135,17 +139,19 @@ export function AboutSettings() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-4">
-            <Button
-              disabled={checking || applying || !supported}
-              onClick={() => void handleCheck()}
-              size="sm"
-              variant="textStrong"
-            >
-              {checking ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
-              {checking ? a.checking : a.checkNow}
-            </Button>
+            {!UPDATE_UI_DISABLED_FOR_LOCAL_FORK && (
+              <Button
+                disabled={checking || applying || !supported}
+                onClick={() => void handleCheck()}
+                size="sm"
+                variant="textStrong"
+              >
+                {checking ? <Loader2 className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}
+                {checking ? a.checking : a.checkNow}
+              </Button>
+            )}
 
-            {updateAvailable && supported && !applying && (
+            {!UPDATE_UI_DISABLED_FOR_LOCAL_FORK && updateAvailable && supported && !applying && (
               <>
                 <Button onClick={() => startActiveUpdate()} size="sm">
                   {a.updateNow}
@@ -156,7 +162,8 @@ export function AboutSettings() {
               </>
             )}
 
-            <Button asChild className="ml-auto" size="sm" variant="text">
+            {!UPDATE_UI_DISABLED_FOR_LOCAL_FORK && (
+              <Button asChild className="ml-auto" size="sm" variant="text">
               <a
                 href={RELEASE_NOTES_URL}
                 onClick={event => {
@@ -169,15 +176,24 @@ export function AboutSettings() {
                 <ExternalLink className="size-3" />
                 {a.releaseNotes}
               </a>
-            </Button>
+              </Button>
+            )}
           </div>
         </div>
 
-        <ListRow
-          description={a.automaticUpdatesDesc}
-          hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
-          title={a.automaticUpdates}
-        />
+        {UPDATE_UI_DISABLED_FOR_LOCAL_FORK ? (
+          <ListRow
+            description="This custom app is managed manually from the SamuelHerrera/hermes-agent fork. Use git, pack, and redeploy from fork main instead of in-app updates."
+            hint={version?.appVersion ? `Hermes ${version.appVersion}` : 'fork-managed build'}
+            title="Fork-managed updates"
+          />
+        ) : (
+          <ListRow
+            description={a.automaticUpdatesDesc}
+            hint={a.branchCommit(status?.branch ?? 'unknown', status?.currentSha?.slice(0, 7) ?? 'unknown')}
+            title={a.automaticUpdates}
+          />
+        )}
 
         <UninstallSection />
       </div>

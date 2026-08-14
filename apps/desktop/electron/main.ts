@@ -298,6 +298,10 @@ const IS_PACKAGED = app.isPackaged || Boolean(process.env.HERMES_DESKTOP_IS_PACK
 const IS_MAC = process.platform === 'darwin'
 const IS_WINDOWS = process.platform === 'win32'
 const IS_WSL = isWslEnvironment()
+// Samuel's fork-managed Desktop build is updated manually from fork main.
+// Disable in-app update entry points so it cannot replace the customized app
+// with the official upstream release/update flow by accident.
+const DISABLE_UPDATE_UI_FOR_LOCAL_FORK = true
 // Truthful macOS kernel major (Tahoe = 25). Product version lies (16 vs 26) per
 // build SDK, so gate Tahoe workarounds on Darwin instead.
 const DARWIN_MAJOR = IS_MAC ? Number.parseInt(os.release(), 10) || 0 : 0
@@ -2991,6 +2995,16 @@ async function releaseBackendLock(updateRoot, tag) {
 // Detection (checkUpdates / commit changelog / "N behind") stays in the UI;
 // only this apply action changed.
 async function applyUpdates(opts = {}) {
+  void opts
+
+  if (DISABLE_UPDATE_UI_FOR_LOCAL_FORK) {
+    return {
+      ok: false,
+      error: 'local-fork-updates-disabled',
+      message: 'Updates are disabled for this local fork build. Rebuild and redeploy from fork main manually.'
+    }
+  }
+
   if (updateInFlight) {
     throw new Error('An update is already in progress.')
   }
@@ -5323,6 +5337,10 @@ function getAppIconPath() {
 }
 
 function sendOpenUpdatesRequested() {
+  if (DISABLE_UPDATE_UI_FOR_LOCAL_FORK) {
+    return
+  }
+
   if (!mainWindow || mainWindow.isDestroyed()) {
     return
   }
@@ -5368,18 +5386,19 @@ function sendWindowStateChanged(nextIsFullscreen?: boolean, target = mainWindow)
 function buildApplicationMenu() {
   const template = []
 
-  const checkForUpdatesItem = {
-    label: 'Check for Updates…',
-    click: () => sendOpenUpdatesRequested()
-  }
+  const checkForUpdatesItem = DISABLE_UPDATE_UI_FOR_LOCAL_FORK
+    ? null
+    : {
+        label: 'Check for Updates…',
+        click: () => sendOpenUpdatesRequested()
+      }
 
   if (IS_MAC) {
     template.push({
       label: APP_NAME,
       submenu: [
         { label: `About ${APP_NAME}`, click: () => showAboutPanelFresh() },
-        checkForUpdatesItem,
-        { type: 'separator' },
+        ...(checkForUpdatesItem ? [checkForUpdatesItem, { type: 'separator' }] : []),
         { role: 'services' },
         { type: 'separator' },
         { role: 'hide' },
@@ -5478,11 +5497,13 @@ function buildApplicationMenu() {
       ? [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }]
       : [{ role: 'minimize' }, { role: 'close' }]
   })
-  template.push({
-    label: 'Help',
-    role: 'help',
-    submenu: [checkForUpdatesItem]
-  })
+  if (checkForUpdatesItem) {
+    template.push({
+      label: 'Help',
+      role: 'help',
+      submenu: [checkForUpdatesItem]
+    })
+  }
 
   return Menu.buildFromTemplate(template)
 }
@@ -12192,7 +12213,17 @@ ipcMain.handle('hermes:terminal:cwd', async (_event, id) => {
 ipcMain.handle('hermes:terminal:dispose', (_event, id) => disposeTerminalSession(String(id || '')))
 
 ipcMain.handle('hermes:updates:check', async () =>
-  checkUpdates().catch(error => ({
+  DISABLE_UPDATE_UI_FOR_LOCAL_FORK
+    ? {
+        supported: false,
+        updateAvailable: false,
+        behind: 0,
+        reason: 'local-fork-updates-disabled',
+        message: 'Updates are disabled for this local fork build.',
+        branch: readDesktopUpdateConfig().branch,
+        fetchedAt: Date.now()
+      }
+    : checkUpdates().catch(error => ({
     supported: true,
     branch: readDesktopUpdateConfig().branch,
     error: 'check-failed',

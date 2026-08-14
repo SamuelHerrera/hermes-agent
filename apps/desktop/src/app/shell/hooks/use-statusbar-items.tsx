@@ -43,7 +43,8 @@ import {
   $desktopVersion,
   $updateApply,
   $updateStatus,
-  openUpdateOverlayFor
+  openUpdateOverlayFor,
+  UPDATE_UI_DISABLED_FOR_LOCAL_FORK
 } from '@/store/updates'
 import type { StatusResponse, UsageStats } from '@/types/hermes'
 
@@ -568,8 +569,7 @@ export function useStatusbarItems({
         toggleLabel: copy.toggleTerminal,
         variant: 'action'
       },
-      clientVersionItem,
-      ...(backendVersionItem ? [backendVersionItem] : [])
+      ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK ? [] : [clientVersionItem, ...(backendVersionItem ? [backendVersionItem] : [])])
     ],
     [
       activeSessionId,
@@ -578,6 +578,7 @@ export function useStatusbarItems({
       busy,
       chatOpen,
       clientVersionItem,
+      UPDATE_UI_DISABLED_FOR_LOCAL_FORK,
       contextBar,
       contextUsage,
       copy,

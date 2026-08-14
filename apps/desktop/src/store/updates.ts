@@ -53,12 +53,35 @@ export const $backendUpdateStatus = atom<DesktopUpdateStatus | null>(null)
 export const $backendUpdateApply = atom<UpdateApplyState>(IDLE)
 export const $backendUpdateChecking = atom<boolean>(false)
 
+// Local fork builds are updated manually from SamuelHerrera/hermes-agent main.
+// Keep all in-app update affordances disabled so the packaged app cannot
+// accidentally replace the customized fork with the official upstream flow.
+const RUNNING_VITEST = import.meta.env?.MODE === 'test'
+export const UPDATE_UI_DISABLED_FOR_LOCAL_FORK = !RUNNING_VITEST
+const FORK_UPDATE_DISABLED_MESSAGE =
+  'Updates are disabled for this local fork build. Rebuild and redeploy from fork main manually.'
+
+function forkUpdateDisabledStatus(): DesktopUpdateStatus {
+  return {
+    supported: false,
+    updateAvailable: false,
+    reason: 'local-fork-updates-disabled',
+    message: FORK_UPDATE_DISABLED_MESSAGE,
+    behind: 0,
+    fetchedAt: Date.now()
+  }
+}
+
 export type UpdateTarget = 'client' | 'backend'
 export const $updateOverlayTarget = atom<UpdateTarget>('client')
 
 export const setUpdateOverlayOpen = (open: boolean) => $updateOverlayOpen.set(open)
 
 export const openUpdateOverlayFor = (target: UpdateTarget) => {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return
+  }
+
   $updateOverlayTarget.set(target)
   $updateOverlayOpen.set(true)
   void (target === 'backend' ? checkBackendUpdates() : checkUpdates())
@@ -202,6 +225,10 @@ export function reportInstallMethodWarning(message: string | undefined): void {
  * on every new commit. The snooze is persisted, so it survives relaunches too.
  */
 export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return
+  }
+
   if (!status || status.supported === false || status.error || !status.targetSha) {
     return
   }
@@ -244,6 +271,10 @@ export function maybeNotifyUpdateAvailable(status: DesktopUpdateStatus | null) {
 }
 
 export function openUpdatesWindow(): void {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return
+  }
+
   openUpdateOverlayFor(isRemoteMode() ? 'backend' : 'client')
 }
 
@@ -255,6 +286,10 @@ export function openUpdatesWindow(): void {
  * only be able to open the changelog overlay.
  */
 export function startActiveUpdate(): void {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return
+  }
+
   const target: UpdateTarget = isRemoteMode() ? 'backend' : 'client'
   $updateOverlayTarget.set(target)
   $updateOverlayOpen.set(true)
@@ -268,6 +303,10 @@ export function startActiveUpdate(): void {
  * check answer, and only apply when there's something to install.
  */
 export function requestActiveUpdate(): void {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return
+  }
+
   const target: UpdateTarget = isRemoteMode() ? 'backend' : 'client'
   const status = target === 'backend' ? $backendUpdateStatus.get() : $updateStatus.get()
 
@@ -328,6 +367,13 @@ function mapBackendCheck(res: BackendUpdateCheckResponse): DesktopUpdateStatus {
 }
 
 export async function checkBackendUpdates(): Promise<DesktopUpdateStatus | null> {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    const status = forkUpdateDisabledStatus()
+    $backendUpdateStatus.set(status)
+
+    return status
+  }
+
   if (!isRemoteMode() || $backendUpdateChecking.get()) {
     return $backendUpdateStatus.get()
   }
@@ -357,6 +403,14 @@ export async function checkBackendUpdates(): Promise<DesktopUpdateStatus | null>
 }
 
 export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    const status = forkUpdateDisabledStatus()
+    $updateStatus.set(status)
+    void refreshDesktopVersion()
+
+    return status
+  }
+
   const bridge = window.hermesDesktop?.updates
 
   if (!bridge || $updateChecking.get()) {
@@ -392,6 +446,12 @@ export async function checkUpdates(): Promise<DesktopUpdateStatus | null> {
 }
 
 export async function applyUpdates(opts: DesktopUpdateApplyOptions = {}): Promise<DesktopUpdateApplyResult> {
+  void opts
+
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    return { ok: false, error: 'local-fork-updates-disabled', message: FORK_UPDATE_DISABLED_MESSAGE }
+  }
+
   const bridge = window.hermesDesktop?.updates
 
   if (!bridge) {
@@ -729,6 +789,12 @@ let lastConnectionMode: string | undefined
 
 /** Wire up background polling + progress streaming. Idempotent. */
 export function startUpdatePoller(): void {
+  if (UPDATE_UI_DISABLED_FOR_LOCAL_FORK) {
+    void refreshDesktopVersion()
+
+    return
+  }
+
   if (pollerStarted || typeof window === 'undefined') {
     return
   }
