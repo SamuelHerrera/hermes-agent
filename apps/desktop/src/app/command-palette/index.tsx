@@ -92,8 +92,8 @@ import {
   COMMAND_CENTER_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
-  navigateToWorkspacePage,
   NEW_CHAT_ROUTE,
+  openWorkspacePageRoute,
   PROFILES_ROUTE,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
@@ -641,7 +641,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     }
   }, [pendingPage])
 
-  const go = useCallback((path: string) => () => navigateToWorkspacePage(navigate, path), [navigate])
+  const go = useCallback((path: string) => () => openWorkspacePageRoute(navigate, path), [navigate])
 
   // Sessions: plain select = open beside what's already loaded (focus existing
   // tile/main, else a new tab — main only when it's a blank draft);

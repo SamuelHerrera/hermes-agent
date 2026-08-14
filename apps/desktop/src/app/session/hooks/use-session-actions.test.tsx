@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
-import { noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
+import { revealTreePane } from '@/components/pane-shell/tree/store'
 import { getAllSessionMessages, getLatestSessionMessages, getSession, type SessionInfo } from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
@@ -1700,21 +1700,22 @@ describe('createBackendSessionForSend workspace target', () => {
   })
 })
 describe('selectSidebarItem', () => {
-  it('fronts the workspace pane when navigating to a sidebar route (issue #72602)', async () => {
+  it('opens built-in workspace routes as tabs instead of assigning the page to the main workspace', async () => {
     const navigate = vi.fn()
     const requestGateway = vi.fn(async () => ({}) as never)
     let handle: HarnessHandle | null = null
 
     render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
     await waitFor(() => expect(handle).not.toBeNull())
+    vi.mocked(revealTreePane).mockClear()
 
     act(() => {
       handle!.selectSidebarItem({ icon: (() => null) as never, id: 'skills', label: 'Capabilities', route: '/skills' })
     })
 
-    expect(navigate).toHaveBeenCalledWith('/skills', undefined)
-    expect(noteActiveTreeGroup).toHaveBeenCalledWith(null)
-    expect(revealTreePane).toHaveBeenCalledWith('workspace')
+    expect(navigate).not.toHaveBeenCalled()
+    expect(openRouteTile).toHaveBeenCalledWith('/skills', 'center')
+    expect(revealTreePane).not.toHaveBeenCalled()
   })
 
   it('opens tile-backed sidebar routes as tabs instead of replacing the main workspace', async () => {

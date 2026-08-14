@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 
 import { noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
+import { openRouteTile } from '@/store/route-tiles'
 
 type NavigateLike = (to: string, options?: { replace?: boolean }) => void
 
@@ -217,7 +218,7 @@ export function appViewForPath(pathname: string): AppView {
 /** Does `to` land on a full page rendered INSIDE the workspace pane
  *  (skills/messaging/artifacts/contributed routes)? Overlays don't count —
  *  they float over whatever the workspace is already showing. */
-function isWorkspacePageRoute(to: string): boolean {
+export function isWorkspacePageRoute(to: string): boolean {
   const view = appViewForPath(to)
 
   return view !== 'chat' && !isOverlayView(view)
@@ -275,4 +276,23 @@ export function navigateToWorkspacePage(navigate: NavigateLike, to: string, opti
   if (isWorkspacePageRoute(to)) {
     revealWorkspacePane()
   }
+}
+
+
+/**
+ * User-facing page affordances should open as closeable layout tabs instead of
+ * assigning the page to the permanent workspace pane, whose page chrome hides
+ * the tab strip. Direct/deep-link routes still use the router path so URL query
+ * state (for example `/skills?tab=mcp`) keeps working.
+ */
+export function openWorkspacePageRoute(navigate: NavigateLike, to: string, options?: { replace?: boolean }): void {
+  const path = routePathname(to)
+
+  if (path === to && isWorkspacePageRoute(path)) {
+    openRouteTile(path, 'center')
+
+    return
+  }
+
+  navigateToWorkspacePage(navigate, to, options)
 }

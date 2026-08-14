@@ -89,7 +89,7 @@ import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
 import {
   CRON_ROUTE,
-  navigateToWorkspacePage,
+  openWorkspacePageRoute,
   routeSessionId,
   sessionRoute,
   SETTINGS_ROUTE,
@@ -1097,7 +1097,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             initialSection={commandCenterInitialSection}
             onClose={closeOverlayToPreviousRoute}
             onDeleteSession={removeSession}
-            onNavigateRoute={path => navigateToWorkspacePage(navigate, path)}
+            onNavigateRoute={path => openWorkspacePageRoute(navigate, path)}
             onOpenSession={sessionId => openSession(sessionId, navigate)}
           />
         </Suspense>

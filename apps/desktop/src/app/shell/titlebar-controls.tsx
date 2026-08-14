@@ -19,13 +19,13 @@ import {
   togglePanesFlipped,
   toggleSidebarOpen
 } from '@/store/layout'
+import { openRouteTile } from '@/store/route-tiles'
 
 import {
   appViewForPath,
   ARTIFACTS_ROUTE,
   isOverlayView,
   MESSAGING_ROUTE,
-  navigateToWorkspacePage,
   SKILLS_ROUTE
 } from '../routes'
 
@@ -170,7 +170,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       icon: <TitlebarIcon name="symbol-misc" />,
       id: 'skills',
       label: t.sidebar.nav.skills,
-      onSelect: () => navigateToWorkspacePage(navigate, SKILLS_ROUTE)
+      onSelect: () => openRouteTile(SKILLS_ROUTE, 'center')
     },
     {
       actionId: 'nav.messaging',
@@ -178,7 +178,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       icon: <TitlebarIcon name="comment" />,
       id: 'messaging',
       label: t.sidebar.nav.messaging,
-      onSelect: () => navigateToWorkspacePage(navigate, MESSAGING_ROUTE)
+      onSelect: () => openRouteTile(MESSAGING_ROUTE, 'center')
     },
     {
       actionId: 'nav.artifacts',
@@ -186,7 +186,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
       icon: <TitlebarIcon name="files" />,
       id: 'artifacts',
       label: t.sidebar.nav.artifacts,
-      onSelect: () => navigateToWorkspacePage(navigate, ARTIFACTS_ROUTE)
+      onSelect: () => openRouteTile(ARTIFACTS_ROUTE, 'center')
     }
   ]
 

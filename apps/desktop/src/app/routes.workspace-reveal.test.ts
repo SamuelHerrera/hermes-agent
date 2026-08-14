@@ -22,6 +22,7 @@ import {
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
   NEW_CHAT_ROUTE,
+  openWorkspacePageRoute,
   routePathname,
   ROUTES_AREA,
   routeSessionId,
@@ -37,7 +38,12 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
   revealTreePane: vi.fn()
 }))
 
+vi.mock('@/store/route-tiles', () => ({
+  openRouteTile: vi.fn()
+}))
+
 const { noteActiveTreeGroup, revealTreePane } = await import('@/components/pane-shell/tree/store')
+const { openRouteTile } = await import('@/store/route-tiles')
 
 const CONTRIBUTED_ROUTE = '/kanban'
 
@@ -58,6 +64,7 @@ const fronted = () =>
 beforeEach(() => {
   vi.mocked(revealTreePane).mockClear()
   vi.mocked(noteActiveTreeGroup).mockClear()
+  vi.mocked(openRouteTile).mockClear()
   $workspaceIsPage.set(false)
 })
 
@@ -185,5 +192,38 @@ describe('navigateToWorkspacePage', () => {
 
     expect(navigate).toHaveBeenCalledTimes(2)
     expect(revealTreePane).not.toHaveBeenCalled()
+  })
+})
+
+describe('openWorkspacePageRoute', () => {
+  it('opens bare workspace pages as center tabs instead of assigning them to workspace', () => {
+    const navigate = vi.fn()
+
+    openWorkspacePageRoute(navigate, SKILLS_ROUTE)
+
+    expect(openRouteTile).toHaveBeenCalledWith(SKILLS_ROUTE, 'center')
+    expect(navigate).not.toHaveBeenCalled()
+    expect(revealTreePane).not.toHaveBeenCalled()
+  })
+
+  it('keeps query deep-links on the router path so their tab state is preserved', () => {
+    const navigate = vi.fn()
+    const to = `${SKILLS_ROUTE}?tab=mcp&server=ctx7`
+
+    openWorkspacePageRoute(navigate, to)
+
+    expect(openRouteTile).not.toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledWith(to, undefined)
+    expect(fronted()).toBe(true)
+  })
+
+  it('still navigates chat and overlay routes normally', () => {
+    const navigate = vi.fn()
+
+    openWorkspacePageRoute(navigate, sessionRoute('sess-a'))
+    openWorkspacePageRoute(navigate, SETTINGS_ROUTE)
+
+    expect(openRouteTile).not.toHaveBeenCalled()
+    expect(navigate).toHaveBeenCalledTimes(2)
   })
 })
