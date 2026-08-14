@@ -648,14 +648,25 @@ export const markAllSessionsRead = () => {
   }
 }
 
+export const markSessionRead = (sessionId: string | null | undefined) => {
+  const id = sessionId?.trim()
+
+  if (!id) {
+    return
+  }
+
+  const unread = $unreadFinishedSessionIds.get()
+  const aliases = new Set(lineageAliases(id, $sessions.get()))
+
+  if (unread.some(x => aliases.has(x))) {
+    $unreadFinishedSessionIds.set(unread.filter(x => !aliases.has(x)))
+  }
+}
+
 export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
   updateAtom($selectedStoredSessionId, next)
   // Opening a session clears its unread state — the user is now looking at it.
-  const id = $selectedStoredSessionId.get()
-
-  if (id && $unreadFinishedSessionIds.get().includes(id)) {
-    $unreadFinishedSessionIds.set($unreadFinishedSessionIds.get().filter(x => x !== id))
-  }
+  markSessionRead($selectedStoredSessionId.get())
 }
 
 export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)

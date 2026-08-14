@@ -68,7 +68,7 @@ export interface PaneMirror<T> {
 /** Build a `watch*` fn: syncs once, then re-syncs on every source/also change.
  *  Module-level state lives in the returned closure, so call it once per app. */
 export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
-  const registered = new Map<string, { dispose: () => void; title: string }>()
+  const registered = new Map<string, { dispose: () => void; signature: string }>()
   const paneId = (key: string) => `${cfg.prefix}:${key}`
 
   const sync = () => {
@@ -78,10 +78,12 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
     for (const tile of tiles) {
       const key = cfg.key(tile)
       const title = cfg.title(key)
+      const preview = cfg.tabPreview?.(key) ?? false
+      const signature = `${title}\u0000${preview ? 'preview' : 'normal'}`
       const current = registered.get(key)
 
       // register() replaces same-id in place — safe for live title refreshes.
-      if (current && current.title === title) {
+      if (current && current.signature === signature) {
         continue
       }
 
@@ -92,7 +94,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         data: {
           tabActivity: cfg.tabActivity ? () => cfg.tabActivity!(key) : undefined,
           tabLead: cfg.tabLead ? () => cfg.tabLead!(key) : undefined,
-          tabPreview: cfg.tabPreview ? () => cfg.tabPreview!(key) : undefined,
+          tabPreview: cfg.tabPreview ? () => preview : undefined,
           tabTitle: cfg.tabTitle ? () => cfg.tabTitle!(key) : undefined,
           stripTools: cfg.stripTools ? () => cfg.stripTools!(key) : undefined,
           dock: {
@@ -114,7 +116,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         render: () => cfg.render(key)
       })
 
-      registered.set(key, { dispose, title })
+      registered.set(key, { dispose, signature })
 
       if (!current) {
         registerPaneCloser(paneId(key), () => cfg.close(key))

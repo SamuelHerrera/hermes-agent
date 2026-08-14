@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClientSessionState } from '@/app/types'
 import { findGroupOfPane, group, split } from '@/components/pane-shell/tree/model'
 import { $layoutTree } from '@/components/pane-shell/tree/store'
-import { $selectedStoredSessionId } from '@/store/session'
+import { $selectedStoredSessionId, $unreadFinishedSessionIds } from '@/store/session'
 import type { SessionTile } from '@/store/session-states'
 import {
   blankDraftTile,
   focusedSessionNeedsRoute,
+  focusOpenSession,
   markSelectionRestore,
   openPreviewSessionTile,
   orderTilesByTree,
@@ -147,6 +148,7 @@ describe('preview session tiles', () => {
     $layoutTree.set(null)
     $sessionTiles.set([])
     $selectedStoredSessionId.set(null)
+    $unreadFinishedSessionIds.set([])
   })
 
   it('single-click preview opens one replaceable italic candidate tab', () => {
@@ -165,6 +167,22 @@ describe('preview session tiles', () => {
       { dir: 'center', preview: false, storedSessionId: 'first' },
       { dir: 'center', preview: true, storedSessionId: 'second' }
     ])
+  })
+
+  it('clears unread immediately when a sidebar click opens a preview tab', () => {
+    $unreadFinishedSessionIds.set(['first'])
+
+    openPreviewSessionTile('first', 'center')
+
+    expect($unreadFinishedSessionIds.get()).toEqual([])
+  })
+
+  it('clears unread immediately when focusing an existing tile', () => {
+    $sessionTiles.set([{ dir: 'center', storedSessionId: 'first' }])
+    $unreadFinishedSessionIds.set(['first'])
+
+    expect(focusOpenSession('first')).toBe('tile')
+    expect($unreadFinishedSessionIds.get()).toEqual([])
   })
 })
 

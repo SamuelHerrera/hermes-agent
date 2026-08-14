@@ -39,6 +39,7 @@ import {
   $sessions,
   $unreadFinishedSessionIds,
   lineageAliases,
+  markSessionRead,
   sessionMatchesStoredId,
   setActiveSessionStoredIdRotation,
   setSessions
@@ -701,8 +702,12 @@ export function openPreviewSessionTile(
   before?: null | string
 ) {
   if (!storedSessionId || storedSessionId === $selectedStoredSessionId.get()) {
+    markSessionRead(storedSessionId)
+
     return
   }
+
+  markSessionRead(storedSessionId)
 
   if ($sessionTiles.get().some(t => t.storedSessionId === storedSessionId)) {
     focusOpenSession(storedSessionId)
@@ -777,6 +782,7 @@ export function nextSessionTileForWorkspace(): null | string {
  *  showing the chat, whereas a tile renders in its own pane regardless. */
 export function focusOpenSession(storedSessionId: string): 'main' | 'tile' | null {
   if ($sessionTiles.get().some(t => t.storedSessionId === storedSessionId)) {
+    markSessionRead(storedSessionId)
     const paneId = `${TILE_PANE_PREFIX}${storedSessionId}`
     revealTreePane(paneId) // un-dismiss + adopt + front in its group
     const tree = $layoutTree.get()
@@ -792,6 +798,7 @@ export function focusOpenSession(storedSessionId: string): 'main' | 'tile' | nul
   // Already the main session: front the workspace tab and drop tile focus so
   // the readouts + sidebar highlight come home (a no-op when main is focused).
   if (storedSessionId === $selectedStoredSessionId.get()) {
+    markSessionRead(storedSessionId)
     revealTreePane('workspace')
     noteActiveTreeGroup(null)
 
