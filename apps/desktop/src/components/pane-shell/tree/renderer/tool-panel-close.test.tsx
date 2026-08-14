@@ -9,6 +9,7 @@ import {
   declareDefaultTree,
   markCollapsePane,
   noteActiveTreeGroup,
+  noteHoveredTreeGroup,
   registerPaneCloser,
   setTreeGroupMinimized
 } from '../store'
@@ -39,6 +40,9 @@ const disposers: (() => void)[] = []
 
 beforeEach(async () => {
   window.localStorage.clear()
+  $layoutTree.set(null)
+  noteActiveTreeGroup(null)
+  noteHoveredTreeGroup(null)
 
   // Per-test isolation: earlier cases dismiss / hide panes, and both records
   // live in module state that survives into the next test.
@@ -58,10 +62,12 @@ beforeEach(async () => {
   markCollapsePane('logs')
   registerPaneCloser('terminal', () => undefined)
   registerPaneCloser('logs', () => undefined)
+  registerPaneCloser('workspace', () => undefined)
 })
 
 afterEach(() => {
   cleanup()
+  noteHoveredTreeGroup(null)
   disposers.splice(0).forEach(dispose => dispose())
 })
 
@@ -77,7 +83,7 @@ const zoneAt = (index: number) => {
   return (node.type === 'split' ? node.children[index] : node) as never
 }
 
-const tabEl = (paneId: string) => document.querySelector<HTMLElement>(`[data-tree-tab="${paneId}"]`)
+const tabEl = (paneId: string) => globalThis.document.querySelector<HTMLElement>(`[data-tree-tab="${paneId}"]`)
 
 describe('right-clicking a tool panel tab', () => {
   it('offers Close when logs is STACKED with the terminal', async () => {
@@ -181,5 +187,16 @@ describe('⌘W over a focused tool panel', () => {
     // close the logs pane the user isn't looking at.
     expect(closeFocusedToolTab()).toBe(false)
     expect(allPaneIds($layoutTree.get()!)).toContain('logs')
+  })
+})
+
+describe('store-owned permanent tab Close', () => {
+  it('offers Close for the workspace tab', async () => {
+    declareDefaultTree(group(['workspace', 'terminal'], { active: 'workspace', id: 'grp-main' }))
+    render(<TreeGroup node={zoneAt(0)} parentAxis="row" />)
+
+    openContextMenu(tabEl('workspace')!)
+
+    expect(await screen.findByRole('menuitem', { name: /^close$/i })).toBeTruthy()
   })
 })

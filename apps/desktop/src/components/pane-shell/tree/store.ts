@@ -417,6 +417,11 @@ const isUncloseablePane = (paneId: string): boolean =>
     (registry.getArea('panes').find(c => c.id === paneId)?.data as { uncloseable?: boolean } | undefined)?.uncloseable
   )
 
+/** Whether a TAB can honor Close. `uncloseable` protects the backing pane from
+ * dismissal; it does not block a registered owner from closing the tab's
+ * contents (the permanent workspace empties to a fresh draft this way). */
+const isCloseableTreeTab = (paneId: string): boolean => !isUncloseablePane(paneId) || Boolean(paneClosers[paneId])
+
 /** A pane that belongs to a CHAT tab strip — the workspace or a session tile.
  *  Chat surfaces only: this gates where a session may DOCK (drops, ⌘T's "+"),
  *  not which zones the generic tab verbs serve — that's `isMainStripPane`. */
@@ -514,8 +519,8 @@ function closeableTreeSiblings(paneId: string): { others: string[]; right: strin
   const idx = panes.indexOf(paneId)
 
   return {
-    others: panes.filter(id => id !== paneId && !isUncloseablePane(id)),
-    right: panes.filter((id, i) => i > idx && !isUncloseablePane(id))
+    others: panes.filter(id => id !== paneId && isCloseableTreeTab(id)),
+    right: panes.filter((id, i) => i > idx && isCloseableTreeTab(id))
   }
 }
 
@@ -523,7 +528,7 @@ function closeableTreeSiblings(paneId: string): { others: string[]; right: strin
 export function treeTabCloseTargets(paneId: string): { all: number; others: number; right: number } {
   const { others, right } = closeableTreeSiblings(paneId)
 
-  return { all: others.length + (isUncloseablePane(paneId) ? 0 : 1), others: others.length, right: right.length }
+  return { all: others.length + (isCloseableTreeTab(paneId) ? 1 : 0), others: others.length, right: right.length }
 }
 
 /**
@@ -552,20 +557,32 @@ export function closeTabPane(paneId: string) {
   }
 }
 
+/** Close ordinary panes before permanent store-owned hosts. Workspace's owner
+ * promotes a surviving sibling when it closes individually; running it last
+ * prevents Close all from reloading a tab that the same command is removing. */
+function closeTreeTabsInOrder(paneIds: string[]): void {
+  const closeable = paneIds.filter(isCloseableTreeTab)
+
+  closeable.filter(id => !isUncloseablePane(id)).forEach(closeTabPane)
+  closeable.filter(isUncloseablePane).forEach(closeTabPane)
+}
+
 export function closeOtherTreeTabs(paneId: string): void {
-  closeableTreeSiblings(paneId).others.forEach(closeTabPane)
+  closeTreeTabsInOrder(closeableTreeSiblings(paneId).others)
 }
 
 export function closeTreeTabsToRight(paneId: string): void {
-  closeableTreeSiblings(paneId).right.forEach(closeTabPane)
+  closeTreeTabsInOrder(closeableTreeSiblings(paneId).right)
 }
 
-/** Close every closeable tab in `paneId`'s group (the uncloseable workspace stays). */
+/** Close every semantically closeable tab in `paneId`'s group. A permanent
+ * pane such as workspace stays in the tree while its registered closer empties
+ * the loaded tab, leaving the editor host ready for the next session. */
 export function closeAllTreeTabs(paneId: string): void {
   const tree = $layoutTree.get()
   const panes = (tree ? findGroupOfPane(tree, paneId) : null)?.panes ?? []
 
-  panes.filter(id => !isUncloseablePane(id)).forEach(closeTabPane)
+  closeTreeTabsInOrder(panes)
 }
 
 /** Pane ids in the tree under a `${prefix}:` namespace — lets a mirror prune
@@ -1647,6 +1664,22 @@ export function setTreeGroupHeaderHidden(groupId: string, headerHidden: boolean)
   if (tree) {
     commit(setGroupHeaderHiddenOp(tree, groupId, headerHidden))
   }
+}
+
+/** Hide the strip when `paneId` is the only pane left in its zone. The pane
+ * remains mounted as the editor host; only the now-empty tab chrome disappears.
+ * Returns whether a lone tab was found and hidden. */
+export function hideLoneTreeTab(paneId: string): boolean {
+  const tree = $layoutTree.get()
+  const group = tree ? findGroupOfPane(tree, paneId) : null
+
+  if (!group || group.panes.length !== 1) {
+    return false
+  }
+
+  setTreeGroupHeaderHidden(group.id, true)
+
+  return true
 }
 
 export function setTreeSplitWeights(splitId: string, weights: number[]) {

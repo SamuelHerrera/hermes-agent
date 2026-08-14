@@ -282,12 +282,16 @@ export function TreeGroup({
   // when it OPENS, so they read the tree with `.get()` at that moment instead.
   const targetPane = () => menuPane ?? activeId
 
-  // Close targets the right-clicked chip (falling back to the active pane);
-  // only panes that declare `uncloseable` (the main workspace) are exempt.
+  // A pane whose store owns Close keeps both the gesture and the menu action
+  // even when the backing pane is permanent — workspace empties its loaded tab
+  // instead of leaving the layout tree.
+  const closeableTab = (paneId: string) => !paneChrome(paneFor(paneId)).uncloseable || panesWithCloser.has(paneId)
+
+  // Close targets the right-clicked chip (falling back to the active pane).
   const closable = () => {
     const paneId = targetPane()
 
-    return paneChrome(paneFor(paneId)).uncloseable ? undefined : paneId
+    return closeableTab(paneId) ? paneId : undefined
   }
 
   // The zone hosting the uncloseable workspace never minimizes — collapsing
@@ -298,10 +302,6 @@ export function TreeGroup({
   // one the zone menu's Close and ⌘W use.
   const closeTab = (paneId: string) => closeTabPane(paneId)
 
-  // A pane whose store owns Close keeps the gesture even when the pane itself
-  // is uncloseable — the workspace tab empties to a fresh draft rather than
-  // leaving the tree.
-  const closeableTab = (paneId: string) => !paneChrome(paneFor(paneId)).uncloseable || panesWithCloser.has(paneId)
 
   // A pane's own live label when it has one, else its registered string.
   const tabLabel = (paneId: string) => paneChrome(paneFor(paneId)).tabTitle?.() ?? paneFor(paneId)?.title ?? paneId

@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const closeFocusedSessionTab = vi.fn(() => false)
 const closeFocusedToolTab = vi.fn(() => false)
+const hideLoneTreeTab = vi.fn<(paneId: string) => boolean>(() => true)
 const nextSessionTileForWorkspace = vi.fn<() => null | string>(() => null)
 const closeSessionTile = vi.fn()
 const requestFreshSession = vi.fn()
 
 vi.mock('@/components/pane-shell/tree/store', () => ({
   closeFocusedSessionTab: () => closeFocusedSessionTab(),
-  closeFocusedToolTab: () => closeFocusedToolTab()
+  closeFocusedToolTab: () => closeFocusedToolTab(),
+  hideLoneTreeTab: (paneId: string) => hideLoneTreeTab(paneId)
 }))
 
 vi.mock('@/store/session-states', () => ({
@@ -58,6 +60,7 @@ beforeEach(() => {
   $workspaceIsPage.set(false)
   closeFocusedSessionTab.mockReturnValue(false)
   closeFocusedToolTab.mockReturnValue(false)
+  hideLoneTreeTab.mockReturnValue(true)
   nextSessionTileForWorkspace.mockReturnValue(null)
   vi.clearAllMocks()
 })
@@ -116,9 +119,10 @@ describe('closeWorkspaceTab', () => {
     expect(requestFreshSession).toHaveBeenCalledTimes(1)
   })
 
-  it('is a no-op on a blank draft — that IS the post-close state', () => {
-    expect(closeWorkspaceTab(vi.fn())).toBe(false)
+  it('hides the lone workspace tab when its draft is already blank', () => {
+    expect(closeWorkspaceTab(vi.fn())).toBe(true)
     expect(requestFreshSession).not.toHaveBeenCalled()
+    expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
   })
 
   it('is a no-op over a full-page view, which owns no chat tab', () => {
