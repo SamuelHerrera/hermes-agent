@@ -48,15 +48,19 @@ export function createClientSessionState(
   }
 }
 
+export function isSubagentSession(session: Pick<SessionInfo, 'delegate_parent_session_id' | 'source'> | null | undefined): boolean {
+  return Boolean(session && (session.source === 'subagent' || session.delegate_parent_session_id?.trim()))
+}
+
 export function sessionTitle(session: SessionInfo, options: { subagentGoal?: string } = {}): string {
   const rawTitle = session.title?.trim() || ''
   const title = /^(unknown|untitled session)$/i.test(rawTitle) ? '' : rawTitle
   const preview = session.preview?.trim() || ''
-  const isSubagent = session.source === 'subagent' || Boolean(session.delegate_parent_session_id?.trim())
 
-  if (isSubagent) {
+  if (isSubagentSession(session)) {
     const goal = options.subagentGoal?.trim() || ''
-    return title || (goal ? `Subagent: ${goal}` : '') || (preview ? `Subagent: ${preview}` : '') || 'Subagent'
+
+    return title || goal || preview || 'Untitled session'
   }
 
   return title || preview || 'Untitled session'

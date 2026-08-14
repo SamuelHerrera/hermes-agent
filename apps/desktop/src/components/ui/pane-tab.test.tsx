@@ -6,6 +6,16 @@ import { PaneTab, PaneTabLabel } from './pane-tab'
 afterEach(cleanup)
 
 describe('PaneTab close gestures', () => {
+  it('renders preview tabs with an italic label cue', () => {
+    render(
+      <PaneTab preview>
+        <PaneTabLabel>preview tab</PaneTabLabel>
+      </PaneTab>
+    )
+
+    expect(screen.getByText('preview tab').className).toContain('italic')
+  })
+
   it('middle-click closes — pointer events only, no auxclick', () => {
     const onClose = vi.fn()
     render(

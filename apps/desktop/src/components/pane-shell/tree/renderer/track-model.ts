@@ -90,6 +90,8 @@ interface PaneChrome extends PaneSizing {
    *  whole panes area, so the label subscribes for itself instead. Absent, or
    *  returning nothing, falls back to `title`. */
   tabTitle?: () => React.ReactNode
+  /** Whether the tab is a replaceable preview tab (VS Code-style italic cue). */
+  tabPreview?: () => boolean
   /** Glyph buttons this pane contributes to the strip, rendered after the last
    *  tab (where "+" sits) while the pane is ACTIVE — controls that act on the
    *  pane, not on any one tab: a preview's console / DevTools toggles. DATA, not

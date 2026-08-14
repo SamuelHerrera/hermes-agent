@@ -231,7 +231,7 @@ describe('sessionTitle', () => {
 
   it('names subagent sessions from the live delegated goal while title generation catches up', () => {
     expect(sessionTitle(sessionInfo({ source: 'subagent', title: 'Unknown' }), { subagentGoal: 'Review invoices' })).toBe(
-      'Subagent: Review invoices'
+      'Review invoices'
     )
   })
 
@@ -241,6 +241,6 @@ describe('sessionTitle', () => {
       sessionTitle(
         sessionInfo({ delegate_parent_session_id: 'parent', preview: 'Review the staged diff', source: 'desktop', title: null })
       )
-    ).toBe('Subagent: Review the staged diff')
+    ).toBe('Review the staged diff')
   })
 })

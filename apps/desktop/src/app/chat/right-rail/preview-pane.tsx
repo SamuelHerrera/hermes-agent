@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Tip } from '@/components/ui/tooltip'
-import { ContribBoundary } from '@/contrib/react/boundary'
+import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { type Translations, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
@@ -170,6 +170,11 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     return null
   }, [previewRendererContributions, target])
+
+  const renderPreviewContribution = useMemo(
+    () => (previewRenderer ? () => previewRenderer.renderer.render({ reloadKey: localReloadKey, target }) : undefined),
+    [localReloadKey, previewRenderer, target]
+  )
 
   // Artifacts have no URL to load — they render from the registry, never in a
   // webview.
@@ -728,7 +733,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
               <ArtifactPreview target={target} />
             ) : previewRenderer ? (
               <ContribBoundary id={previewRenderer.contribution.id}>
-                {previewRenderer.renderer.render({ reloadKey: localReloadKey, target })}
+                <ContribRender render={renderPreviewContribution!} />
               </ContribBoundary>
             ) : (
               <LocalFilePreview reloadKey={localReloadKey} target={target} />

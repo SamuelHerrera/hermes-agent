@@ -9,9 +9,12 @@ import {
   blankDraftTile,
   focusedSessionNeedsRoute,
   markSelectionRestore,
+  openPreviewSessionTile,
   orderTilesByTree,
+  promoteSessionTile,
   selectionHomesToWorkspace
 } from '@/store/session-states'
+import { $sessionTiles } from '@/store/session-states'
 
 const tile = (storedSessionId: string): SessionTile => ({ storedSessionId })
 const tilePane = (id: string) => `session-tile:${id}`
@@ -136,6 +139,32 @@ describe('blankDraftTile', () => {
   it('is null when every open tab holds a conversation', () => {
     expect(blankDraftTile([bound('a', 'run-a')], { 'run-a': state(2) })).toBeNull()
     expect(blankDraftTile([], {})).toBeNull()
+  })
+})
+
+describe('preview session tiles', () => {
+  beforeEach(() => {
+    $layoutTree.set(null)
+    $sessionTiles.set([])
+    $selectedStoredSessionId.set(null)
+  })
+
+  it('single-click preview opens one replaceable italic candidate tab', () => {
+    openPreviewSessionTile('first', 'center')
+    openPreviewSessionTile('second', 'center')
+
+    expect($sessionTiles.get()).toEqual([{ dir: 'center', preview: true, storedSessionId: 'second' }])
+  })
+
+  it('promoting a preview keeps it while the next preview gets its own replaceable slot', () => {
+    openPreviewSessionTile('first', 'center')
+    promoteSessionTile('first')
+    openPreviewSessionTile('second', 'center')
+
+    expect($sessionTiles.get()).toEqual([
+      { dir: 'center', preview: false, storedSessionId: 'first' },
+      { dir: 'center', preview: true, storedSessionId: 'second' }
+    ])
   })
 })
 

@@ -65,6 +65,19 @@ describe('ProjectOverviewRow', () => {
     expect(tipTrigger(button)).toBeTruthy()
   })
 
+  it('keeps running preview rows visible in the collapsed base project view', () => {
+    render(
+      <ProjectOverviewRow
+        previewSessions={[{ id: 'running', running: true }, { id: 'idle' }] as unknown as SessionInfo[]}
+        project={project}
+        renderRows={sessions => sessions.map(session => <div key={session.id}>{session.id}</div>)}
+      />
+    )
+
+    expect(screen.getByText('running')).toBeTruthy()
+    expect(screen.queryByText('idle')).toBeNull()
+  })
+
   it('does not render the disclosure toggle when there is nothing to preview', () => {
     render(<ProjectOverviewRow project={project} />)
 

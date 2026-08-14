@@ -1,7 +1,7 @@
+import { host } from '@hermes/plugin-sdk'
 import { describe, expect, it, vi } from 'vitest'
 
 import { openRouteTile } from '@/store/route-tiles'
-import { host } from '@hermes/plugin-sdk'
 
 vi.mock('@/store/route-tiles', () => ({
   openRouteTile: vi.fn()

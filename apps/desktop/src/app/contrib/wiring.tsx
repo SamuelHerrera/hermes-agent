@@ -894,9 +894,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onReload: reloadFromMessage,
     onRemoveAttachment: id => void composer.removeAttachment(id),
     onRestoreToMessage: restoreToMessage,
-    // Already on screen (open tile, or the main session)? Jump to its tab;
-    // otherwise load it into main. Same door every other session link uses.
-    onResumeSession: sessionId => openSession(sessionId, navigate),
+    // Sidebar single-click uses a VS Code-style preview tab: already-open
+    // sessions are focused, while a cold row replaces the current preview tab
+    // instead of spending the uncloseable workspace pane.
+    onResumeSession: sessionId => openSession(sessionId, navigate, 'preview'),
     onRetryResume: sessionId => void resumeSession(sessionId, true),
     onSteer: steerPrompt,
     onSubmit: submitText,

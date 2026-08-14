@@ -930,10 +930,7 @@ export async function resolveSessionProfile(storedSessionId: null | string): Pro
     return undefined
   }
 
-  const activeProfile = normalizeProfileKey($activeGatewayProfile.get())
-  const singleProfile = $profiles.get().length <= 1
-
-  return singleProfile && profile === activeProfile ? undefined : profile
+  return profile
 }
 
 type SessionRuntimeStatePatch = Partial<

@@ -2060,6 +2060,7 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(requestGateway).toHaveBeenCalledWith('session.resume', {
       session_id: 'stored-session-a',
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     // The prompt must land in the resumed session, NOT the foreground.
@@ -3132,6 +3133,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[1]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID })
@@ -3268,6 +3270,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[1]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[2]?.params).toEqual({
@@ -3315,6 +3318,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(calls[0]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
+      profile: 'default',
       omit_messages: true
     })
     expect(calls[1]?.params).toMatchObject({ session_id: RECOVERED_SESSION_ID })

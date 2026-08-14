@@ -178,6 +178,15 @@ describe('SidebarSessionRow running indicator', () => {
     expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeTruthy()
   })
 
+  it('swaps the subagent robot glyph to the loading glyph while its turn is running', () => {
+    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+
+    const { container } = renderRow(makeSession({ delegate_parent_session_id: 'parent', title: 'Review diff' }))
+
+    expect(container.querySelector('.codicon-robot')).toBeNull()
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(2)
+  })
+
   // The row owns its status subscription so a turn starting repaints that row
   // and nothing else — not its siblings, and not the list around them. Rows
   // render once per fiber, so counting `sessionTitle` counts repaints.

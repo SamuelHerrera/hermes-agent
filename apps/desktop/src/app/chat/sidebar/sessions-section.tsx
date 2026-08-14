@@ -18,7 +18,7 @@ import {
 } from '@/lib/session-date-groups'
 import { sessionBucketLabel } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { sessionPinId } from '@/store/session'
+import { sessionMatchesStoredId, sessionPinId, setSessions } from '@/store/session'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 
 import { SidebarDateDivider, SidebarSectionMeta } from './chrome'
@@ -38,6 +38,23 @@ import { SidebarSessionRow } from './session-row'
 import { VirtualSessionList } from './virtual-session-list'
 
 export const VIRTUALIZE_THRESHOLD = 25
+
+
+function seedSessionForOpen(session: SessionInfo): void {
+  setSessions(prev => {
+    const existing = prev.find(row => sessionMatchesStoredId(row, session.id))
+    const next: SessionInfo = {
+      ...existing,
+      ...session,
+      delegate_parent_session_id: session.delegate_parent_session_id ?? existing?.delegate_parent_session_id,
+      parent_session_id: session.parent_session_id ?? existing?.parent_session_id,
+      preview: session.preview || existing?.preview || null,
+      title: session.title || existing?.title || null
+    }
+
+    return [next, ...prev.filter(row => !sessionMatchesStoredId(row, session.id))]
+  })
+}
 
 interface SidebarSectionHeaderProps {
   label: string
@@ -273,7 +290,10 @@ export function SidebarSessionsSection({
         onDelete: () => onDeleteSession(session.id),
         onPin: () => onTogglePin(sessionPinId(session)),
         onToggleBranch: hasBranchChildren ? () => toggleBranchCollapsed(session.id) : undefined,
-        onResume: () => onResumeSession(session.id),
+        onResume: () => {
+          seedSessionForOpen(session)
+          onResumeSession(session.id)
+        },
         reorderable: draggable && !branchStem,
         session,
         showProfile: showProfileTags

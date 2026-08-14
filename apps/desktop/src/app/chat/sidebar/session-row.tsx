@@ -5,6 +5,7 @@ import type * as React from 'react'
 import { PrTag } from '@/app/chat/pr-tag'
 import { ProfileTag } from '@/app/chat/profile-tag'
 import { startSessionDrag } from '@/app/chat/session-drag'
+import { SubagentSessionIcon } from '@/app/chat/subagent-session-icon'
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
 import { openSession } from '@/app/open-session'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ import { $sidebarRowMeta } from '@/store/layout'
 import { normalizeProfileKey } from '@/store/profile'
 import { $pullRequestsByBranch, sessionPrKey } from '@/store/pull-requests'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
+import { promoteSessionTile } from '@/store/session-states'
 import { sessionCostUsd } from '@/store/sidebar-archive'
 import { $subagentsBySession, type SubagentProgress } from '@/store/subagents'
 
@@ -347,6 +349,13 @@ function SidebarSessionRowImpl({
 
             onResume()
           }}
+          onDoubleClick={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerHaptic('selection')
+            promoteSessionTile(session.id)
+            openSession(session.id, () => undefined, 'tab')
+          }}
         >
           {hasBranchChildren ? (
             <button
@@ -389,6 +398,7 @@ function SidebarSessionRowImpl({
               />
             </Tip>
           ) : null}
+          <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
           <SidebarRowLabel className="flex-1 font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90">
             {title}
           </SidebarRowLabel>

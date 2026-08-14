@@ -55,6 +55,7 @@ import {
   SIDEBAR_MAX_WIDTH
 } from '@/store/layout'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
+import { $projectTree } from '@/store/projects'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
 import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
@@ -71,6 +72,7 @@ import {
   watchSessionTiles,
   WorkspaceTabMenu
 } from '../chat/session-tile'
+import { SubagentSessionIcon } from '../chat/subagent-session-icon'
 import { HudShell } from '../hud/hud-shell'
 import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
 import { $workspaceIsPage } from '../routes'
@@ -100,6 +102,36 @@ import { ContribWiring, WiredPane } from './wiring'
 // ONE render identity for the workspace pane — syncWorkspaceTitle re-registers
 // the contribution (new title) and a fresh closure would remount the chat.
 const renderWorkspacePane = () => <WiredPane part="chatRoutes" />
+
+
+function storedRowForPaneTitle(selected: string | null) {
+  if (!selected) {
+    return null
+  }
+
+  const match = (session: (typeof $sessions.value)[number]) => sessionMatchesStoredId(session, selected)
+
+  return (
+    $sessions.get().find(match) ??
+    $projectTree
+      .get()
+      .flatMap(project => [
+        ...project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions)),
+        ...(project.previewSessions ?? [])
+      ])
+      .find(match) ??
+    null
+  )
+}
+
+function SessionTabLead({ selected, stored }: { selected: null | string; stored: ReturnType<typeof storedRowForPaneTitle> }) {
+  return (
+    <>
+      <SessionStatusDot session={stored} storedSessionId={selected} />
+      <SubagentSessionIcon className="ml-1" session={stored} storedSessionId={selected} />
+    </>
+  )
+}
 
 // Boot-hidden panes mount behind display:none (instant-toggle contract) — defer
 // them to idle so they're off the first-paint path, warm before reveal.
@@ -426,7 +458,7 @@ watchSessionPins()
 // above, so the pane content never remounts.
 const syncWorkspaceTitle = () => {
   const selected = $selectedStoredSessionId.get()
-  const stored = selected ? $sessions.get().find(s => sessionMatchesStoredId(s, selected)) : null
+  const stored = storedRowForPaneTitle(selected)
 
   registry.register({
     id: 'workspace',
@@ -439,7 +471,7 @@ const syncWorkspaceTitle = () => {
       // tiles render, so the main tab never disagrees with its sidebar row. A
       // fresh draft has no session to key by, which IS its status: the dot
       // resolves to `draft` and marks the tab rather than leaving a hole.
-      tabLead: () => <SessionStatusDot session={stored} storedSessionId={selected} />,
+      tabLead: () => <SessionTabLead selected={selected} stored={stored} />,
       // A draft's name lives in its composer, not in any session row, so the
       // label subscribes to it directly — typing renames the tab without
       // re-registering the pane.
@@ -459,6 +491,7 @@ const syncWorkspaceTitle = () => {
 $selectedStoredSessionId.listen(syncWorkspaceTitle)
 $sessions.listen(syncWorkspaceTitle)
 $workspaceIsPage.listen(syncWorkspaceTitle)
+$projectTree.listen(syncWorkspaceTitle)
 
 // Layout reset collapses every session tile into main as a tab (after the
 // workspace) instead of re-scattering them — pre-placed before adoption.

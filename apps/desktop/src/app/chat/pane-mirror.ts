@@ -43,6 +43,8 @@ export interface PaneMirror<T> {
    *  as `tabLead` — a name that moves faster than re-registration (see
    *  PaneChrome.tabTitle). Falls back to `title`. */
   tabTitle?: (key: string) => ReactNode
+  /** VS Code-style preview tab cue: italic and replaceable until promoted. */
+  tabPreview?: (key: string) => boolean
   /** Glyph buttons the tile contributes to the strip, after the last tab (where
    *  "+" sits), while it is the ACTIVE pane — e.g. a preview's console /
    *  DevTools toggles. DATA, not markup: the strip's `PaneStripGlyph` owns the
@@ -90,6 +92,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         data: {
           tabActivity: cfg.tabActivity ? () => cfg.tabActivity!(key) : undefined,
           tabLead: cfg.tabLead ? () => cfg.tabLead!(key) : undefined,
+          tabPreview: cfg.tabPreview ? () => cfg.tabPreview!(key) : undefined,
           tabTitle: cfg.tabTitle ? () => cfg.tabTitle!(key) : undefined,
           stripTools: cfg.stripTools ? () => cfg.stripTools!(key) : undefined,
           dock: {
