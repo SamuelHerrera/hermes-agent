@@ -27,6 +27,11 @@ export interface KanbanTask {
   /** True when every direct parent is done/archived; used to show todo cards
    *  that are only waiting for the dispatcher recompute/promotion tick. */
   parents_satisfied?: null | boolean
+  /** Per-profile/user card read watermark returned by the backend. */
+  is_unread?: boolean
+  latest_unread_event_id?: number
+  last_read_event_id?: number
+  read_at?: null | number
   tags?: KanbanTag[]
 }
 
@@ -101,6 +106,42 @@ export interface KanbanEvent {
   created_at: number
 }
 
+export type KanbanActivityTone = 'current' | 'done' | 'error' | 'info' | 'pending' | 'warning' | string
+
+export interface KanbanActivityActor {
+  type?: null | string
+  id?: null | string
+}
+
+export interface KanbanActivityGroup {
+  key: string
+  count: number
+  first_at?: null | number
+  last_at?: null | number
+  collapsed?: boolean
+  omitted_count?: number
+}
+
+export interface KanbanActivityTimelineItem {
+  id: number | string
+  task_id?: string
+  run_id?: null | number
+  source_event_id?: null | number
+  source_kind?: string
+  type: string
+  importance?: string
+  created_at?: null | number
+  actor?: KanbanActivityActor
+  title: string
+  summary?: null | string
+  status?: null | string
+  tone?: null | KanbanActivityTone
+  icon?: null | string
+  group?: null | KanbanActivityGroup
+  details?: null | Record<string, unknown>
+  children?: KanbanActivityTimelineItem[]
+}
+
 export interface KanbanAttachment {
   id: number | string
   filename: string
@@ -141,6 +182,9 @@ export interface KanbanTaskDetail {
   task: KanbanTaskFull
   comments: KanbanComment[]
   events: KanbanEvent[]
+  /** Persisted, backend-grouped Activity projection. Prefer this when present;
+   *  keep `events` as the raw audit/fallback stream for older servers. */
+  activity_timeline?: KanbanActivityTimelineItem[]
   attachments: KanbanAttachment[]
   links: { parents: string[]; children: string[] }
   link_details?: { parents?: KanbanTaskLink[]; children?: KanbanTaskLink[] }

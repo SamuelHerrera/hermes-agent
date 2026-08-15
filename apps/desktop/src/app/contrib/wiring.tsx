@@ -119,6 +119,7 @@ import {
   titlebarToolsWidthCss
 } from '../shell/titlebar'
 import { TitlebarControls } from '../shell/titlebar-controls'
+import { useCodexUsage } from '../shell/use-codex-usage'
 import { UpdatesOverlay } from '../updates-overlay'
 
 import { ContribWiringContext } from './context'
@@ -204,6 +205,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const activeGatewayProfile = useStore($activeGatewayProfile)
   const profileScope = useStore($profileScope)
   const boot = useStore($desktopBoot)
+  const codexUsage = useCodexUsage({ enabled: gatewayState === 'open', profile: activeGatewayProfile })
 
   const routedSessionId = routeSessionId(location.pathname)
   const routedSessionIdRef = useRef(routedSessionId)
@@ -1005,7 +1007,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
   // against the static app-control cluster — in the tree layout the titlebar
   // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  const APP_CONTROL_TOOL_COUNT = 8
+  const APP_CONTROL_TOOL_COUNT = 9
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
@@ -1032,6 +1034,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             buttons. Exits are the ⌘⇧H toggle and ⌘W. */}
         {!isHudWindow() && (
           <TitlebarControls
+            codexUsage={codexUsage.usage}
+            codexUsageState={codexUsage.state}
             leftTools={leftTitlebarTools}
             onOpenSettings={() => navigate(SETTINGS_ROUTE)}
             tools={rightTitlebarTools}

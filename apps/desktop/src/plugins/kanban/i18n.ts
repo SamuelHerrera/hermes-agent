@@ -155,6 +155,7 @@ type KanbanMessages = {
   tags: string
   aiTagBadge: string
   aiTagTip: string
+  unreadCard: string
   noTags: string
   tagName: string
   addTag: string
@@ -168,6 +169,8 @@ type KanbanMessages = {
   noDescription: string
   result: string
   latestSummary: string
+  aiResultEntry: string
+  aiSummaryEntry: string
   dependencies: string
   blockedBy: string
   blocks: string
@@ -400,6 +403,7 @@ const en: KanbanMessages = {
   tags: 'Tags',
   aiTagBadge: 'AI',
   aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
+  unreadCard: 'Unread card',
   noTags: 'No tags yet.',
   tagName: 'Tag name',
   addTag: 'Add tag',
@@ -413,6 +417,8 @@ const en: KanbanMessages = {
   noDescription: 'No description yet.',
   result: 'Result',
   latestSummary: 'Latest summary',
+  aiResultEntry: 'AI result',
+  aiSummaryEntry: 'AI summary',
   dependencies: 'Dependencies',
   blockedBy: 'Blocked by',
   blocks: 'Blocks',
@@ -646,6 +652,7 @@ const ja: KanbanMessages = {
   tags: 'タグ',
   aiTagBadge: 'AI',
   aiTagTip: 'AI ワークフロー更新で自動管理されています。手動で削除することもできます。',
+  unreadCard: '未読のカード',
   noTags: 'タグはまだありません。',
   tagName: 'タグ名',
   addTag: 'タグを追加',
@@ -659,6 +666,8 @@ const ja: KanbanMessages = {
   noDescription: 'まだ説明はありません。',
   result: '結果',
   latestSummary: '最新のサマリー',
+  aiResultEntry: 'AIの結果',
+  aiSummaryEntry: 'AIのサマリー',
   dependencies: '依存関係',
   blockedBy: 'ブロック元',
   blocks: 'ブロック先',
@@ -891,6 +900,7 @@ const zh: KanbanMessages = {
   tags: '标签',
   aiTagBadge: 'AI',
   aiTagTip: '由 AI 工作流更新自动管理；你仍然可以手动移除。',
+  unreadCard: '未读卡片',
   noTags: '暂无标签。',
   tagName: '标签名称',
   addTag: '添加标签',
@@ -904,6 +914,8 @@ const zh: KanbanMessages = {
   noDescription: '暂无描述。',
   result: '结果',
   latestSummary: '最新摘要',
+  aiResultEntry: 'AI 结果',
+  aiSummaryEntry: 'AI 摘要',
   dependencies: '依赖关系',
   blockedBy: '受阻于',
   blocks: '阻塞',
@@ -1134,6 +1146,7 @@ const zhHant: KanbanMessages = {
   tags: '標籤',
   aiTagBadge: 'AI',
   aiTagTip: '由 AI 工作流程更新自動管理；你仍可手動移除。',
+  unreadCard: '未讀卡片',
   noTags: '尚無標籤。',
   tagName: '標籤名稱',
   addTag: '新增標籤',
@@ -1147,6 +1160,8 @@ const zhHant: KanbanMessages = {
   noDescription: '尚無描述。',
   result: '結果',
   latestSummary: '最新摘要',
+  aiResultEntry: 'AI 結果',
+  aiSummaryEntry: 'AI 摘要',
   dependencies: '相依關係',
   blockedBy: '受阻於',
   blocks: '阻擋',

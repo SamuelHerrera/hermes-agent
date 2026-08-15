@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -78,6 +80,123 @@ def test_codex_usage_prefers_explicit_live_agent_credentials(monkeypatch, codex_
     assert calls[0]["headers"]["Authorization"] == "Bearer live-agent-token"
 
 
+def test_desktop_codex_usage_serialization_is_sanitized():
+    reset_at = datetime(2026, 5, 1, 12, 30, tzinfo=timezone.utc)
+    snapshot = account_usage.AccountUsageSnapshot(
+        provider="openai-codex",
+        source="usage_api",
+        fetched_at=datetime(2026, 4, 30, 9, 0, tzinfo=timezone.utc),
+        plan="Plus",
+        windows=(
+            account_usage.AccountUsageWindow(
+                key="primary_window",
+                label="Session",
+                used_percent=40.4,
+                reset_at=reset_at,
+            ),
+            account_usage.AccountUsageWindow(
+                key="secondary_window",
+                label="Weekly",
+                used_percent=12,
+            ),
+            account_usage.AccountUsageWindow(
+                key="burst_window",
+                label="Burst Window",
+                used_percent=5,
+                detail="temporary bucket",
+            ),
+        ),
+        metadata={
+            "account_id": "acct_should_not_escape",
+            "authorization": "Bearer should-not-escape",
+            "endpoint": "https://chatgpt.com/backend-api/wham/usage",
+            "reset_credits_available": 2,
+            "session_token": "token_should_not_escape",
+        },
+    )
+
+    result = account_usage.serialize_codex_usage_for_desktop(snapshot)
+
+    assert result == {
+        "available": True,
+        "status": "available",
+        "provider": "openai-codex",
+        "plan": "Plus",
+        "used_percent": 40.4,
+        "remaining_percent": 59.6,
+        "reset_time": "2026-05-01T12:30:00+00:00",
+        "reset_credits": 2,
+        "buckets": [
+            {
+                "key": "primary_window",
+                "label": "Session",
+                "used_percent": 40.4,
+                "remaining_percent": 59.6,
+                "reset_time": "2026-05-01T12:30:00+00:00",
+                "detail": None,
+            },
+            {
+                "key": "secondary_window",
+                "label": "Weekly",
+                "used_percent": 12.0,
+                "remaining_percent": 88.0,
+                "reset_time": None,
+                "detail": None,
+            },
+            {
+                "key": "burst_window",
+                "label": "Burst Window",
+                "used_percent": 5.0,
+                "remaining_percent": 95.0,
+                "reset_time": None,
+                "detail": "temporary bucket",
+            },
+        ],
+    }
+    encoded = json.dumps(result)
+    assert "Bearer" not in encoded
+    assert "Authorization" not in encoded
+    assert "chatgpt.com" not in encoded
+    assert "account_id" not in encoded
+    assert "authorization" not in encoded.lower()
+    assert "endpoint" not in encoded
+    assert "session_token" not in encoded
+    assert "should-not-escape" not in encoded
+    assert "token_should_not_escape" not in encoded
+
+
+def test_desktop_codex_usage_failure_returns_sanitized_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        account_usage,
+        "fetch_account_usage",
+        lambda provider: (_ for _ in ()).throw(
+            RuntimeError("Bearer private-token via https://chatgpt.com/backend-api/wham/usage")
+        ),
+    )
+
+    result = account_usage.desktop_codex_usage()
+
+    assert result == account_usage.unavailable_desktop_codex_usage()
+    encoded = json.dumps(result)
+    assert "private-token" not in encoded
+    assert "Bearer" not in encoded
+    assert "chatgpt.com" not in encoded
+
+
+def test_desktop_codex_usage_unavailable_shape_is_stable():
+    assert account_usage.serialize_codex_usage_for_desktop(None) == {
+        "available": False,
+        "status": "unavailable",
+        "provider": "openai-codex",
+        "plan": None,
+        "used_percent": None,
+        "remaining_percent": None,
+        "reset_time": None,
+        "reset_credits": 0,
+        "buckets": [],
+    }
+
+
 def test_codex_usage_falls_back_to_native_credential_pool(monkeypatch, codex_usage_payload):
     calls = []
     monkeypatch.setattr(
@@ -118,6 +237,42 @@ def test_codex_usage_falls_back_to_native_credential_pool(monkeypatch, codex_usa
     assert "ChatGPT-Account-Id" not in calls[0]["headers"]
 
 
+def test_codex_usage_keeps_extra_windows_and_reset_credit_count(monkeypatch):
+    calls = []
+    payload = {
+        "plan_type": "pro",
+        "rate_limit": {
+            "primary_window": {"used_percent": 50, "reset_at": 1779846359},
+            "secondary_window": {"used_percent": 20, "reset_at": 1780230796},
+            "burst_window": {"used_percent": 3, "reset_at": 1780230999},
+        },
+        "rate_limit_reset_credits": {"available_count": 4},
+    }
+    monkeypatch.setattr(
+        account_usage.httpx,
+        "Client",
+        lambda timeout: _FakeClient(calls, payload),
+    )
+    monkeypatch.setattr(
+        account_usage,
+        "resolve_codex_runtime_credentials",
+        lambda **kwargs: {
+            "api_key": "singleton-token",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+        },
+    )
+    monkeypatch.setattr(account_usage, "_read_codex_tokens", lambda: {"tokens": {}})
+
+    desktop_usage = account_usage.desktop_codex_usage()
+
+    assert desktop_usage["plan"] == "Pro"
+    assert desktop_usage["reset_credits"] == 4
+    assert [bucket["key"] for bucket in desktop_usage["buckets"]] == [
+        "primary_window",
+        "secondary_window",
+        "burst_window",
+    ]
+    assert desktop_usage["buckets"][2]["label"] == "Burst Window"
 
 
 def test_codex_usage_account_id_read_failure_keeps_singleton_token(monkeypatch, codex_usage_payload):

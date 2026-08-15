@@ -101,6 +101,8 @@ _log = logging.getLogger(__name__)
 
 VALID_STATUSES = {"triage", "todo", "scheduled", "ready", "running", "blocked", "review", "done", "archived"}
 VALID_INITIAL_STATUSES = {"running", "blocked"}
+UNREAD_TASK_STATUSES = {"done", "blocked", "review"}
+UNREAD_TASK_EVENT_KINDS = ("completed", "blocked", "review_requested")
 
 # Typed block reasons. Distinguishes the two fundamentally different things a
 # worker (or human) means by "blocked", so each can be routed differently
@@ -1335,6 +1337,32 @@ class Event:
     run_id: Optional[int] = None
 
 
+
+@dataclass
+class ActivityEvent:
+    """Persisted, user-facing timeline projection for a Kanban task."""
+
+    id: int
+    task_id: str
+    run_id: Optional[int]
+    source_event_id: Optional[int]
+    source_kind: str
+    semantic_type: str
+    importance: str
+    group_key: Optional[str]
+    sequence: int
+    created_at: int
+    actor_type: str
+    actor_id: Optional[str]
+    title: str
+    summary: Optional[str]
+    details: Optional[dict]
+    status: Optional[str]
+    tone: Optional[str]
+    icon: Optional[str]
+    dedupe_hash: Optional[str]
+    visibility: str
+
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
@@ -1458,6 +1486,45 @@ CREATE TABLE IF NOT EXISTS task_events (
     created_at INTEGER NOT NULL
 );
 
+-- Per-reader read watermarks for task-card attention badges. The unread state
+-- is derived by comparing this marker with the latest qualifying task_event
+-- (completed, blocked, review_requested); it is deliberately not a global flag
+-- on tasks so different profiles/users can read cards independently.
+CREATE TABLE IF NOT EXISTS task_read_state (
+    task_id              TEXT NOT NULL,
+    reader_id            TEXT NOT NULL,
+    last_read_event_id   INTEGER NOT NULL DEFAULT 0,
+    read_at              INTEGER,
+    PRIMARY KEY (task_id, reader_id)
+);
+
+-- Persisted, presentation-ready activity timeline. ``task_events`` remains the
+-- raw audit log; this table stores the durable user-facing projection used by
+-- the desktop Activity tab so meaningful work survives drawer close/reopen,
+-- page reload, and worker-log tail truncation.
+CREATE TABLE IF NOT EXISTS task_activity_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id         TEXT NOT NULL,
+    run_id          INTEGER,
+    source_event_id INTEGER,
+    source_kind     TEXT NOT NULL,
+    semantic_type   TEXT NOT NULL,
+    importance      TEXT NOT NULL DEFAULT 'normal',
+    group_key       TEXT,
+    sequence        INTEGER NOT NULL,
+    created_at      INTEGER NOT NULL,
+    actor_type      TEXT NOT NULL,
+    actor_id        TEXT,
+    title           TEXT NOT NULL,
+    summary         TEXT,
+    details_json    TEXT,
+    status          TEXT,
+    tone            TEXT,
+    icon            TEXT,
+    dedupe_hash     TEXT,
+    visibility      TEXT NOT NULL DEFAULT 'timeline'
+);
+
 -- Historical attempt record. Each time the dispatcher claims a task, a
 -- new row is created here; claim state, PID, heartbeat, runtime cap,
 -- and structured summary all live on the run, not the task. Multiple
@@ -1548,6 +1615,11 @@ CREATE INDEX IF NOT EXISTS idx_links_child           ON task_links(child_id);
 CREATE INDEX IF NOT EXISTS idx_links_parent          ON task_links(parent_id);
 CREATE INDEX IF NOT EXISTS idx_comments_task         ON task_comments(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_events_task           ON task_events(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_task_read_reader      ON task_read_state(reader_id, task_id);
+CREATE INDEX IF NOT EXISTS idx_activity_task_sequence ON task_activity_events(task_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_activity_task_run      ON task_activity_events(task_id, run_id);
+CREATE INDEX IF NOT EXISTS idx_activity_task_group    ON task_activity_events(task_id, group_key, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_dedupe ON task_activity_events(dedupe_hash) WHERE dedupe_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_runs_task             ON task_runs(task_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_runs_status           ON task_runs(status);
 CREATE INDEX IF NOT EXISTS idx_attachments_task      ON task_attachments(task_id, created_at);
@@ -3823,40 +3895,133 @@ def remove_tag_from_task(conn: sqlite3.Connection, task_id: str, name: str) -> b
 
 AI_TAG_PREFIX = "AI:"
 AI_TAG_NORMALIZED_PREFIX = "ai:"
+AI_TAG_MAX_MANAGED = 5
+AI_TAG_ALLOWED_CATEGORY_PREFIXES = (
+    "AI:Area ",
+    "AI:Surface ",
+    "AI:Feature ",
+    "AI:Behavior ",
+    "AI:Integration ",
+    "AI:Data ",
+)
+AI_TAG_DENYLIST_NORMALIZED = {
+    "ai:status todo",
+    "ai:status ready",
+    "ai:status running",
+    "ai:status review",
+    "ai:status blocked",
+    "ai:status done",
+    "ai:status archived",
+    "ai:status triage",
+    "ai:needs review",
+    "ai:needs tests",
+    "ai:needs qa",
+    "ai:needs input",
+    "ai:needs approval",
+    "ai:needs changes",
+    "ai:in progress",
+    "ai:completed",
+    "ai:pending",
+    "ai:waiting",
+    "ai:blocked",
+    "ai:review required",
+    "ai:has parents",
+    "ai:has children",
+    "ai:high priority",
+    "ai:kind bug",
+    "ai:kind docs",
+}
+AI_TAG_FEATURE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("kanban", "board"), "Area Kanban"),
+    (("desktop", "electron", "app", "ui", "drawer"), "Surface Desktop"),
+    (("gateway",), "Surface Gateway"),
+    (("cli", "command", "terminal"), "Surface CLI"),
+    (("dashboard",), "Surface Dashboard"),
+    (("tui",), "Surface TUI"),
+    (("browser",), "Surface Browser"),
+    (("slack",), "Integration Slack"),
+    (("whatsapp",), "Integration WhatsApp"),
+    (("telegram",), "Integration Telegram"),
+    (("github",), "Integration GitHub"),
+    (("google workspace", "gmail", "drive", "docs", "sheets"), "Integration Google Workspace"),
+    (("notion",), "Integration Notion"),
+    (("cron", "schedule", "scheduling"), "Area Scheduling"),
+    (("memory", "hindsight"), "Area Memory"),
+    (("tool", "tools", "mcp"), "Area Tools"),
+    (("tag", "tags", "tagging"), "Feature Tags"),
+    (("tab", "tabs"), "Feature Tabs"),
+    (("left panel", "sidebar", "side panel", "panel"), "Feature Left Panel"),
+    (("task card", "task cards", "cards"), "Feature Task Cards"),
+    (("filter", "filters", "filtering"), "Feature Filtering"),
+    (("assign", "assigned", "assignee", "assignment"), "Feature Assignment"),
+    (("notification", "notifications", "notify"), "Feature Notifications"),
+    (("automation", "automations", "monitor"), "Feature Automations"),
+    (("review flow", "review workflow", "review lane", "review column"), "Feature Review Flow"),
+    (("attachment", "attachments", "file upload", "upload"), "Feature Attachments"),
+    (("search", "find"), "Feature Search"),
+    (("ai", "model", "llm", "agent"), "Feature AI"),
+    (("route", "routing", "navigation", "navigate"), "Behavior Routing"),
+    (("drag", "drop", "drag drop", "drag-and-drop"), "Behavior Drag Drop"),
+    (("tab close", "close tab", "closing tab"), "Behavior Tab Close"),
+    (("reorder", "sorting", "sort"), "Behavior Reorder"),
+    (("zoom",), "Behavior Zoom"),
+    (("permission", "permissions", "access control", "auth"), "Behavior Permission Check"),
+    (("bulk edit", "bulk action"), "Behavior Bulk Edit"),
+    (("task tags", "tag data"), "Data Task Tags"),
+    (("task events", "events"), "Data Task Events"),
+    (("session", "sessions"), "Data Sessions"),
+    (("profile", "profiles"), "Data Profiles"),
+    (("workspace", "workspaces"), "Data Workspaces"),
+)
+
+
+def _ai_tag_text_parts(text: str) -> tuple[str, set[str]]:
+    """Return normalized phrase text and whole-word tokens for tag matching."""
+    phrase_text = " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
+    return phrase_text, set(phrase_text.split())
+
+
+def _ai_keyword_matches(phrase_text: str, words: set[str], keyword: str) -> bool:
+    keyword_text = " ".join(re.findall(r"[a-z0-9]+", keyword.casefold()))
+    if not keyword_text:
+        return False
+    if " " in keyword_text:
+        return f" {keyword_text} " in f" {phrase_text} "
+    return keyword_text in words
+
+
+def _ai_feature_tag_allowed(name: str) -> bool:
+    normalized = _normalize_tag_name(name)
+    return (
+        normalized not in AI_TAG_DENYLIST_NORMALIZED
+        and any(name.startswith(prefix) for prefix in AI_TAG_ALLOWED_CATEGORY_PREFIXES)
+    )
 
 
 def _ai_managed_tag_names(conn: sqlite3.Connection, task: Task) -> list[str]:
-    """Return deterministic AI-managed tag display names for *task*.
+    """Return deterministic business-feature AI tag display names for *task*.
 
-    The taxonomy is intentionally small and rule-based: lifecycle code can run
-    it safely from write paths, audit diffs are stable, and tag normalization
-    prevents near-duplicates such as ``AI:Status Ready`` vs ``ai:status ready``.
+    Tags must describe durable product area, surface, feature, behavior,
+    integration, or data-object relevance. They intentionally do not mirror
+    mutable workflow state such as lane/status, review/test needs, priority, or
+    parent/child graph metadata.
     """
-    text = f"{task.title or ''} {task.body or ''}".casefold()
-    names: set[str] = {f"{AI_TAG_PREFIX}Status {str(task.status).title()}"}
+    del conn  # Feature tagging is intentionally independent of graph metadata.
+    phrase_text, words = _ai_tag_text_parts(f"{task.title or ''} {task.body or ''}")
+    names: list[str] = []
+    seen: set[str] = set()
 
-    if parent_ids(conn, task.id):
-        names.add(f"{AI_TAG_PREFIX}Has Parents")
-    if child_ids(conn, task.id):
-        names.add(f"{AI_TAG_PREFIX}Has Children")
-    if int(task.priority or 0) >= 5:
-        names.add(f"{AI_TAG_PREFIX}High Priority")
-
-    keyword_tags = (
-        (("kanban", "board", "task"), "Area Kanban"),
-        (("desktop", "ui", "drawer", "editor", "app"), "Surface Desktop"),
-        (("gateway", "telegram", "slack", "whatsapp"), "Surface Gateway"),
-        (("cron", "schedule", "monitor"), "Area Automation"),
-        (("tag", "tags", "tagging"), "Feature Tags"),
-        (("ai", "model", "llm", "agent"), "Feature AI"),
-        (("review", "qa", "verify"), "Needs Review"),
-        (("bug", "fix", "error", "broken", "regression"), "Kind Bug"),
-        (("test", "tests", "typecheck"), "Needs Tests"),
-        (("doc", "docs", "readme"), "Kind Docs"),
-    )
-    for keywords, label in keyword_tags:
-        if any(word in text for word in keywords):
-            names.add(f"{AI_TAG_PREFIX}{label}")
+    for keywords, label in AI_TAG_FEATURE_RULES:
+        if not any(_ai_keyword_matches(phrase_text, words, keyword) for keyword in keywords):
+            continue
+        name = f"{AI_TAG_PREFIX}{label}"
+        normalized = _normalize_tag_name(name)
+        if normalized in seen or not _ai_feature_tag_allowed(name):
+            continue
+        names.append(name)
+        seen.add(normalized)
+        if len(names) >= AI_TAG_MAX_MANAGED:
+            break
 
     # Sort by the same normalized key used by list_task_tags/list_tags so event
     # payloads and task tag ordering are deterministic and easy to diff.
@@ -4601,6 +4766,788 @@ def list_events(conn: sqlite3.Connection, task_id: str) -> list[Event]:
     return out
 
 
+def _normalize_reader_id(reader_id: str) -> str:
+    reader = str(reader_id or "").strip()
+    if not reader:
+        raise ValueError("reader_id is required")
+    if any(ord(ch) < 32 for ch in reader):
+        raise ValueError("reader_id must not contain control characters")
+    if len(reader) > 200:
+        raise ValueError("reader_id must be <= 200 characters")
+    return reader
+
+
+def _latest_task_unread_event_ids(
+    conn: sqlite3.Connection,
+    task_ids: Iterable[str],
+) -> dict[str, int]:
+    ids = [str(tid) for tid in task_ids if tid]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    kind_placeholders = ",".join("?" for _ in UNREAD_TASK_EVENT_KINDS)
+    rows = conn.execute(
+        f"""
+        SELECT task_id, COALESCE(MAX(id), 0) AS latest_event_id
+          FROM task_events
+         WHERE task_id IN ({placeholders})
+           AND kind IN ({kind_placeholders})
+         GROUP BY task_id
+        """,
+        (*ids, *UNREAD_TASK_EVENT_KINDS),
+    ).fetchall()
+    return {row["task_id"]: int(row["latest_event_id"] or 0) for row in rows}
+
+
+def latest_task_unread_event_id(conn: sqlite3.Connection, task_id: str) -> int:
+    """Return the newest task_event id that can make a card unread."""
+    return _latest_task_unread_event_ids(conn, [task_id]).get(task_id, 0)
+
+
+def _task_unread_payload(
+    *,
+    task_id: str,
+    reader_id: str,
+    status: Optional[str],
+    latest_event_id: int,
+    last_read_event_id: int,
+    read_at: Optional[int],
+) -> dict[str, Any]:
+    qualifies = status in UNREAD_TASK_STATUSES
+    return {
+        "task_id": task_id,
+        "reader_id": reader_id,
+        "status": status,
+        "is_unread": bool(qualifies and latest_event_id > last_read_event_id),
+        "latest_unread_event_id": int(latest_event_id or 0),
+        "last_read_event_id": int(last_read_event_id or 0),
+        "read_at": read_at,
+    }
+
+
+def task_unread_states(
+    conn: sqlite3.Connection,
+    tasks: Iterable[Task],
+    *,
+    reader_id: str,
+) -> dict[str, dict[str, Any]]:
+    """Return per-reader unread payloads for a batch of task rows."""
+    reader = _normalize_reader_id(reader_id)
+    task_list = list(tasks)
+    if not task_list:
+        return {}
+    task_ids = [task.id for task in task_list]
+    latest_by_task = _latest_task_unread_event_ids(conn, task_ids)
+    placeholders = ",".join("?" for _ in task_ids)
+    read_rows = conn.execute(
+        f"""
+        SELECT task_id, last_read_event_id, read_at
+          FROM task_read_state
+         WHERE reader_id = ?
+           AND task_id IN ({placeholders})
+        """,
+        (reader, *task_ids),
+    ).fetchall()
+    read_by_task = {
+        row["task_id"]: (
+            int(row["last_read_event_id"] or 0),
+            int(row["read_at"]) if row["read_at"] is not None else None,
+        )
+        for row in read_rows
+    }
+    out: dict[str, dict[str, Any]] = {}
+    for task in task_list:
+        last_read, read_at = read_by_task.get(task.id, (0, None))
+        out[task.id] = _task_unread_payload(
+            task_id=task.id,
+            reader_id=reader,
+            status=task.status,
+            latest_event_id=latest_by_task.get(task.id, 0),
+            last_read_event_id=last_read,
+            read_at=read_at,
+        )
+    return out
+
+
+def task_unread_state(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    reader_id: str,
+) -> dict[str, Any]:
+    """Return one task's derived unread state for ``reader_id``."""
+    task = get_task(conn, task_id)
+    if task is None:
+        raise ValueError(f"task {task_id} not found")
+    return task_unread_states(conn, [task], reader_id=reader_id)[task.id]
+
+
+def mark_task_read(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    reader_id: str,
+) -> dict[str, Any]:
+    """Mark the latest qualifying card event read for one reader.
+
+    The marker is a watermark, not a global flag: future completed/blocked/review
+    events get larger ``task_events.id`` values and make the same card unread
+    again for this reader while other readers keep their own marker.
+    """
+    reader = _normalize_reader_id(reader_id)
+    now = int(time.time())
+    with write_txn(conn):
+        task = get_task(conn, task_id)
+        if task is None:
+            raise ValueError(f"task {task_id} not found")
+        latest_event_id = latest_task_unread_event_id(conn, task_id)
+        if latest_event_id > 0:
+            conn.execute(
+                """
+                INSERT INTO task_read_state (
+                    task_id, reader_id, last_read_event_id, read_at
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(task_id, reader_id) DO UPDATE SET
+                    last_read_event_id = excluded.last_read_event_id,
+                    read_at = excluded.read_at
+                WHERE task_read_state.last_read_event_id < excluded.last_read_event_id
+                """,
+                (task_id, reader, latest_event_id, now),
+            )
+    return task_unread_state(conn, task_id, reader_id=reader)
+
+
+def _json_or_none(value: Any) -> Optional[str]:
+    return json.dumps(value, ensure_ascii=False) if value else None
+
+
+def _activity_details_from_row(row: sqlite3.Row) -> Optional[dict]:
+    try:
+        details = json.loads(row["details_json"]) if row["details_json"] else None
+    except Exception:
+        details = None
+    return details if isinstance(details, dict) else None
+
+
+def _activity_from_row(row: sqlite3.Row) -> ActivityEvent:
+    return ActivityEvent(
+        id=int(row["id"]),
+        task_id=row["task_id"],
+        run_id=int(row["run_id"]) if row["run_id"] is not None else None,
+        source_event_id=(
+            int(row["source_event_id"]) if row["source_event_id"] is not None else None
+        ),
+        source_kind=row["source_kind"],
+        semantic_type=row["semantic_type"],
+        importance=row["importance"],
+        group_key=row["group_key"],
+        sequence=int(row["sequence"]),
+        created_at=int(row["created_at"]),
+        actor_type=row["actor_type"],
+        actor_id=row["actor_id"],
+        title=row["title"],
+        summary=row["summary"],
+        details=_activity_details_from_row(row),
+        status=row["status"],
+        tone=row["tone"],
+        icon=row["icon"],
+        dedupe_hash=row["dedupe_hash"],
+        visibility=row["visibility"],
+    )
+
+
+def _next_activity_sequence(conn: sqlite3.Connection, task_id: str) -> int:
+    row = conn.execute(
+        "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_seq "
+        "FROM task_activity_events WHERE task_id = ?",
+        (task_id,),
+    ).fetchone()
+    return int(row["next_seq"] if row and row["next_seq"] is not None else 1)
+
+
+def _append_activity_event(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    run_id: Optional[int] = None,
+    source_event_id: Optional[int] = None,
+    source_kind: str = "system",
+    semantic_type: str,
+    importance: str = "normal",
+    group_key: Optional[str] = None,
+    created_at: Optional[int] = None,
+    actor_type: str = "system",
+    actor_id: Optional[str] = None,
+    title: str,
+    summary: Optional[str] = None,
+    details: Optional[dict] = None,
+    status: Optional[str] = None,
+    tone: Optional[str] = None,
+    icon: Optional[str] = None,
+    dedupe_hash: Optional[str] = None,
+    visibility: str = "timeline",
+) -> Optional[int]:
+    """Insert one persisted Activity timeline row.
+
+    This is deliberately separate from ``task_events``: raw events remain the
+    audit log, while activity rows are the stable UI projection and can also be
+    written directly for first-class agent steps/decisions/tool milestones.
+    """
+    if not title or not title.strip():
+        title = semantic_type.replace(".", " ").replace("_", " ").title()
+    if importance not in {"critical", "high", "normal", "low", "noise"}:
+        importance = "normal"
+    if visibility not in {"timeline", "detail_only", "hidden"}:
+        visibility = "timeline"
+    now = int(time.time()) if created_at is None else int(created_at)
+    sequence = _next_activity_sequence(conn, task_id)
+    details_json = _json_or_none(details)
+    cur = conn.execute(
+        """
+        INSERT OR IGNORE INTO task_activity_events (
+            task_id, run_id, source_event_id, source_kind, semantic_type,
+            importance, group_key, sequence, created_at, actor_type, actor_id,
+            title, summary, details_json, status, tone, icon, dedupe_hash,
+            visibility
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            task_id,
+            run_id,
+            source_event_id,
+            source_kind,
+            semantic_type,
+            importance,
+            group_key,
+            sequence,
+            now,
+            actor_type,
+            actor_id,
+            title.strip(),
+            summary,
+            details_json,
+            status,
+            tone,
+            icon,
+            dedupe_hash,
+            visibility,
+        ),
+    )
+    return int(cur.lastrowid) if cur.rowcount == 1 else None
+
+
+def append_activity_event(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    title: str,
+    summary: Optional[str] = None,
+    semantic_type: str = "agent.step",
+    source_kind: str = "agent_step",
+    importance: str = "normal",
+    group_key: Optional[str] = None,
+    run_id: Optional[int] = None,
+    actor_type: str = "agent",
+    actor_id: Optional[str] = None,
+    details: Optional[dict] = None,
+    status: Optional[str] = None,
+    tone: Optional[str] = None,
+    icon: Optional[str] = None,
+    dedupe_hash: Optional[str] = None,
+    visibility: str = "timeline",
+) -> Optional[int]:
+    """Public writer for durable agent work/decision/verification milestones."""
+    with write_txn(conn, allow_nested=True):
+        return _append_activity_event(
+            conn,
+            task_id,
+            run_id=run_id,
+            source_kind=source_kind,
+            semantic_type=semantic_type,
+            importance=importance,
+            group_key=group_key,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            title=title,
+            summary=summary,
+            details=details,
+            status=status,
+            tone=tone,
+            icon=icon,
+            dedupe_hash=dedupe_hash,
+            visibility=visibility,
+        )
+
+
+def _activity_tag_name(payload: Optional[dict]) -> Optional[str]:
+    tag = payload.get("tag") if isinstance(payload, dict) else None
+    if isinstance(tag, dict):
+        name = tag.get("name")
+        return str(name) if name is not None else None
+    return None
+
+
+def _activity_summary_from_payload(payload: Optional[dict], *keys: str) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _activity_actor_for_event(kind: str, payload: Optional[dict]) -> tuple[str, Optional[str]]:
+    if isinstance(payload, dict):
+        source = payload.get("source")
+        if source == "ai":
+            return "ai_tagger", None
+        for key in ("assignee", "implementer", "reviewer"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return "agent", value.strip()
+    if kind in {"claimed", "heartbeat", "completed", "blocked", "review_requested"}:
+        return "worker", None
+    if kind in {"created", "promoted", "linked", "dependency_wait"}:
+        return "dispatcher", None
+    return "system", None
+
+
+def _humanize_event_kind(kind: str) -> str:
+    return kind.replace("_", " ").strip().capitalize() or "Task event"
+
+
+def _activity_spec_for_event(kind: str, payload: Optional[dict]) -> dict[str, Any]:
+    payload = payload if isinstance(payload, dict) else None
+    source = payload.get("source") if payload else None
+    actor_type, actor_id = _activity_actor_for_event(kind, payload)
+    details = {"payload": payload} if payload else None
+
+    if kind == "created":
+        return {
+            "semantic_type": "task.created",
+            "title": "Task created",
+            "summary": f"Initial status: {payload.get('status')}" if payload and payload.get("status") else None,
+            "status": "succeeded",
+            "tone": "done",
+            "actor_type": "dispatcher",
+            "details": details,
+        }
+    if kind == "claimed":
+        lock = payload.get("lock") if payload else None
+        title = "Worker claimed task"
+        if isinstance(lock, str) and lock:
+            title = f"Claimed by {lock.split(':', 1)[0]}"
+        return {
+            "semantic_type": "worker.claimed",
+            "title": title,
+            "status": "started",
+            "tone": "current",
+            "actor_type": "worker",
+            "details": details,
+        }
+    if kind == "heartbeat":
+        note = _activity_summary_from_payload(payload, "note")
+        if note:
+            return {
+                "semantic_type": "heartbeat.checkin",
+                "title": "Progress update",
+                "summary": note,
+                "status": "progress",
+                "tone": "info",
+                "actor_type": "worker",
+                "details": details,
+            }
+        return {
+            "semantic_type": "heartbeat.checkin",
+            "importance": "noise",
+            "group_key": "heartbeat:routine",
+            "title": "Worker check-in",
+            "summary": None,
+            "status": "progress",
+            "tone": "info",
+            "actor_type": "worker",
+            "details": details,
+        }
+    if kind in {"tag_attached", "tag_removed", "ai_tags_updated"}:
+        automatic = source == "ai" or kind == "ai_tags_updated"
+        tag_name = _activity_tag_name(payload)
+        if kind == "tag_attached":
+            summary = f"Added {tag_name}" if tag_name else "Tag added"
+        elif kind == "tag_removed":
+            summary = f"Removed {tag_name}" if tag_name else "Tag removed"
+        else:
+            added = payload.get("added") if payload else None
+            removed = payload.get("removed") if payload else None
+            bits = []
+            if added:
+                bits.append("added " + ", ".join(map(str, added)))
+            if removed:
+                bits.append("removed " + ", ".join(map(str, removed)))
+            summary = "; ".join(bits) or "Tags refreshed"
+        return {
+            "semantic_type": "tags.changed",
+            "importance": "low",
+            "group_key": "tags:auto" if automatic else "tags:manual",
+            "title": "AI updated tags automatically" if automatic else "Tags updated",
+            "summary": summary,
+            "tone": "info",
+            "actor_type": "ai_tagger" if automatic else actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind == "completed":
+        return {
+            "semantic_type": "task.completed",
+            "importance": "high",
+            "title": "Work completed",
+            "summary": _activity_summary_from_payload(payload, "summary"),
+            "status": "succeeded",
+            "tone": "done",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind in {"blocked", "dependency_wait", "block_loop_detected"}:
+        titles = {
+            "blocked": "Needs human input",
+            "dependency_wait": "Waiting on dependency",
+            "block_loop_detected": "Block loop detected",
+        }
+        return {
+            "semantic_type": "task.blocked" if kind != "dependency_wait" else "dependency.waiting",
+            "importance": "critical" if kind == "block_loop_detected" else "high",
+            "title": titles[kind],
+            "summary": _activity_summary_from_payload(payload, "reason"),
+            "status": "waiting",
+            "tone": "error" if kind == "block_loop_detected" else "warning",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind == "review_requested":
+        return {
+            "semantic_type": "task.review_requested",
+            "importance": "high",
+            "title": "Ready for review",
+            "summary": _activity_summary_from_payload(payload, "summary"),
+            "status": "waiting",
+            "tone": "pending",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind == "changes_requested":
+        return {
+            "semantic_type": "task.changes_requested",
+            "importance": "high",
+            "title": "Changes requested",
+            "summary": _activity_summary_from_payload(payload, "reason"),
+            "status": "waiting",
+            "tone": "warning",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind == "promoted":
+        return {
+            "semantic_type": "dependency.promoted",
+            "title": "Dependencies satisfied",
+            "summary": "Task promoted to Ready",
+            "status": "succeeded",
+            "tone": "done",
+            "actor_type": "dispatcher",
+            "details": details,
+        }
+    if kind == "linked":
+        return {
+            "semantic_type": "dependency.linked",
+            "importance": "low",
+            "group_key": "dependency:link",
+            "title": "Dependency linked",
+            "summary": None,
+            "tone": "info",
+            "actor_type": "dispatcher",
+            "details": details,
+        }
+    if kind == "decomposed":
+        return {
+            "semantic_type": "task.decomposed",
+            "title": "Task decomposed",
+            "summary": _activity_summary_from_payload(payload, "reason"),
+            "status": "succeeded",
+            "tone": "done",
+            "actor_type": "dispatcher",
+            "details": details,
+        }
+    if kind == "assigned":
+        assignee = payload.get("assignee") if payload else None
+        return {
+            "semantic_type": "task.assigned",
+            "title": f"Assigned to {assignee}" if assignee else "Task assigned",
+            "tone": "info",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind in {"timed_out", "stale", "gave_up", "crashed", "spawn_failed"}:
+        return {
+            "semantic_type": f"worker.{kind}",
+            "importance": "critical" if kind in {"gave_up", "crashed"} else "high",
+            "title": _humanize_event_kind(kind),
+            "summary": _activity_summary_from_payload(payload, "error", "reason", "summary"),
+            "status": "failed",
+            "tone": "error",
+            "actor_type": "system",
+            "details": details,
+        }
+    if kind == "scheduled":
+        return {
+            "semantic_type": "task.scheduled",
+            "title": "Task scheduled",
+            "summary": _activity_summary_from_payload(payload, "reason"),
+            "status": "waiting",
+            "tone": "pending",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+    if kind == "archived":
+        return {
+            "semantic_type": "task.archived",
+            "title": "Task archived",
+            "status": "succeeded",
+            "tone": "done",
+            "actor_type": actor_type,
+            "actor_id": actor_id,
+            "details": details,
+        }
+
+    return {
+        "semantic_type": f"task.{kind}",
+        "title": _humanize_event_kind(kind),
+        "summary": _activity_summary_from_payload(payload, "summary", "reason"),
+        "actor_type": actor_type,
+        "actor_id": actor_id,
+        "details": details,
+    }
+
+
+def _materialize_activity_from_event(
+    conn: sqlite3.Connection,
+    *,
+    event_id: int,
+    task_id: str,
+    kind: str,
+    payload: Optional[dict],
+    created_at: int,
+    run_id: Optional[int],
+) -> None:
+    spec = _activity_spec_for_event(kind, payload)
+    _append_activity_event(
+        conn,
+        task_id,
+        run_id=run_id,
+        source_event_id=event_id,
+        source_kind="kanban_event",
+        semantic_type=spec.pop("semantic_type"),
+        importance=spec.pop("importance", "normal"),
+        group_key=spec.pop("group_key", None),
+        created_at=created_at,
+        actor_type=spec.pop("actor_type", "system"),
+        actor_id=spec.pop("actor_id", None),
+        title=spec.pop("title"),
+        summary=spec.pop("summary", None),
+        details=spec.pop("details", None),
+        status=spec.pop("status", None),
+        tone=spec.pop("tone", None),
+        icon=spec.pop("icon", None),
+        dedupe_hash=f"task_event:{event_id}",
+        visibility=spec.pop("visibility", "timeline"),
+    )
+
+
+def backfill_activity_events(conn: sqlite3.Connection, task_id: Optional[str] = None) -> int:
+    """Materialize timeline rows from existing raw audit events once per event."""
+    where = "WHERE e.id NOT IN (SELECT source_event_id FROM task_activity_events WHERE source_event_id IS NOT NULL)"
+    params: tuple[Any, ...] = ()
+    if task_id is not None:
+        where += " AND e.task_id = ?"
+        params = (task_id,)
+    rows = conn.execute(
+        "SELECT e.* FROM task_events e " + where + " ORDER BY e.created_at ASC, e.id ASC",
+        params,
+    ).fetchall()
+    count = 0
+    with write_txn(conn, allow_nested=True):
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"]) if row["payload"] else None
+            except Exception:
+                payload = None
+            before = conn.total_changes
+            _materialize_activity_from_event(
+                conn,
+                event_id=int(row["id"]),
+                task_id=row["task_id"],
+                kind=row["kind"],
+                payload=payload if isinstance(payload, dict) else None,
+                created_at=int(row["created_at"]),
+                run_id=(int(row["run_id"]) if row["run_id"] is not None else None),
+            )
+            if conn.total_changes > before:
+                count += 1
+    return count
+
+
+def list_activity_events(conn: sqlite3.Connection, task_id: str) -> list[ActivityEvent]:
+    # Lazily backfill old boards/tasks so the API immediately returns durable
+    # activity history after an upgrade without a separate maintenance command.
+    missing = conn.execute(
+        "SELECT 1 FROM task_events e "
+        "WHERE e.task_id = ? AND NOT EXISTS ("
+        "  SELECT 1 FROM task_activity_events a WHERE a.source_event_id = e.id"
+        ") LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    if missing:
+        backfill_activity_events(conn, task_id)
+    rows = conn.execute(
+        "SELECT * FROM task_activity_events "
+        "WHERE task_id = ? AND visibility != 'hidden' "
+        "ORDER BY sequence ASC, created_at ASC, id ASC",
+        (task_id,),
+    ).fetchall()
+    return [_activity_from_row(row) for row in rows]
+
+
+def _activity_item_dict(event: ActivityEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "task_id": event.task_id,
+        "run_id": event.run_id,
+        "source_event_id": event.source_event_id,
+        "source_kind": event.source_kind,
+        "type": event.semantic_type,
+        "importance": event.importance,
+        "created_at": event.created_at,
+        "actor": {"type": event.actor_type, "id": event.actor_id},
+        "title": event.title,
+        "summary": event.summary,
+        "status": event.status,
+        "tone": event.tone,
+        "icon": event.icon,
+        "group": None,
+        "details": event.details,
+    }
+
+
+def _activity_group_title(group_key: str) -> str:
+    return {
+        "tags:auto": "AI updated tags automatically",
+        "tags:manual": "Tags updated",
+        "heartbeat:routine": "Worker check-ins",
+        "dependency:link": "Dependency links updated",
+        "status:auto": "Status metadata updated",
+        "agent:read": "Agent inspected files",
+        "agent:search": "Agent searched the codebase",
+        "agent:edit": "Agent edited files",
+        "agent:verify": "Agent ran verification",
+    }.get(group_key, group_key.replace(":", " ").replace("_", " ").title())
+
+
+def _activity_group_summary(group_key: str, events: list[ActivityEvent]) -> Optional[str]:
+    count = len(events)
+    if group_key == "heartbeat:routine":
+        return f"{count} routine check-in{'s' if count != 1 else ''}"
+    if group_key.startswith("tags:"):
+        snippets = [e.summary for e in events if e.summary]
+        if snippets:
+            shown = "; ".join(snippets[:3])
+            extra = count - min(count, 3)
+            return shown + (f"; +{extra} more" if extra else "")
+        return f"{count} tag change{'s' if count != 1 else ''}"
+    if group_key == "dependency:link":
+        return f"{count} dependency link update{'s' if count != 1 else ''}"
+    return f"{count} related update{'s' if count != 1 else ''}"
+
+
+def _activity_group_dict(events: list[ActivityEvent]) -> dict[str, Any]:
+    first = events[0]
+    last = events[-1]
+    key = first.group_key or "group"
+    children_all = [_activity_item_dict(event) for event in events]
+    max_children = 10
+    children = children_all[-max_children:]
+    omitted = max(0, len(children_all) - len(children))
+    return {
+        "id": f"group-{re.sub(r'[^a-zA-Z0-9_-]+', '-', key)}-{first.id}-{last.id}",
+        "task_id": first.task_id,
+        "run_id": first.run_id,
+        "source_event_id": None,
+        "source_kind": "activity_group",
+        "type": first.semantic_type,
+        "importance": first.importance,
+        "created_at": first.created_at,
+        "actor": {"type": first.actor_type, "id": first.actor_id},
+        "title": _activity_group_title(key),
+        "summary": _activity_group_summary(key, events),
+        "status": first.status,
+        "tone": first.tone,
+        "icon": first.icon,
+        "group": {
+            "key": key,
+            "count": len(events),
+            "first_at": first.created_at,
+            "last_at": last.created_at,
+            "collapsed": True,
+            "omitted_count": omitted,
+        },
+        "children": children,
+    }
+
+
+def _can_group_activity(prior: ActivityEvent, event: ActivityEvent) -> bool:
+    if not event.group_key or prior.group_key != event.group_key:
+        return False
+    if prior.run_id != event.run_id:
+        return False
+    if event.importance not in {"low", "noise"} or prior.importance not in {"low", "noise"}:
+        return False
+    if event.group_key == "heartbeat:routine":
+        return True
+    return int(event.created_at) - int(prior.created_at) <= 300
+
+
+def list_activity_timeline(conn: sqlite3.Connection, task_id: str) -> list[dict[str, Any]]:
+    """Return the grouped persisted Activity timeline for the task detail API."""
+    events = [e for e in list_activity_events(conn, task_id) if e.visibility == "timeline"]
+    items: list[dict[str, Any]] = []
+    group: list[ActivityEvent] = []
+
+    def flush_group() -> None:
+        nonlocal group
+        if not group:
+            return
+        if len(group) == 1:
+            items.append(_activity_item_dict(group[0]))
+        else:
+            items.append(_activity_group_dict(group))
+        group = []
+
+    for event in events:
+        if group and _can_group_activity(group[-1], event):
+            group.append(event)
+            continue
+        flush_group()
+        if event.group_key and event.importance in {"low", "noise"}:
+            group = [event]
+        else:
+            items.append(_activity_item_dict(event))
+    flush_group()
+    return items
+
+
 def _append_event(
     conn: sqlite3.Connection,
     task_id: str,
@@ -4608,8 +5555,8 @@ def _append_event(
     payload: Optional[dict] = None,
     *,
     run_id: Optional[int] = None,
-) -> None:
-    """Record an event row.  Called from within an already-open txn.
+) -> Optional[int]:
+    """Record an event row and materialize its Activity timeline projection.
 
     ``run_id`` is optional: pass the current run id so UIs can group
     events by attempt. For events that aren't scoped to a single run
@@ -4618,11 +5565,22 @@ def _append_event(
     """
     now = int(time.time())
     pl = json.dumps(payload, ensure_ascii=False) if payload else None
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (task_id, run_id, kind, pl, now),
     )
+    event_id = int(cur.lastrowid)
+    _materialize_activity_from_event(
+        conn,
+        event_id=event_id,
+        task_id=task_id,
+        kind=kind,
+        payload=payload if isinstance(payload, dict) else None,
+        created_at=now,
+        run_id=run_id,
+    )
+    return event_id
 
 
 def _end_run(
@@ -7882,6 +8840,7 @@ def delete_archived_task(conn: sqlite3.Connection, task_id: str) -> bool:
         )
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_activity_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))
@@ -7906,6 +8865,7 @@ def delete_task(conn: sqlite3.Connection, task_id: str) -> bool:
         conn.execute("DELETE FROM task_links WHERE parent_id = ? OR child_id = ?", (task_id, task_id))
         conn.execute("DELETE FROM task_comments WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_events WHERE task_id = ?", (task_id,))
+        conn.execute("DELETE FROM task_activity_events WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_runs WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM task_tags WHERE task_id = ?", (task_id,))
         conn.execute("DELETE FROM kanban_notify_subs WHERE task_id = ?", (task_id,))

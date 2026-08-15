@@ -28,6 +28,7 @@ class AccountUsageWindow:
     used_percent: Optional[float] = None
     reset_at: Optional[datetime] = None
     detail: Optional[str] = None
+    key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class AccountUsageSnapshot:
     windows: tuple[AccountUsageWindow, ...] = ()
     details: tuple[str, ...] = ()
     unavailable_reason: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
 
     @property
     def available(self) -> bool:
@@ -132,6 +134,92 @@ def _is_finite_num(v: Any) -> TypeGuard[float]:
     ``_fmt_usd`` without a None-operand warning.
     """
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def unavailable_desktop_codex_usage() -> dict[str, Any]:
+    """Stable fail-open Desktop shape for Codex usage.
+
+    The renderer gets only display-ready quota fields.  Private endpoint URLs,
+    OAuth tokens, bearer headers, account IDs, and exception details stay server-side.
+    """
+    return {
+        "available": False,
+        "status": "unavailable",
+        "provider": "openai-codex",
+        "plan": None,
+        "used_percent": None,
+        "remaining_percent": None,
+        "reset_time": None,
+        "reset_credits": 0,
+        "buckets": [],
+    }
+
+
+def _coerce_percent(value: Any) -> Optional[float]:
+    if not _is_finite_num(value):
+        return None
+    return round(max(0.0, min(100.0, float(value))), 1)
+
+
+def _usage_bucket_key(window: AccountUsageWindow) -> str:
+    if window.key:
+        return str(window.key)
+    label = str(window.label or "").strip().lower()
+    key = "_".join(part for part in label.replace("-", " ").split() if part)
+    return key or "usage"
+
+
+def _serialize_desktop_window(window: AccountUsageWindow) -> dict[str, Any]:
+    used = _coerce_percent(window.used_percent)
+    remaining = round(100.0 - used, 1) if used is not None else None
+    return {
+        "key": _usage_bucket_key(window),
+        "label": str(window.label or ""),
+        "used_percent": used,
+        "remaining_percent": remaining,
+        "reset_time": window.reset_at.isoformat() if window.reset_at else None,
+        "detail": str(window.detail) if window.detail else None,
+    }
+
+
+def serialize_codex_usage_for_desktop(snapshot: Optional[AccountUsageSnapshot]) -> dict[str, Any]:
+    """Return a renderer-safe Codex quota payload.
+
+    This intentionally serializes from ``AccountUsageSnapshot`` instead of the raw
+    Codex API response so no credential, private endpoint, authorization header,
+    or backend-only response detail can cross the Desktop IPC/API boundary.
+    """
+    if not snapshot or snapshot.provider != "openai-codex" or not snapshot.available:
+        return unavailable_desktop_codex_usage()
+
+    buckets = [_serialize_desktop_window(window) for window in snapshot.windows]
+    primary = buckets[0] if buckets else None
+    reset_credits = 0
+    metadata = snapshot.metadata if isinstance(snapshot.metadata, dict) else {}
+    raw_reset_credits = metadata.get("reset_credits_available")
+    if _is_finite_num(raw_reset_credits):
+        reset_credits = max(0, int(raw_reset_credits))
+
+    return {
+        "available": True,
+        "status": "available",
+        "provider": "openai-codex",
+        "plan": snapshot.plan,
+        "used_percent": primary["used_percent"] if primary else None,
+        "remaining_percent": primary["remaining_percent"] if primary else None,
+        "reset_time": primary["reset_time"] if primary else None,
+        "reset_credits": reset_credits,
+        "buckets": buckets,
+    }
+
+
+def desktop_codex_usage() -> dict[str, Any]:
+    """Fetch and serialize Codex quota for Desktop, failing open on every error."""
+    try:
+        return serialize_codex_usage_for_desktop(fetch_account_usage("openai-codex"))
+    except Exception:
+        logger.debug("codex ▸ Desktop usage payload failed (fail-open)", exc_info=True)
+        return unavailable_desktop_codex_usage()
 
 
 def build_nous_credits_snapshot(account_info) -> Optional[AccountUsageSnapshot]:
@@ -525,14 +613,33 @@ def _fetch_codex_account_usage(
     payload = response.json() or {}
     rate_limit = payload.get("rate_limit") or {}
     windows: list[AccountUsageWindow] = []
-    for key, label in (("primary_window", "Session"), ("secondary_window", "Weekly")):
+    codex_windows = {"primary_window": "Session", "secondary_window": "Weekly"}
+    for key, label in codex_windows.items():
         window = rate_limit.get(key) or {}
         used = window.get("used_percent")
         if used is None:
             continue
         windows.append(
             AccountUsageWindow(
+                key=key,
                 label=label,
+                used_percent=float(used),
+                reset_at=_parse_dt(window.get("reset_at")),
+            )
+        )
+    for key in sorted(rate_limit):
+        if key in codex_windows:
+            continue
+        window = rate_limit.get(key) or {}
+        if not isinstance(window, dict):
+            continue
+        used = window.get("used_percent")
+        if used is None:
+            continue
+        windows.append(
+            AccountUsageWindow(
+                key=str(key),
+                label=_title_case_slug(key) or str(key),
                 used_percent=float(used),
                 reset_at=_parse_dt(window.get("reset_at")),
             )
@@ -540,6 +647,7 @@ def _fetch_codex_account_usage(
     details: list[str] = []
     reset_credits = payload.get("rate_limit_reset_credits") or {}
     banked = reset_credits.get("available_count")
+    reset_credits_available = int(banked) if _is_finite_num(banked) else 0
     if isinstance(banked, (int, float)) and int(banked) > 0:
         count = int(banked)
         plural = "s" if count != 1 else ""
@@ -560,6 +668,7 @@ def _fetch_codex_account_usage(
         plan=_title_case_slug(payload.get("plan_type")),
         windows=tuple(windows),
         details=tuple(details),
+        metadata={"reset_credits_available": max(0, reset_credits_available)},
     )
 
 

@@ -29,6 +29,7 @@ import {
   SKILLS_ROUTE
 } from '../routes'
 
+import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
 import {
   TITLEBAR_ICON_BADGE_SCALE,
   titlebarButtonClass,
@@ -57,6 +58,8 @@ export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
+  codexUsage?: CodexUsageData | null
+  codexUsageState?: CodexUsageControlState
   leftTools?: readonly TitlebarTool[]
   tools?: readonly TitlebarTool[]
   onOpenSettings: () => void
@@ -108,7 +111,13 @@ function useModifierHeld(): boolean {
   return held
 }
 
-export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }: TitlebarControlsProps) {
+export function TitlebarControls({
+  codexUsage,
+  codexUsageState = 'unavailable',
+  leftTools = [],
+  tools = [],
+  onOpenSettings
+}: TitlebarControlsProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
   const location = useLocation()
@@ -313,6 +322,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         {visibleWorkspacePageTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
+        <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         {visibleSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}

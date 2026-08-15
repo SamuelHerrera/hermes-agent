@@ -164,6 +164,89 @@ def test_connect_migrates_legacy_db_before_optional_column_indexes(tmp_path):
     assert "idx_tasks_tenant" in indexes
     assert "idx_tasks_idempotency" in indexes
     assert "idx_events_run" in indexes
+    assert "task_activity_events" in {
+        row["name"]
+        for row in migrated.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    assert "idx_activity_task_sequence" in indexes
+
+
+def test_activity_timeline_persists_agent_steps_groups_and_full_history(kanban_home):
+    """Activity rows are durable, grouped, and not limited to a log tail."""
+    with kb.connect() as conn:
+        tid = kb.create_task(
+            conn,
+            title="Kanban desktop task events timeline",
+            body="Persist task events, agent decisions, verification steps, and tag events.",
+            assignee="worker-a",
+        )
+        claimed = kb.claim_task(conn, tid, claimer="worker-a:1")
+        assert claimed is not None
+        run_id = claimed.current_run_id
+
+        kb.heartbeat_worker(conn, tid, expected_run_id=run_id)
+        kb.heartbeat_worker(
+            conn,
+            tid,
+            note="inspected backend timeline schema",
+            expected_run_id=run_id,
+        )
+        kb.append_activity_event(
+            conn,
+            tid,
+            run_id=run_id,
+            semantic_type="agent.decision",
+            source_kind="decision",
+            title="Decided to materialize activity rows",
+            summary="Keep raw task_events and add a durable Activity projection.",
+            details={"decision": "separate task_activity_events projection"},
+        )
+        for index in range(25):
+            kb.append_activity_event(
+                conn,
+                tid,
+                run_id=run_id,
+                semantic_type="agent.step",
+                title=f"Persisted step {index:02d}",
+            )
+        assert kb.complete_task(conn, tid, summary="timeline backend complete")
+
+        activity_rows = kb.list_activity_events(conn, tid)
+        assert any(row.semantic_type == "agent.decision" for row in activity_rows)
+        assert sum(row.title.startswith("Persisted step ") for row in activity_rows) == 25
+
+        timeline = kb.list_activity_timeline(conn, tid)
+        titles = [item["title"] for item in timeline]
+        assert "Task created" in titles
+        assert "Progress update" in titles
+        assert "Decided to materialize activity rows" in titles
+        assert "Work completed" in titles
+        assert sum(title.startswith("Persisted step ") for title in titles) == 25
+
+        groups = [item for item in timeline if item.get("group")]
+        assert any(item["group"]["key"] == "tags:auto" for item in groups)
+        assert all("children" in item for item in groups)
+
+        step_titles = [title for title in titles if title.startswith("Persisted step ")]
+        assert step_titles == [f"Persisted step {index:02d}" for index in range(25)]
+
+
+def test_activity_timeline_backfills_legacy_raw_events(kanban_home):
+    """Legacy rows materialize on read so reloads after upgrade have history."""
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="legacy timeline", assignee="worker-a")
+        conn.execute("DELETE FROM task_activity_events WHERE task_id = ?", (tid,))
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM task_activity_events WHERE task_id = ?",
+            (tid,),
+        ).fetchone()["n"] == 0
+
+        timeline = kb.list_activity_timeline(conn, tid)
+        assert any(item["title"] == "Task created" for item in timeline)
+        assert conn.execute(
+            "SELECT COUNT(*) AS n FROM task_activity_events WHERE task_id = ?",
+            (tid,),
+        ).fetchone()["n"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -547,8 +630,8 @@ def test_task_tags_normalize_reuse_persist_and_cascade(kanban_home):
         ]
 
 
-def test_ai_tag_manager_applies_deterministic_lifecycle_tags_without_duplicate_noise(kanban_home):
-    """AI-managed lifecycle tags update predictably while preserving user tags."""
+def test_ai_tag_manager_generates_feature_tags_without_status_noise(kanban_home):
+    """AI-managed tags describe product features and preserve user tags."""
     with kb.connect() as conn:
         tid = kb.create_task(
             conn,
@@ -561,31 +644,28 @@ def test_ai_tag_manager_applies_deterministic_lifecycle_tags_without_duplicate_n
         assert initial == [
             "ai:area kanban",
             "ai:feature tags",
-            "ai:high priority",
-            "ai:kind bug",
-            "ai:status ready",
             "ai:surface desktop",
         ]
+        assert "ai:high priority" not in initial
+        assert "ai:kind bug" not in initial
+        assert not any(tag.startswith("ai:status ") for tag in initial)
 
         # User tags are outside the AI-managed namespace and must survive AI refreshes.
         kb.attach_tag_to_task(conn, tid, "Manual Customer Tag")
+        # Existing stale AI status chips must be removed by the next AI refresh.
+        kb.attach_tag_to_task(conn, tid, "AI:Status Ready")
         kb.block_task(conn, tid, reason="waiting on input", kind="needs_input")
 
         after_block = [t.normalized_name for t in kb.list_task_tags(conn, tid)]
         assert "manual customer tag" in after_block
         assert "ai:status ready" not in after_block
-        assert "ai:status blocked" in after_block
-        assert after_block.count("ai:status blocked") == 1
+        assert "ai:status blocked" not in after_block
 
         # Re-running the manager should not create duplicate tag rows or links.
         kb.apply_ai_task_tags(conn, tid, trigger="status", reason="idempotency check")
         assert [t.normalized_name for t in kb.list_task_tags(conn, tid)].count(
-            "ai:status blocked"
+            "ai:feature tags"
         ) == 1
-
-        tag_names = [t.normalized_name for t in kb.list_tags(conn)]
-        assert tag_names.count("ai:status blocked") == 1
-        assert tag_names.count("ai:status ready") == 1  # reusable tag record survives detach
 
         ai_events = [e for e in kb.list_events(conn, tid) if e.kind == "ai_tags_updated"]
         assert ai_events
@@ -593,11 +673,48 @@ def test_ai_tag_manager_applies_deterministic_lifecycle_tags_without_duplicate_n
         assert latest["source"] == "ai"
         assert latest["trigger"] == "status"
         assert latest["removed"] == ["AI:Status Ready"]
-        assert latest["added"] == ["AI:Status Blocked"]
+        assert latest["added"] == []
+
+
+def test_ai_tag_manager_filters_workflow_words_and_keeps_feature_context(kanban_home):
+    """Workflow/status wording must not become AI tags when features are present."""
+    bad_tags = {
+        "ai:needs review",
+        "ai:needs tests",
+        "ai:needs qa",
+        "ai:status todo",
+        "ai:status done",
+        "ai:status ready",
+        "ai:in progress",
+        "ai:review required",
+    }
+    with kb.connect() as conn:
+        tid = kb.create_task(
+            conn,
+            title="Review kanban task card filtering after tests",
+            body="Needs review before done; move from todo to in progress after QA approval.",
+            assignee="default",
+        )
+
+        tags = {t.normalized_name for t in kb.list_task_tags(conn, tid)}
+        assert {"ai:area kanban", "ai:feature filtering", "ai:feature task cards"} <= tags
+        assert tags.isdisjoint(bad_tags)
+        assert not any(tag.startswith(("ai:status ", "ai:needs ")) for tag in tags)
+
+        review_flow = kb.create_task(
+            conn,
+            title="Add kanban review flow routing UI",
+            body="Improve the review workflow route and navigation behavior.",
+            assignee="default",
+        )
+        flow_tags = {t.normalized_name for t in kb.list_task_tags(conn, review_flow)}
+        assert "ai:feature review flow" in flow_tags
+        assert "ai:behavior routing" in flow_tags
+        assert "ai:needs review" not in flow_tags
 
 
 def test_ai_tag_manager_tags_decomposed_children_and_root(kanban_home):
-    """Splitting a task gives generated children related deterministic tags."""
+    """Splitting a task gives generated children feature-related tags."""
     with kb.connect() as conn:
         root = kb.create_task(conn, title="Kanban auto tags feature", triage=True)
         child_ids = kb.decompose_triage_task(
@@ -619,14 +736,65 @@ def test_ai_tag_manager_tags_decomposed_children_and_root(kanban_home):
         assert "ai:feature tags" in first_tags
         assert "ai:surface desktop" in first_tags
         assert "ai:feature ai" in second_tags
-        assert "ai:has parents" in second_tags
-        assert "ai:has parents" in root_tags
+        assert "ai:feature tags" in second_tags
+        assert "ai:feature tags" in root_tags
+
+        for tags in (first_tags, second_tags, root_tags):
+            assert not any(tag.startswith("ai:status ") for tag in tags)
+            assert "ai:has parents" not in tags
+            assert "ai:has children" not in tags
 
         for tid in [root, *child_ids]:
             events = [e for e in kb.list_events(conn, tid) if e.kind == "ai_tags_updated"]
             assert events, f"missing AI tag audit event for {tid}"
             triggers = {(e.payload or {}).get("trigger") for e in events}
-            assert triggers & {"created", "split"}
+            assert triggers & {"created", "updated", "split"}
+
+
+def test_task_unread_state_is_per_reader_and_driven_by_qualifying_events(kanban_home):
+    """Done/blocked/review transitions badge unread independently per reader."""
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="notify on completion", assignee="default")
+
+        assert kb.task_unread_state(conn, tid, reader_id="alice")["is_unread"] is False
+
+        assert kb.complete_task(conn, tid, summary="finished")
+
+        alice_state = kb.task_unread_state(conn, tid, reader_id="alice")
+        bob_state = kb.task_unread_state(conn, tid, reader_id="bob")
+        assert alice_state["is_unread"] is True
+        assert bob_state["is_unread"] is True
+        assert alice_state["latest_unread_event_id"] > 0
+        assert alice_state["last_read_event_id"] == 0
+
+        read_state = kb.mark_task_read(conn, tid, reader_id="alice")
+        assert read_state["is_unread"] is False
+        assert read_state["last_read_event_id"] == alice_state["latest_unread_event_id"]
+        assert kb.task_unread_state(conn, tid, reader_id="alice")["is_unread"] is False
+        assert kb.task_unread_state(conn, tid, reader_id="bob")["is_unread"] is True
+
+
+def test_task_unread_state_resets_on_later_qualifying_transition(kanban_home):
+    """A card read after one completion becomes unread again on a later event."""
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="second completion", assignee="default")
+
+        assert kb.block_task(conn, tid, reason="needs input", kind="needs_input")
+        first = kb.mark_task_read(conn, tid, reader_id="alice")
+        assert first["is_unread"] is False
+
+        assert kb.unblock_task(conn, tid)
+        assert kb.request_review(conn, tid, summary="needs review")
+        review_state = kb.task_unread_state(conn, tid, reader_id="alice")
+        assert review_state["is_unread"] is True
+        assert review_state["latest_unread_event_id"] > first["last_read_event_id"]
+
+        assert kb.mark_task_read(conn, tid, reader_id="alice")["is_unread"] is False
+
+        assert kb.complete_task(conn, tid, summary="approved")
+        done_state = kb.task_unread_state(conn, tid, reader_id="alice")
+        assert done_state["is_unread"] is True
+        assert done_state["latest_unread_event_id"] > review_state["latest_unread_event_id"]
 
 
 

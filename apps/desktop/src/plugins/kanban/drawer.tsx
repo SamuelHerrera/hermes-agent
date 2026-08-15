@@ -21,7 +21,6 @@ import {
   host,
   Input,
   Loader,
-  LogView,
   Tabs,
   TabsContent,
   TabsList,
@@ -36,6 +35,7 @@ import {
 import { type ClipboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import {
+  boardKey,
   $boardSlug,
   addComment,
   addTaskTag,
@@ -46,6 +46,7 @@ import {
   fetchTags,
   fetchTask,
   logKey,
+  markTaskRead,
   patchTask,
   PROFILES_KEY,
   reassignTask,
@@ -58,14 +59,23 @@ import {
 } from './api'
 import { KanbanCommentBody, resolveKanbanAttachmentImageSrc } from './comment-body'
 import { ModelOverrideField, overridePatch, type TaskModelOverride } from './model-override'
-import { attachmentMarkdownUrl, buildPastedImageComment, clipboardImageFiles, PastedImageUploadGuard } from './paste-images'
+import {
+  attachmentMarkdownUrl,
+  buildPastedImageComment,
+  clipboardImageFiles,
+  PastedImageUploadGuard
+} from './paste-images'
 import {
   type Diagnostic,
   type DiagnosticAction,
+  type KanbanActivityGroup,
+  type KanbanActivityTimelineItem,
   type KanbanAttachment,
+  type KanbanBoard,
   type KanbanEvent,
   type KanbanRun,
   type KanbanTag,
+  type KanbanTask,
   type KanbanTaskDetail,
   type KanbanTaskFull,
   type KanbanTaskLink,
@@ -73,6 +83,7 @@ import {
   type TaskEstimate,
   type WorkerLog
 } from './types'
+import { isUnreadAttentionCard } from './unread'
 import {
   ago,
   Avatar,
@@ -93,8 +104,96 @@ import {
 
 const AI_TAG_NORMALIZED_PREFIX = 'ai:'
 
+type TaskReadState = Awaited<ReturnType<typeof markTaskRead>>
+
+function applyTaskReadState<T extends KanbanTask>(task: T, state: TaskReadState): T {
+  return {
+    ...task,
+    is_unread: state.is_unread,
+    last_read_event_id: state.last_read_event_id,
+    latest_unread_event_id: state.latest_unread_event_id,
+    read_at: state.read_at
+  }
+}
+
+function applyBoardTaskReadState(board: KanbanBoard, taskId: string, state: TaskReadState): KanbanBoard {
+  let changed = false
+  const columns = board.columns.map(column => {
+    let columnChanged = false
+    const tasks = column.tasks.map(task => {
+      if (task.id !== taskId) {
+        return task
+      }
+
+      changed = true
+      columnChanged = true
+
+      return applyTaskReadState(task, state)
+    })
+
+    return columnChanged ? { ...column, tasks } : column
+  })
+
+  return changed ? { ...board, columns } : board
+}
+
+type DetailPanelTone =
+  'attachments' | 'comments' | 'default' | 'description' | 'log' | 'metadata' | 'result' | 'summary'
+
+function detailPanelToneClass(tone: DetailPanelTone): string {
+  switch (tone) {
+    case 'description':
+      return 'border-l-sky-400/55 bg-sky-400/5'
+
+    case 'summary':
+      return 'border-l-violet-400/55 bg-violet-400/5'
+
+    case 'result':
+      return 'border-l-emerald-400/55 bg-emerald-400/5'
+
+    case 'comments':
+      return 'border-l-amber-400/55 bg-amber-400/5'
+
+    case 'metadata':
+      return 'border-l-cyan-400/45 bg-(--ui-bg-secondary)'
+
+    case 'attachments':
+      return 'border-l-fuchsia-400/45 bg-(--ui-bg-secondary)'
+
+    case 'log':
+      return 'border-l-slate-400/45 bg-black/20'
+
+    default:
+      return 'border-l-(--ui-stroke-tertiary) bg-(--ui-bg-secondary)'
+  }
+}
+
+function DetailPanel({
+  children,
+  className,
+  tone = 'default'
+}: {
+  children: ReactNode
+  className?: string
+  tone?: DetailPanelTone
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded-lg border border-(--ui-stroke-tertiary) border-l-2 p-3 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ui-text-primary)_4%,transparent)]',
+        detailPanelToneClass(tone),
+        className
+      )}
+    >
+      {children}
+    </div>
+  )
+}
+
 function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
-  return tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
+  return (
+    tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
+  )
 }
 
 function stringArray(value: unknown): string[] {
@@ -205,7 +304,6 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
 
     case 'reprioritized':
       return { label: k.evtReprioritized(String(p.priority ?? '?')) }
-
     case 'tag_attached': {
       const name = eventTagName(p)
 
@@ -241,13 +339,15 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
   }
 }
 
-type TimelineTone = 'current' | 'done' | 'error' | 'pending' | 'warning'
+type TimelineTone = 'current' | 'done' | 'error' | 'info' | 'pending' | 'warning'
 
 interface TimelineItem {
   actionTrace?: TimelineSubitem[]
   at?: null | number
   children?: TimelineSubitem[]
   detail?: string
+  group?: KanbanActivityGroup
+  icon?: null | string
   id: string
   label: string
   tone: TimelineTone
@@ -258,6 +358,17 @@ interface TimelineSubitem {
   detail?: string
   id: string
   label: string
+}
+
+type DiscussionItemKind = 'ai-result' | 'ai-summary' | 'comment'
+
+interface DiscussionItem {
+  at: number
+  author: string
+  body: string
+  id: string
+  kind: DiscussionItemKind
+  order: number
 }
 
 const EVENT_TONES: Record<string, TimelineTone> = {
@@ -327,7 +438,10 @@ function describeCommand(command: string): null | WorkerActivityHit {
     return { kind: 'check', phrase: 'checked the current git diff' }
   }
 
-  if (/\bgit\s+-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized) || /\bgit\s+(?:-c\s+\S+\s+)*-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized)) {
+  if (
+    /\bgit\s+-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized) ||
+    /\bgit\s+(?:-c\s+\S+\s+)*-c\s+[^\n]*(?:diff|status|show|log)\b/.test(normalized)
+  ) {
     return { kind: 'check', phrase: 'checked the current git diff' }
   }
 
@@ -374,7 +488,9 @@ function humanSkillName(raw: string): string {
 function describeSearch(raw: string): string {
   const query = cleanSubject(raw).toLowerCase()
 
-  if (/workerlogactivitysummary|work updates|worker check-ins|timeline|heartbeat|current_action|working now/.test(query)) {
+  if (
+    /workerlogactivitysummary|work updates|worker check-ins|timeline|heartbeat|current_action|working now/.test(query)
+  ) {
     return 'searched the Kanban activity timeline and worker-update code'
   }
 
@@ -399,7 +515,10 @@ function describeWorkerLogLine(line: string): null | WorkerActivityHit {
     return null
   }
 
-  const action = cleaned.replace(/^(?:[^\w/$]+\s*)+/u, '').replace(/\s+/g, ' ').trim()
+  const action = cleaned
+    .replace(/^(?:[^\w/$]+\s*)+/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 
   if (!action) {
     return null
@@ -568,7 +687,165 @@ function workerLogActivitySummary(log: WorkerLog | undefined, at?: null | number
 }
 
 function latestRun(runs: KanbanRun[]): KanbanRun | undefined {
-  return [...runs].sort((a, b) => Number(b.started_at ?? 0) - Number(a.started_at ?? 0) || Number(b.id) - Number(a.id))[0]
+  return [...runs].sort(
+    (a, b) => Number(b.started_at ?? 0) - Number(a.started_at ?? 0) || Number(b.id) - Number(a.id)
+  )[0]
+}
+
+type StructuredWorkerLogTone = 'error' | 'output' | 'system' | 'tool' | 'warning'
+
+interface StructuredWorkerLogBlock {
+  body?: string[]
+  detail?: string
+  duration?: string
+  id: string
+  label: string
+  status?: string
+  tone: StructuredWorkerLogTone
+}
+
+const WORKER_LOG_TOOL_LABELS: Record<string, string> = {
+  $: 'Terminal',
+  exec: 'Python',
+  find: 'Find files',
+  grep: 'Search',
+  kanban_at: 'Kanban',
+  kanban_bl: 'Kanban',
+  kanban_co: 'Kanban',
+  kanban_he: 'Kanban',
+  kanban_sh: 'Kanban',
+  patch: 'Edit file',
+  read: 'Read file',
+  skill: 'Skill',
+  vision: 'Vision',
+  write: 'Write file'
+}
+
+function workerLogToolLabel(tool: string): string {
+  return WORKER_LOG_TOOL_LABELS[tool] ?? tool.replace(/[-_]+/g, ' ')
+}
+
+function parseWorkerLogToolLine(
+  line: string
+): null | { detail?: string; duration?: string; status?: string; tool: string } {
+  const match = line.match(
+    /^\s*[│┃┊]?\s*(?:[^\w\s$]+\s+)?(?<tool>\$|[\w-]+)(?:\s+(?<detail>.*?))?\s+(?<duration>\d+(?:\.\d+)?s)(?:\s+\[(?<status>[^\]]+)\])?\s*$/u
+  )
+
+  if (!match?.groups) {
+    return null
+  }
+
+  const detail = match.groups.detail?.replace(/\s+/g, ' ').trim()
+
+  return {
+    detail: detail || undefined,
+    duration: match.groups.duration,
+    status: match.groups.status,
+    tool: match.groups.tool
+  }
+}
+
+function workerLogOutputTone(lines: string[]): StructuredWorkerLogTone {
+  return lines.some(line => /\b(?:error|exception|failed|traceback)\b|\[exit [1-9]\d*]/i.test(line))
+    ? 'error'
+    : 'output'
+}
+
+/**
+ * Worker logs are a terminal tail, not a structured transcript: they reliably
+ * expose tool rows, durations, exit statuses, warnings, and generic output, but
+ * not absolute timestamps or complete assistant/thought/message boundaries.
+ * Keep this intentionally lightweight and fall back to safe text blocks for
+ * anything unknown so malformed log lines never disappear.
+ */
+function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] {
+  const blocks: StructuredWorkerLogBlock[] = []
+  let pendingOutput: string[] = []
+  let pendingOutputLabel = 'Log output'
+
+  const push = (block: Omit<StructuredWorkerLogBlock, 'id'>) => {
+    blocks.push({ ...block, id: `worker-log-${blocks.length}` })
+  }
+
+  const flushOutput = () => {
+    if (!pendingOutput.length) {
+      return
+    }
+
+    push({ body: pendingOutput, label: pendingOutputLabel, tone: workerLogOutputTone(pendingOutput) })
+    pendingOutput = []
+    pendingOutputLabel = 'Log output'
+  }
+
+  stripAnsi(content)
+    .replace(/\r/g, '')
+    .split('\n')
+    .forEach(rawLine => {
+      const line = rawLine.trimEnd()
+      const compact = line.trim()
+
+      if (!compact) {
+        return
+      }
+
+      const cleaned = stripLogLineChrome(compact)
+      const tool = parseWorkerLogToolLine(compact)
+
+      if (tool) {
+        flushOutput()
+        push({
+          detail: tool.detail,
+          duration: tool.duration,
+          label: workerLogToolLabel(tool.tool),
+          status: tool.status,
+          tone: tool.status && /exit [1-9]\d*/i.test(tool.status) ? 'error' : 'tool'
+        })
+
+        return
+      }
+
+      if (/^review diff$/i.test(cleaned)) {
+        flushOutput()
+        pendingOutputLabel = 'Tool result'
+
+        return
+      }
+
+      if (/^Query:\s*/.test(compact)) {
+        flushOutput()
+        push({ detail: compact.replace(/^Query:\s*/, ''), label: 'Task request', tone: 'system' })
+
+        return
+      }
+
+      if (/^Initializing agent/.test(compact)) {
+        flushOutput()
+        push({ label: 'Worker started', tone: 'system' })
+
+        return
+      }
+
+      if (/^(?:Resume this session with:|Session:|Title:|Duration:|Messages:)\b/.test(compact)) {
+        flushOutput()
+        push({ detail: compact, label: 'Session info', tone: 'system' })
+
+        return
+      }
+
+      if (/⚠|\bwarning\b/i.test(compact)) {
+        flushOutput()
+        push({ detail: cleaned || compact, label: 'Warning', tone: 'warning' })
+
+        return
+      }
+
+      pendingOutput.push(line)
+    })
+
+  flushOutput()
+
+  return blocks
 }
 
 function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, k: KanbanText) {
@@ -587,19 +864,26 @@ function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, k:
     }
   }
 
-
   switch (task.status) {
     case 'running':
       return { detail: parts.join(' · ') || undefined, label: k.timelineWorking, tone: 'current' as const }
 
     case 'blocked':
-      return { detail: task.last_failure_error ?? (parts.join(' · ') || undefined), label: k.timelineNeedsInput, tone: 'error' as const }
+      return {
+        detail: task.last_failure_error ?? (parts.join(' · ') || undefined),
+        label: k.timelineNeedsInput,
+        tone: 'error' as const
+      }
 
     case 'review':
       return { detail: parts.join(' · ') || undefined, label: k.timelineReview, tone: 'current' as const }
 
     case 'done':
-      return { detail: task.latest_summary ?? task.result ?? (parts.join(' · ') || undefined), label: k.timelineCompleted, tone: 'done' as const }
+      return {
+        detail: task.latest_summary ?? task.result ?? (parts.join(' · ') || undefined),
+        label: k.timelineCompleted,
+        tone: 'done' as const
+      }
 
     case 'archived':
       return { detail: parts.join(' · ') || undefined, label: k.timelineArchived, tone: 'done' as const }
@@ -665,7 +949,116 @@ function heartbeatTimelineSubitems(events: KanbanEvent[]): TimelineSubitem[] {
   return notes
 }
 
-export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | undefined, k: KanbanText): TimelineItem[] {
+const PERSISTED_ACTIVITY_TONES = new Set<TimelineTone>(['current', 'done', 'error', 'info', 'pending', 'warning'])
+
+function activityDetailText(item: KanbanActivityTimelineItem): string | undefined {
+  if (item.summary?.trim()) {
+    return item.summary.trim()
+  }
+
+  if (!item.details) {
+    return undefined
+  }
+
+  const detail = Object.entries(item.details)
+    .filter(([, value]) => value != null && typeof value !== 'object')
+    .slice(0, 3)
+    .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${String(value)}`)
+    .join(' · ')
+
+  return detail || undefined
+}
+
+function activityTone(item: KanbanActivityTimelineItem): TimelineTone {
+  if (item.tone && PERSISTED_ACTIVITY_TONES.has(item.tone as TimelineTone)) {
+    return item.tone as TimelineTone
+  }
+
+  switch (item.status) {
+    case 'failed':
+      return 'error'
+
+    case 'waiting':
+      return 'pending'
+
+    case 'started':
+
+    case 'progress':
+      return 'current'
+
+    case 'cancelled':
+      return 'warning'
+
+    case 'succeeded':
+      return 'done'
+  }
+
+  switch (item.importance) {
+    case 'critical':
+      return 'error'
+
+    case 'high':
+      return 'warning'
+
+    case 'low':
+
+    case 'noise':
+      return 'info'
+
+    default:
+      return 'done'
+  }
+}
+
+function activityChildItem(item: KanbanActivityTimelineItem): TimelineSubitem {
+  return {
+    at: item.created_at,
+    detail: activityDetailText(item),
+    id: `activity-child-${String(item.id)}`,
+    label: item.title || item.type.replace(/\./g, ' ')
+  }
+}
+
+function persistedActivityTimelineItems(activity: KanbanActivityTimelineItem[] | undefined): TimelineItem[] {
+  if (!activity?.length) {
+    return []
+  }
+
+  return activity.map(item => {
+    const children = item.children?.map(activityChildItem) ?? []
+    const omitted = item.group?.omitted_count ?? 0
+
+    if (omitted > 0) {
+      children.push({
+        id: `activity-child-${String(item.id)}-omitted`,
+        label: `${omitted} older ${omitted === 1 ? 'update' : 'updates'} hidden in this group`
+      })
+    }
+
+    return {
+      at: item.created_at,
+      children: children.length ? children : undefined,
+      detail: activityDetailText(item),
+      group: item.group ?? undefined,
+      icon: item.icon,
+      id: `activity-${String(item.id)}`,
+      label: item.title || item.type.replace(/\./g, ' '),
+      tone: activityTone(item)
+    }
+  })
+}
+
+export function buildTimelineItems(
+  detail: KanbanTaskDetail,
+  log: WorkerLog | undefined,
+  k: KanbanText
+): TimelineItem[] {
+  const persisted = persistedActivityTimelineItems(detail.activity_timeline)
+
+  if (persisted.length) {
+    return persisted
+  }
+
   const items: TimelineItem[] = []
   const heartbeats: KanbanEvent[] = []
   const seen = new Set<string>()
@@ -729,7 +1122,12 @@ export function buildTimelineItems(detail: KanbanTaskDetail, log: WorkerLog | un
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
     push({
-      at: detail.task.completed_at ?? run?.ended_at ?? run?.started_at ?? detail.task.last_heartbeat_at ?? detail.task.created_at,
+      at:
+        detail.task.completed_at ??
+        run?.ended_at ??
+        run?.started_at ??
+        detail.task.last_heartbeat_at ??
+        detail.task.created_at,
       children,
       detail: current.detail,
       id: `current-${detail.task.status}`,
@@ -756,7 +1154,10 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
   const k = useKanban()
   const items = buildTimelineItems(detail, log, k)
 
-  const timelineCount = items.reduce((count, item) => count + 1 + (item.children?.length ?? 0) + (item.actionTrace?.length ?? 0), 0)
+  const timelineCount = items.reduce(
+    (count, item) => count + 1 + (item.children?.length ?? 0) + (item.actionTrace?.length ?? 0),
+    0
+  )
 
   const iconFor = (tone: TimelineTone) => {
     switch (tone) {
@@ -771,6 +1172,9 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
 
       case 'pending':
         return 'circle-outline'
+
+      case 'info':
+        return 'info'
 
       default:
         return 'check'
@@ -791,6 +1195,9 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
       case 'pending':
         return 'border-(--ui-stroke-tertiary) bg-(--ui-bg-quaternary) text-(--ui-text-quaternary)'
 
+      case 'info':
+        return 'border-sky-400/40 bg-sky-400/10 text-sky-300'
+
       default:
         return 'border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) text-(--ui-text-secondary)'
     }
@@ -799,7 +1206,9 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
   if (!items.length) {
     return (
       <section className="min-h-0 flex flex-1 flex-col gap-1.5">
-        <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{k.timeline(0)}</div>
+        <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">
+          {k.timeline(0)}
+        </div>
         <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.timelineNoActivity}</p>
       </section>
     )
@@ -807,19 +1216,33 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
 
   return (
     <section className="min-h-0 flex flex-1 flex-col gap-1.5">
-      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{k.timeline(timelineCount)}</div>
-      <ScrollFade className="-mr-1 min-h-0 flex-1 pr-1" deps={`${items.length}-${log?.content?.length ?? 0}`} max="100%">
+      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">
+        {k.timeline(timelineCount)}
+      </div>
+      <ScrollFade
+        className="-mr-1 min-h-0 flex-1 pr-1"
+        deps={`${items.length}-${log?.content?.length ?? 0}`}
+        max="100%"
+      >
         <ol className="relative flex flex-col gap-1.5 before:absolute before:top-2 before:bottom-2 before:left-2.5 before:w-px before:bg-(--ui-stroke-tertiary)">
           {items.map(item => (
             <li className="relative flex gap-2 text-[0.75rem]" key={item.id}>
               <span
-                className={cn('z-[1] mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border', toneClass(item.tone))}
+                className={cn(
+                  'z-[1] mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border',
+                  toneClass(item.tone)
+                )}
               >
-                <Codicon name={iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
+                <Codicon name={item.icon ?? iconFor(item.tone)} size="0.72rem" spinning={item.tone === 'current'} />
               </span>
               <div className="min-w-0 flex-1 rounded-md px-1 py-0.5 transition-colors hover:bg-(--ui-bg-quaternary)/45">
-                <div className="flex items-baseline gap-2">
+                <div className="flex flex-wrap items-baseline gap-2">
                   <span className="font-medium text-(--ui-text-secondary)">{item.label}</span>
+                  {item.group && (
+                    <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] leading-none text-(--ui-text-quaternary)">
+                      {item.group.count} grouped
+                    </span>
+                  )}
                   {ago(item.at) && (
                     <span className="ml-auto shrink-0 text-[0.625rem] text-(--ui-text-quaternary)">{ago(item.at)}</span>
                   )}
@@ -836,10 +1259,14 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                         <span className="min-w-0">
                           <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{action.label}</span>
                           {action.detail && (
-                            <span className="ml-1 line-clamp-3 text-[0.6875rem] text-(--ui-text-quaternary)">{action.detail}</span>
+                            <span className="ml-1 line-clamp-3 text-[0.6875rem] text-(--ui-text-quaternary)">
+                              {action.detail}
+                            </span>
                           )}
                         </span>
-                        {ago(action.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(action.at)}</span>}
+                        {ago(action.at) && (
+                          <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(action.at)}</span>
+                        )}
                       </div>
                     ))}
                     {item.children?.map(child => (
@@ -847,10 +1274,14 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                         <span className="min-w-0">
                           <span className="text-[0.6875rem] text-(--ui-text-tertiary)">{child.label}</span>
                           {child.detail && (
-                            <span className="ml-1 line-clamp-1 text-[0.6875rem] text-(--ui-text-quaternary)">{child.detail}</span>
+                            <span className="ml-1 line-clamp-1 text-[0.6875rem] text-(--ui-text-quaternary)">
+                              {child.detail}
+                            </span>
                           )}
                         </span>
-                        {ago(child.at) && <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>}
+                        {ago(child.at) && (
+                          <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(child.at)}</span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -864,17 +1295,118 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
   )
 }
 
+function workerLogToneClass(tone: StructuredWorkerLogTone): string {
+  switch (tone) {
+    case 'error':
+      return 'border-destructive/40 bg-destructive/10 text-destructive'
+
+    case 'system':
+      return 'border-sky-400/30 bg-sky-400/10 text-sky-200'
+
+    case 'warning':
+      return 'border-amber-400/40 bg-amber-400/10 text-amber-200'
+
+    case 'tool':
+      return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+
+    default:
+      return 'border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) text-(--ui-text-secondary)'
+  }
+}
+
+function workerLogIcon(tone: StructuredWorkerLogTone): string {
+  switch (tone) {
+    case 'error':
+      return 'error'
+
+    case 'system':
+      return 'info'
+
+    case 'warning':
+      return 'warning'
+
+    case 'tool':
+      return 'tools'
+
+    default:
+      return 'output'
+  }
+}
+
+function StructuredWorkerLogBlockView({ block }: { block: StructuredWorkerLogBlock }) {
+  return (
+    <div className={cn('rounded-lg border px-2.5 py-2 text-[0.75rem]', workerLogToneClass(block.tone))}>
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-md bg-black/10">
+          <Codicon name={workerLogIcon(block.tone)} size="0.75rem" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="font-medium text-current">{block.label}</span>
+            {block.detail && (
+              <span className="min-w-0 truncate text-[0.6875rem] text-(--ui-text-quaternary)">{block.detail}</span>
+            )}
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              {block.duration && (
+                <span className="rounded bg-black/15 px-1.5 py-0.5 font-mono text-[0.625rem] text-current">
+                  {block.duration}
+                </span>
+              )}
+              {block.status && (
+                <span
+                  className={cn(
+                    'rounded px-1.5 py-0.5 font-mono text-[0.625rem]',
+                    block.tone === 'error' ? 'bg-destructive/15 text-destructive' : 'bg-black/15 text-current'
+                  )}
+                >
+                  {block.status}
+                </span>
+              )}
+            </span>
+          </div>
+          {block.body && block.body.length > 0 && (
+            <details className="group mt-1.5" open={block.body.length <= 4 || block.tone === 'error'}>
+              <summary className="cursor-pointer select-none text-[0.625rem] uppercase tracking-[0.14em] text-(--ui-text-quaternary)">
+                {block.body.length} log {block.body.length === 1 ? 'line' : 'lines'}
+              </summary>
+              <pre
+                className="mt-1.5 max-h-56 overflow-auto rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-primary)/70 p-2 font-mono text-[0.6875rem] leading-relaxed whitespace-pre-wrap text-(--ui-text-secondary)"
+                data-selectable-text="true"
+              >
+                {block.body.join('\n')}
+              </pre>
+            </details>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function WorkerLogSection({ log }: { log?: WorkerLog }) {
   const k = useKanban()
   const title = log?.truncated ? k.workerLogTail : k.workerLog
+  const blocks = log?.exists && log.content ? structuredWorkerLogBlocks(log.content) : []
 
   return (
     <section className="min-h-0 flex flex-1 flex-col gap-1.5">
-      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">{title}</div>
-      {log?.exists && log.content ? (
-        <ScrollFade className="-mr-1 min-h-0 flex-1 pr-1" deps={log.content.length} max="100%">
-          <LogView className="min-h-full border-0">{log.content}</LogView>
-        </ScrollFade>
+      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-(--ui-text-quaternary)">
+        {title}
+      </div>
+      {blocks.length > 0 ? (
+        <DetailPanel className="min-h-0 flex-1 p-2" tone="log">
+          <ScrollFade
+            className="-mr-1 min-h-0 flex-1 pr-1"
+            deps={`${log?.content.length ?? 0}-${blocks.length}`}
+            max="100%"
+          >
+            <div className="flex min-h-full flex-col gap-1.5">
+              {blocks.map(block => (
+                <StructuredWorkerLogBlockView block={block} key={block.id} />
+              ))}
+            </div>
+          </ScrollFade>
+        </DetailPanel>
       ) : (
         <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.workerLogEmpty}</p>
       )}
@@ -893,7 +1425,10 @@ function MetaRow({ children, label }: { children: ReactNode; label: string }) {
 
 function DrawerTabContent({ children, value }: { children: ReactNode; value: string }) {
   return (
-    <TabsContent className="min-h-0 flex-1 flex-col gap-4 data-[state=active]:flex data-[state=inactive]:hidden" value={value}>
+    <TabsContent
+      className="min-h-0 flex-1 flex-col gap-4 data-[state=active]:flex data-[state=inactive]:hidden"
+      value={value}
+    >
       {children}
     </TabsContent>
   )
@@ -955,34 +1490,36 @@ export function DependenciesSection({ detail, onOpen }: { detail: KanbanTaskDeta
 
   return (
     <Section label={k.dependencies}>
-      {(['parents', 'children'] as const).map(side => {
-        const links = linkedTasks(detail, side)
+      <DetailPanel className="flex flex-col gap-3">
+        {(['parents', 'children'] as const).map(side => {
+          const links = linkedTasks(detail, side)
 
-        return links.length > 0 ? (
-          <div className="flex flex-col gap-1" key={side}>
-            <span className="text-[0.6875rem] text-(--ui-text-quaternary)">
-              {side === 'parents' ? k.blockedBy : k.blocks}
-            </span>
-            <div className="flex flex-col gap-1">
-              {links.map(link => {
-                const label = linkedTaskLabel(link)
+          return links.length > 0 ? (
+            <div className="flex flex-col gap-1" key={side}>
+              <span className="text-[0.6875rem] text-(--ui-text-quaternary)">
+                {side === 'parents' ? k.blockedBy : k.blocks}
+              </span>
+              <div className="flex flex-col gap-1">
+                {links.map(link => {
+                  const label = linkedTaskLabel(link)
 
-                return (
-                  <button
-                    className="min-w-0 rounded bg-(--ui-bg-quaternary) px-1.5 py-1 text-left text-[0.6875rem] text-(--ui-text-secondary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
-                    key={link.id}
-                    onClick={() => onOpen(link.id)}
-                    title={`${label} (${link.id})`}
-                    type="button"
-                  >
-                    <span className="block truncate">{label}</span>
-                  </button>
-                )
-              })}
+                  return (
+                    <button
+                      className="min-w-0 rounded bg-(--ui-bg-quaternary) px-1.5 py-1 text-left text-[0.6875rem] text-(--ui-text-secondary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
+                      key={link.id}
+                      onClick={() => onOpen(link.id)}
+                      title={`${label} (${link.id})`}
+                      type="button"
+                    >
+                      <span className="block truncate">{label}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        ) : null
-      })}
+          ) : null
+        })}
+      </DetailPanel>
     </Section>
   )
 }
@@ -1101,13 +1638,7 @@ function PastedImagePreview({ attachment }: { attachment: KanbanAttachment }) {
     }
   }, [previewSrc])
 
-  return (
-    <img
-      alt={attachment.filename || 'pasted image'}
-      className="h-16 w-16 object-cover"
-      src={resolvedSrc}
-    />
-  )
+  return <img alt={attachment.filename || 'pasted image'} className="h-16 w-16 object-cover" src={resolvedSrc} />
 }
 
 // Mirrors the review pane's commit-message field: one row tall to start
@@ -1227,7 +1758,13 @@ export function CommentComposer({
       {running && onRequeue && (
         <div className="flex items-center justify-between gap-2">
           <span className="text-[0.625rem] leading-tight text-(--ui-text-quaternary)">{k.deliveredLive}</span>
-          <Button className="shrink-0" disabled={!commentBody().trim() || pending} onClick={requeue} size="xs" variant="outline">
+          <Button
+            className="shrink-0"
+            disabled={!commentBody().trim() || pending}
+            onClick={requeue}
+            size="xs"
+            variant="outline"
+          >
             <Codicon name="debug-restart" size="0.7rem" />
             {k.requeueWithNote}
           </Button>
@@ -1260,45 +1797,47 @@ export function TitleSection({ onSave, title }: { onSave: (title: string) => voi
       }
       label={k.taskTitle}
     >
-      {editing ? (
-        <div className="flex flex-col gap-1.5">
-          <Input
-            autoFocus
-            className="text-[0.8125rem] font-semibold"
-            onChange={event => setDraft(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
+      <DetailPanel>
+        {editing ? (
+          <div className="flex flex-col gap-1.5">
+            <Input
+              autoFocus
+              className="text-[0.8125rem] font-semibold"
+              onChange={event => setDraft(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
 
-                if (trimmed) {
-                  onSave(trimmed)
-                  setEditing(false)
+                  if (trimmed) {
+                    onSave(trimmed)
+                    setEditing(false)
+                  }
                 }
-              }
-            }}
-            value={draft}
-          />
-          <Button
-            aria-label={k.save}
-            className="self-end"
-            disabled={!trimmed}
-            onClick={() => {
-              if (!trimmed) {
-                return
-              }
+              }}
+              value={draft}
+            />
+            <Button
+              aria-label={k.save}
+              className="self-end"
+              disabled={!trimmed}
+              onClick={() => {
+                if (!trimmed) {
+                  return
+                }
 
-              onSave(trimmed)
-              setEditing(false)
-            }}
-            size="xs"
-            variant="secondary"
-          >
-            {k.save}
-          </Button>
-        </div>
-      ) : (
-        <p className="whitespace-pre-wrap text-[0.8125rem] font-semibold text-foreground">{title}</p>
-      )}
+                onSave(trimmed)
+                setEditing(false)
+              }}
+              size="xs"
+              variant="secondary"
+            >
+              {k.save}
+            </Button>
+          </div>
+        ) : (
+          <p className="whitespace-pre-wrap text-[0.875rem] leading-relaxed font-semibold text-foreground">{title}</p>
+        )}
+      </DetailPanel>
     </Section>
   )
 }
@@ -1334,7 +1873,7 @@ export function TaskTagsSection({
 
   return (
     <Section label={k.tags}>
-      <div className="flex flex-col gap-2">
+      <DetailPanel className="flex flex-col gap-2">
         {tags.length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {tags.map(tag => (
@@ -1411,7 +1950,7 @@ export function TaskTagsSection({
             </div>
           </div>
         )}
-      </div>
+      </DetailPanel>
     </Section>
   )
 }
@@ -1438,31 +1977,33 @@ function DescriptionSection({ body, onSave }: { body: null | string | undefined;
       }
       label={k.description}
     >
-      {editing ? (
-        <div className="flex flex-col gap-1.5">
-          <Textarea
-            className="min-h-24 text-[0.75rem]"
-            onChange={event => setDraft(event.target.value)}
-            value={draft}
-          />
-          <Button
-            aria-label={k.save}
-            className="self-end"
-            onClick={() => {
-              onSave(draft)
-              setEditing(false)
-            }}
-            size="xs"
-            variant="secondary"
-          >
-            {k.save}
-          </Button>
-        </div>
-      ) : body ? (
-        <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{body}</p>
-      ) : (
-        <p className="text-[0.8125rem] text-(--ui-text-quaternary)">{k.noDescription}</p>
-      )}
+      <DetailPanel tone="description">
+        {editing ? (
+          <div className="flex flex-col gap-1.5">
+            <Textarea
+              className="min-h-24 text-[0.75rem]"
+              onChange={event => setDraft(event.target.value)}
+              value={draft}
+            />
+            <Button
+              aria-label={k.save}
+              className="self-end"
+              onClick={() => {
+                onSave(draft)
+                setEditing(false)
+              }}
+              size="xs"
+              variant="secondary"
+            >
+              {k.save}
+            </Button>
+          </div>
+        ) : body ? (
+          <p className="whitespace-pre-wrap text-[0.8125rem] leading-6 text-(--ui-text-secondary)">{body}</p>
+        ) : (
+          <p className="text-[0.8125rem] text-(--ui-text-quaternary)">{k.noDescription}</p>
+        )}
+      </DetailPanel>
     </Section>
   )
 }
@@ -1470,6 +2011,66 @@ function DescriptionSection({ body, onSave }: { body: null | string | undefined;
 // `latest_summary` is just the newest non-null run summary. A reclaim writes an
 // administrative note into that slot; hide those (Runs still shows them).
 const isAdminSummary = (summary: string) => /^status changed to \w+ \(dashboard\/direct\)$/.test(summary)
+
+function discussionBody(value: null | string | undefined): null | string {
+  const body = value?.trim()
+
+  return body && !isAdminSummary(body) ? body : null
+}
+
+export function buildDiscussionItems(detail: KanbanTaskDetail): DiscussionItem[] {
+  const items: DiscussionItem[] = []
+  let order = 0
+  const push = (item: Omit<DiscussionItem, 'order'>) => items.push({ ...item, order: order++ })
+  const summaryBodies = new Set<string>()
+
+  for (const comment of detail.comments) {
+    if (!comment.body.trim()) {
+      continue
+    }
+
+    push({
+      at: comment.created_at,
+      author: comment.author,
+      body: comment.body,
+      id: `comment-${comment.id}`,
+      kind: 'comment'
+    })
+  }
+
+  for (const run of detail.runs) {
+    const body = discussionBody(run.summary)
+
+    if (!body) {
+      continue
+    }
+
+    summaryBodies.add(body)
+    push({
+      at: run.ended_at ?? run.started_at ?? detail.task.completed_at ?? detail.task.created_at ?? 0,
+      author: run.profile || 'AI worker',
+      body,
+      id: `run-summary-${run.id}`,
+      kind: 'ai-summary'
+    })
+  }
+
+  const result = discussionBody(detail.task.result)
+
+  if (result && !summaryBodies.has(result)) {
+    const latest = latestRun(detail.runs)
+
+    push({
+      at: detail.task.completed_at ?? latest?.ended_at ?? latest?.started_at ?? detail.task.created_at ?? 0,
+      author: 'AI worker',
+      body: result,
+      id: 'task-result',
+      kind: 'ai-result'
+    })
+  }
+
+  return items.sort((a, b) => a.at - b.at || a.order - b.order)
+}
 
 export function AttachmentsSection({
   attachments,
@@ -1527,20 +2128,22 @@ export function AttachmentsSection({
       }
       label={k.attachments(attachments.length)}
     >
-      <div onPaste={pasteImages} tabIndex={0} title="Paste images here to add them as attachments">
-        {attachments.length > 0 ? (
-          <ul className="flex flex-col gap-1">
-            {attachments.map(attachment => (
-              <li className="flex items-center gap-1.5 text-[0.75rem] text-(--ui-text-tertiary)" key={attachment.id}>
-                <Codicon name="file" size="0.75rem" />
-                {attachment.filename}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noAttachments}</p>
-        )}
-      </div>
+      <DetailPanel className="py-2.5" tone="attachments">
+        <div onPaste={pasteImages} tabIndex={0} title="Paste images here to add them as attachments">
+          {attachments.length > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {attachments.map(attachment => (
+                <li className="flex items-center gap-1.5 text-[0.75rem] text-(--ui-text-tertiary)" key={attachment.id}>
+                  <Codicon name="file" size="0.75rem" />
+                  {attachment.filename}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noAttachments}</p>
+          )}
+        </div>
+      </DetailPanel>
     </Section>
   )
 }
@@ -1571,45 +2174,47 @@ function EstimateSection({ id }: { id: string }) {
 
   return (
     <Section label={k.estimate}>
-      {result?.ok ? (
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2 text-[0.8125rem]">
-            <span className="font-medium tabular-nums text-(--ui-text-secondary)">
-              ~{compactNumber(result.est_tokens)} {k.tokUnit}
-            </span>
-            {result.complexity && (
-              <span className="text-(--ui-text-tertiary)">
-                · {k.complexity[result.complexity] ?? result.complexity}
+      <DetailPanel className="py-2.5">
+        {result?.ok ? (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-[0.8125rem]">
+              <span className="font-medium tabular-nums text-(--ui-text-secondary)">
+                ~{compactNumber(result.est_tokens)} {k.tokUnit}
               </span>
+              {result.complexity && (
+                <span className="text-(--ui-text-tertiary)">
+                  · {k.complexity[result.complexity] ?? result.complexity}
+                </span>
+              )}
+              <Tip label={k.reEstimate}>
+                <Button
+                  aria-label={k.reEstimate}
+                  className="ml-auto"
+                  disabled={est.isPending}
+                  onClick={() => est.mutate()}
+                  size="icon-xs"
+                  variant="ghost"
+                >
+                  <Codicon name="refresh" size="0.75rem" spinning={est.isPending} />
+                </Button>
+              </Tip>
+            </div>
+            {result.rationale && (
+              <p className="text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">{result.rationale}</p>
             )}
-            <Tip label={k.reEstimate}>
-              <Button
-                aria-label={k.reEstimate}
-                className="ml-auto"
-                disabled={est.isPending}
-                onClick={() => est.mutate()}
-                size="icon-xs"
-                variant="ghost"
-              >
-                <Codicon name="refresh" size="0.75rem" spinning={est.isPending} />
-              </Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <Button disabled={est.isPending} onClick={() => est.mutate()} size="xs" variant="outline">
+              <Codicon name={est.isPending ? 'loading' : 'dashboard'} size="0.75rem" spinning={est.isPending} />
+              {est.isPending ? k.estimating : k.estimateEffort}
+            </Button>
+            <Tip label={k.estimateTipLong}>
+              <span className="text-[0.625rem] text-(--ui-text-quaternary)">{k.makesModelCall}</span>
             </Tip>
           </div>
-          {result.rationale && (
-            <p className="text-[0.6875rem] leading-relaxed text-(--ui-text-quaternary)">{result.rationale}</p>
-          )}
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <Button disabled={est.isPending} onClick={() => est.mutate()} size="xs" variant="outline">
-            <Codicon name={est.isPending ? 'loading' : 'dashboard'} size="0.75rem" spinning={est.isPending} />
-            {est.isPending ? k.estimating : k.estimateEffort}
-          </Button>
-          <Tip label={k.estimateTipLong}>
-            <span className="text-[0.625rem] text-(--ui-text-quaternary)">{k.makesModelCall}</span>
-          </Tip>
-        </div>
-      )}
+        )}
+      </DetailPanel>
     </Section>
   )
 }
@@ -1679,7 +2284,11 @@ export function TaskDrawerShell({
   if (mode === 'dialog') {
     return (
       <Dialog onOpenChange={open => !open && onClose?.()} open>
-        <DialogContent bodyClassName="p-0 overflow-visible" className="w-auto max-w-none border-0 bg-transparent p-0 shadow-none" showCloseButton={false}>
+        <DialogContent
+          bodyClassName="p-0 overflow-visible"
+          className="w-auto max-w-none border-0 bg-transparent p-0 shadow-none"
+          showCloseButton={false}
+        >
           {body}
         </DialogContent>
       </Dialog>
@@ -1705,6 +2314,7 @@ export function TaskDrawer({
   const qc = useQueryClient()
   const slug = useValue($boardSlug)
   const pasteGuardRef = useRef(new PastedImageUploadGuard())
+  const readAttemptRef = useRef<null | string>(null)
 
   // Socket-invalidated (bindApi); the interval is only the socketless heartbeat.
   const { data: detail, error } = useQuery({
@@ -1717,6 +2327,55 @@ export function TaskDrawer({
   const task = detail?.task
   const running = task?.status === 'running'
   const defaultAssignee = useDefaultAssignee()
+
+  useEffect(() => {
+    if (!id) {
+      readAttemptRef.current = null
+
+      return
+    }
+
+    if (!task || !isUnreadAttentionCard(task)) {
+      return
+    }
+
+    const attemptKey = `${id}:${task.latest_unread_event_id ?? 'unversioned'}`
+
+    if (readAttemptRef.current === attemptKey) {
+      return
+    }
+
+    readAttemptRef.current = attemptKey
+    let cancelled = false
+
+    markTaskRead(id).then(
+      state => {
+        if (cancelled) {
+          return
+        }
+
+        qc.setQueryData<KanbanTaskDetail>(taskKey(slug, id), previous =>
+          previous ? { ...previous, task: applyTaskReadState(previous.task, state) } : previous
+        )
+        qc.setQueryData<KanbanBoard>(boardKey(slug, false), previous =>
+          previous ? applyBoardTaskReadState(previous, id, state) : previous
+        )
+        qc.setQueryData<KanbanBoard>(boardKey(slug, true), previous =>
+          previous ? applyBoardTaskReadState(previous, id, state) : previous
+        )
+        void qc.invalidateQueries({ queryKey: ['kanban', 'board', slug] })
+      },
+      (err: unknown) => {
+        if (!cancelled) {
+          host.notify({ kind: 'warning', message: errText(err) })
+        }
+      }
+    )
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, qc, slug, task?.id, task?.is_unread, task?.latest_unread_event_id, task?.status])
 
   const { data: log } = useQuery({
     enabled: !!id,
@@ -1901,6 +2560,7 @@ export function TaskDrawer({
   }
 
   const errorMessage = error ? errText(error) : null
+  const discussionItems = detail ? buildDiscussionItems(detail) : []
 
   const move = (status: string) => {
     if (!task || status === task.status) {
@@ -1973,7 +2633,11 @@ export function TaskDrawer({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <TaskDetailHeaderControls mode={mode} onClose={onClose} onToggleMode={() => setMode(value => (value === 'sheet' ? 'dialog' : 'sheet'))} />
+            <TaskDetailHeaderControls
+              mode={mode}
+              onClose={onClose}
+              onToggleMode={() => setMode(value => (value === 'sheet' ? 'dialog' : 'sheet'))}
+            />
           </div>
         </div>
         {task && (
@@ -1993,24 +2657,35 @@ export function TaskDrawer({
         ) : (
           <Tabs className="min-h-0 flex flex-1 flex-col gap-3 text-sm" defaultValue="details">
             <TabsList className="sticky top-0 z-10 h-8 w-full justify-start overflow-x-auto rounded-none border-b border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-0">
-              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="details">
+              <TabsTrigger
+                className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none"
+                value="details"
+              >
                 {k.tabDetails}
               </TabsTrigger>
-              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="activity">
+              <TabsTrigger
+                className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none"
+                value="activity"
+              >
                 {k.tabActivity}
               </TabsTrigger>
-              <TabsTrigger className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none" value="logs">
+              <TabsTrigger
+                className="h-8 rounded-none px-2.5 text-[0.6875rem] data-[state=active]:shadow-none"
+                value="logs"
+              >
                 {log?.truncated ? k.workerLogTail : k.workerLog}
               </TabsTrigger>
             </TabsList>
 
             <DrawerTabContent value="details">
               <Section label={k.details}>
-                <DetailMetaGrid
-                  onModelChange={next => void mutate(() => patchTask(task.id, overridePatch(next)))()}
-                  onReassign={profile => void mutate(() => reassignTask(task.id, profile))()}
-                  task={task}
-                />
+                <DetailPanel tone="metadata">
+                  <DetailMetaGrid
+                    onModelChange={next => void mutate(() => patchTask(task.id, overridePatch(next)))()}
+                    onReassign={profile => void mutate(() => reassignTask(task.id, profile))()}
+                    task={task}
+                  />
+                </DetailPanel>
               </Section>
 
               {task.status === 'ready' && !task.assignee && !defaultAssignee && (
@@ -2025,7 +2700,10 @@ export function TaskDrawer({
                 </Section>
               )}
 
-              <TitleSection onSave={title => void mutate(() => patchTask(task.id, { title }))()} title={task.title || task.id} />
+              <TitleSection
+                onSave={title => void mutate(() => patchTask(task.id, { title }))()}
+                title={task.title || task.id}
+              />
 
               <TaskTagsSection
                 existingTags={tags?.tags ?? []}
@@ -2039,18 +2717,6 @@ export function TaskDrawer({
 
               <EstimateSection id={task.id} />
 
-              {task.result && (
-                <Section label={k.result}>
-                  <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.result}</p>
-                </Section>
-              )}
-
-              {task.latest_summary && !isAdminSummary(task.latest_summary) && (
-                <Section label={k.latestSummary}>
-                  <p className="whitespace-pre-wrap text-[0.8125rem] text-(--ui-text-secondary)">{task.latest_summary}</p>
-                </Section>
-              )}
-
               {(detail.links.parents.length > 0 || detail.links.children.length > 0) && (
                 <DependenciesSection detail={detail} onOpen={onOpen} />
               )}
@@ -2063,28 +2729,54 @@ export function TaskDrawer({
                     </span>
                   </Tip>
                 }
-                label={k.comments(detail.comments.length)}
+                label={k.comments(discussionItems.length)}
               >
-                {detail.comments.length > 0 && (
-                  <ul className="flex flex-col gap-2">
-                    {detail.comments.map(comment => (
-                      <li className="text-[0.75rem]" key={comment.id}>
-                        <span className="font-medium text-(--ui-text-secondary)">{comment.author}</span>
-                        <span className="ml-2 text-[0.625rem] text-(--ui-text-quaternary)">
-                          {ago(comment.created_at)}
-                        </span>
-                        <KanbanCommentBody body={comment.body} />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <CommentComposer
-                  onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
-                  onRequeue={body => requeueMut.mutate(body)}
-                  onSubmit={body => commentMut.mutate(body)}
-                  pending={commentMut.isPending || pasteImagesMut.isPending || requeueMut.isPending}
-                  running={running}
-                />
+                <DetailPanel className="flex flex-col gap-3" tone="comments">
+                  {discussionItems.length > 0 && (
+                    <ul className="flex flex-col gap-2">
+                      {discussionItems.map(entry => {
+                        const aiLabel =
+                          entry.kind === 'ai-result'
+                            ? k.aiResultEntry
+                            : entry.kind === 'ai-summary'
+                              ? k.aiSummaryEntry
+                              : null
+
+                        return (
+                          <li
+                            className={cn(
+                              'rounded-md border p-2 text-[0.75rem]',
+                              aiLabel
+                                ? 'border-emerald-400/25 bg-emerald-400/10'
+                                : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-secondary)/70'
+                            )}
+                            key={entry.id}
+                          >
+                            <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                              <span className="font-medium text-(--ui-text-secondary)">{entry.author}</span>
+                              {aiLabel && (
+                                <span className="rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-px text-[0.58rem] font-semibold uppercase tracking-[0.08em] text-emerald-300">
+                                  {aiLabel}
+                                </span>
+                              )}
+                              {entry.at > 0 && (
+                                <span className="text-[0.625rem] text-(--ui-text-quaternary)">{ago(entry.at)}</span>
+                              )}
+                            </div>
+                            <KanbanCommentBody body={entry.body} />
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  <CommentComposer
+                    onPasteImages={files => pasteImagesMut.mutateAsync({ files })}
+                    onRequeue={body => requeueMut.mutate(body)}
+                    onSubmit={body => commentMut.mutate(body)}
+                    pending={commentMut.isPending || pasteImagesMut.isPending || requeueMut.isPending}
+                    running={running}
+                  />
+                </DetailPanel>
               </Section>
 
               <AttachmentsSection

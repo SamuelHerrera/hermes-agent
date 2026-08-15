@@ -141,6 +141,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     get: () => ipcRenderer.invoke('hermes:profile:get'),
     set: name => ipcRenderer.invoke('hermes:profile:set', name)
   },
+  codexUsage: {
+    get: profile => ipcRenderer.invoke('hermes:codex-usage:get', profile)
+  },
   api: request => ipcRenderer.invoke('hermes:api', request),
   notify: payload => ipcRenderer.invoke('hermes:notify', payload),
   requestMicrophoneAccess: () => ipcRenderer.invoke('hermes:requestMicrophoneAccess'),
@@ -189,6 +192,9 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     // Current zoom of this window, as { level, percent }.
     get: () => ipcRenderer.invoke('hermes:zoom:get'),
     setPercent: percent => ipcRenderer.send('hermes:zoom:set-percent', percent),
+    // Tab close can make Chromium reset live zoom without changing the app's
+    // persisted zoom; ask main to reapply the persisted sender-window value.
+    reassert: () => ipcRenderer.send('hermes:zoom:reassert'),
     // Fires on every zoom change, including the Ctrl/Cmd +/-/0 shortcuts,
     // so the settings UI can stay in sync with the keyboard.
     onChanged: callback => {

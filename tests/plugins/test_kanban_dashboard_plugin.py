@@ -280,11 +280,11 @@ def test_dashboard_material_updates_refresh_ai_tags_and_audit_changes(client):
         "ai:area kanban",
         "ai:feature ai",
         "ai:feature tags",
-        "ai:high priority",
-        "ai:kind bug",
-        "ai:needs tests",
         "ai:surface desktop",
     }.issubset(names)
+    assert "ai:high priority" not in names
+    assert "ai:kind bug" not in names
+    assert "ai:needs tests" not in names
 
     ai_events = [
         event for event in detail["events"]

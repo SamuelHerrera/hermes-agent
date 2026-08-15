@@ -10,7 +10,14 @@ import { useDesktopIntegrations } from './use-desktop-integrations'
 // Mutable HUD-window flag so the restore tests can flip the window kind the
 // hook believes it runs in. Default false keeps the pre-existing restore
 // coverage exercising the real main-window path.
-const { hudWindowMock } = vi.hoisted(() => ({ hudWindowMock: vi.fn(() => false) }))
+const { closeActiveTabMock, hudWindowMock } = vi.hoisted(() => ({
+  closeActiveTabMock: vi.fn(() => false),
+  hudWindowMock: vi.fn(() => false)
+}))
+
+vi.mock('@/app/chat/close-tab', () => ({
+  closeActiveTab: closeActiveTabMock
+}))
 
 vi.mock('@/store/windows', async importOriginal => {
   const actual = await importOriginal<typeof WindowsStore>()
@@ -58,6 +65,7 @@ describe('useDesktopIntegrations', () => {
     _resetLegacyDiscardForTests()
     navigate = vi.fn()
     // Every test starts as a main window; only the HUD describe flips this.
+    closeActiveTabMock.mockReturnValue(false)
     hudWindowMock.mockReturnValue(false)
 
     // Stub the desktop bridge so the hook's useEffect callbacks don't try to
@@ -71,7 +79,13 @@ describe('useDesktopIntegrations', () => {
       onDeepLink: vi.fn(),
       signalDeepLinkReady: vi.fn(),
       onClosePreviewRequested: vi.fn(),
-      onOpenFolderRequested: vi.fn()
+      onOpenFolderRequested: vi.fn(),
+      zoom: {
+        get: vi.fn(),
+        setPercent: vi.fn(),
+        reassert: vi.fn(),
+        onChanged: vi.fn()
+      }
     } as unknown as Window['hermesDesktop']
   })
 
@@ -132,6 +146,31 @@ describe('useDesktopIntegrations', () => {
       }
     )
   }
+
+  describe('close preview zoom reassertion', () => {
+    it('reasserts persisted zoom after a successful close-preview tab action', () => {
+      const closePreviewListeners: Array<() => void> = []
+      const unsubscribe = vi.fn()
+      const onClosePreviewRequested = desktopWindow.hermesDesktop?.onClosePreviewRequested as ReturnType<typeof vi.fn>
+
+      const reassert = (desktopWindow.hermesDesktop?.zoom as { reassert?: ReturnType<typeof vi.fn> } | undefined)
+        ?.reassert
+
+      closeActiveTabMock.mockReturnValue(true)
+      onClosePreviewRequested.mockImplementation(callback => {
+        closePreviewListeners.push(callback)
+
+        return unsubscribe
+      })
+
+      render()
+
+      closePreviewListeners[0]?.()
+
+      expect(closeActiveTabMock).toHaveBeenCalledTimes(1)
+      expect(reassert).toHaveBeenCalledTimes(1)
+    })
+  })
 
   describe('profile-ready gate', () => {
     it('does NOT restore before profileReady is true', () => {

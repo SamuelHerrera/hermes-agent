@@ -97,6 +97,7 @@ import {
   type TaskSortDirections,
   type TaskTimeDisplay
 } from './types'
+import { isUnreadAttentionCard } from './unread'
 import {
   $newTaskLane,
   ago,
@@ -116,6 +117,7 @@ import {
   useOrchestration
 } from './ui'
 
+export { isUnreadAttentionCard } from './unread'
 export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
 const fmtTaskDateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -181,8 +183,10 @@ export const NEW_TASK_MINIMIZE_BUTTON_CLASS =
   'absolute right-10 top-2.5 z-20 text-(--ui-text-tertiary) hover:bg-(--chrome-action-hover) hover:text-foreground'
 export const NEW_TASK_MINIMIZE_BUTTON_SIZE = 'icon-xs' as const
 export const KANBAN_LANE_WIDTH_CLASS = 'w-[min(22rem,calc(100vw-2rem))] md:w-80 xl:w-[22rem]'
-export const KANBAN_BOARD_SCROLL_CLASS = 'flex min-w-0 flex-1 gap-3 overflow-auto px-4 pt-1 pb-3'
-export const KANBAN_COLUMN_TASKS_CLASS = 'relative flex flex-1 flex-col gap-2'
+export const KANBAN_BOARD_SCROLL_CLASS =
+  'flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto overflow-y-hidden px-4 pt-1 pb-3'
+export const KANBAN_COLUMN_TASKS_CLASS =
+  'relative flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto pr-1'
 
 // ── optimistic board edits (reconciled by the follow-up refresh) ─────────────
 
@@ -409,6 +413,7 @@ function Card({
   const summary = task.latest_summary || task.body
   const orchestration = useOrchestration()
   const fallback = (orchestration?.dispatch_default_assignee ?? orchestration?.default_assignee ?? '').trim()
+  const showUnread = isUnreadAttentionCard(task)
 
   const arc = arcState(task, {
     autoDecompose: orchestration?.auto_decompose ?? true,
@@ -455,7 +460,23 @@ function Card({
               )}
             />
           )}
-          <span className="line-clamp-2 text-[0.8125rem] font-medium leading-snug text-foreground">
+          {showUnread && (
+            <Tip label={k.unreadCard}>
+              <span
+                aria-label={k.unreadCard}
+                className="absolute right-2 top-2 inline-flex size-5 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-500 shadow-sm"
+                role="status"
+              >
+                <Codicon name="check" size="0.75rem" />
+              </span>
+            </Tip>
+          )}
+          <span
+            className={cn(
+              'line-clamp-2 text-[0.8125rem] font-medium leading-snug text-foreground',
+              showUnread && 'pr-7'
+            )}
+          >
             {task.title || task.id}
           </span>
           {task.tags && task.tags.length > 0 && (
@@ -636,7 +657,7 @@ function Column({
     <div
       {...dragHandlers}
       className={cn(
-        'group/col flex min-h-full shrink-0 flex-col rounded-lg p-2 transition-colors',
+        'group/col flex h-full min-h-0 shrink-0 flex-col rounded-lg p-2 transition-colors',
         KANBAN_LANE_WIDTH_CLASS,
         wash
       )}

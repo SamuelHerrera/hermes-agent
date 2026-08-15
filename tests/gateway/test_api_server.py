@@ -312,6 +312,7 @@ def _create_app(adapter: APIServerAdapter) -> web.Application:
     app.router.add_get("/v1/capabilities", adapter._handle_capabilities)
     app.router.add_get("/v1/skills", adapter._handle_skills)
     app.router.add_get("/v1/toolsets", adapter._handle_toolsets)
+    app.router.add_get("/api/account/codex-usage", adapter._handle_codex_usage)
     app.router.add_post("/api/sessions/{session_id}/chat", adapter._handle_session_chat)
     app.router.add_post("/api/sessions/{session_id}/chat/stream", adapter._handle_session_chat_stream)
     app.router.add_post("/v1/chat/completions", adapter._handle_chat_completions)
@@ -756,6 +757,47 @@ class TestHealthDetailedEndpoint:
         with patch("tools.process_registry.process_registry.completion_queue.qsize", return_value=0), \
              patch("tools.async_delegation.active_count", return_value=0):
             assert adapter._readiness_work_counts() == (4, 0, 0)
+
+
+class TestCodexUsageEndpoint:
+    @pytest.mark.asyncio
+    async def test_codex_usage_endpoint_returns_sanitized_payload(self, adapter):
+        payload = {
+            "available": True,
+            "status": "available",
+            "provider": "openai-codex",
+            "plan": "Plus",
+            "used_percent": 25.0,
+            "remaining_percent": 75.0,
+            "reset_time": None,
+            "reset_credits": 1,
+            "buckets": [],
+        }
+        app = _create_app(adapter)
+        with patch("gateway.platforms.api_server.desktop_codex_usage", return_value=payload):
+            async with TestClient(TestServer(app)) as cli:
+                resp = await cli.get("/api/account/codex-usage")
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data == payload
+        encoded = json.dumps(data)
+        assert "Authorization" not in encoded
+        assert "Bearer" not in encoded
+
+    @pytest.mark.asyncio
+    async def test_codex_usage_endpoint_fails_open(self, adapter):
+        app = _create_app(adapter)
+        with patch("gateway.platforms.api_server.desktop_codex_usage", side_effect=RuntimeError("boom")):
+            async with TestClient(TestServer(app)) as cli:
+                resp = await cli.get("/api/account/codex-usage")
+                assert resp.status == 200
+                data = await resp.json()
+
+        assert data["available"] is False
+        assert data["status"] == "unavailable"
+        assert data["provider"] == "openai-codex"
+        assert data["buckets"] == []
 
 
 # ---------------------------------------------------------------------------

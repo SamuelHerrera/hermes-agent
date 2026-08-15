@@ -136,6 +136,19 @@ def _conn(board: Optional[str] = None):
     return kanban_db.connect(board=board)
 
 
+def _reader_id(reader_id: Optional[str]) -> str:
+    """Resolve the per-user/profile read-state key for card unread badges."""
+    if reader_id is not None and str(reader_id).strip():
+        return kanban_db._normalize_reader_id(str(reader_id))
+    try:
+        from hermes_cli.profiles import get_active_profile_name
+
+        profile = get_active_profile_name()
+    except Exception:
+        profile = "default"
+    return kanban_db._normalize_reader_id(f"profile:{profile or 'default'}")
+
+
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
@@ -161,6 +174,7 @@ def _task_dict(
     *,
     latest_summary: Optional[str] = None,
     tags: Optional[list[dict[str, Any]]] = None,
+    unread_state: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     d = asdict(task)
     # Add derived age metrics so the UI can colour stale cards without
@@ -175,6 +189,20 @@ def _task_dict(
     # ``tasks.result``. ``None`` when no run has produced a summary yet.
     d["latest_summary"] = latest_summary
     d["tags"] = tags or []
+    if unread_state is not None:
+        d.update({
+            "is_unread": bool(unread_state.get("is_unread")),
+            "latest_unread_event_id": int(unread_state.get("latest_unread_event_id") or 0),
+            "last_read_event_id": int(unread_state.get("last_read_event_id") or 0),
+            "read_at": unread_state.get("read_at"),
+        })
+    else:
+        d.update({
+            "is_unread": False,
+            "latest_unread_event_id": 0,
+            "last_read_event_id": 0,
+            "read_at": None,
+        })
     # Keep body short on list endpoints; full body comes from /tasks/:id.
     return d
 
@@ -464,6 +492,7 @@ def get_board(
     tenant: Optional[str] = Query(None, description="Filter to a single tenant"),
     include_archived: bool = Query(False),
     board: Optional[str] = Query(None, description="Kanban board slug (omit for current)"),
+    reader_id: Optional[str] = Query(None, description="Per-user/profile read-state key"),
     workflow_template_id: Optional[str] = Query(
         None, description="Restrict to tasks using this workflow template id",
     ),
@@ -552,13 +581,23 @@ def get_board(
         task_ids = [t.id for t in tasks]
         summary_map = kanban_db.latest_summaries(conn, task_ids)
         tag_map = _tags_by_task(conn, task_ids)
+        unread_map = kanban_db.task_unread_states(
+            conn,
+            tasks,
+            reader_id=_reader_id(reader_id),
+        )
 
         for t in tasks:
             full = summary_map.get(t.id)
             preview = (
                 full[:_CARD_SUMMARY_PREVIEW_CHARS] if full else None
             )
-            d = _task_dict(t, latest_summary=preview, tags=tag_map.get(t.id, []))
+            d = _task_dict(
+                t,
+                latest_summary=preview,
+                tags=tag_map.get(t.id, []),
+                unread_state=unread_map.get(t.id),
+            )
             d["link_counts"] = link_counts.get(t.id, {"parents": 0, "children": 0})
             d["comment_count"] = comment_counts.get(t.id, 0)
             d["progress"] = progress.get(t.id)  # None when the task has no children
@@ -613,6 +652,7 @@ def get_board(
 def get_task(
     task_id: str,
     board: Optional[str] = Query(None),
+    reader_id: Optional[str] = Query(None, description="Per-user/profile read-state key"),
     run_state_type: Optional[str] = Query(
         None, description="With run_state_name: filter runs by column 'status' or 'outcome'",
     ),
@@ -644,6 +684,11 @@ def get_task(
             task,
             latest_summary=full_summary,
             tags=[_tag_dict(tag) for tag in kanban_db.list_task_tags(conn, task_id)],
+            unread_state=kanban_db.task_unread_state(
+                conn,
+                task_id,
+                reader_id=_reader_id(reader_id),
+            ),
         )
         links = _links_for(conn, task_id)
         child_ids = links["children"]
@@ -671,6 +716,7 @@ def get_task(
             "task": task_d,
             "comments": [_comment_dict(c) for c in kanban_db.list_comments(conn, task_id)],
             "events": [_event_dict(e) for e in kanban_db.list_events(conn, task_id)],
+            "activity_timeline": kanban_db.list_activity_timeline(conn, task_id),
             "attachments": [_attachment_dict(a, board=board) for a in kanban_db.list_attachments(conn, task_id)],
             "links": links,
             "link_details": _link_details_for(conn, links),
@@ -685,6 +731,34 @@ def get_task(
                 )
             ],
         }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# POST /tasks/:id/read
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/{task_id}/read")
+def mark_task_read(
+    task_id: str,
+    board: Optional[str] = Query(None),
+    reader_id: Optional[str] = Query(None, description="Per-user/profile read-state key"),
+):
+    """Mark the latest qualifying attention/completion event read for a card."""
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        try:
+            return kanban_db.mark_task_read(
+                conn,
+                task_id,
+                reader_id=_reader_id(reader_id),
+            )
+        except ValueError as exc:
+            detail = str(exc)
+            status_code = 404 if "not found" in detail else 400
+            raise HTTPException(status_code=status_code, detail=detail)
     finally:
         conn.close()
 

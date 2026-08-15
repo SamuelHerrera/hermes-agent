@@ -182,6 +182,15 @@ export const fetchBoard = (archived: boolean) =>
 
 export const fetchTask = (id: string) => call<KanbanTaskDetail>(withBoard(`/tasks/${id}`))
 
+export const markTaskRead = (id: string) =>
+  call<{
+    task_id: string
+    is_unread: boolean
+    latest_unread_event_id: number
+    last_read_event_id: number
+    read_at?: null | number
+  }>(withBoard(`/tasks/${id}/read`), { method: 'POST' })
+
 /** Worker stdout/stderr tail (last 16 KiB — plenty for the drawer). */
 export const fetchLog = (id: string) => call<WorkerLog>(withBoard(`/tasks/${id}/log`, { tail: '16384' }))
 
@@ -232,10 +241,16 @@ export const createTask = (body: Record<string, unknown>) =>
   nudged(call<{ task: KanbanTask | null; warning?: string }>(withBoard('/tasks'), { method: 'POST', body }))
 
 export const addTaskTag = (id: string, name: string) =>
-  nudged(call<{ tag: KanbanTag; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags`), { method: 'POST', body: { name } }))
+  nudged(
+    call<{ tag: KanbanTag; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags`), { method: 'POST', body: { name } })
+  )
 
 export const removeTaskTag = (id: string, name: string) =>
-  nudged(call<{ removed: boolean; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags/${encodeURIComponent(name)}`), { method: 'DELETE' }))
+  nudged(
+    call<{ removed: boolean; tags: KanbanTag[] }>(withBoard(`/tasks/${id}/tags/${encodeURIComponent(name)}`), {
+      method: 'DELETE'
+    })
+  )
 
 // Deleting can unblock dependants (a gone parent no longer gates), so it
 // nudges too.

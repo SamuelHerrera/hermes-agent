@@ -5632,6 +5632,27 @@ function restorePersistedZoomLevel(window) {
     .catch(error => rememberLog(`[zoom] restore failed: ${error?.message || error}`))
 }
 
+const scheduledZoomReassertByWindow = new WeakMap()
+
+function schedulePersistedZoomReassert(window) {
+  if (!window || window.isDestroyed()) {
+    return
+  }
+
+  const existing = scheduledZoomReassertByWindow.get(window)
+
+  if (existing) {
+    clearTimeout(existing)
+  }
+
+  const timer = setTimeout(() => {
+    scheduledZoomReassertByWindow.delete(window)
+    restorePersistedZoomLevel(window)
+  }, 0)
+
+  scheduledZoomReassertByWindow.set(window, timer)
+}
+
 function installZoomShortcuts(window) {
   // Override Ctrl/Cmd + +/-/0 with half Chromium's default zoom step (ZOOM_STEP
   // is 0.1 vs Chromium's 0.2). The menu items handle this on macOS (where the
@@ -10127,6 +10148,47 @@ ipcMain.handle('hermes:backend:touch', async (_event, profile) => {
 ipcMain.handle('hermes:gateway:ws-url', async (_event, profile) => {
   return gatewayWsUrlIpcResult(() => freshGatewayWsUrl(profile))
 })
+
+const CODEX_USAGE_UNAVAILABLE = Object.freeze({
+  available: false,
+  status: 'unavailable',
+  provider: 'openai-codex',
+  plan: null,
+  used_percent: null,
+  remaining_percent: null,
+  reset_time: null,
+  reset_credits: 0
+})
+
+function unavailableCodexUsageForIpc() {
+  return { ...CODEX_USAGE_UNAVAILABLE, buckets: [] }
+}
+
+async function fetchCodexUsageForIpc(profile) {
+  try {
+    const routeProfile = resolveRouteProfile(null, profile)
+    const connection = await ensureBackend(routeProfile)
+    const requestPath = pathWithGlobalRemoteProfile('/api/account/codex-usage', profile, profileRouteOptions(profile))
+    const url = `${connection.baseUrl}${requestPath}`
+
+    if (connection.authMode === 'oauth') {
+      const nativeAt = await ensureNativeAccessToken(connection.baseUrl).catch(() => null)
+      const restAuth = resolveOauthRestAuth(nativeAt)
+
+      if (restAuth.kind === 'bearer') {
+        return fetchJson(url, null, { bearer: restAuth.token, timeoutMs: 15_000 })
+      }
+
+      return fetchJsonViaOauthSession(url, { timeoutMs: 15_000 })
+    }
+
+    return fetchJson(url, connection.token, { timeoutMs: 15_000 })
+  } catch {
+    return unavailableCodexUsageForIpc()
+  }
+}
+
+ipcMain.handle('hermes:codex-usage:get', async (_event, profile) => fetchCodexUsageForIpc(profile))
 ipcMain.handle('hermes:window:openSession', async (_event, sessionId, opts) => {
   if (typeof sessionId !== 'string' || !sessionId.trim()) {
     return { ok: false, error: 'invalid-session-id' }
@@ -10228,6 +10290,9 @@ ipcMain.on('hermes:zoom:set-percent', (event, percent) => {
   }
 
   setAndPersistZoomLevel(window, percentToZoomLevel(Number(percent)))
+})
+ipcMain.on('hermes:zoom:reassert', event => {
+  schedulePersistedZoomReassert(BrowserWindow.fromWebContents(event.sender))
 })
 
 // --- Pet overlay (pop-out mascot) -----------------------------------------
@@ -12224,12 +12289,12 @@ ipcMain.handle('hermes:updates:check', async () =>
         fetchedAt: Date.now()
       }
     : checkUpdates().catch(error => ({
-    supported: true,
-    branch: readDesktopUpdateConfig().branch,
-    error: 'check-failed',
-    message: error?.message || String(error),
-    fetchedAt: Date.now()
-  }))
+        supported: true,
+        branch: readDesktopUpdateConfig().branch,
+        error: 'check-failed',
+        message: error?.message || String(error),
+        fetchedAt: Date.now()
+      }))
 )
 
 ipcMain.handle('hermes:updates:apply', async (_event, payload) =>

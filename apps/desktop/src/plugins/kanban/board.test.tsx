@@ -7,6 +7,7 @@ import {
   createNewTaskDraft,
   draftBarClassName,
   isAiManagedTag,
+  isUnreadAttentionCard,
   KANBAN_BOARD_SCROLL_CLASS,
   KANBAN_COLUMN_TASKS_CLASS,
   KANBAN_LANE_WIDTH_CLASS,
@@ -82,6 +83,7 @@ const testKanbanText = {
   orchestratorTip: (assignee: string) => `Orchestrator ${assignee}`,
   aiTagBadge: 'AI',
   aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
+  unreadCard: 'Unread card',
   parent: 'Parent',
   parkedOption: 'Parked',
   priority: 'Priority',
@@ -218,6 +220,14 @@ describe('kanban board time sorting', () => {
   it('identifies AI-managed tags from the backend namespace for special rendering', () => {
     expect(isAiManagedTag({ name: 'AI:Status Ready', normalized_name: 'ai:status ready' })).toBe(true)
     expect(isAiManagedTag({ name: 'Feature Alpha', normalized_name: 'feature alpha' })).toBe(false)
+  })
+
+  it('shows unread badges only for unread completed or attention-needed cards', () => {
+    expect(isUnreadAttentionCard({ is_unread: true, status: 'done' })).toBe(true)
+    expect(isUnreadAttentionCard({ is_unread: true, status: 'blocked' })).toBe(true)
+    expect(isUnreadAttentionCard({ is_unread: true, status: 'review' })).toBe(true)
+    expect(isUnreadAttentionCard({ is_unread: false, status: 'done' })).toBe(false)
+    expect(isUnreadAttentionCard({ is_unread: true, status: 'ready' })).toBe(false)
   })
 })
 
@@ -377,10 +387,14 @@ describe('minimized new task drafts', () => {
 })
 
 describe('kanban board lane layout classes', () => {
-  it('keeps vertical overflow at the board level instead of inside each lane', () => {
-    expect(KANBAN_BOARD_SCROLL_CLASS).toContain('overflow-auto')
-    expect(KANBAN_COLUMN_TASKS_CLASS).not.toContain('overflow-y-auto')
-    expect(KANBAN_COLUMN_TASKS_CLASS).not.toContain('overflow-x-hidden')
+  it('constrains vertical overflow to each lane card list', () => {
+    expect(KANBAN_BOARD_SCROLL_CLASS).toContain('min-h-0')
+    expect(KANBAN_BOARD_SCROLL_CLASS).toContain('overflow-x-auto')
+    expect(KANBAN_BOARD_SCROLL_CLASS).toContain('overflow-y-hidden')
+    expect(KANBAN_BOARD_SCROLL_CLASS).not.toContain('overflow-auto')
+    expect(KANBAN_COLUMN_TASKS_CLASS).toContain('min-h-0')
+    expect(KANBAN_COLUMN_TASKS_CLASS).toContain('overflow-y-auto')
+    expect(KANBAN_COLUMN_TASKS_CLASS).toContain('overflow-x-hidden')
   })
 
   it('keeps lanes wide enough for readable card content', () => {
@@ -390,6 +404,52 @@ describe('kanban board lane layout classes', () => {
 })
 
 describe('KanbanBoardPage header', () => {
+  it('renders a compact unread badge for qualifying cards on the board', async () => {
+    vi.mocked(fetchBoard).mockResolvedValueOnce({
+      assignees: [],
+      columns: [
+        {
+          name: 'done',
+          tasks: [
+            { created_at: 1, id: 't_unread_done', is_unread: true, status: 'done', title: 'Unread done' },
+            { created_at: 2, id: 't_read_done', is_unread: false, status: 'done', title: 'Read done' }
+          ]
+        },
+        {
+          name: 'blocked',
+          tasks: [
+            { created_at: 3, id: 't_unread_blocked', is_unread: true, status: 'blocked', title: 'Unread blocked' }
+          ]
+        },
+        {
+          name: 'review',
+          tasks: [{ created_at: 4, id: 't_unread_review', is_unread: true, status: 'review', title: 'Unread review' }]
+        },
+        {
+          name: 'ready',
+          tasks: [{ created_at: 5, id: 't_unread_ready', is_unread: true, status: 'ready', title: 'Unread ready' }]
+        }
+      ],
+      latest_event_id: 6,
+      now: 1000,
+      tenants: []
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={client}>
+        <KanbanBoardPage />
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByText('Unread done')).toBeTruthy()
+    expect(screen.getByText('Unread blocked')).toBeTruthy()
+    expect(screen.getByText('Unread review')).toBeTruthy()
+    expect(screen.getByText('Read done')).toBeTruthy()
+    expect(screen.getByText('Unread ready')).toBeTruthy()
+    expect(screen.getAllByLabelText('Unread card')).toHaveLength(3)
+  })
+
   it('makes expanded and collapsed lane descriptions available as accessible tooltips', async () => {
     vi.mocked(fetchBoard).mockResolvedValueOnce({
       assignees: [],

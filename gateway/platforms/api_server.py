@@ -94,6 +94,7 @@ from gateway.platforms.base import (
 )
 from agent.redact import redact_sensitive_text
 from agent.interrupt_compat import request_hard_interrupt
+from agent.account_usage import desktop_codex_usage, unavailable_desktop_codex_usage
 from gateway.readiness import collect_runtime_readiness
 
 from agent.secret_scope import UnscopedSecretError as _UnscopedSecretError
@@ -2062,6 +2063,7 @@ class APIServerAdapter(BasePlatformAdapter):
             ("GET", "/v1/capabilities", self._handle_capabilities),
             ("GET", "/v1/skills", self._handle_skills),
             ("GET", "/v1/toolsets", self._handle_toolsets),
+            ("GET", "/api/account/codex-usage", self._handle_codex_usage),
             ("GET", "/api/sessions", self._handle_list_sessions),
             ("POST", "/api/sessions", self._handle_create_session),
             ("GET", "/api/sessions/{session_id}", self._handle_get_session),
@@ -3091,6 +3093,20 @@ class APIServerAdapter(BasePlatformAdapter):
                 status=500,
             )
 
+    async def _handle_codex_usage(self, request):
+        """GET /api/account/codex-usage — sanitized Desktop Codex quota state."""
+        auth_err = self._check_auth(request)
+        if auth_err:
+            return auth_err
+
+        try:
+            payload = await asyncio.to_thread(desktop_codex_usage)
+        except Exception:
+            # Fail open for UI polling: no exception text, private URL, or token
+            # material leaves the server-side gateway path.
+            payload = unavailable_desktop_codex_usage()
+        return web.json_response(payload)
+
     async def _handle_capabilities(self, request: "web.Request") -> "web.Response":
         """GET /v1/capabilities — advertise the stable API surface.
 
@@ -3139,6 +3155,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_chat_streaming": True,
                 "session_fork": True,
                 "session_model_lock": True,
+                "codex_usage": True,
                 "admin_config_rw": False,
                 "jobs_admin": False,
                 "memory_write_api": False,
@@ -3174,6 +3191,7 @@ class APIServerAdapter(BasePlatformAdapter):
                 "session_chat": {"method": "POST", "path": "/api/sessions/{session_id}/chat"},
                 "session_chat_stream": {"method": "POST", "path": "/api/sessions/{session_id}/chat/stream"},
                 "session_model_lock": {"method": "POST", "path": "/api/sessions/{session_id}/model"},
+                "codex_usage": {"method": "GET", "path": "/api/account/codex-usage"},
             },
         })
 

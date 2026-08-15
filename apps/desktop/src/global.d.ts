@@ -11,6 +11,27 @@ import type { QuickEntryStatePush, QuickEntryStatus, QuickEntrySubmitPayload } f
 
 export {}
 
+type DesktopCodexUsageBucket = {
+  detail: null | string
+  key: string
+  label: string
+  remaining_percent: null | number
+  reset_time: null | string
+  used_percent: null | number
+}
+
+type DesktopCodexUsage = {
+  available: boolean
+  buckets: DesktopCodexUsageBucket[]
+  plan: null | string
+  provider: 'openai-codex'
+  remaining_percent: null | number
+  reset_credits: number
+  reset_time: null | string
+  status: 'available' | 'unavailable'
+  used_percent: null | number
+}
+
 declare global {
   interface Window {
     hermesDesktop: {
@@ -138,6 +159,9 @@ declare global {
         // clear the preference.
         set: (name: string | null) => Promise<DesktopActiveProfile>
       }
+      codexUsage?: {
+        get: (profile?: null | string) => Promise<DesktopCodexUsage>
+      }
       api: <T>(request: HermesApiRequest) => Promise<T>
       notify: (payload: HermesNotification) => Promise<boolean>
       requestMicrophoneAccess: () => Promise<boolean>
@@ -200,6 +224,7 @@ declare global {
       zoom?: {
         get: () => Promise<{ level: number; percent: number }>
         setPercent: (percent: number) => void
+        reassert?: () => void
         onChanged: (callback: (payload: { level: number; percent: number }) => void) => () => void
       }
       revealLogs: () => Promise<{ ok: boolean; path: string; error?: string }>

@@ -1,20 +1,25 @@
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { $boardSlug, boardKey, fetchBoard, fetchTask, markTaskRead, taskKey } from './api'
 import { KanbanCommentBody } from './comment-body'
 import {
   AttachmentsSection,
+  buildDiscussionItems,
   buildTimelineItems,
   CommentComposer,
   DependenciesSection,
   TaskDetailHeaderControls,
+  TaskDrawer,
   TaskDrawerShell,
   TaskTagsSection,
   TimelineSection,
   TitleSection,
   WorkerLogSection
 } from './drawer'
-import type { KanbanTaskDetail, WorkerLog } from './types'
+import type { KanbanBoard, KanbanTaskDetail, WorkerLog } from './types'
+import { isUnreadAttentionCard } from './unread'
 
 const testKanbanText = {
   activity: (count: number) => `Activity · ${count}`,
@@ -22,10 +27,33 @@ const testKanbanText = {
   attachments: (count: number) => `Attachments (${count})`,
   close: 'Close',
   col: {
+    blocked: { help: '', label: 'Blocked' },
+    done: { help: '', label: 'Done' },
     ready: { help: '', label: 'Ready' },
+    review: { help: '', label: 'Review' },
     running: { help: '', label: 'Running' }
   },
+  archiveTask: 'Archive task',
+  assignee: 'Assignee',
+  blockedBy: 'Blocked by',
+  blocks: 'Blocks',
+  cancelEdit: 'Cancel',
   comment: 'Comment',
+  comments: (count: number) => `Comments (${count})`,
+  commentsHelp: 'Comments are sent to the task thread.',
+  commentsHelpRunning: 'Comments can message the running worker.',
+  commandCopied: 'Command copied',
+  complexity: { L: 'Large', M: 'Medium', S: 'Small' },
+  copiedId: (id: string) => `Copied ${id}`,
+  copiedTitle: 'Copied title',
+  copyTaskId: 'Copy task id',
+  copyTitle: 'Copy title',
+  couldNotEstimate: 'Could not estimate',
+  deleteTask: 'Delete task',
+  dependencies: 'Dependencies',
+  description: 'Description',
+  details: 'Details',
+  diagnosticsN: (count: number) => `Diagnostics (${count})`,
   deliveredLive: 'Delivered live',
   evtAssignedTo: (assignee: string) => `assigned to ${assignee}`,
   evtArchived: 'archived',
@@ -52,16 +80,38 @@ const testKanbanText = {
   evtUnassigned: 'unassigned',
   evtUnblocked: (col: string) => `unblocked ${col}`,
   evtWorkerStarted: 'worker started',
+  editDescription: 'Edit description',
+  estimate: 'Estimate',
+  estimateEffort: 'Estimate effort',
+  estimateTipLong: 'Estimate effort',
+  estimating: 'Estimating…',
+  makesModelCall: 'Makes a model call',
+  metaCreated: 'Created',
+  metaCreatedBy: 'Created by',
+  metaPriority: 'Priority',
+  metaTenant: 'Tenant',
+  metaWorkerPid: 'Worker PID',
+  model: 'Model',
   messageWorker: 'Message the running worker…',
   noAttachments: 'No attachments',
+  noDescription: 'No description',
+  notePosted: 'Note posted',
   openAsDialog: 'Open as dialog',
   openAsSideSheet: 'Open as side sheet',
+  readyUnassignedBody: 'Assign a worker before dispatch.',
+  readyUnassignedTitle: 'Ready but unassigned',
+  reEstimate: 'Re-estimate',
   requeueWithNote: 'Requeue with note',
   runs: (count: number) => `Runs · ${count}`,
   save: 'Save',
   send: 'Send',
+  tabActivity: 'Activity',
+  tabDetails: 'Details',
+  taskActions: 'Task actions',
   taskTitle: 'Title',
   tags: 'Tags',
+  aiResultEntry: 'AI result',
+  aiSummaryEntry: 'AI summary',
   aiTagBadge: 'AI',
   aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
   noTags: 'No tags yet.',
@@ -89,7 +139,10 @@ const testKanbanText = {
   timelineRunProfile: (profile: string) => `${profile} run`,
   timelineWaitingIn: (column: string) => `Waiting in ${column}`,
   timelineWorking: 'Agent is working now',
+  tokUnit: 'tok',
+  unassigned: 'Unassigned',
   uploadAttachment: 'Upload attachment',
+  workspace: 'Workspace',
   workerLog: 'Worker log',
   workerLogTail: 'Worker log · tail',
   workerLogEmpty: 'No worker log yet.'
@@ -100,11 +153,28 @@ vi.mock('./ui', async () => {
 
   return {
     ...actual,
+    useDefaultAssignee: () => 'default',
     useKanban: () => testKanbanText
   }
 })
 
+vi.mock('./api', async () => {
+  const actual = await vi.importActual('./api')
+
+  return {
+    ...actual,
+    fetchBoard: vi.fn(),
+    fetchLog: vi.fn(() => Promise.resolve({ content: '', exists: false, size_bytes: 0, truncated: false })),
+    fetchProfiles: vi.fn(() => Promise.resolve({ profiles: [] })),
+    fetchTags: vi.fn(() => Promise.resolve({ tags: [] })),
+    fetchTask: vi.fn(),
+    markTaskRead: vi.fn()
+  }
+})
+
 afterEach(() => {
+  vi.clearAllMocks()
+  $boardSlug.set('')
   vi.unstubAllGlobals()
 })
 
@@ -117,6 +187,160 @@ function pasteFile(target: HTMLElement, file: File) {
     }
   })
 }
+
+function taskDetail(patch: Partial<KanbanTaskDetail['task']> = {}): KanbanTaskDetail {
+  return {
+    attachments: [],
+    comments: [],
+    events: [],
+    links: { children: [], parents: [] },
+    runs: [],
+    task: {
+      created_at: 1,
+      id: 't_unread',
+      is_unread: true,
+      latest_unread_event_id: 7,
+      status: 'done',
+      title: 'Unread task',
+      ...patch
+    }
+  }
+}
+
+function renderTaskDrawer(id: string, board: KanbanBoard) {
+  const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } })
+  client.setQueryData(boardKey('', false), board)
+
+  render(
+    <QueryClientProvider client={client}>
+      <TaskDrawer columns={['done', 'blocked', 'review', 'ready']} id={id} onClose={vi.fn()} onOpen={vi.fn()} />
+    </QueryClientProvider>
+  )
+
+  return client
+}
+
+function BoardBadgeProbe({ taskId }: { taskId: string }) {
+  const { data: board } = useQuery({
+    queryFn: () => fetchBoard(false),
+    queryKey: boardKey('', false),
+    staleTime: Infinity
+  })
+  const task = board?.columns.flatMap(column => column.tasks).find(candidate => candidate.id === taskId)
+
+  return task && isUnreadAttentionCard(task) ? <span aria-label="Unread card" /> : null
+}
+
+describe('TaskDrawer read state', () => {
+  it('marks an unread qualifying card as read after its detail opens', async () => {
+    const id = 't_done_unread'
+    vi.mocked(fetchTask).mockResolvedValue(taskDetail({ id, title: 'Unread done' }))
+    vi.mocked(markTaskRead).mockResolvedValue({
+      is_unread: false,
+      last_read_event_id: 7,
+      latest_unread_event_id: 7,
+      read_at: 123,
+      task_id: id
+    })
+    const board: KanbanBoard = {
+      assignees: [],
+      columns: [
+        { name: 'done', tasks: [{ created_at: 1, id, is_unread: true, status: 'done', title: 'Unread done' }] }
+      ],
+      latest_event_id: 7,
+      now: 123,
+      tenants: []
+    }
+
+    const client = renderTaskDrawer(id, board)
+
+    await waitFor(() => expect(markTaskRead).toHaveBeenCalledWith(id))
+    await waitFor(() =>
+      expect(client.getQueryData<KanbanBoard>(boardKey('', false))?.columns[0]?.tasks[0]?.is_unread).toBe(false)
+    )
+    expect(client.getQueryData<KanbanTaskDetail>(taskKey('', id))?.task.is_unread).toBe(false)
+  })
+
+  it('keeps the board badge cleared when the board refetches after marking read', async () => {
+    const id = 't_done_unread'
+    const unreadTask = { created_at: 1, id, is_unread: true, status: 'done', title: 'Unread done' }
+    const readTask = {
+      ...unreadTask,
+      is_unread: false,
+      last_read_event_id: 7,
+      latest_unread_event_id: 7,
+      read_at: 123
+    }
+    const initialBoard: KanbanBoard = {
+      assignees: [],
+      columns: [{ name: 'done', tasks: [unreadTask] }],
+      latest_event_id: 7,
+      now: 123,
+      tenants: []
+    }
+    const refreshedBoard: KanbanBoard = {
+      ...initialBoard,
+      columns: [{ name: 'done', tasks: [readTask] }],
+      now: 124
+    }
+    let resolveRead!: (state: Awaited<ReturnType<typeof markTaskRead>>) => void
+
+    vi.mocked(fetchTask).mockResolvedValue(taskDetail({ id, title: 'Unread done' }))
+    vi.mocked(markTaskRead).mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          resolveRead = resolve
+        })
+    )
+    vi.mocked(fetchBoard).mockResolvedValueOnce(refreshedBoard)
+
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } })
+    client.setQueryData(boardKey('', false), initialBoard)
+
+    render(
+      <QueryClientProvider client={client}>
+        <BoardBadgeProbe taskId={id} />
+        <TaskDrawer columns={['done', 'blocked', 'review', 'ready']} id={id} onClose={vi.fn()} onOpen={vi.fn()} />
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByLabelText('Unread card')).toBeTruthy()
+    await waitFor(() => expect(markTaskRead).toHaveBeenCalledWith(id))
+
+    resolveRead({
+      is_unread: false,
+      last_read_event_id: 7,
+      latest_unread_event_id: 7,
+      read_at: 123,
+      task_id: id
+    })
+
+    await waitFor(() => expect(screen.queryByLabelText('Unread card')).toBeNull())
+    await waitFor(() => expect(fetchBoard).toHaveBeenCalledWith(false))
+    expect(client.getQueryData<KanbanBoard>(boardKey('', false))?.columns[0]?.tasks[0]?.is_unread).toBe(false)
+  })
+
+  it('keeps unread cached when the mark-read request fails', async () => {
+    const id = 't_blocked_unread'
+    vi.mocked(fetchTask).mockResolvedValue(taskDetail({ id, status: 'blocked', title: 'Unread blocked' }))
+    vi.mocked(markTaskRead).mockRejectedValue(new Error('read failed'))
+    const board: KanbanBoard = {
+      assignees: [],
+      columns: [
+        { name: 'blocked', tasks: [{ created_at: 1, id, is_unread: true, status: 'blocked', title: 'Unread blocked' }] }
+      ],
+      latest_event_id: 7,
+      now: 123,
+      tenants: []
+    }
+
+    const client = renderTaskDrawer(id, board)
+
+    await waitFor(() => expect(markTaskRead).toHaveBeenCalledWith(id))
+    expect(client.getQueryData<KanbanBoard>(boardKey('', false))?.columns[0]?.tasks[0]?.is_unread).toBe(true)
+    expect(client.getQueryData<KanbanTaskDetail>(taskKey('', id))?.task.is_unread).toBe(true)
+  })
+})
 
 describe('TitleSection', () => {
   it('edits an existing task title through the same save path as the description', () => {
@@ -144,6 +368,12 @@ describe('TitleSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('places the title text in a bordered detail card for scanability', () => {
+    render(<TitleSection onSave={vi.fn()} title="Readable title" />)
+
+    expect(screen.getByText('Readable title').closest('div')?.className).toContain('rounded-lg')
   })
 })
 
@@ -220,6 +450,12 @@ describe('TaskTagsSection', () => {
     expect(onAdd).toHaveBeenCalledWith('release train')
     expect((screen.getByLabelText('Tag name') as HTMLInputElement).value).toBe('')
   })
+
+  it('renders tag controls inside the shared detail card shell', () => {
+    render(<TaskTagsSection existingTags={[]} onAdd={vi.fn()} onRemove={vi.fn()} pending={false} tags={[]} />)
+
+    expect(screen.getByText('No tags yet.').closest('div')?.className).toContain('rounded-lg')
+  })
 })
 
 describe('TaskDrawerShell layout', () => {
@@ -262,7 +498,11 @@ describe('CommentComposer pasted images', () => {
         token: 'preview-token'
       })
     })
-    const onPasteImages = vi.fn().mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
+
+    const onPasteImages = vi
+      .fn()
+      .mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
+
     const onSubmit = vi.fn()
 
     render(<CommentComposer onPasteImages={onPasteImages} onSubmit={onSubmit} pending={false} />)
@@ -300,7 +540,11 @@ describe('CommentComposer pasted images', () => {
         token: 'preview-token'
       })
     })
-    const onPasteImages = vi.fn().mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
+
+    const onPasteImages = vi
+      .fn()
+      .mockResolvedValue([{ id: 7, filename: 'clip.png', url: '/api/plugins/kanban/attachments/7' }])
+
     const onSubmit = vi.fn()
 
     render(<CommentComposer onPasteImages={onPasteImages} onSubmit={onSubmit} pending={false} />)
@@ -414,6 +658,96 @@ describe('AttachmentsSection pasted images', () => {
   })
 })
 
+describe('buildDiscussionItems', () => {
+  it('mixes comments, task results, and every run summary chronologically with AI markers', () => {
+    const detail = {
+      attachments: [],
+      comments: [
+        { id: 1, author: 'samuel', body: 'Please reprocess this.', created_at: 1010 },
+        { id: 2, author: 'samuel', body: 'Second note.', created_at: 1040 }
+      ],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [
+        {
+          ended_at: 1020,
+          id: 7,
+          outcome: 'completed',
+          profile: 'default',
+          started_at: 1015,
+          status: 'closed',
+          summary: 'First AI pass.'
+        },
+        {
+          ended_at: 1050,
+          id: 8,
+          outcome: 'completed',
+          profile: 'reviewer',
+          started_at: 1045,
+          status: 'closed',
+          summary: 'Second AI pass.'
+        },
+        {
+          ended_at: 1060,
+          id: 9,
+          outcome: 'completed',
+          profile: 'default',
+          started_at: 1055,
+          status: 'closed',
+          summary: 'status changed to ready (dashboard/direct)'
+        }
+      ],
+      task: {
+        completed_at: 1030,
+        created_at: 1000,
+        id: 't_demo',
+        result: 'Legacy task result.',
+        status: 'done',
+        title: 'Demo'
+      }
+    } as KanbanTaskDetail
+
+    expect(buildDiscussionItems(detail).map(item => ({ body: item.body, kind: item.kind }))).toEqual([
+      { body: 'Please reprocess this.', kind: 'comment' },
+      { body: 'First AI pass.', kind: 'ai-summary' },
+      { body: 'Legacy task result.', kind: 'ai-result' },
+      { body: 'Second note.', kind: 'comment' },
+      { body: 'Second AI pass.', kind: 'ai-summary' }
+    ])
+  })
+
+  it('does not duplicate task.result when it matches a run handoff', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [
+        {
+          ended_at: 1020,
+          id: 7,
+          outcome: 'completed',
+          profile: 'default',
+          started_at: 1015,
+          status: 'closed',
+          summary: 'Same handoff.'
+        }
+      ],
+      task: {
+        completed_at: 1020,
+        created_at: 1000,
+        id: 't_demo',
+        result: 'Same handoff.',
+        status: 'done',
+        title: 'Demo'
+      }
+    } as KanbanTaskDetail
+
+    expect(buildDiscussionItems(detail)).toHaveLength(1)
+    expect(buildDiscussionItems(detail)[0]).toMatchObject({ body: 'Same handoff.', kind: 'ai-summary' })
+  })
+})
+
 describe('buildTimelineItems', () => {
   it('summarizes events and the current running action without exposing raw logs', () => {
     const detail = {
@@ -426,7 +760,14 @@ describe('buildTimelineItems', () => {
       ],
       links: { children: [], parents: [] },
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
-      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
     } as KanbanTaskDetail
 
     const log = {
@@ -527,6 +868,94 @@ describe('buildTimelineItems', () => {
     expect(items.map(item => item.label)).toContain('tag removed: Manual Review')
   })
 
+  it('prefers persisted activity timeline rows and groups noisy events', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1005,
+          id: 10,
+          importance: 'normal',
+          summary: 'Read the task context and selected the drawer implementation path.',
+          title: 'Loaded task context',
+          tone: 'done',
+          type: 'agent.context'
+        },
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1010,
+          id: 11,
+          importance: 'high',
+          status: 'succeeded',
+          summary: 'Ran focused Vitest coverage for the Kanban drawer.',
+          title: 'Ran Kanban drawer tests',
+          type: 'agent.verification'
+        },
+        {
+          children: [
+            {
+              actor: { id: 'ai', type: 'ai_tagger' },
+              created_at: 1020,
+              id: 12,
+              importance: 'low',
+              summary: 'added AI:Status Ready',
+              title: 'AI tag added: AI:Status Ready',
+              type: 'tags.changed'
+            },
+            {
+              actor: { id: 'ai', type: 'ai_tagger' },
+              created_at: 1021,
+              id: 13,
+              importance: 'low',
+              summary: 'removed AI:Status Todo',
+              title: 'AI tag removed: AI:Status Todo',
+              type: 'tags.changed'
+            }
+          ],
+          created_at: 1020,
+          group: { collapsed: true, count: 2, first_at: 1020, key: 'tags:auto', last_at: 1021, omitted_count: 0 },
+          id: 'group-tags-auto-12-13',
+          importance: 'low',
+          summary: 'added AI:Status Ready; removed AI:Status Todo',
+          title: 'AI updated tags automatically',
+          type: 'tags.changed'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [
+        { id: 1, created_at: 1000, kind: 'tag_attached', payload: { source: 'ai', tag: { name: 'AI:Status Ready' } } }
+      ],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1000, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const log = {
+      content: '  ┊ 📖 read      raw-log-only.tsx  0.1s',
+      exists: true,
+      size_bytes: 44,
+      truncated: false
+    } as WorkerLog
+
+    const items = buildTimelineItems(detail, log, testKanbanText as never)
+
+    expect(items.map(item => item.label)).toEqual([
+      'Loaded task context',
+      'Ran Kanban drawer tests',
+      'AI updated tags automatically'
+    ])
+    expect(items[1]).toMatchObject({ detail: 'Ran focused Vitest coverage for the Kanban drawer.', tone: 'done' })
+    expect(items[2]).toMatchObject({ group: { count: 2 }, tone: 'info' })
+    expect(items[2].children?.map(child => child.label)).toEqual([
+      'AI tag added: AI:Status Ready',
+      'AI tag removed: AI:Status Todo'
+    ])
+    expect(items.some(item => item.label === 'Agent is working now')).toBe(false)
+    expect(items.some(item => item.label === 'AI tag added: AI:Status Ready')).toBe(false)
+    expect(items.some(item => item.label === 'Work updates')).toBe(false)
+  })
+
   it('keeps raw worker logs out of the timeline view', () => {
     const detail = {
       attachments: [],
@@ -534,7 +963,14 @@ describe('buildTimelineItems', () => {
       events: [{ id: 1, created_at: 1000, kind: 'heartbeat', payload: null }],
       links: { children: [], parents: [] },
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
-      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
     } as KanbanTaskDetail
 
     const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
@@ -549,13 +985,46 @@ describe('buildTimelineItems', () => {
     expect(screen.queryByText('Runs · 1')).toBeNull()
   })
 
-  it('renders raw worker logs in their own section', () => {
-    const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
+  it('renders worker logs as structured blocks instead of one raw text dump', () => {
+    const log = {
+      content: [
+        'Query: work kanban task t_demo',
+        '  ┊ 💻 $         npm run test:ui -- src/plugins/kanban/drawer.test.tsx  1.4s [exit 1]',
+        '  ┊ 🔎 grep      WorkerLogSection  0.2s',
+        '  ┊ review diff',
+        '@@ -1,1 +1,1 @@',
+        '-raw log',
+        '+structured log'
+      ].join('\n'),
+      exists: true,
+      size_bytes: 260,
+      truncated: false
+    } as WorkerLog
 
     render(<WorkerLogSection log={log} />)
 
     expect(screen.getByText('Worker log')).toBeTruthy()
-    expect(screen.getByText('worker output')).toBeTruthy()
+    expect(screen.getByText('Task request')).toBeTruthy()
+    expect(screen.getByText('Terminal')).toBeTruthy()
+    expect(screen.getByText('Search')).toBeTruthy()
+    expect(screen.getByText('Tool result')).toBeTruthy()
+    expect(screen.getByText('exit 1')).toBeTruthy()
+    expect(screen.getByText('@@ -1,1 +1,1 @@', { exact: false })).toBeTruthy()
+  })
+
+  it('keeps malformed or unknown worker log lines visible safely', () => {
+    const log = {
+      content: 'not a known log row\nTraceback: boom',
+      exists: true,
+      size_bytes: 36,
+      truncated: false
+    } as WorkerLog
+
+    render(<WorkerLogSection log={log} />)
+
+    expect(screen.getByText('Log output')).toBeTruthy()
+    expect(screen.getByText('not a known log row', { exact: false })).toBeTruthy()
+    expect(screen.getByText('Traceback: boom', { exact: false })).toBeTruthy()
   })
 
   it('renders an empty state when worker logs have not been written yet', () => {
@@ -572,14 +1041,21 @@ describe('buildTimelineItems', () => {
       events: [],
       links: { children: [], parents: [] },
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
-      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
     } as KanbanTaskDetail
 
     const log = {
       content: [
-        "  ┊ 📖 read      drawer.tsx L1-2000  0.1s",
-        "  ┊ 🔧 patch     /repo/apps/desktop/src/plugins/kanban/drawer.tsx  1.6s",
-        "  ┊ 💻 $         npm run test:ui -- src/plugins/kanban/drawer.test.tsx  1.4s [exit 1]"
+        '  ┊ 📖 read      drawer.tsx L1-2000  0.1s',
+        '  ┊ 🔧 patch     /repo/apps/desktop/src/plugins/kanban/drawer.tsx  1.6s',
+        '  ┊ 💻 $         npm run test:ui -- src/plugins/kanban/drawer.test.tsx  1.4s [exit 1]'
       ].join('\n'),
       exists: true,
       size_bytes: 180,
@@ -606,7 +1082,14 @@ describe('buildTimelineItems', () => {
       events: [],
       links: { children: [], parents: [] },
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
-      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
     } as KanbanTaskDetail
 
     const log = { content: 'worker output', exists: true, size_bytes: 13, truncated: false } as WorkerLog
@@ -623,7 +1106,14 @@ describe('buildTimelineItems', () => {
       events: [],
       links: { children: [], parents: [] },
       runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
-      task: { assignee: 'default', created_at: 995, id: 't_demo', last_heartbeat_at: 1020, status: 'running', title: 'Demo' }
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
     } as KanbanTaskDetail
 
     const log = {
@@ -638,7 +1128,12 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Recent action')).toBe(false)
     expect(items.at(-1)).toMatchObject({ label: 'Agent is working now' })
     expect(items.at(-1)?.actionTrace).toEqual([
-      { at: 1020, detail: 'Read file-1.tsx, file-2.tsx, file-3.tsx, file-4.tsx, and 21 more.', id: 'worker-activity-summary', label: 'Work updates' }
+      {
+        at: 1020,
+        detail: 'Read file-1.tsx, file-2.tsx, file-3.tsx, file-4.tsx, and 21 more.',
+        id: 'worker-activity-summary',
+        label: 'Work updates'
+      }
     ])
   })
 
@@ -649,7 +1144,12 @@ describe('buildTimelineItems', () => {
       attachments: [],
       comments: [],
       events: [
-        ...Array.from({ length: 12 }, (_, index) => ({ id: index + 1, created_at: 1000 + index, kind: 'heartbeat', payload: null })),
+        ...Array.from({ length: 12 }, (_, index) => ({
+          id: index + 1,
+          created_at: 1000 + index,
+          kind: 'heartbeat',
+          payload: null
+        })),
         { id: 20, created_at: 1015, kind: 'completed', payload: null }
       ],
       links: { children: [], parents: [] },
@@ -659,10 +1159,10 @@ describe('buildTimelineItems', () => {
 
     const log = {
       content: [
-        "  ┊ 📚 skill     hermes-agent  0.1s",
-        "  ┊ 👁️  vision    inspect screenshot  0.1s",
-        "  ┊ 🔎 grep      timeline  0.1s",
-        "  ┊ 🔧 patch     drawer.tsx  1.6s"
+        '  ┊ 📚 skill     hermes-agent  0.1s',
+        '  ┊ 👁️  vision    inspect screenshot  0.1s',
+        '  ┊ 🔎 grep      timeline  0.1s',
+        '  ┊ 🔧 patch     drawer.tsx  1.6s'
       ].join('\n'),
       exists: true,
       size_bytes: 180,
@@ -677,7 +1177,8 @@ describe('buildTimelineItems', () => {
       expect(completed?.actionTrace).toEqual([
         {
           at: 1030,
-          detail: 'Loaded Hermes guidance, reviewed the attached screenshot, searched the Kanban activity timeline and worker-update code, and updated drawer.tsx.',
+          detail:
+            'Loaded Hermes guidance, reviewed the attached screenshot, searched the Kanban activity timeline and worker-update code, and updated drawer.tsx.',
           id: 'worker-activity-summary',
           label: 'Work updates'
         }
