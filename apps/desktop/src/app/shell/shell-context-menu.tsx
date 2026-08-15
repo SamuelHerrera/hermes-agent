@@ -7,7 +7,7 @@ import { useI18n } from '@/i18n'
 import { isEditableTarget } from '@/lib/keybinds/combo'
 import { openCommandPalette } from '@/store/command-palette'
 import { toggleStatusbarVisible } from '@/store/statusbar-prefs'
-import { requestActiveUpdate } from '@/store/updates'
+import { requestActiveUpdate, UPDATE_UI_DISABLED_FOR_LOCAL_FORK } from '@/store/updates'
 import { canOpenNewWindow, openNewWindow } from '@/store/windows'
 
 import { navigateToWorkspacePage, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../routes'
@@ -57,12 +57,16 @@ export function ShellContextMenu({ children }: { children: React.ReactNode }) {
         label: t.commandCenter.settings,
         onSelect: () => navigateToWorkspacePage(navigate, SETTINGS_ROUTE)
       })}
-      <kit.Separator />
-      {renderActionItem(kit, {
-        icon: 'cloud-download',
-        label: t.commandCenter.updateHermes,
-        onSelect: requestActiveUpdate
-      })}
+      {!UPDATE_UI_DISABLED_FOR_LOCAL_FORK && (
+        <>
+          <kit.Separator />
+          {renderActionItem(kit, {
+            icon: 'cloud-download',
+            label: t.commandCenter.updateHermes,
+            onSelect: requestActiveUpdate
+          })}
+        </>
+      )}
     </>
   )
 
