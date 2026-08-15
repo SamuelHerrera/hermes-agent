@@ -350,6 +350,7 @@ interface TimelineItem {
   icon?: null | string
   id: string
   label: string
+  status?: null | string
   tone: TimelineTone
 }
 
@@ -951,7 +952,19 @@ function heartbeatTimelineSubitems(events: KanbanEvent[]): TimelineSubitem[] {
 
 const PERSISTED_ACTIVITY_TONES = new Set<TimelineTone>(['current', 'done', 'error', 'info', 'pending', 'warning'])
 
+function isAgentStepActivity(item: KanbanActivityTimelineItem): boolean {
+  return item.source_kind === 'agent_step' || item.type.startsWith('agent.')
+}
+
+function activityTime(item: KanbanActivityTimelineItem): null | number | undefined {
+  return item.started_at ?? item.created_at ?? item.ended_at
+}
+
 function activityDetailText(item: KanbanActivityTimelineItem): string | undefined {
+  if (item.description?.trim()) {
+    return item.description.trim()
+  }
+
   if (item.summary?.trim()) {
     return item.summary.trim()
   }
@@ -1012,7 +1025,7 @@ function activityTone(item: KanbanActivityTimelineItem): TimelineTone {
 
 function activityChildItem(item: KanbanActivityTimelineItem): TimelineSubitem {
   return {
-    at: item.created_at,
+    at: activityTime(item),
     detail: activityDetailText(item),
     id: `activity-child-${String(item.id)}`,
     label: item.title || item.type.replace(/\./g, ' ')
@@ -1036,13 +1049,14 @@ function persistedActivityTimelineItems(activity: KanbanActivityTimelineItem[] |
     }
 
     return {
-      at: item.created_at,
+      at: activityTime(item),
       children: children.length ? children : undefined,
       detail: activityDetailText(item),
       group: item.group ?? undefined,
       icon: item.icon,
       id: `activity-${String(item.id)}`,
       label: item.title || item.type.replace(/\./g, ' '),
+      status: item.status,
       tone: activityTone(item)
     }
   })
@@ -1054,14 +1068,10 @@ export function buildTimelineItems(
   k: KanbanText
 ): TimelineItem[] {
   const persisted = persistedActivityTimelineItems(detail.activity_timeline)
-
-  if (persisted.length) {
-    return persisted
-  }
-
   const items: TimelineItem[] = []
   const heartbeats: KanbanEvent[] = []
   const seen = new Set<string>()
+  const hasPersistedAgentSteps = detail.activity_timeline?.some(isAgentStepActivity) ?? false
 
   const push = (item: TimelineItem) => {
     if (!seen.has(item.id)) {
@@ -1070,55 +1080,69 @@ export function buildTimelineItems(
     }
   }
 
-  if (detail.task.created_at) {
-    push({ at: detail.task.created_at, id: 'task-created', label: k.timelineCreated, tone: 'done' })
-  }
+  persisted.forEach(push)
 
-  if (detail.task.assignee) {
-    push({ id: 'task-assignee', label: k.timelineAssigned(detail.task.assignee), tone: 'done' })
-  }
-
-  for (const event of detail.events) {
-    if (event.kind === 'heartbeat') {
-      heartbeats.push(event)
-
-      continue
+  if (!persisted.length) {
+    if (detail.task.created_at) {
+      push({ at: detail.task.created_at, id: 'task-created', label: k.timelineCreated, tone: 'done' })
     }
 
-    const { detail: extra, label } = eventText(event, k)
-    const payload = parseEventPayload(event)
-    const tone = EVENT_TONES[event.kind] ?? 'done'
+    if (detail.task.assignee) {
+      push({ id: 'task-assignee', label: k.timelineAssigned(detail.task.assignee), tone: 'done' })
+    }
 
-    push({
-      at: event.created_at,
-      detail: extra,
-      id: `event-${event.id}`,
-      label: event.kind === 'commented' ? k.timelineCommented(String(payload.author ?? k.someone)) : label,
-      tone
-    })
+    for (const event of detail.events) {
+      if (event.kind === 'heartbeat') {
+        heartbeats.push(event)
+
+        continue
+      }
+
+      const { detail: extra, label } = eventText(event, k)
+      const payload = parseEventPayload(event)
+      const tone = EVENT_TONES[event.kind] ?? 'done'
+
+      push({
+        at: event.created_at,
+        detail: extra,
+        id: `event-${event.id}`,
+        label: event.kind === 'commented' ? k.timelineCommented(String(payload.author ?? k.someone)) : label,
+        tone
+      })
+    }
+  } else if (!hasPersistedAgentSteps) {
+    heartbeats.push(...detail.events.filter(event => event.kind === 'heartbeat'))
   }
 
   const run = latestRun(detail.runs)
 
-  for (const candidate of detail.runs) {
-    if (detail.task.status === 'running' && run?.id === candidate.id) {
-      continue
-    }
+  if (!persisted.length) {
+    for (const candidate of detail.runs) {
+      if (detail.task.status === 'running' && run?.id === candidate.id) {
+        continue
+      }
 
-    push(runTimelineItem(candidate))
+      push(runTimelineItem(candidate))
+    }
   }
 
   const current = currentStatusLabel(detail.task, run, k)
-
-  const actionTrace = workerLogActivitySummary(
-    log,
-    detail.task.status === 'running'
-      ? (detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at)
-      : (run?.ended_at ?? detail.task.completed_at ?? detail.task.last_heartbeat_at)
-  )
+  const actionTrace = hasPersistedAgentSteps
+    ? []
+    : workerLogActivitySummary(
+        log,
+        detail.task.status === 'running'
+          ? (detail.task.last_heartbeat_at ?? run?.started_at ?? detail.task.created_at)
+          : (run?.ended_at ?? detail.task.completed_at ?? detail.task.last_heartbeat_at)
+      )
 
   const heartbeatChildren = heartbeatTimelineSubitems(heartbeats)
   const children = heartbeatChildren.length > 0 ? heartbeatChildren : undefined
+  const shouldAddCurrent = !persisted.length || (!hasPersistedAgentSteps && (actionTrace.length > 0 || children))
+
+  if (!shouldAddCurrent) {
+    return items
+  }
 
   if (TERMINAL_STATUSES.has(detail.task.status) && current.tone === 'done') {
     push({
@@ -1203,6 +1227,29 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
     }
   }
 
+  const statusLabel = (status: null | string | undefined) => {
+    switch (status) {
+      case 'progress':
+      case 'started':
+        return 'In progress'
+
+      case 'succeeded':
+        return 'Completed'
+
+      case 'failed':
+        return 'Failed'
+
+      case 'waiting':
+        return 'Waiting'
+
+      case 'cancelled':
+        return 'Cancelled'
+
+      default:
+        return undefined
+    }
+  }
+
   if (!items.length) {
     return (
       <section className="min-h-0 flex flex-1 flex-col gap-1.5">
@@ -1241,6 +1288,11 @@ export function TimelineSection({ detail, log }: { detail: KanbanTaskDetail; log
                   {item.group && (
                     <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] leading-none text-(--ui-text-quaternary)">
                       {item.group.count} grouped
+                    </span>
+                  )}
+                  {statusLabel(item.status) && (
+                    <span className="rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] leading-none text-(--ui-text-quaternary)">
+                      {statusLabel(item.status)}
                     </span>
                   )}
                   {ago(item.at) && (
@@ -1774,71 +1826,139 @@ export function CommentComposer({
   )
 }
 
-export function TitleSection({ onSave, title }: { onSave: (title: string) => void; title: string }) {
+export function TitleSection({
+  disabled = false,
+  onSave,
+  saving = false,
+  title
+}: {
+  disabled?: boolean
+  onSave: (title: string) => Promise<void> | void
+  saving?: boolean
+  title: string
+}) {
   const k = useKanban()
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = useState(title)
+  const [message, setMessage] = useState<null | string>(null)
+  const editButtonRef = useRef<HTMLButtonElement | null>(null)
   const trimmed = draft.trim()
 
-  return (
-    <Section
-      action={
-        <Button
-          aria-label={editing ? k.cancelEdit : k.editTitle}
-          onClick={() => {
-            setDraft(title)
-            setEditing(!editing)
-          }}
-          size="icon-xs"
-          variant="ghost"
-        >
-          <Codicon name={editing ? 'close' : 'edit'} size="0.75rem" />
-        </Button>
-      }
-      label={k.taskTitle}
-    >
-      <DetailPanel>
-        {editing ? (
-          <div className="flex flex-col gap-1.5">
-            <Input
-              autoFocus
-              className="text-[0.8125rem] font-semibold"
-              onChange={event => setDraft(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
+  useEffect(() => {
+    if (!editing) {
+      setDraft(title)
+    }
+  }, [editing, title])
 
-                  if (trimmed) {
-                    onSave(trimmed)
-                    setEditing(false)
-                  }
-                }
-              }}
-              value={draft}
-            />
+  const restoreEditFocus = () => requestAnimationFrame(() => editButtonRef.current?.focus())
+  const cancel = () => {
+    setDraft(title)
+    setMessage(null)
+    setEditing(false)
+    restoreEditFocus()
+  }
+  const save = async () => {
+    if (saving) {
+      return
+    }
+
+    if (!trimmed) {
+      setMessage(k.titleRequired)
+      return
+    }
+
+    setMessage(null)
+
+    try {
+      await onSave(trimmed)
+      setEditing(false)
+      restoreEditFocus()
+    } catch (err: unknown) {
+      setMessage(errText(err))
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-start gap-1.5">
+          <Input
+            aria-invalid={message ? true : undefined}
+            aria-label={k.taskTitle}
+            autoFocus
+            className="h-8 min-w-[12rem] flex-1 text-sm font-semibold"
+            disabled={disabled || saving}
+            onChange={event => {
+              setDraft(event.target.value)
+              if (message) {
+                setMessage(null)
+              }
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                event.stopPropagation()
+                void save()
+              }
+
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                event.stopPropagation()
+                cancel()
+              }
+            }}
+            value={draft}
+          />
+          <div className="flex shrink-0 items-center gap-1">
             <Button
               aria-label={k.save}
-              className="self-end"
-              disabled={!trimmed}
-              onClick={() => {
-                if (!trimmed) {
-                  return
-                }
-
-                onSave(trimmed)
-                setEditing(false)
-              }}
+              disabled={disabled || saving}
+              onClick={() => void save()}
               size="xs"
               variant="secondary"
             >
+              <Codicon name={saving ? 'loading' : 'check'} size="0.75rem" spinning={saving} />
               {k.save}
             </Button>
+            <Button aria-label={k.cancelEdit} disabled={disabled || saving} onClick={cancel} size="xs" variant="ghost">
+              <Codicon name="close" size="0.75rem" />
+              {k.cancelEdit}
+            </Button>
           </div>
-        ) : (
-          <p className="whitespace-pre-wrap text-[0.875rem] leading-relaxed font-semibold text-foreground">{title}</p>
+        </div>
+        {message && (
+          <p className="text-[0.6875rem] text-destructive" role="alert">
+            {message}
+          </p>
         )}
-      </DetailPanel>
-    </Section>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <h2
+        className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-snug font-semibold text-foreground"
+        data-selectable-text="true"
+      >
+        {title}
+      </h2>
+      <Button
+        aria-label={k.editTitle}
+        className="mt-[-0.125rem] shrink-0"
+        disabled={disabled}
+        onClick={() => {
+          setDraft(title)
+          setMessage(null)
+          setEditing(true)
+        }}
+        ref={editButtonRef}
+        size="icon-xs"
+        variant="ghost"
+      >
+        <Codicon name="edit" size="0.75rem" />
+      </Button>
+    </div>
   )
 }
 
@@ -2533,6 +2653,12 @@ export function TaskDrawer({
     }
   })
 
+  const titleMut = useMutation({
+    mutationFn: (title: string) => patchTask(id!, { title }),
+    onError: err => host.notify({ kind: 'error', message: errText(err) }),
+    onSuccess: invalidate
+  })
+
   const pasteImagesAsAttachments = (event: ClipboardEvent<HTMLElement>) => {
     if (event.defaultPrevented || pasteImagesMut.isPending || uploadMut.isPending) {
       return
@@ -2641,9 +2767,13 @@ export function TaskDrawer({
           </div>
         </div>
         {task && (
-          <h2 className="text-sm leading-snug font-semibold text-foreground" data-selectable-text="true">
-            {task.title || task.id}
-          </h2>
+          <TitleSection
+            onSave={async title => {
+              await titleMut.mutateAsync(title)
+            }}
+            saving={titleMut.isPending}
+            title={task.title || task.id}
+          />
         )}
       </header>
 
@@ -2699,11 +2829,6 @@ export function TaskDrawer({
                   <Diagnostics items={task.diagnostics} onReclaim={() => void mutate(() => reclaimTask(task.id))()} />
                 </Section>
               )}
-
-              <TitleSection
-                onSave={title => void mutate(() => patchTask(task.id, { title }))()}
-                title={task.title || task.id}
-              />
 
               <TaskTagsSection
                 existingTags={tags?.tags ?? []}

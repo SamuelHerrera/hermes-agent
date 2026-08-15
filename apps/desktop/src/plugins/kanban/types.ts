@@ -133,10 +133,13 @@ export interface KanbanActivityTimelineItem {
   created_at?: null | number
   actor?: KanbanActivityActor
   title: string
+  description?: null | string
   summary?: null | string
   status?: null | string
   tone?: null | KanbanActivityTone
   icon?: null | string
+  started_at?: null | number
+  ended_at?: null | number
   group?: null | KanbanActivityGroup
   details?: null | Record<string, unknown>
   children?: KanbanActivityTimelineItem[]

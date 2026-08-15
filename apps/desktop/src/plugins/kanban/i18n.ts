@@ -152,6 +152,7 @@ type KanbanMessages = {
   diagnosticsN: (n: number) => string
   commandCopied: string
   taskTitle: string
+  titleRequired: string
   tags: string
   aiTagBadge: string
   aiTagTip: string
@@ -400,6 +401,7 @@ const en: KanbanMessages = {
   diagnosticsN: n => `Diagnostics · ${n}`,
   commandCopied: 'Command copied',
   taskTitle: 'Title',
+  titleRequired: 'Title is required.',
   tags: 'Tags',
   aiTagBadge: 'AI',
   aiTagTip: 'Managed automatically by AI workflow updates; you can still remove it manually.',
@@ -649,6 +651,7 @@ const ja: KanbanMessages = {
   diagnosticsN: n => `診断・${n}`,
   commandCopied: 'コマンドをコピーしました',
   taskTitle: 'タイトル',
+  titleRequired: 'タイトルは必須です。',
   tags: 'タグ',
   aiTagBadge: 'AI',
   aiTagTip: 'AI ワークフロー更新で自動管理されています。手動で削除することもできます。',
@@ -897,6 +900,7 @@ const zh: KanbanMessages = {
   diagnosticsN: n => `诊断・${n}`,
   commandCopied: '命令已复制',
   taskTitle: '标题',
+  titleRequired: '标题为必填项。',
   tags: '标签',
   aiTagBadge: 'AI',
   aiTagTip: '由 AI 工作流更新自动管理；你仍然可以手动移除。',
@@ -1143,6 +1147,7 @@ const zhHant: KanbanMessages = {
   diagnosticsN: n => `診斷・${n}`,
   commandCopied: '指令已複製',
   taskTitle: '標題',
+  titleRequired: '標題為必填項。',
   tags: '標籤',
   aiTagBadge: 'AI',
   aiTagTip: '由 AI 工作流程更新自動管理；你仍可手動移除。',

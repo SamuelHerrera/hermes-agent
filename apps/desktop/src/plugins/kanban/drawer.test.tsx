@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { $boardSlug, boardKey, fetchBoard, fetchTask, markTaskRead, taskKey } from './api'
+import { $boardSlug, boardKey, fetchBoard, fetchTask, markTaskRead, patchTask, taskKey } from './api'
 import { KanbanCommentBody } from './comment-body'
 import {
   AttachmentsSection,
@@ -109,6 +109,7 @@ const testKanbanText = {
   tabDetails: 'Details',
   taskActions: 'Task actions',
   taskTitle: 'Title',
+  titleRequired: 'Title is required.',
   tags: 'Tags',
   aiResultEntry: 'AI result',
   aiSummaryEntry: 'AI summary',
@@ -168,7 +169,8 @@ vi.mock('./api', async () => {
     fetchProfiles: vi.fn(() => Promise.resolve({ profiles: [] })),
     fetchTags: vi.fn(() => Promise.resolve({ tags: [] })),
     fetchTask: vi.fn(),
-    markTaskRead: vi.fn()
+    markTaskRead: vi.fn(),
+    patchTask: vi.fn()
   }
 })
 
@@ -349,9 +351,11 @@ describe('TitleSection', () => {
     render(<TitleSection onSave={onSave} title="Original task title" />)
 
     expect(screen.getByText('Original task title')).toBeTruthy()
+    expect(screen.queryByText('Title')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
 
     const input = screen.getByDisplayValue('Original task title') as HTMLInputElement
+    expect(screen.queryByText('Original task title')).toBeNull()
     fireEvent.change(input, { target: { value: 'Updated task title' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -368,12 +372,97 @@ describe('TitleSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert').textContent).toBe('Title is required.')
   })
 
-  it('places the title text in a bordered detail card for scanability', () => {
-    render(<TitleSection onSave={vi.fn()} title="Readable title" />)
+  it('cancels local title edits without saving', () => {
+    const onSave = vi.fn()
 
-    expect(screen.getByText('Readable title').closest('div')?.className).toContain('rounded-lg')
+    render(<TitleSection onSave={onSave} title="Readable title" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByDisplayValue('Readable title'), { target: { value: 'Draft title' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Readable title')).toBeTruthy()
+    expect(screen.queryByDisplayValue('Draft title')).toBeNull()
+  })
+
+  it('saves a valid title with Enter', async () => {
+    const onSave = vi.fn()
+
+    render(<TitleSection onSave={onSave} title="Keyboard title" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    const input = screen.getByLabelText('Title')
+    fireEvent.change(input, { target: { value: '  Saved by Enter  ' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith('Saved by Enter'))
+    await waitFor(() => expect(screen.queryByDisplayValue('  Saved by Enter  ')).toBeNull())
+  })
+
+  it('cancels title editing with Escape', () => {
+    const onSave = vi.fn()
+
+    render(<TitleSection onSave={onSave} title="Readable title" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    const input = screen.getByDisplayValue('Readable title')
+    fireEvent.change(input, { target: { value: 'Draft title' } })
+    fireEvent.keyDown(input, { key: 'Escape' })
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('Readable title')).toBeTruthy()
+    expect(screen.queryByDisplayValue('Draft title')).toBeNull()
+  })
+
+  it('keeps editing and shows the save error when title persistence fails', async () => {
+    const onSave = vi.fn(async () => {
+      throw new Error('Save failed')
+    })
+
+    render(<TitleSection onSave={onSave} title="Readable title" />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    fireEvent.change(screen.getByDisplayValue('Readable title'), { target: { value: 'Changed title' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Save failed'))
+    expect(screen.getByDisplayValue('Changed title')).toBeTruthy()
+  })
+
+  it('loads an existing drawer title once and saves edits through patchTask', async () => {
+    const id = 't_title_edit'
+    vi.mocked(fetchTask).mockResolvedValue(
+      taskDetail({ id, is_unread: false, status: 'ready', title: 'Existing drawer title' })
+    )
+    vi.mocked(patchTask).mockResolvedValue({})
+
+    const board: KanbanBoard = {
+      assignees: [],
+      columns: [{ name: 'ready', tasks: [{ created_at: 1, id, status: 'ready', title: 'Existing drawer title' }] }],
+      latest_event_id: 7,
+      now: 123,
+      tenants: []
+    }
+
+    renderTaskDrawer(id, board)
+
+    expect(await screen.findByText('Existing drawer title')).toBeTruthy()
+    expect(screen.queryByText('Title')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit title' }))
+    const input = screen.getByLabelText('Title') as HTMLInputElement
+    expect(input.value).toBe('Existing drawer title')
+    expect(screen.queryByText('Existing drawer title')).toBeNull()
+
+    fireEvent.change(input, { target: { value: 'Renamed from drawer' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(patchTask).toHaveBeenCalledWith(id, { title: 'Renamed from drawer' }))
+    await waitFor(() => expect(screen.queryByDisplayValue('Renamed from drawer')).toBeNull())
   })
 })
 
@@ -954,6 +1043,193 @@ describe('buildTimelineItems', () => {
     expect(items.some(item => item.label === 'Agent is working now')).toBe(false)
     expect(items.some(item => item.label === 'AI tag added: AI:Status Ready')).toBe(false)
     expect(items.some(item => item.label === 'Work updates')).toBe(false)
+  })
+
+  it('uses durable grouped agent step descriptions, statuses, and start times', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1010,
+          description: 'The agent is reading the related UI code to understand the Activity timeline behavior.',
+          ended_at: 1020,
+          id: 10,
+          importance: 'normal',
+          source_kind: 'agent_step',
+          started_at: 1005,
+          status: 'progress',
+          summary: 'A shorter technical fallback.',
+          title: 'Inspecting relevant files',
+          type: 'agent.file_inspection'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1000, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const items = buildTimelineItems(detail, undefined, testKanbanText as never)
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      at: 1005,
+      detail: 'The agent is reading the related UI code to understand the Activity timeline behavior.',
+      label: 'Inspecting relevant files',
+      status: 'progress',
+      tone: 'current'
+    })
+
+    render(<TimelineSection detail={detail} />)
+
+    expect(screen.getByText('Inspecting relevant files')).toBeTruthy()
+    expect(screen.getByText('In progress')).toBeTruthy()
+    expect(
+      screen.getByText('The agent is reading the related UI code to understand the Activity timeline behavior.')
+    ).toBeTruthy()
+  })
+
+  it('renders running, completed, and failed grouped step statuses', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1010,
+          description: 'The agent is still checking the relevant files.',
+          id: 10,
+          source_kind: 'agent_step',
+          started_at: 1005,
+          status: 'progress',
+          title: 'Inspecting relevant files',
+          type: 'agent.file_inspection'
+        },
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1020,
+          description: 'The focused Activity timeline tests passed.',
+          id: 11,
+          source_kind: 'agent_step',
+          started_at: 1015,
+          status: 'succeeded',
+          title: 'Running verification',
+          type: 'agent.verification'
+        },
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1030,
+          description: 'A command failed and the agent is using that output to recover.',
+          id: 12,
+          source_kind: 'agent_step',
+          started_at: 1025,
+          status: 'failed',
+          title: 'Recovering from a failed command',
+          type: 'agent.error_retry'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1000, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const items = buildTimelineItems(detail, undefined, testKanbanText as never)
+
+    expect(items.map(item => ({ label: item.label, status: item.status, tone: item.tone }))).toEqual([
+      { label: 'Inspecting relevant files', status: 'progress', tone: 'current' },
+      { label: 'Running verification', status: 'succeeded', tone: 'done' },
+      { label: 'Recovering from a failed command', status: 'failed', tone: 'error' }
+    ])
+
+    render(<TimelineSection detail={detail} />)
+
+    expect(screen.getByText('In progress')).toBeTruthy()
+    expect(screen.getByText('Completed')).toBeTruthy()
+    expect(screen.getByText('Failed')).toBeTruthy()
+  })
+
+  it('uses current status fallback messaging when worker logs are missing', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [
+        { id: 1, created_at: 1000, kind: 'created', payload: { assignee: 'default', status: 'ready' } },
+        { id: 2, created_at: 1010, kind: 'assigned', payload: { assignee: 'default' } }
+      ],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1015, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const items = buildTimelineItems(detail, undefined, testKanbanText as never)
+
+    expect(items.map(item => item.label)).toEqual([
+      'Task created',
+      'Assigned to default',
+      'created Ready default',
+      'assigned to default',
+      'Agent is working now'
+    ])
+    expect(items.at(-1)).toMatchObject({ detail: 'default run', tone: 'current' })
+    expect(items.at(-1)?.actionTrace).toBeUndefined()
+  })
+
+  it('merges worker-log fallback progress when persisted activity has only lifecycle rows', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          actor: { id: 'dispatcher', type: 'system' },
+          created_at: 1000,
+          id: 10,
+          importance: 'normal',
+          source_kind: 'task_event',
+          status: 'succeeded',
+          summary: 'A worker picked up this task.',
+          title: 'Claimed by shiburashid.local',
+          type: 'task.claimed'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [{ id: 1, created_at: 1020, kind: 'heartbeat', payload: null }],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1010, status: 'running' }],
+      task: {
+        assignee: 'default',
+        created_at: 995,
+        id: 't_demo',
+        last_heartbeat_at: 1020,
+        status: 'running',
+        title: 'Demo'
+      }
+    } as KanbanTaskDetail
+
+    const log = {
+      content: [
+        '  ┊ 📖 read      drawer.tsx L1-2000  0.1s',
+        '  ┊ 📖 read      types.ts L1-200  0.1s',
+        '  ┊ 🔎 grep      activity_timeline  0.1s'
+      ].join('\n'),
+      exists: true,
+      size_bytes: 140,
+      truncated: false
+    } as WorkerLog
+
+    const items = buildTimelineItems(detail, log, testKanbanText as never)
+
+    expect(items.map(item => item.label)).toEqual(['Claimed by shiburashid.local', 'Agent is working now'])
+    expect(items.at(-1)?.actionTrace).toEqual([
+      {
+        at: 1020,
+        detail: 'Searched the Kanban activity timeline and worker-update code and read drawer.tsx and types.ts.',
+        id: 'worker-activity-summary',
+        label: 'Work updates'
+      }
+    ])
+    expect(items.at(-1)?.children).toMatchObject([{ label: 'Worker check-ins' }])
   })
 
   it('keeps raw worker logs out of the timeline view', () => {

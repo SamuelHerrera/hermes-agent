@@ -76,6 +76,51 @@ def test_agent_activity_step_updates_existing_group_without_exposing_raw_details
         assert "pytest -q" not in rendered
 
 
+def test_agent_activity_steps_preserve_assignment_progress_and_failures(kanban_home):
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="preserve lifecycle rows")
+        assert kb.assign_task(conn, tid, "worker-a")
+        claimed = kb.claim_task(conn, tid, claimer="worker-a:1")
+        assert claimed is not None
+        run_id = claimed.current_run_id
+        assert kb.heartbeat_worker(conn, tid, note="checking the Activity timeline", expected_run_id=run_id)
+
+        kb.record_agent_activity_step(
+            conn,
+            tid,
+            run_id=run_id,
+            step_type="verification",
+            group_key=f"run:{run_id}:verification:ui-tests",
+            title="Running verification",
+            summary="The agent is checking that the Activity timeline renders the grouped steps correctly.",
+            status="progress",
+        )
+        kb.record_agent_activity_step(
+            conn,
+            tid,
+            run_id=run_id,
+            step_type="error_retry",
+            group_key=f"run:{run_id}:error_retry:typecheck",
+            title="Recovering from a failed command",
+            summary="A verification command failed, so the agent is using the error to decide the next step.",
+            status="failed",
+        )
+
+        timeline = kb.list_activity_timeline(conn, tid)
+
+    labels = [item["title"] for item in timeline]
+    assert "Assigned to worker-a" in labels
+    assert "Progress update" in labels
+    assert "Running verification" in labels
+    assert "Recovering from a failed command" in labels
+    by_title = {item["title"]: item for item in timeline}
+    assert by_title["Running verification"]["status"] == "progress"
+    assert by_title["Running verification"]["description"] == (
+        "The agent is checking that the Activity timeline renders the grouped steps correctly."
+    )
+    assert by_title["Recovering from a failed command"]["status"] == "failed"
+
+
 def test_handle_function_call_records_grouped_kanban_tool_step(kanban_home, monkeypatch):
     from tools.registry import registry
     import model_tools
