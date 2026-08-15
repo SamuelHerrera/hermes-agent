@@ -476,6 +476,27 @@ def _require_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+@app.get("/api/account/codex-usage")
+async def get_codex_usage():
+    """Return sanitized Desktop Codex quota state for the dashboard API.
+
+    Desktop's Electron main process calls this route on its local
+    ``hermes serve`` connection. Keep the endpoint on the FastAPI/dashboard
+    backend as well as the gateway API server so the authenticated request
+    reaches the shared account-usage serializer instead of the headless SPA
+    404 fallback.
+    """
+    account_usage = importlib.import_module("agent.account_usage")
+
+    try:
+        payload = await run_in_threadpool(account_usage.desktop_codex_usage)
+    except Exception:
+        # Fail open for UI polling and never leak private endpoint URLs,
+        # bearer tokens, or exception details to the renderer process.
+        payload = account_usage.unavailable_desktop_codex_usage()
+    return JSONResponse(payload)
+
+
 # Accepted Host header values for loopback binds. DNS rebinding attacks
 # point a victim browser at an attacker-controlled hostname (evil.test)
 # which resolves to 127.0.0.1 after a TTL flip — bypassing same-origin
