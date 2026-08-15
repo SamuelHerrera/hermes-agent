@@ -3614,6 +3614,7 @@ def create_task(
                         "workspace_path": workspace_path,
                         "branch_name": branch_name,
                         "project_id": project_id,
+                        "created_by": created_by,
                         "skills": list(skills_list) if skills_list else None,
                         "goal_mode": bool(goal_mode) or None,
                         "model_override": model_override,
@@ -5124,13 +5125,32 @@ def _activity_spec_for_event(kind: str, payload: Optional[dict]) -> dict[str, An
     details = {"payload": payload} if payload else None
 
     if kind == "created":
+        created_by = payload.get("created_by") if payload else None
+        summary_bits = []
+        if payload and payload.get("status"):
+            summary_bits.append(f"Initial status: {payload.get('status')}")
+        if isinstance(created_by, str) and created_by.strip():
+            summary_bits.append(f"Created by {created_by.strip()}")
         return {
             "semantic_type": "task.created",
             "title": "Task created",
-            "summary": f"Initial status: {payload.get('status')}" if payload and payload.get("status") else None,
+            "summary": " · ".join(summary_bits) or None,
             "status": "succeeded",
             "tone": "done",
             "actor_type": "dispatcher",
+            "actor_id": created_by.strip() if isinstance(created_by, str) and created_by.strip() else None,
+            "details": details,
+        }
+    if kind == "commented":
+        author = payload.get("author") if payload else None
+        author = author.strip() if isinstance(author, str) else ""
+        return {
+            "semantic_type": "task.commented",
+            "title": f"Comment from {author}" if author else "Comment added",
+            "summary": None,
+            "tone": "info",
+            "actor_type": "human" if author else actor_type,
+            "actor_id": author or actor_id,
             "details": details,
         }
     if kind == "claimed":

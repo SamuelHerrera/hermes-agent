@@ -253,7 +253,7 @@ function eventText(event: KanbanEvent, k: KanbanText): { detail?: string; label:
 
   switch (event.kind) {
     case 'created':
-      return { label: k.evtCreated(col('status') ?? '', str('assignee') ?? '') }
+      return { label: k.evtCreated(col('status') ?? '', str('assignee') ?? ''), detail: str('created_by') ?? undefined }
     case 'status': {
       const reason = str('reason')
 

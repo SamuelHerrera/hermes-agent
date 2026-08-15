@@ -36,8 +36,10 @@ the port.
 from __future__ import annotations
 
 import asyncio
+import getpass
 import json
 import logging
+import os
 import sqlite3
 import time
 from dataclasses import asdict
@@ -147,6 +149,45 @@ def _reader_id(reader_id: Optional[str]) -> str:
     except Exception:
         profile = "default"
     return kanban_db._normalize_reader_id(f"profile:{profile or 'default'}")
+
+
+_DASHBOARD_AUTHOR_ALIASES = {"dashboard", "desktop", "destop"}
+
+
+def _local_user_display_name() -> str:
+    """Return a human display name for local dashboard/desktop writes.
+
+    The Kanban API historically persisted generic surface labels (``dashboard``
+    or ``desktop``) as the ticket creator/comment author. Prefer an explicit
+    display-name env override when deployments provide one, then the OS account
+    full name, then a readable local-user fallback instead of another opaque
+    surface label.
+    """
+    for key in ("HERMES_USER_DISPLAY_NAME", "HERMES_DISPLAY_NAME", "USER_DISPLAY_NAME"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        import pwd
+
+        gecos = (pwd.getpwuid(os.getuid()).pw_gecos or "").split(",", 1)[0].strip()
+        if gecos:
+            return gecos
+    except Exception:
+        pass
+    try:
+        username = getpass.getuser().strip()
+    except Exception:
+        username = ""
+    return f"Local user ({username})" if username else "Local user"
+
+
+def _display_author(author: Optional[str]) -> str:
+    """Resolve dashboard/desktop placeholder authors to the current user."""
+    value = (author or "").strip()
+    if not value or value.casefold() in _DASHBOARD_AUTHOR_ALIASES:
+        return _local_user_display_name()
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +843,7 @@ def create_task(payload: CreateTaskBody, board: Optional[str] = Query(None)):
             title=payload.title,
             body=payload.body,
             assignee=payload.assignee,
-            created_by="dashboard",
+            created_by=_display_author(None),
             workspace_kind=payload.workspace_kind,
             workspace_path=payload.workspace_path,
             tenant=payload.tenant,
@@ -1602,7 +1643,7 @@ def _set_status_direct(
 
 class CommentBody(BaseModel):
     body: str
-    author: Optional[str] = "dashboard"
+    author: Optional[str] = None
 
 
 @router.post("/tasks/{task_id}/comments")
@@ -1615,7 +1656,7 @@ def add_comment(task_id: str, payload: CommentBody, board: Optional[str] = Query
         if kanban_db.get_task(conn, task_id) is None:
             raise HTTPException(status_code=404, detail=f"task {task_id} not found")
         kanban_db.add_comment(
-            conn, task_id, author=payload.author or "dashboard", body=payload.body,
+            conn, task_id, author=_display_author(payload.author), body=payload.body,
         )
         return {"ok": True}
     finally:

@@ -119,6 +119,22 @@ def test_create_task_appears_on_board(client):
     assert "researcher" in data["assignees"]
 
 
+def test_dashboard_created_tasks_use_current_user_display_name(client, monkeypatch):
+    monkeypatch.setenv("HERMES_USER_DISPLAY_NAME", "Samuel Operator")
+
+    r = client.post("/api/plugins/kanban/tasks", json={"title": "named creator"})
+    assert r.status_code == 200, r.text
+    task = r.json()["task"]
+    assert task["created_by"] == "Samuel Operator"
+
+    detail = client.get(f"/api/plugins/kanban/tasks/{task['id']}").json()
+    assert detail["task"]["created_by"] == "Samuel Operator"
+    created = next(event for event in detail["events"] if event["kind"] == "created")
+    assert created["payload"]["created_by"] == "Samuel Operator"
+    activity = next(item for item in detail["activity_timeline"] if item["type"] == "task.created")
+    assert "Created by Samuel Operator" in activity["summary"]
+
+
 def test_board_marks_parent_satisfaction_for_todo_cards(client):
     parent = client.post("/api/plugins/kanban/tasks", json={"title": "parent"}).json()["task"]
     child = client.post(
@@ -731,6 +747,25 @@ def test_add_comment(client):
     assert len(comments) == 1
     assert comments[0]["body"] == "how's progress?"
     assert comments[0]["author"] == "teknium"
+
+
+def test_dashboard_placeholder_comment_author_uses_current_user(client, monkeypatch):
+    monkeypatch.setenv("HERMES_USER_DISPLAY_NAME", "Samuel Operator")
+    t = client.post("/api/plugins/kanban/tasks", json={"title": "x"}).json()["task"]
+
+    for payload in ({"body": "default author"}, {"body": "desktop author", "author": "desktop"}):
+        r = client.post(f"/api/plugins/kanban/tasks/{t['id']}/comments", json=payload)
+        assert r.status_code == 200, r.text
+
+    detail = client.get(f"/api/plugins/kanban/tasks/{t['id']}").json()
+    assert [c["author"] for c in detail["comments"]] == ["Samuel Operator", "Samuel Operator"]
+    comment_events = [event for event in detail["events"] if event["kind"] == "commented"]
+    assert [event["payload"]["author"] for event in comment_events] == ["Samuel Operator", "Samuel Operator"]
+    comment_activity = [item for item in detail["activity_timeline"] if item["type"] == "task.commented"]
+    assert [item["title"] for item in comment_activity] == [
+        "Comment from Samuel Operator",
+        "Comment from Samuel Operator",
+    ]
 
 
 # ---------------------------------------------------------------------------
