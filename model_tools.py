@@ -1503,6 +1503,17 @@ def handle_function_call(
                         session_id=session_id,
                         user_task=user_task,
                     )
+            try:
+                from agent.kanban_activity import record_kanban_tool_activity
+
+                record_kanban_tool_activity(
+                    function_name,
+                    function_args,
+                    observer_status="ok",
+                    phase="start",
+                )
+            except Exception:
+                pass
             if skip_tool_execution_middleware:
                 result = _dispatch(function_args)
             else:
@@ -1526,6 +1537,25 @@ def handle_function_call(
                 except Exception:
                     pass
         duration_ms = int((time.monotonic() - _dispatch_start) * 1000)
+
+        try:
+            status, error_type, error_message = _tool_result_observer_fields(
+                function_name,
+                result,
+            )
+            from agent.kanban_activity import record_kanban_tool_activity
+
+            record_kanban_tool_activity(
+                function_name,
+                function_args,
+                observer_status=status,
+                phase="end",
+                duration_ms=duration_ms,
+                error_type=error_type,
+                error_message=error_message,
+            )
+        except Exception:
+            pass
 
         _emit_post_tool_call_hook(
             function_name=function_name,
@@ -1588,6 +1618,20 @@ def handle_function_call(
             if _dispatch_start is not None
             else 0
         )
+        try:
+            from agent.kanban_activity import record_kanban_tool_activity
+
+            record_kanban_tool_activity(
+                function_name,
+                function_args,
+                observer_status="error",
+                phase="end",
+                duration_ms=duration_ms,
+                error_type=type(e).__name__,
+                error_message=str(e),
+            )
+        except Exception:
+            pass
         _emit_post_tool_call_hook(
             function_name=function_name,
             function_args=function_args,

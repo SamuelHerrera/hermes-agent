@@ -5080,6 +5080,188 @@ def append_activity_event(
         )
 
 
+_AGENT_ACTIVITY_TERMINAL_STATUSES = {"succeeded", "failed", "waiting", "cancelled"}
+
+
+def _activity_run_clause(run_id: Optional[int]) -> tuple[str, tuple[Any, ...]]:
+    if run_id is None:
+        return "run_id IS NULL", ()
+    return "run_id = ?", (run_id,)
+
+
+def _coerce_activity_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _merge_activity_step_details(
+    prior: Optional[dict],
+    incoming: Optional[dict],
+    *,
+    created_at: int,
+    updated_at: int,
+    terminal: bool,
+) -> dict:
+    """Merge safe, user-facing step metadata for an upserted agent step."""
+    merged: dict[str, Any] = dict(prior or {})
+    merged.setdefault("started_at", created_at)
+    merged["last_update_at"] = updated_at
+    if terminal:
+        merged["ended_at"] = updated_at
+    merged["updates_count"] = max(1, _coerce_activity_int(merged.get("updates_count")) or 1) + 1
+
+    incoming = incoming if isinstance(incoming, dict) else {}
+    for key, value in incoming.items():
+        if key in {"raw_sources", "tools", "started_at", "last_update_at", "ended_at", "updates_count"}:
+            continue
+        if value is not None:
+            merged[key] = value
+
+    raw_sources: list[Any] = []
+    for source in merged.get("raw_sources") or []:
+        if source not in raw_sources:
+            raw_sources.append(source)
+    for source in incoming.get("raw_sources") or []:
+        if source not in raw_sources:
+            raw_sources.append(source)
+    if raw_sources:
+        merged["raw_sources"] = raw_sources[-25:]
+
+    tools: list[str] = []
+    for tool in merged.get("tools") or []:
+        if isinstance(tool, str) and tool not in tools:
+            tools.append(tool)
+    for tool in incoming.get("tools") or []:
+        if isinstance(tool, str) and tool not in tools:
+            tools.append(tool)
+    if tools:
+        merged["tools"] = tools[-25:]
+    return merged
+
+
+def record_agent_activity_step(
+    conn: sqlite3.Connection,
+    task_id: str,
+    *,
+    step_type: str,
+    title: str,
+    summary: Optional[str] = None,
+    group_key: Optional[str] = None,
+    run_id: Optional[int] = None,
+    actor_type: str = "agent",
+    actor_id: Optional[str] = None,
+    details: Optional[dict] = None,
+    status: Optional[str] = None,
+    tone: Optional[str] = None,
+    icon: Optional[str] = None,
+    importance: str = "normal",
+    visibility: str = "timeline",
+) -> Optional[int]:
+    """Insert or update one durable, grouped user-facing agent work step.
+
+    Unlike :func:`append_activity_event`, this writer coalesces repeated
+    low-level tool calls into a single Activity row when they share a stable
+    ``group_key`` for the same task run. The row keeps a plain title/summary in
+    the main timeline while preserving bounded raw-source references in
+    ``details_json`` for expansion/debugging.
+    """
+    clean_step = (step_type or "step").strip().replace(".", "_") or "step"
+    semantic_type = f"agent.{clean_step}"
+    now = int(time.time())
+    with write_txn(conn, allow_nested=True):
+        existing = None
+        if group_key:
+            run_clause, run_params = _activity_run_clause(run_id)
+            existing = conn.execute(
+                "SELECT * FROM task_activity_events "
+                "WHERE task_id = ? AND source_kind = 'agent_step' "
+                f"AND {run_clause} AND group_key = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (task_id, *run_params, group_key),
+            ).fetchone()
+        if existing is None:
+            initial_details = _merge_activity_step_details(
+                None,
+                details,
+                created_at=now,
+                updated_at=now,
+                terminal=status in _AGENT_ACTIVITY_TERMINAL_STATUSES,
+            )
+            # _merge_activity_step_details starts at 2 because it is optimized
+            # for update calls; normalize first-write count back to 1.
+            initial_details["updates_count"] = 1
+            return _append_activity_event(
+                conn,
+                task_id,
+                run_id=run_id,
+                source_kind="agent_step",
+                semantic_type=semantic_type,
+                importance=importance,
+                group_key=group_key,
+                created_at=now,
+                actor_type=actor_type,
+                actor_id=actor_id,
+                title=title,
+                summary=summary,
+                details=initial_details,
+                status=status,
+                tone=tone,
+                icon=icon,
+                visibility=visibility,
+            )
+
+        existing_details = _activity_details_from_row(existing)
+        merged_details = _merge_activity_step_details(
+            existing_details,
+            details,
+            created_at=int(existing["created_at"]),
+            updated_at=now,
+            terminal=status in _AGENT_ACTIVITY_TERMINAL_STATUSES,
+        )
+        conn.execute(
+            """
+            UPDATE task_activity_events
+               SET semantic_type = ?,
+                   importance    = ?,
+                   actor_type    = ?,
+                   actor_id      = ?,
+                   title         = ?,
+                   summary       = ?,
+                   details_json  = ?,
+                   status        = ?,
+                   tone          = ?,
+                   icon          = ?,
+                   visibility    = ?
+             WHERE id = ?
+            """,
+            (
+                semantic_type,
+                importance,
+                actor_type,
+                actor_id,
+                title,
+                summary,
+                _json_or_none(merged_details),
+                status,
+                tone,
+                icon,
+                visibility,
+                int(existing["id"]),
+            ),
+        )
+        return int(existing["id"])
+
+
 def _activity_tag_name(payload: Optional[dict]) -> Optional[str]:
     tag = payload.get("tag") if isinstance(payload, dict) else None
     if isinstance(tag, dict):
@@ -5442,6 +5624,9 @@ def list_activity_events(conn: sqlite3.Connection, task_id: str) -> list[Activit
 
 
 def _activity_item_dict(event: ActivityEvent) -> dict[str, Any]:
+    details = event.details if isinstance(event.details, dict) else None
+    started_at = _coerce_activity_int(details.get("started_at")) if details else None
+    ended_at = _coerce_activity_int(details.get("ended_at")) if details else None
     return {
         "id": event.id,
         "task_id": event.task_id,
@@ -5454,7 +5639,10 @@ def _activity_item_dict(event: ActivityEvent) -> dict[str, Any]:
         "actor": {"type": event.actor_type, "id": event.actor_id},
         "title": event.title,
         "summary": event.summary,
+        "description": event.summary,
         "status": event.status,
+        "started_at": started_at or event.created_at,
+        "ended_at": ended_at,
         "tone": event.tone,
         "icon": event.icon,
         "group": None,
