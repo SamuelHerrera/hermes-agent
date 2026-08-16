@@ -33,6 +33,7 @@ import {
 import { useEffect } from 'react'
 
 import { $boardSlug, bindApi, boardKey, BOARDS_KEY, fetchBoard, fetchBoards } from './api'
+import { KanbanApprovalBridge } from './approval-bridge'
 import { KanbanBoardPage } from './board'
 import { KANBAN_LOCALES } from './i18n'
 import {
@@ -264,6 +265,12 @@ const plugin: HermesPlugin = {
         area: STATUSBAR_AREAS.right,
         order: 80,
         render: () => <KanbanCount />
+      },
+      {
+        id: 'approval-bridge',
+        area: STATUSBAR_AREAS.right,
+        order: 79,
+        render: () => <KanbanApprovalBridge nativeNotify={ctx.os.notify} />
       },
       {
         id: 'open',

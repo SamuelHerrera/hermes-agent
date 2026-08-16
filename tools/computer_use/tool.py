@@ -47,6 +47,7 @@ import re
 import struct
 import sys
 import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from tools.computer_use.backend import (
@@ -511,6 +512,102 @@ def handle_computer_use(args: Dict[str, Any], **kwargs) -> Any:
         return json.dumps({"error": f"{action} failed: {e}"})
 
 
+def _approval_bypass_active(session_id: str) -> bool:
+    """Return True when the current Hermes approval mode bypasses prompts."""
+    try:
+        from tools.approval import (
+            get_current_session_key,
+            is_approval_bypass_active_for_session,
+        )
+
+        if is_approval_bypass_active_for_session(session_id):
+            return True
+        current_key = get_current_session_key(default="")
+        return bool(current_key and is_approval_bypass_active_for_session(current_key))
+    except Exception:
+        return False
+
+
+def _kanban_worker_approval_verdict(
+    action: str,
+    args: Dict[str, Any],
+    summary: str,
+    session_id: str,
+) -> Optional[str]:
+    """Bridge headless Kanban worker computer-use approval through the board DB.
+
+    Dispatcher-spawned workers run as detached CLI subprocesses with
+    stdin=/dev/null, so the normal CLI prompt is invisible and times out.  For
+    those runs we publish a pending approval row in the Kanban DB and wait while
+    Desktop surfaces it as a notification/dialog.
+    """
+    task_id = os.environ.get("HERMES_KANBAN_TASK", "").strip()
+    if not task_id:
+        return None
+    try:
+        from hermes_cli import kanban_db
+        from tools.approval import _get_approval_timeout
+    except Exception as exc:
+        logger.warning("kanban approval bridge unavailable: %s", exc)
+        return None
+
+    conn = None
+    approval_id = ""
+    try:
+        conn = kanban_db.connect()
+        req = kanban_db.create_approval_request(
+            conn,
+            task_id=task_id,
+            run_id=int(os.environ["HERMES_KANBAN_RUN_ID"])
+            if os.environ.get("HERMES_KANBAN_RUN_ID", "").isdigit()
+            else None,
+            session_id=session_id or os.environ.get("HERMES_SESSION_ID") or None,
+            profile=os.environ.get("HERMES_PROFILE") or None,
+            action=action,
+            command=f"computer_use: {summary}",
+            description=f"Allow Kanban worker {task_id} to perform computer_use `{action}`?",
+            choices=["once", "session", "always", "deny"],
+        )
+        approval_id = req.id
+        timeout = max(0, int(_get_approval_timeout()))
+        deadline = time.monotonic() + timeout
+        activity = {"last_touch": time.monotonic(), "start": time.monotonic()}
+        try:
+            from tools.environments.base import touch_activity_if_due
+        except Exception:  # pragma: no cover
+            touch_activity_if_due = None
+
+        while True:
+            current = kanban_db.get_approval_request(conn, approval_id)
+            if current and current.status != "pending":
+                choice = current.choice or "deny"
+                if choice == "once":
+                    return "approve_once"
+                if choice == "session":
+                    return "approve_session"
+                if choice == "always":
+                    return "always_approve"
+                return "timeout" if choice == "timeout" else "deny"
+            if time.monotonic() >= deadline:
+                try:
+                    kanban_db.resolve_approval_request(conn, approval_id, "timeout")
+                except Exception:
+                    pass
+                return "timeout"
+            if touch_activity_if_due is not None:
+                touch_activity_if_due(activity, "waiting for Kanban computer_use approval")
+            time.sleep(1.0)
+    except Exception as exc:
+        logger.warning("kanban approval bridge failed: %s", exc)
+        return None
+    finally:
+        try:
+            if conn is not None:
+                conn.close()
+        except Exception:
+            pass
+
+
 def _request_approval(action: str, args: Dict[str, Any],
                       session_id: str = "") -> Optional[str]:
     """Return None if approved, or a JSON error string if denied.
@@ -524,6 +621,8 @@ def _request_approval(action: str, args: Dict[str, Any],
     operation. State is keyed on session_id so concurrent runs don't leak
     unlocks into one another.
     """
+    if _approval_bypass_active(session_id):
+        return None
     is_foreground = args.get("delivery_mode") == "foreground"
     scope_key = (action, "foreground" if is_foreground else "background")
     with _approval_lock:
@@ -531,17 +630,19 @@ def _request_approval(action: str, args: Dict[str, Any],
             return None
         if scope_key in _always_allow.get(session_id, set()):
             return None
-    cb = _approval_callback
-    if cb is None:
-        # No CLI approval wired — default allow. Gateway approval is handled
-        # one layer out via the normal tool-approval infra.
-        return None
     summary = _summarize_action(action, args)
-    try:
-        verdict = cb(action, args, summary)
-    except Exception as e:
-        logger.warning("approval callback failed: %s", e)
-        verdict = "deny"
+    verdict = _kanban_worker_approval_verdict(action, args, summary, session_id)
+    if verdict is None:
+        cb = _approval_callback
+        if cb is None:
+            # No CLI approval wired — default allow. Gateway approval is handled
+            # one layer out via the normal tool-approval infra.
+            return None
+        try:
+            verdict = cb(action, args, summary)
+        except Exception as e:
+            logger.warning("approval callback failed: %s", e)
+            verdict = "deny"
     if verdict == "approve_once":
         return None
     if verdict == "approve_session" or verdict == "always_approve":

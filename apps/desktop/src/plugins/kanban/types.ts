@@ -106,6 +106,22 @@ export interface KanbanEvent {
   created_at: number
 }
 
+export interface KanbanApprovalRequest {
+  id: string
+  task_id: string
+  run_id?: null | number
+  session_id?: null | string
+  profile?: null | string
+  action: string
+  command: string
+  description: string
+  choices?: string[]
+  status: string
+  choice?: null | string
+  created_at: number
+  resolved_at?: null | number
+}
+
 export type KanbanActivityTone = 'current' | 'done' | 'error' | 'info' | 'pending' | 'warning' | string
 
 export interface KanbanActivityActor {

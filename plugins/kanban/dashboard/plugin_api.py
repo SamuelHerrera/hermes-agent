@@ -353,6 +353,24 @@ def _run_dict(r: kanban_db.Run) -> dict[str, Any]:
     }
 
 
+def _approval_dict(a: kanban_db.KanbanApprovalRequest) -> dict[str, Any]:
+    return {
+        "id": a.id,
+        "task_id": a.task_id,
+        "run_id": a.run_id,
+        "session_id": a.session_id,
+        "profile": a.profile,
+        "action": a.action,
+        "command": a.command,
+        "description": a.description,
+        "choices": a.choices or [],
+        "status": a.status,
+        "choice": a.choice,
+        "created_at": a.created_at,
+        "resolved_at": a.resolved_at,
+    }
+
+
 # Hallucination-warning event kinds — see complete_task() in kanban_db.py.
 # completion_blocked_hallucination: kernel rejected created_cards with
 #   phantom ids; task stays in prior state.
@@ -681,6 +699,51 @@ def get_board(
             "latest_event_id": int(latest_event_id),
             "now": int(time.time()),
         }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Worker approval bridge
+# ---------------------------------------------------------------------------
+
+class ApprovalResponseBody(BaseModel):
+    choice: str = Field("deny", description="once|session|always|deny")
+
+
+@router.get("/approvals")
+def list_approvals(
+    status: str = Query("pending"),
+    task_id: Optional[str] = Query(None),
+    board: Optional[str] = Query(None),
+):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        approvals = kanban_db.list_approval_requests(
+            conn,
+            status=status,
+            task_id=task_id,
+            limit=50,
+        )
+        return {"approvals": [_approval_dict(a) for a in approvals]}
+    finally:
+        conn.close()
+
+
+@router.post("/approvals/{approval_id}/respond")
+def respond_approval(
+    approval_id: str,
+    payload: ApprovalResponseBody,
+    board: Optional[str] = Query(None),
+):
+    board = _resolve_board(board)
+    conn = _conn(board=board)
+    try:
+        approval = kanban_db.resolve_approval_request(conn, approval_id, payload.choice)
+        if approval is None:
+            raise HTTPException(status_code=404, detail="approval request is not pending")
+        return {"approval": _approval_dict(approval)}
     finally:
         conn.close()
 

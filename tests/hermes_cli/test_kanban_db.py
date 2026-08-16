@@ -39,6 +39,46 @@ def _init_git_repo(repo: Path) -> None:
     subprocess.run(["git", "-C", str(repo), "commit", "-m", "init"], check=True, capture_output=True, text=True)
 
 
+def test_approval_requests_can_be_created_listed_and_resolved(kanban_home):
+    conn = kb.connect()
+    try:
+        task_id = kb.create_task(conn, title="needs gui approval", assignee="default")
+        request = kb.create_approval_request(
+            conn,
+            task_id=task_id,
+            run_id=7,
+            session_id="session-1",
+            profile="default",
+            action="click",
+            command="computer_use: click at (10, 20)",
+            description="Allow click?",
+            choices=["once", "session", "deny"],
+        )
+
+        pending = kb.list_approval_requests(conn)
+        assert [item.id for item in pending] == [request.id]
+        assert pending[0].task_id == task_id
+        assert pending[0].choices == ["once", "session", "deny"]
+
+        detail = kb.get_approval_request(conn, request.id)
+        assert detail is not None
+        assert detail.status == "pending"
+
+        resolved = kb.resolve_approval_request(conn, request.id, "session")
+        assert resolved is not None
+        assert resolved.status == "resolved"
+        assert resolved.choice == "session"
+        assert kb.list_approval_requests(conn) == []
+
+        kinds = [row["kind"] for row in conn.execute(
+            "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id", (task_id,)
+        )]
+        assert "approval_requested" in kinds
+        assert "approval_resolved" in kinds
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Schema / init
 # ---------------------------------------------------------------------------

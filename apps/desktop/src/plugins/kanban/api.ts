@@ -14,6 +14,7 @@ import { atom, type PluginRestOptions, type PluginStorage, queryClient } from '@
 import type {
   BoardMeta,
   BoardsResponse,
+  KanbanApprovalRequest,
   KanbanAttachment,
   KanbanBoard,
   KanbanProfile,
@@ -204,6 +205,17 @@ export const fetchProjects = () => call<{ projects: KanbanProject[] }>('/project
 export const fetchOrchestration = () => call<OrchestrationSettings>('/orchestration')
 
 export const fetchTags = () => call<{ tags: KanbanTag[] }>(withBoard('/tags'))
+
+export const APPROVALS_KEY = ['kanban', 'approvals'] as const
+
+export const fetchPendingApprovals = () =>
+  call<{ approvals: KanbanApprovalRequest[] }>(withBoard('/approvals', { status: 'pending' }))
+
+export const respondKanbanApproval = (id: string, choice: string) =>
+  call<{ approval: KanbanApprovalRequest }>(withBoard(`/approvals/${encodeURIComponent(id)}/respond`), {
+    body: { choice },
+    method: 'POST'
+  })
 
 // ── writes ────────────────────────────────────────────────────────────────────
 

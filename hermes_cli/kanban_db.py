@@ -1328,6 +1328,49 @@ class Tag:
 
 
 @dataclass
+class KanbanApprovalRequest:
+    """Pending/resolved human approval requested by a headless Kanban worker."""
+
+    id: str
+    task_id: str
+    run_id: Optional[int]
+    session_id: Optional[str]
+    profile: Optional[str]
+    action: str
+    command: str
+    description: str
+    choices: Optional[list[str]]
+    status: str
+    choice: Optional[str]
+    created_at: int
+    resolved_at: Optional[int]
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> "KanbanApprovalRequest":
+        try:
+            choices = json.loads(row["choices"]) if row["choices"] else None
+            if not isinstance(choices, list):
+                choices = None
+        except Exception:
+            choices = None
+        return cls(
+            id=row["id"],
+            task_id=row["task_id"],
+            run_id=row["run_id"],
+            session_id=row["session_id"],
+            profile=row["profile"],
+            action=row["action"],
+            command=row["command"],
+            description=row["description"],
+            choices=[str(choice) for choice in choices] if choices else None,
+            status=row["status"],
+            choice=row["choice"],
+            created_at=int(row["created_at"]),
+            resolved_at=(int(row["resolved_at"]) if row["resolved_at"] is not None else None),
+        )
+
+
+@dataclass
 class Event:
     id: int
     task_id: str
@@ -1335,7 +1378,6 @@ class Event:
     payload: Optional[dict]
     created_at: int
     run_id: Optional[int] = None
-
 
 
 @dataclass
@@ -1609,6 +1651,27 @@ CREATE TABLE IF NOT EXISTS kanban_notify_subs (
     PRIMARY KEY (task_id, platform, chat_id, thread_id)
 );
 
+-- Cross-process approval bridge for headless Kanban workers. Normal chat/TUI
+-- approvals are in-process queues, but dispatcher-spawned workers are separate
+-- CLI subprocesses with stdin=/dev/null. When such a worker needs human consent
+-- for native input (computer_use click/type/etc.), it inserts a pending row here
+-- and waits while the Desktop Kanban plugin displays it as an approval dialog.
+CREATE TABLE IF NOT EXISTS kanban_approval_requests (
+    id          TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL,
+    run_id      INTEGER,
+    session_id  TEXT,
+    profile     TEXT,
+    action      TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    description TEXT NOT NULL,
+    choices     TEXT,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    choice      TEXT,
+    created_at  INTEGER NOT NULL,
+    resolved_at INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee_status ON tasks(assignee, status);
 CREATE INDEX IF NOT EXISTS idx_tasks_status          ON tasks(status);
 CREATE INDEX IF NOT EXISTS idx_links_child           ON task_links(child_id);
@@ -1627,6 +1690,8 @@ CREATE INDEX IF NOT EXISTS idx_tags_normalized       ON tags(normalized_name);
 CREATE INDEX IF NOT EXISTS idx_task_tags_task        ON task_tags(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_tags_tag         ON task_tags(tag_id, task_id);
 CREATE INDEX IF NOT EXISTS idx_notify_task           ON kanban_notify_subs(task_id);
+CREATE INDEX IF NOT EXISTS idx_approval_status       ON kanban_approval_requests(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_approval_task         ON kanban_approval_requests(task_id, created_at);
 """
 
 
@@ -5831,6 +5896,138 @@ def _append_event(
         run_id=run_id,
     )
     return event_id
+
+
+def create_approval_request(
+    conn: sqlite3.Connection,
+    *,
+    task_id: str,
+    action: str,
+    command: str,
+    description: str,
+    choices: Optional[list[str]] = None,
+    run_id: Optional[int] = None,
+    session_id: Optional[str] = None,
+    profile: Optional[str] = None,
+) -> KanbanApprovalRequest:
+    """Create a pending human approval for a headless Kanban worker.
+
+    The row is intentionally separate from ``task_events``: it is an active
+    request that a UI can resolve, not just audit history. A companion
+    ``approval_requested`` event wakes live Kanban dashboards via the existing
+    event socket.
+    """
+    if not task_id:
+        raise ValueError("task_id is required")
+    now = int(time.time())
+    approval_id = "ka_" + secrets.token_hex(8)
+    normalized_choices = [str(c) for c in choices] if choices else ["once", "session", "deny"]
+    with write_txn(conn):
+        conn.execute(
+            """
+            INSERT INTO kanban_approval_requests (
+                id, task_id, run_id, session_id, profile, action, command,
+                description, choices, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (
+                approval_id,
+                task_id,
+                run_id,
+                session_id,
+                profile,
+                action,
+                command,
+                description,
+                json.dumps(normalized_choices, ensure_ascii=False),
+                now,
+            ),
+        )
+        _append_event(
+            conn,
+            task_id,
+            "approval_requested",
+            {
+                "approval_id": approval_id,
+                "action": action,
+                "command": command,
+                "description": description,
+            },
+            run_id=run_id,
+        )
+    return get_approval_request(conn, approval_id)  # type: ignore[return-value]
+
+
+def get_approval_request(
+    conn: sqlite3.Connection,
+    approval_id: str,
+) -> Optional[KanbanApprovalRequest]:
+    row = conn.execute(
+        "SELECT * FROM kanban_approval_requests WHERE id = ?",
+        (approval_id,),
+    ).fetchone()
+    return KanbanApprovalRequest.from_row(row) if row else None
+
+
+def list_approval_requests(
+    conn: sqlite3.Connection,
+    *,
+    status: str = "pending",
+    task_id: Optional[str] = None,
+    limit: int = 50,
+) -> list[KanbanApprovalRequest]:
+    clauses = []
+    params: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if task_id:
+        clauses.append("task_id = ?")
+        params.append(task_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM kanban_approval_requests {where} "
+        "ORDER BY created_at ASC, id ASC LIMIT ?",
+        (*params, max(1, min(int(limit or 50), 200))),
+    ).fetchall()
+    return [KanbanApprovalRequest.from_row(row) for row in rows]
+
+
+def resolve_approval_request(
+    conn: sqlite3.Connection,
+    approval_id: str,
+    choice: str,
+) -> Optional[KanbanApprovalRequest]:
+    """Resolve one pending Kanban approval; returns the updated row or None."""
+    normalized = str(choice or "deny").strip().lower()
+    if normalized not in {"once", "session", "always", "deny", "timeout"}:
+        raise ValueError("choice must be one of once, session, always, deny, timeout")
+    now = int(time.time())
+    with write_txn(conn):
+        row = conn.execute(
+            "SELECT task_id, run_id FROM kanban_approval_requests "
+            "WHERE id = ? AND status = 'pending'",
+            (approval_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        status = "expired" if normalized == "timeout" else "resolved"
+        conn.execute(
+            """
+            UPDATE kanban_approval_requests
+               SET status = ?, choice = ?, resolved_at = ?
+             WHERE id = ? AND status = 'pending'
+            """,
+            (status, normalized, now, approval_id),
+        )
+        _append_event(
+            conn,
+            row["task_id"],
+            "approval_resolved",
+            {"approval_id": approval_id, "choice": normalized, "status": status},
+            run_id=row["run_id"],
+        )
+    return get_approval_request(conn, approval_id)
 
 
 def _end_run(

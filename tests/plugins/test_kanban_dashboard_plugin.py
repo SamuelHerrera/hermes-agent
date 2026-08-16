@@ -119,6 +119,38 @@ def test_create_task_appears_on_board(client):
     assert "researcher" in data["assignees"]
 
 
+def test_approval_endpoints_list_and_resolve_pending_worker_approval(client):
+    task = client.post("/api/plugins/kanban/tasks", json={"title": "approval card"}).json()["task"]
+    conn = kb.connect()
+    try:
+        approval = kb.create_approval_request(
+            conn,
+            task_id=task["id"],
+            action="click",
+            command="computer_use: click at (1375, 48)",
+            description="Allow Kanban worker to click?",
+            choices=["once", "session", "deny"],
+        )
+    finally:
+        conn.close()
+
+    r = client.get("/api/plugins/kanban/approvals")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert [item["id"] for item in data["approvals"]] == [approval.id]
+    assert data["approvals"][0]["command"] == "computer_use: click at (1375, 48)"
+
+    r = client.post(f"/api/plugins/kanban/approvals/{approval.id}/respond", json={"choice": "once"})
+    assert r.status_code == 200, r.text
+    resolved = r.json()["approval"]
+    assert resolved["status"] == "resolved"
+    assert resolved["choice"] == "once"
+
+    r = client.get("/api/plugins/kanban/approvals")
+    assert r.status_code == 200, r.text
+    assert r.json()["approvals"] == []
+
+
 def test_dashboard_created_tasks_use_current_user_display_name(client, monkeypatch):
     monkeypatch.setenv("HERMES_USER_DISPLAY_NAME", "Samuel Operator")
 
