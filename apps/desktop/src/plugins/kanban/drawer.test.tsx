@@ -119,6 +119,8 @@ const testKanbanText = {
   tagName: 'Tag name',
   addTag: 'Add tag',
   existingTags: 'Existing tags',
+  filterExistingTags: 'Filter existing tags',
+  noExistingTagMatches: 'No tags match your filter.',
   addExistingTag: (name: string) => `Add existing tag ${name}`,
   removeTag: (name: string) => `Remove tag ${name}`,
   editTitle: 'Edit title',
@@ -499,21 +501,91 @@ describe('TaskTagsSection', () => {
       />
     )
 
-    expect(screen.getByText('AI:Status Ready')).toBeTruthy()
+    expect(screen.getByText('Status Ready')).toBeTruthy()
+    expect(screen.queryByText('AI:Status Ready')).toBeNull()
     expect(screen.getByText('AI')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag AI:Status Ready' }))
 
     expect(onRemove).toHaveBeenCalledWith('AI:Status Ready')
   })
 
-  it('lets users attach an existing tag that is not already on the task', () => {
+  it('renders business feature/module tags while leaving manual status labels intact', () => {
+    const onAdd = vi.fn()
+    const onRemove = vi.fn()
+
+    render(
+      <TaskTagsSection
+        existingTags={[{ id: 4, name: 'AI:Feature Churn Module', normalized_name: 'ai:feature churn module' }]}
+        onAdd={onAdd}
+        onRemove={onRemove}
+        pending={false}
+        tags={[
+          { id: 1, name: 'Billing Module', normalized_name: 'billing module' },
+          { id: 2, name: 'Feature: Invoice Sync', normalized_name: 'feature: invoice sync' },
+          { id: 3, name: 'Status: Customer Ready', normalized_name: 'status: customer ready' }
+        ]}
+      />
+    )
+
+    expect(screen.getByText('Billing Module')).toBeTruthy()
+    expect(screen.getByText('Feature: Invoice Sync')).toBeTruthy()
+    expect(screen.getByText('Status: Customer Ready')).toBeTruthy()
+
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Tag name' }))
+    expect(screen.queryByLabelText('Filter existing tags')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add existing tag AI:Feature Churn Module' }).textContent).toContain(
+      'Feature Churn Module'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove tag Status: Customer Ready' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add existing tag AI:Feature Churn Module' }))
+
+    expect(onRemove).toHaveBeenCalledWith('Status: Customer Ready')
+    expect(onAdd).toHaveBeenCalledWith('AI:Feature Churn Module')
+  })
+
+  it('opens the existing-tags panel from the tag-name combobox and closes it with Escape', () => {
+    render(
+      <TaskTagsSection
+        existingTags={[
+          { id: 1, name: 'Backend', normalized_name: 'backend' },
+          { id: 2, name: 'Frontend', normalized_name: 'frontend' }
+        ]}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        pending={false}
+        tags={[]}
+      />
+    )
+
+    const tagNameInput = screen.getByRole('combobox', { name: 'Tag name' })
+
+    expect(tagNameInput.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Existing tags' })).toBeNull()
+    expect(screen.queryByLabelText('Filter existing tags')).toBeNull()
+
+    fireEvent.focus(tagNameInput)
+
+    expect(tagNameInput.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('listbox', { name: 'Existing tags' })).toBeTruthy()
+    expect(screen.queryByLabelText('Filter existing tags')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add existing tag Frontend' })).toBeTruthy()
+
+    fireEvent.keyDown(tagNameInput, { key: 'Escape' })
+
+    expect(tagNameInput.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'Add existing tag Frontend' })).toBeNull()
+  })
+
+  it('lets users filter and attach an existing tag from the tag-name combobox', () => {
     const onAdd = vi.fn()
 
     render(
       <TaskTagsSection
         existingTags={[
           { id: 1, name: 'Backend', normalized_name: 'backend' },
-          { id: 2, name: 'Frontend', normalized_name: 'frontend' }
+          { id: 2, name: 'Frontend', normalized_name: 'frontend' },
+          { id: 3, name: 'Release Train', normalized_name: 'release train' }
         ]}
         onAdd={onAdd}
         onRemove={vi.fn()}
@@ -523,9 +595,35 @@ describe('TaskTagsSection', () => {
     )
 
     expect(screen.queryByRole('button', { name: 'Add existing tag Backend' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add existing tag Frontend' })).toBeNull()
+
+    const tagNameInput = screen.getByRole('combobox', { name: 'Tag name' }) as HTMLInputElement
+
+    tagNameInput.focus()
+    fireEvent.focus(tagNameInput)
+
+    expect(document.activeElement).toBe(tagNameInput)
+
+    expect(screen.queryByRole('button', { name: 'Add existing tag Backend' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add existing tag Frontend' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add existing tag Release Train' })).toBeTruthy()
+
+    fireEvent.change(tagNameInput, { target: { value: 'FRONT' } })
+
+    expect(screen.getByRole('button', { name: 'Add existing tag Frontend' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add existing tag Release Train' })).toBeNull()
+
+    fireEvent.change(tagNameInput, { target: { value: 'missing' } })
+
+    expect(screen.getByText('No tags match your filter.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add existing tag Frontend' })).toBeNull()
+
+    fireEvent.change(tagNameInput, { target: { value: 'front' } })
+
     fireEvent.click(screen.getByRole('button', { name: 'Add existing tag Frontend' }))
 
     expect(onAdd).toHaveBeenCalledWith('Frontend')
+    expect(tagNameInput.value).toBe('')
   })
 
   it('lets users create and attach a new tag name', () => {

@@ -630,6 +630,40 @@ def test_task_tags_normalize_reuse_persist_and_cascade(kanban_home):
         ]
 
 
+def test_business_feature_module_and_status_tags_persist_after_reload(kanban_home):
+    """Manual business feature/module tags remain reusable alongside status tags."""
+    with kb.connect() as conn:
+        tid = kb.create_task(
+            conn,
+            title="Billing automation follow-up",
+            body="Keep customer-facing feature tags independent from task state.",
+        )
+        kb.attach_tag_to_task(conn, tid, "Billing Module")
+        kb.attach_tag_to_task(conn, tid, "Feature: Invoice Sync")
+        kb.attach_tag_to_task(conn, tid, "Status: Customer Ready")
+
+        assert [
+            tag.name for tag in kb.list_task_tags(conn, tid)
+            if not tag.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ] == [
+            "Billing Module",
+            "Feature: Invoice Sync",
+            "Status: Customer Ready",
+        ]
+
+    with kb.connect() as conn:
+        persisted = [
+            (tag.name, tag.normalized_name)
+            for tag in kb.list_task_tags(conn, tid)
+            if not tag.normalized_name.startswith(kb.AI_TAG_NORMALIZED_PREFIX)
+        ]
+        assert persisted == [
+            ("Billing Module", "billing module"),
+            ("Feature: Invoice Sync", "feature: invoice sync"),
+            ("Status: Customer Ready", "status: customer ready"),
+        ]
+
+
 def test_ai_tag_manager_generates_feature_tags_without_status_noise(kanban_home):
     """AI-managed tags describe product features and preserve user tags."""
     with kb.connect() as conn:
@@ -749,6 +783,52 @@ def test_ai_tag_manager_tags_decomposed_children_and_root(kanban_home):
             assert events, f"missing AI tag audit event for {tid}"
             triggers = {(e.payload or {}).get("trigger") for e in events}
             assert triggers & {"created", "updated", "split"}
+
+
+def test_ai_tag_taxonomy_backfill_cleans_stale_active_board_tags(kanban_home):
+    """Opening an existing board refreshes stale workflow AI tags in-place."""
+    with kb.connect() as conn:
+        active = kb.create_task(
+            conn,
+            title="Kanban feature module tags",
+            body="Task card search and filtering should use Billing Module tags.",
+            assignee="default",
+        )
+        archived = kb.create_task(
+            conn,
+            title="Archived kanban state labels",
+            assignee="default",
+        )
+        kb.attach_tag_to_task(conn, active, "Billing Module")
+        kb.attach_tag_to_task(conn, active, "AI:Status Ready")
+        kb.attach_tag_to_task(conn, active, "AI:Has Parents")
+        kb.attach_tag_to_task(conn, archived, "AI:Status Todo")
+        conn.execute("UPDATE tasks SET status = 'archived' WHERE id = ?", (archived,))
+
+    # Simulate the first open after upgrading/restarting a long-lived process.
+    kb.init_db()
+
+    with kb.connect() as conn:
+        active_tags = {tag.normalized_name for tag in kb.list_task_tags(conn, active)}
+        archived_tags = {tag.normalized_name for tag in kb.list_task_tags(conn, archived)}
+        assert "billing module" in active_tags
+        assert "ai:status ready" not in active_tags
+        assert "ai:has parents" not in active_tags
+        assert {
+            "ai:area kanban",
+            "ai:feature tags",
+            "ai:feature filtering",
+            "ai:feature task cards",
+        } <= active_tags
+        assert "ai:status todo" in archived_tags
+
+        backfill_events = [
+            e.payload or {}
+            for e in kb.list_events(conn, active)
+            if e.kind == "ai_tags_updated" and (e.payload or {}).get("trigger") == "backfill"
+        ]
+        assert backfill_events
+        assert backfill_events[-1]["removed"] == ["AI:Has Parents", "AI:Status Ready"]
 
 
 def test_task_unread_state_is_per_reader_and_driven_by_qualifying_events(kanban_home):

@@ -1,5 +1,5 @@
 import { atom } from 'nanostores'
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 
 import { noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
 import { registry } from '@/contrib/registry'
@@ -133,6 +133,26 @@ export interface SidebarNavContribution {
   path: string
   /** Plain sidebar clicks open the route as a movable tab instead of main. */
   openAsTile?: boolean
+  /** Optional nested rows rendered under this top-level nav contribution. */
+  children?: ComponentType<SidebarNavChildrenProps>
+}
+
+export interface SidebarNavChildContribution {
+  id: string
+  label: string
+  /** Highlight this child as the currently selected dashboard/sub-view. */
+  active?: boolean
+  /** Optional right-side chrome for per-child status counts. */
+  adornment?: ComponentType
+  /** Called when the child row is selected. */
+  onSelect?: () => void
+}
+
+export interface SidebarNavChildrenProps {
+  /** Incremented when the expanded parent row is selected. Children can use it to
+   *  mirror the parent's default/current selection into their own state. */
+  parentSelectedAt?: number
+  renderItem: (item: SidebarNavChildContribution) => ReactNode
 }
 
 // Views that render as a full-screen modal card (OverlayView) over the shell.
@@ -141,7 +161,6 @@ export interface SidebarNavContribution {
 export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
   'agents',
   'command-center',
-  'cron',
   'profiles',
   'settings',
   'starmap',
@@ -162,6 +181,28 @@ export function routePathname(to: string): string {
   const cut = to.search(/[?#]/)
 
   return cut === -1 ? to : to.slice(0, cut)
+}
+
+export function cronJobRoute(jobId: string): string {
+  return `${CRON_ROUTE}/${encodeURIComponent(jobId)}`
+}
+
+export function cronJobIdFromRoute(pathname: string): string | null {
+  const path = routePathname(pathname)
+
+  if (!path.startsWith(`${CRON_ROUTE}/`)) {
+    return null
+  }
+
+  const id = path.slice(CRON_ROUTE.length + 1)
+
+  return id && !id.includes('/') ? decodeURIComponent(id) : null
+}
+
+export function isCronRoute(pathname: string): boolean {
+  const path = routePathname(pathname)
+
+  return path === CRON_ROUTE || cronJobIdFromRoute(path) !== null
 }
 
 export function isNewChatRoute(pathname: string): boolean {
@@ -206,6 +247,10 @@ export function appViewForPath(pathname: string): AppView {
 
   if (isNewChatRoute(path) || routeSessionId(path)) {
     return 'chat'
+  }
+
+  if (isCronRoute(path)) {
+    return 'cron'
   }
 
   if (isContributedPath(path)) {

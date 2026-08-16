@@ -18,10 +18,10 @@ export type SidebarActions = Pick<
   | 'onLoadMoreSessions'
   | 'onManageCronJob'
   | 'onNavigate'
+  | 'onOpenSessionTab'
   | 'onNewSessionInWorkspace'
   | 'onNewSessionSplit'
   | 'onResumeSession'
-  | 'onTriggerCronJob'
 >
 
 /** The ChatView handlers the controller owns — forwarded verbatim. */

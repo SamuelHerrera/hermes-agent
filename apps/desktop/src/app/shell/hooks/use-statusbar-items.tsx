@@ -20,6 +20,7 @@ import { copyFilePath, revealFile } from '@/store/file-actions'
 import { revealFileInTree } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $projectTree, projectNameForCwd } from '@/store/projects'
+import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionId,
   $busy,
@@ -480,7 +481,7 @@ export function useStatusbarItems({
         icon: <Clock className="size-3" />,
         id: 'cron',
         label: copy.cron,
-        to: CRON_ROUTE,
+        onSelect: () => openRouteTile(CRON_ROUTE, 'center'),
         toggleLabel: copy.cron,
         variant: 'action'
       },

@@ -2,7 +2,7 @@ import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/c
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
@@ -18,12 +18,16 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
-  SidebarMenuItem
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem
 } from '@/components/ui/sidebar'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useContributions } from '@/contrib/react/use-contributions'
-import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
+import { getCronJobRuns, searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { comboTokens } from '@/lib/keybinds/combo'
 import { resolveProfileColor } from '@/lib/profile-color'
@@ -37,7 +41,6 @@ import {
   $panesFlipped,
   $pinnedSessionIds,
   $sidebarCardRows,
-  $sidebarCronOpen,
   $sidebarFiltersActive,
   $sidebarGrouping,
   $sidebarMessagingOpenIds,
@@ -59,7 +62,6 @@ import {
   pinSession,
   SESSION_SEARCH_FOCUS_EVENT,
   setPinnedSessionOrder,
-  setSidebarCronOpen,
   setSidebarPinsOpen,
   setSidebarProjectOrderIds,
   setSidebarRecentsOpen,
@@ -123,14 +125,20 @@ import { $sessionDotStateById, sessionStatusBucket } from '@/store/session-dot-s
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive'
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
+import type { CronJob } from '@/types/hermes'
 
+import { jobTitle } from '../../cron/job-state'
 import {
   type AppView,
-  SIDEBAR_NAV_AREA
+  CRON_ROUTE,
+  cronJobRoute,
+  routePathname,
+  SIDEBAR_NAV_AREA,
+  type SidebarNavChildContribution,
+  type SidebarNavChildrenProps
 } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
-import { SidebarCronJobsSection } from './cron-jobs-section'
 import { SidebarFilterMenu } from './filter-menu'
 import { SidebarLoadMoreRow } from './load-more-row'
 import { contributedNavItems } from './nav-contributions'
@@ -252,7 +260,7 @@ interface ChatSidebarProps extends React.ComponentProps<typeof Sidebar> {
   /** Create a brand-new session and open it as a tile on `dir`. */
   onNewSessionSplit: (dir: SplitDir) => void
   onManageCronJob: (jobId: string) => void
-  onTriggerCronJob: (jobId: string) => void
+  onOpenSessionTab: (sessionId: string) => void
 }
 
 export function ChatSidebar({
@@ -267,7 +275,7 @@ export function ChatSidebar({
   onNewSessionInWorkspace,
   onNewSessionSplit,
   onManageCronJob,
-  onTriggerCronJob
+  onOpenSessionTab
 }: ChatSidebarProps) {
   const { t } = useI18n()
   const s = t.sidebar
@@ -300,7 +308,6 @@ export function ChatSidebar({
   const pinnedSessionIds = useStore($pinnedSessionIds)
   const pinsOpen = useStore($sidebarPinsOpen)
   const agentsOpen = useStore($sidebarRecentsOpen)
-  const cronOpen = useStore($sidebarCronOpen)
   // The sidebar highlight tracks the FOCUSED session — the interacted tile's
   // tab, else the main selection — so it stays 1:1 with whatever tab is active.
   const selectedSessionId = useStore($focusedStoredSessionId)
@@ -343,6 +350,8 @@ export function ChatSidebar({
   const [serverMatches, setServerMatches] = useState<SessionSearchResult[]>([])
   const [searchPending, setSearchPending] = useState(false)
   const [newSessionKbdFlash, setNewSessionKbdFlash] = useState(false)
+  const [expandedNavIds, setExpandedNavIds] = useState<Record<string, boolean>>({})
+  const [navParentSelectionEvents, setNavParentSelectionEvents] = useState<Record<string, number>>({})
   const [messagingLoadMorePending, setMessagingLoadMorePending] = useState<Record<string, boolean>>({})
   const [recentsLoadMorePending, setRecentsLoadMorePending] = useState(false)
   const messagingOpenIds = useStore($sidebarMessagingOpenIds)
@@ -1340,6 +1349,45 @@ export function ChatSidebar({
   // it over the default sort, so stale/new ids reconcile on the next render.
   const reorderProjects = (ids: string[]) => setSidebarProjectOrderIds(ids)
 
+  const CronNavChildren = useMemo<React.ComponentType<SidebarNavChildrenProps> | undefined>(() => {
+    if (cronJobs.length === 0) {
+      return undefined
+    }
+
+    return function CronNavChildrenComponent({ renderItem }: SidebarNavChildrenProps) {
+      return (
+        <CronNavJobs
+          activePath={routePathname(pathname)}
+          activeSessionId={activeSidebarSessionId}
+          jobs={cronJobs}
+          onOpenJob={onManageCronJob}
+          onOpenRun={onOpenSessionTab}
+          renderItem={renderItem}
+        />
+      )
+    }
+  }, [activeSidebarSessionId, cronJobs, onManageCronJob, onOpenSessionTab, pathname])
+
+  const navItems = useMemo<SidebarNavItem[]>(() => {
+    const items = [...SIDEBAR_NAV]
+
+    if (cronJobs.length > 0) {
+      items.push({
+        id: 'cron',
+        label: s.nav.cron,
+        icon: props => <Codicon name="watch" {...props} />,
+        children: CronNavChildren,
+        openAsTile: true,
+        route: CRON_ROUTE,
+        adornment: function CronNavCount() {
+          return <span className="text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">{cronJobs.length}</span>
+        }
+      })
+    }
+
+    return [...items, ...contributedNav]
+  }, [CronNavChildren, contributedNav, cronJobs.length, s.nav.cron])
+
   // Sortable rows carry live session ids; the pinned store is keyed by durable
   // (lineage-root) ids, so translate before persisting the new order.
   const reorderPinned = (ids: string[]) =>
@@ -1367,8 +1415,10 @@ export function ChatSidebar({
         <SidebarGroup className="shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
-              {[...SIDEBAR_NAV, ...contributedNav].map(item => {
+              {navItems.map(item => {
                 const isInteractive = Boolean(item.action) || Boolean(item.route)
+                const hasChildren = Boolean(item.children)
+                const expanded = hasChildren && Boolean(expandedNavIds[item.id])
 
                 const active =
                   (item.id === 'skills' && currentView === 'skills') ||
@@ -1406,6 +1456,10 @@ export function ChatSidebar({
                         $newChatProfile.set(null)
                       }
 
+                      if (expanded && item.children) {
+                        setNavParentSelectionEvents(current => ({ ...current, [item.id]: (current[item.id] ?? 0) + 1 }))
+                      }
+
                       onNavigate(item)
                     }}
                     tooltip={
@@ -1421,7 +1475,7 @@ export function ChatSidebar({
                   >
                     <item.icon className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]" />
                     <span className="min-w-0 flex-1 truncate">{s.nav[item.id] ?? item.label}</span>
-                    {item.adornment ? (
+                    {item.adornment && !expanded ? (
                       <span className="ml-auto inline-flex shrink-0 items-center justify-center">
                         <item.adornment />
                       </span>
@@ -1434,6 +1488,33 @@ export function ChatSidebar({
                       />
                     )}
                   </SidebarMenuButton>
+                )
+
+                const renderChildItem = (child: SidebarNavChildContribution) => (
+                  <SidebarMenuSubItem key={child.id}>
+                    <SidebarMenuSubButton
+                      asChild
+                      className={cn(
+                        'h-6 px-2 text-[0.75rem] text-(--ui-text-secondary) hover:bg-(--ui-control-hover-background) hover:text-foreground',
+                        child.active && 'bg-(--ui-control-active-background) text-foreground'
+                      )}
+                      isActive={child.active}
+                      size="sm"
+                    >
+                      <button
+                        className="flex w-full min-w-0 items-center gap-2 text-left"
+                        onClick={child.onSelect}
+                        type="button"
+                      >
+                        <span className="min-w-0 flex-1 truncate">{child.label}</span>
+                        {child.adornment ? (
+                          <span className="ml-auto inline-flex shrink-0 items-center justify-center">
+                            <child.adornment />
+                          </span>
+                        ) : null}
+                      </button>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
                 )
 
                 // New session + route-backed pages can open in a split —
@@ -1460,6 +1541,33 @@ export function ChatSidebar({
                     ) : (
                       button
                     )}
+                    {hasChildren ? (
+                      <SidebarMenuAction
+                        aria-expanded={expanded}
+                        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${s.nav[item.id] ?? item.label}`}
+                        className="top-1 h-5 w-5 opacity-70 hover:opacity-100"
+                        onClick={event => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setExpandedNavIds(current => ({ ...current, [item.id]: !current[item.id] }))
+                        }}
+                        type="button"
+                      >
+                        <Codicon
+                          className="-translate-y-px leading-none"
+                          name={expanded ? 'chevron-down' : 'chevron-right'}
+                          size="0.75rem"
+                        />
+                      </SidebarMenuAction>
+                    ) : null}
+                    {expanded && item.children ? (
+                      <SidebarMenuSub className="mt-1 gap-px py-0.5 pr-0">
+                        <item.children
+                          parentSelectedAt={navParentSelectionEvents[item.id] ?? 0}
+                          renderItem={renderChildItem}
+                        />
+                      </SidebarMenuSub>
+                    ) : null}
                   </SidebarMenuItem>
                 )
               })}
@@ -1744,17 +1852,6 @@ export function ChatSidebar({
                 )
               })}
 
-            {!trimmedQuery && !worktreeGroupingActive && cronJobs.length > 0 && (
-              <SidebarCronJobsSection
-                jobs={cronJobs}
-                label={s.cronJobs}
-                onManageJob={onManageCronJob}
-                onOpenRun={onResumeSession}
-                onToggle={() => setSidebarCronOpen(!cronOpen)}
-                onTriggerJob={onTriggerCronJob}
-                open={cronOpen}
-              />
-            )}
           </div>
         )}
 
@@ -1769,6 +1866,109 @@ export function ChatSidebar({
       <WorktreeDialog />
     </Sidebar>
   )
+}
+
+
+function CronNavJobs({
+  activePath,
+  activeSessionId,
+  jobs,
+  onOpenJob,
+  onOpenRun,
+  renderItem
+}: {
+  activePath: string
+  activeSessionId: null | string
+  jobs: CronJob[]
+  onOpenJob: (jobId: string) => void
+  onOpenRun: (sessionId: string) => void
+  renderItem: (item: SidebarNavChildContribution) => React.ReactNode
+}) {
+  const sorted = useMemo(() => [...jobs].sort((a, b) => jobTitle(a).localeCompare(jobTitle(b))), [jobs])
+
+  return (
+    <>
+      {sorted.map(job => (
+        <Fragment key={job.id}>
+          {renderItem({
+            active: activePath === cronJobRoute(job.id),
+            id: `cron-job-${job.id}`,
+            label: jobTitle(job),
+            onSelect: () => onOpenJob(job.id)
+          })}
+          <CronNavJobRuns
+            activeSessionId={activeSessionId}
+            jobId={job.id}
+            onOpenRun={onOpenRun}
+            renderItem={renderItem}
+          />
+        </Fragment>
+      ))}
+    </>
+  )
+}
+
+function CronNavJobRuns({
+  activeSessionId,
+  jobId,
+  onOpenRun,
+  renderItem
+}: {
+  activeSessionId: null | string
+  jobId: string
+  onOpenRun: (sessionId: string) => void
+  renderItem: (item: SidebarNavChildContribution) => React.ReactNode
+}) {
+  const [runs, setRuns] = useState<SessionInfo[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void getCronJobRuns(jobId, 5)
+      .then(result => {
+        if (!cancelled) {
+          setRuns(result)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRuns([])
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [jobId])
+
+  return (
+    <>
+      {runs.map(run =>
+        renderItem({
+          active: run.id === activeSessionId,
+          id: `cron-run-${jobId}-${run.id}`,
+          label: `↳ ${cronRunLabel(run)}`,
+          onSelect: () => onOpenRun(run.id)
+        })
+      )}
+    </>
+  )
+}
+
+function cronRunLabel(run: SessionInfo): string {
+  const seconds = run.last_active || run.started_at
+
+  if (!seconds) {
+    return run.title?.trim() || run.id
+  }
+
+  const date = new Date(seconds * 1000)
+
+  if (Number.isNaN(date.valueOf())) {
+    return run.title?.trim() || run.id
+  }
+
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
 interface MessagingSection {

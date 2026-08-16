@@ -20,7 +20,7 @@ import { type ReactNode, useEffect, useState } from 'react'
 
 import { fetchOrchestration, ORCHESTRATION_KEY } from './api'
 import { columnLabel, useKanban } from './i18n'
-import { COLUMN_META, columnMeta, type KanbanColumn, type KanbanTask } from './types'
+import { COLUMN_META, columnMeta, type KanbanColumn, type KanbanTag, type KanbanTask } from './types'
 
 // Plugin-scoped i18n lives in ./i18n; re-exported so components import strings
 // and chrome from one place (./ui).
@@ -56,6 +56,24 @@ export const LOCKED_COLUMNS = ['review', 'running', 'scheduled'] as const
 export const isLockedTarget = (name: string): boolean => (LOCKED_COLUMNS as readonly string[]).includes(name)
 
 export const shortId = (id?: null | string) => (id ?? '').replace(/^t_/, '').slice(0, 6)
+
+const AI_TAG_NORMALIZED_PREFIX = 'ai:'
+
+export function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
+  return (
+    tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
+  )
+}
+
+export function kanbanTagDisplayName(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): string {
+  if (!isAiManagedTag(tag)) {
+    return tag.name
+  }
+
+  const withoutAiPrefix = tag.name.replace(/^ai:\s*/i, '').trim()
+
+  return withoutAiPrefix || tag.name
+}
 
 // The electron REST bridge throws `Error("409: {\"detail\":\"…\"}")`; pull out
 // the human-readable detail for a toast.
@@ -175,7 +193,9 @@ export function KanbanLaneCounts({
   }
 
   return (
-    <span className={['inline-flex items-center gap-1 text-(--ui-text-secondary)', className].filter(Boolean).join(' ')}>
+    <span
+      className={['inline-flex items-center gap-1 text-(--ui-text-secondary)', className].filter(Boolean).join(' ')}
+    >
       {counts.map(({ count, label, name, tone }) => {
         const aria = `${count} ${labelPrefix} ${label} ${pluralKanbanTask(count)}`
 

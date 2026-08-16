@@ -1,7 +1,7 @@
 import { type FocusEvent, type PointerEvent, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 import { titlebarButtonClass } from './titlebar'
@@ -87,7 +87,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
   return (
     <div className="relative" onBlur={onBlur} onFocus={openSoon} onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
       <Popover onOpenChange={setOpen} open={open}>
-        <PopoverTrigger asChild>
+        <PopoverAnchor asChild>
           <Button
             aria-disabled={disabled || unavailable || undefined}
             aria-label="Codex subscription usage"
@@ -96,7 +96,6 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
               'relative bg-transparent select-none text-(--ui-text-tertiary)',
               (disabled || unavailable) && 'opacity-60 hover:text-(--ui-text-tertiary)'
             )}
-            onClick={() => setOpen(value => !value)}
             onPointerDown={event => event.stopPropagation()}
             size="icon-titlebar"
             type="button"
@@ -119,7 +118,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
               </span>
             </span>
           </Button>
-        </PopoverTrigger>
+        </PopoverAnchor>
         <PopoverContent
           align="end"
           className="w-64 p-0 text-[0.72rem] [-webkit-app-region:no-drag]"

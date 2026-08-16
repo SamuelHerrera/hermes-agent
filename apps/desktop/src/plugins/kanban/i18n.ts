@@ -161,6 +161,8 @@ type KanbanMessages = {
   tagName: string
   addTag: string
   existingTags: string
+  filterExistingTags: string
+  noExistingTagMatches: string
   addExistingTag: (name: string) => string
   removeTag: (name: string) => string
   editTitle: string
@@ -410,6 +412,8 @@ const en: KanbanMessages = {
   tagName: 'Tag name',
   addTag: 'Add tag',
   existingTags: 'Existing tags',
+  filterExistingTags: 'Filter existing tags',
+  noExistingTagMatches: 'No tags match your filter.',
   addExistingTag: name => `Add existing tag ${name}`,
   removeTag: name => `Remove tag ${name}`,
   editTitle: 'Edit title',
@@ -660,6 +664,8 @@ const ja: KanbanMessages = {
   tagName: 'タグ名',
   addTag: 'タグを追加',
   existingTags: '既存のタグ',
+  filterExistingTags: '既存のタグを絞り込み',
+  noExistingTagMatches: '絞り込み条件に一致するタグはありません。',
   addExistingTag: name => `既存のタグ ${name} を追加`,
   removeTag: name => `タグ ${name} を削除`,
   editTitle: 'タイトルを編集',
@@ -909,6 +915,8 @@ const zh: KanbanMessages = {
   tagName: '标签名称',
   addTag: '添加标签',
   existingTags: '已有标签',
+  filterExistingTags: '筛选已有标签',
+  noExistingTagMatches: '没有与筛选条件匹配的标签。',
   addExistingTag: name => `添加已有标签 ${name}`,
   removeTag: name => `移除标签 ${name}`,
   editTitle: '编辑标题',
@@ -1156,6 +1164,8 @@ const zhHant: KanbanMessages = {
   tagName: '標籤名稱',
   addTag: '新增標籤',
   existingTags: '現有標籤',
+  filterExistingTags: '篩選現有標籤',
+  noExistingTagMatches: '沒有與篩選條件相符的標籤。',
   addExistingTag: name => `新增現有標籤 ${name}`,
   removeTag: name => `移除標籤 ${name}`,
   editTitle: '編輯標題',

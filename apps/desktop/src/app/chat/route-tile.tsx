@@ -11,21 +11,63 @@ import { lazy, type ReactNode, Suspense } from 'react'
 
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
+import { $cronJobs } from '@/store/cron'
 import { $routeTiles, closeRouteTile, type RouteTile } from '@/store/route-tiles'
 
-import { ARTIFACTS_ROUTE, contributedRoutes, MESSAGING_ROUTE, ROUTES_AREA, SKILLS_ROUTE } from '../routes'
+import { jobTitle } from '../cron/job-state'
+import { openSession } from '../open-session'
+import {
+  ARTIFACTS_ROUTE,
+  contributedRoutes,
+  cronJobIdFromRoute,
+  isCronRoute,
+  MESSAGING_ROUTE,
+  ROUTES_AREA,
+  SKILLS_ROUTE
+} from '../routes'
 
 import { paneMirror } from './pane-mirror'
 
 const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
+const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 
 // Built-in page views + their pane titles, keyed by route.
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
   [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' }
+}
+
+function cronTitle(path: string): string {
+  const jobId = cronJobIdFromRoute(path)
+
+  if (!jobId) {
+    return 'Scheduled jobs'
+  }
+
+  const job = $cronJobs.get().find(row => row.id === jobId)
+
+  return job ? jobTitle(job) : 'Scheduled job'
+}
+
+function builtinPage(path: string): null | { render: () => ReactNode; title: string } {
+  if (isCronRoute(path)) {
+    const jobId = cronJobIdFromRoute(path)
+
+    return {
+      render: () => (
+        <CronView
+          initialJobId={jobId}
+          onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')}
+        />
+      ),
+      title: cronTitle(path)
+    }
+  }
+
+  return BUILTIN_PAGES[path] ?? null
 }
 
 /** Humanize a route path into a tab title: `/my-atlas` → `My Atlas`. */
@@ -40,8 +82,10 @@ const humanizePath = (path: string): string =>
 /** Title for a route tile: the built-in name, the contribution's own `title`,
  *  else a humanized path — never the internal `${source}:${id}` key. */
 function routeTitle(path: string): string {
-  if (BUILTIN_PAGES[path]) {
-    return BUILTIN_PAGES[path].title
+  const builtin = builtinPage(path)
+
+  if (builtin) {
+    return builtin.title
   }
 
   return contributedRoutes().find(r => r.path === path)?.title ?? humanizePath(path)
@@ -58,7 +102,7 @@ function RouteTabLead({ path }: { path: string }) {
 }
 
 function RouteTilePane({ path }: { path: string }) {
-  const builtin = BUILTIN_PAGES[path]
+  const builtin = builtinPage(path)
 
   // Subscribe so a plugin page tile appears the moment its route registers.
   useContributions(ROUTES_AREA)
@@ -96,6 +140,7 @@ function RouteTilePane({ path }: { path: string }) {
 /** Keep pane contributions mirroring `$routeTiles`. Call once from the root. */
 export const watchRouteTiles = paneMirror<RouteTile>({
   source: $routeTiles,
+  also: [$cronJobs],
   key: t => t.path,
   prefix: 'route-tile',
   dir: t => t.dir,

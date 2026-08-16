@@ -34,7 +34,7 @@ interface PanelProps {
   className?: string
   closeLabel?: string
   contentClassName?: string
-  onClose: () => void
+  onClose?: () => void
 }
 
 export function Panel({
@@ -44,6 +44,14 @@ export function Panel({
   contentClassName,
   onClose
 }: PanelProps) {
+  if (!onClose) {
+    return (
+      <section className={cn('flex h-full min-h-0 w-full flex-col px-4 py-4 sm:px-5', className, contentClassName)}>
+        {children}
+      </section>
+    )
+  }
+
   return (
     <OverlayView
       closeLabel={closeLabel}

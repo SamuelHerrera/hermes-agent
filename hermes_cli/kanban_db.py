@@ -2522,6 +2522,7 @@ def connect(
                     # stale PRAGMA snapshots during gateway startup.
                     conn.executescript(SCHEMA_SQL)
                     _migrate_add_optional_columns(conn)
+                    backfill_ai_task_tags(conn)
                     _INITIALIZED_PATHS.add(resolved)
         except Exception:
             conn.close()
@@ -4131,6 +4132,47 @@ def apply_ai_task_tags(
         )
 
     return {"added": added_names, "removed": removed_names}
+
+
+def backfill_ai_task_tags(
+    conn: sqlite3.Connection,
+    task_id: Optional[str] = None,
+    *,
+    include_archived: bool = False,
+) -> int:
+    """Refresh AI-managed business tags across existing board tasks.
+
+    This is the upgrade/restart cleanup path for boards that already persisted
+    the old workflow/status AI taxonomy. Manual tags outside the ``ai:``
+    namespace are preserved by :func:`apply_ai_task_tags`; archived tasks are
+    skipped by default so historical closed cards keep their old audit context.
+
+    Returns the number of tasks whose AI tag set changed.
+    """
+    query = "SELECT id FROM tasks"
+    params: list[Any] = []
+    clauses: list[str] = []
+    if task_id is not None:
+        clauses.append("id = ?")
+        params.append(task_id)
+    if not include_archived:
+        clauses.append("status != 'archived'")
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at ASC, id ASC"
+
+    changed = 0
+    rows = conn.execute(query, tuple(params)).fetchall()
+    for row in rows:
+        diff = apply_ai_task_tags(
+            conn,
+            row["id"],
+            trigger="backfill",
+            reason="business feature/module tag taxonomy refresh",
+        )
+        if diff.get("added") or diff.get("removed"):
+            changed += 1
+    return changed
 
 
 def assign_task(conn: sqlite3.Connection, task_id: str, profile: Optional[str]) -> bool:

@@ -1,9 +1,10 @@
+import { host } from '@hermes/plugin-sdk'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { $boardSlug, fetchBoard } from './api'
-import plugin, { KanbanNavStatus, KanbanRouteTabLead } from './plugin'
+import { $boardSlug, fetchBoard, fetchBoards } from './api'
+import plugin, { KanbanNavDashboards, KanbanNavStatus, KanbanRouteTabLead } from './plugin'
 import type { KanbanBoard } from './types'
 
 vi.mock('./ui', async () => {
@@ -33,7 +34,8 @@ vi.mock('./api', async () => {
   return {
     ...actual,
     bindApi: vi.fn(() => vi.fn()),
-    fetchBoard: vi.fn()
+    fetchBoard: vi.fn(),
+    fetchBoards: vi.fn()
   }
 })
 
@@ -73,6 +75,7 @@ function renderWithClient(children: React.ReactNode) {
 afterEach(() => {
   $boardSlug.set('')
   vi.clearAllMocks()
+  vi.restoreAllMocks()
 })
 
 describe('Kanban route tab loader', () => {
@@ -158,5 +161,66 @@ describe('Kanban sidebar nav counts', () => {
 
     expect(await screen.findByTitle('3 Kanban Ready tasks')).toBeTruthy()
     expect(screen.queryByRole('status', { name: 'Kanban tasks running' })).toBeNull()
+  })
+
+  it('renders dashboard child rows with per-board counts and selects a board in the single Kanban tab', async () => {
+    vi.mocked(fetchBoards).mockResolvedValue({
+      boards: [
+        { counts: { ready: 2, running: 1 }, name: 'Default', slug: 'default' },
+        { counts: { blocked: 3 }, name: 'Personal', slug: 'personal' }
+      ],
+      current: 'default'
+    })
+    const openRouteTile = vi.spyOn(host, 'openRouteTile').mockImplementation(vi.fn())
+
+    renderWithClient(
+      <KanbanNavDashboards
+        renderItem={item => {
+          const Adornment = item.adornment
+
+          return (
+            <button data-active={item.active} key={item.id} onClick={item.onSelect} type="button">
+              <span>{item.label}</span>
+              {Adornment ? <Adornment /> : null}
+            </button>
+          )
+        }}
+      />
+    )
+
+    expect(await screen.findByText('Default')).toBeTruthy()
+    expect(screen.getByTitle('2 Kanban Ready tasks')).toBeTruthy()
+    expect(screen.getByTitle('1 Kanban Running task')).toBeTruthy()
+    expect(screen.getByTitle('3 Kanban Blocked tasks')).toBeTruthy()
+
+    fireEvent.click(screen.getByText('Personal'))
+
+    expect($boardSlug.get()).toBe('personal')
+    expect(openRouteTile).toHaveBeenCalledWith('/kanban')
+  })
+
+  it('normalizes the current/default dashboard when the expanded parent row is selected', async () => {
+    $boardSlug.set('stale-board')
+    vi.mocked(fetchBoards).mockResolvedValue({
+      boards: [
+        { counts: { ready: 2 }, name: 'Default', slug: 'default' },
+        { counts: { blocked: 3 }, name: 'Personal', slug: 'personal' }
+      ],
+      current: 'default'
+    })
+
+    renderWithClient(
+      <KanbanNavDashboards
+        parentSelectedAt={1}
+        renderItem={item => (
+          <button data-active={item.active} key={item.id} onClick={item.onSelect} type="button">
+            {item.label}
+          </button>
+        )}
+      />
+    )
+
+    expect(await screen.findByText('Default')).toBeTruthy()
+    await waitFor(() => expect($boardSlug.get()).toBe(''))
   })
 })

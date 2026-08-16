@@ -23,17 +23,26 @@ import {
   type RouteContribution,
   ROUTES_AREA,
   SIDEBAR_NAV_AREA,
+  type SidebarNavChildrenProps,
   type SidebarNavContribution,
   STATUSBAR_AREAS,
   Tip,
   useQuery,
   useValue
 } from '@hermes/plugin-sdk'
+import { useEffect } from 'react'
 
-import { $boardSlug, bindApi, boardKey, fetchBoard } from './api'
+import { $boardSlug, bindApi, boardKey, BOARDS_KEY, fetchBoard, fetchBoards } from './api'
 import { KanbanBoardPage } from './board'
 import { KANBAN_LOCALES } from './i18n'
-import { $newTaskLane, KanbanLaneCounts, kanbanLaneCountsFromColumns, kanbanLaneCountsTip, useKanban } from './ui'
+import {
+  $newTaskLane,
+  KanbanLaneCounts,
+  kanbanLaneCountsFromColumns,
+  kanbanLaneCountsFromStatusCounts,
+  kanbanLaneCountsTip,
+  useKanban
+} from './ui'
 
 type KanbanCounts = {
   active: number
@@ -116,6 +125,63 @@ export function KanbanNavStatus() {
   )
 }
 
+export function KanbanNavDashboards({ parentSelectedAt = 0, renderItem }: SidebarNavChildrenProps) {
+  const k = useKanban()
+  const slug = useValue($boardSlug)
+
+  const { data: boards } = useQuery({
+    queryFn: fetchBoards,
+    queryKey: BOARDS_KEY,
+    refetchInterval: 60_000
+  })
+
+  const currentSlug = slug || boards?.current || ''
+
+  useEffect(() => {
+    if (!parentSelectedAt || !boards?.boards.length) {
+      return
+    }
+
+    const selectedSlug = boards.boards.some(board => board.slug === currentSlug) ? currentSlug : boards.current
+
+    $boardSlug.set(selectedSlug === boards.current ? '' : selectedSlug)
+  }, [boards, currentSlug, parentSelectedAt])
+
+  if (!boards?.boards.length) {
+    return null
+  }
+
+  return (
+    <>
+      {boards.boards.map(board => {
+        const counts = kanbanLaneCountsFromStatusCounts(board.counts, k)
+        const label = board.name || board.slug
+
+        const Adornment = counts.length
+          ? function KanbanDashboardNavCounts() {
+              return (
+                <Tip label={kanbanLaneCountsTip(label, counts)}>
+                  <KanbanLaneCounts counts={counts} />
+                </Tip>
+              )
+            }
+          : undefined
+
+        return renderItem({
+          active: board.slug === currentSlug,
+          adornment: Adornment,
+          id: `kanban-board-${board.slug}`,
+          label,
+          onSelect: () => {
+            $boardSlug.set(board.slug === boards.current ? '' : board.slug)
+            host.openRouteTile('/kanban')
+          }
+        })
+      })}
+    </>
+  )
+}
+
 export function KanbanRouteTabLead() {
   const k = useKanban()
   const slug = useValue($boardSlug)
@@ -185,6 +251,7 @@ const plugin: HermesPlugin = {
         area: SIDEBAR_NAV_AREA,
         order: 50,
         data: {
+          children: KanbanNavDashboards,
           codicon: 'project',
           label: 'Kanban',
           openAsTile: true,

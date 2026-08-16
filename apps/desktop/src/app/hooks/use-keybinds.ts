@@ -193,7 +193,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'nav.skills': () => openWorkspacePageRoute(navigate, SKILLS_ROUTE),
     'nav.messaging': () => openWorkspacePageRoute(navigate, MESSAGING_ROUTE),
     'nav.artifacts': () => openWorkspacePageRoute(navigate, ARTIFACTS_ROUTE),
-    'nav.cron': () => navigate(CRON_ROUTE),
+    'nav.cron': () => openWorkspacePageRoute(navigate, CRON_ROUTE),
     'nav.agents': () => navigate(AGENTS_ROUTE),
 
     'session.new': () => {

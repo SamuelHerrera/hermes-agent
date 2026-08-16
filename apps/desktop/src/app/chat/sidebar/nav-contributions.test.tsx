@@ -8,6 +8,22 @@ import { contributedNavItems } from './nav-contributions'
 afterEach(cleanup)
 
 describe('contributed sidebar nav items', () => {
+  it('preserves a contribution child renderer for dropdown rows', () => {
+    const Children = () => null
+
+    const items = contributedNavItems([
+      {
+        area: 'sidebar.nav',
+        data: { children: Children, codicon: 'project', label: 'Kanban', path: '/kanban' },
+        id: 'kanban:nav',
+        source: 'plugin:kanban'
+      } satisfies Contribution
+    ])
+
+    expect(items).toHaveLength(1)
+    expect(items[0].children).toBe(Children)
+  })
+
   it('preserves a contribution render callback as row adornment chrome', () => {
     const items = contributedNavItems([
       {

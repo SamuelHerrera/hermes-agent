@@ -24,7 +24,7 @@ import { $newSessionTabAction, registerPaneCloser } from '@/components/pane-shel
 import { FloatingPet } from '@/components/pet/floating-pet'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { emitGatewayEvent } from '@/contrib/events'
-import { getLatestSessionMessages, triggerCronJob } from '@/hermes'
+import { getLatestSessionMessages } from '@/hermes'
 import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { sessionMessagesSignature } from '@/lib/session-signatures'
 import { isMessagingSource } from '@/lib/session-source'
@@ -34,7 +34,7 @@ import { playWakeSound } from '@/lib/wake-sound'
 import { $billingSettingsRequest } from '@/store/billing-block'
 import { $desktopBoot } from '@/store/boot'
 import { requestVoiceConversationStart } from '@/store/composer'
-import { $cronReviewRequest, setCronFocusJobId } from '@/store/cron'
+import { $cronReviewRequest } from '@/store/cron'
 import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/store/layout'
 import { $previewTarget } from '@/store/preview'
 import {
@@ -89,6 +89,7 @@ import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
 import {
   CRON_ROUTE,
+  cronJobRoute,
   openWorkspacePageRoute,
   routeSessionId,
   sessionRoute,
@@ -137,7 +138,6 @@ import type { WiringActions, WiringApi } from './types'
 // ChatRoutesSurface's and live in ./surfaces.
 const AgentsView = lazy(async () => ({ default: (await import('../agents')).AgentsView }))
 const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
-const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 const ProfilesView = lazy(async () => ({ default: (await import('../profiles')).ProfilesView }))
 const SettingsView = lazy(async () => ({ default: (await import('../settings')).SettingsView }))
@@ -193,7 +193,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     cronReviewSeenRef.current = cronReviewRequest
 
     if (cronReviewRequest > 0) {
-      navigate(CRON_ROUTE)
+      openWorkspacePageRoute(navigate, CRON_ROUTE)
     }
   }, [cronReviewRequest, navigate])
   const freshDraftReady = useStore($freshDraftReady)
@@ -236,7 +236,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     closeOverlayToPreviousRoute,
     commandCenterInitialSection,
     commandCenterOpen,
-    cronOpen,
     currentView,
     openAgents,
     openCommandCenterSection,
@@ -898,11 +897,9 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onEdit: editMessage,
     onLoadMoreMessaging: loadMoreMessagingForPlatform,
     onLoadMoreSessions: loadMoreSessions,
-    onManageCronJob: jobId => {
-      setCronFocusJobId(jobId)
-      navigate(CRON_ROUTE)
-    },
+    onManageCronJob: jobId => openWorkspacePageRoute(navigate, cronJobRoute(jobId)),
     onNavigate: selectSidebarItem,
+    onOpenSessionTab: sessionId => openSession(sessionId, navigate, 'tab'),
     onNewSessionInWorkspace: path => startSessionInWorkspace(path, { openTab: true }),
     onNewSessionSplit: dir => void openNewSessionTile(dir),
     onPasteClipboardImage: opts => composer.pasteClipboardImage(opts),
@@ -922,11 +919,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onThreadMessagesChange: handleThreadMessagesChange,
     onToggleSelectedPin: toggleSelectedPin,
     onTranscribeAudio: transcribeVoiceAudio,
-    onTriggerCronJob: jobId => {
-      void triggerCronJob(jobId)
-        .then(() => refreshCronJobs())
-        .catch(() => undefined)
-    },
     getGateway: () => gatewayRef.current,
     openAgents,
     openCommandCenterSection,
@@ -1113,14 +1105,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         </Suspense>
       )}
 
-      {cronOpen && (
-        <Suspense fallback={null}>
-          <CronView
-            onClose={closeOverlayToPreviousRoute}
-            onOpenSession={sessionId => openSession(sessionId, navigate)}
-          />
-        </Suspense>
-      )}
 
       {webhooksOpen && (
         <Suspense fallback={null}>

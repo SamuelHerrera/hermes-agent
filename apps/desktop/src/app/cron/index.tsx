@@ -285,12 +285,18 @@ function matchesQuery(job: CronJob, q: string): boolean {
 }
 
 interface CronViewProps extends React.ComponentProps<'section'> {
-  onClose: () => void
+  initialJobId?: null | string
+  onClose?: () => void
   onOpenSession?: (sessionId: string) => void
   setStatusbarItemGroup?: SetStatusbarItemGroup
 }
 
-export function CronView({ onClose, onOpenSession, setStatusbarItemGroup: _setStatusbarItemGroup }: CronViewProps) {
+export function CronView({
+  initialJobId = null,
+  onClose,
+  onOpenSession,
+  setStatusbarItemGroup: _setStatusbarItemGroup
+}: CronViewProps) {
   const { t } = useI18n()
   const c = t.cron
   // Source of truth is the shared atom (also fed by the controller poll), so the
@@ -301,7 +307,7 @@ export function CronView({ onClose, onOpenSession, setStatusbarItemGroup: _setSt
   const [query, setQuery] = useState('')
   const [busyJobId, setBusyJobId] = useState<null | string>(null)
   // Master/detail: the job whose schedule + run history fill the right pane.
-  const [selectedJobId, setSelectedJobId] = useState<null | string>(null)
+  const [selectedJobId, setSelectedJobId] = useState<null | string>(() => initialJobId)
   // Set when a job is opened from the sidebar so we scroll it into view once the
   // row exists. Cleared after the scroll fires.
   const pendingScrollRef = useRef<null | string>(null)
@@ -331,6 +337,18 @@ export function CronView({ onClose, onOpenSession, setStatusbarItemGroup: _setSt
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // Route tile → "open this job in its own tab": keep the detail selection
+  // tied to the path while still letting base /cron remember local clicks.
+  // eslint-disable-next-line no-restricted-syntax -- legitimate one-shot scroll target, not an atom mirror
+  useEffect(() => {
+    if (!initialJobId) {
+      return
+    }
+
+    setSelectedJobId(initialJobId)
+    pendingScrollRef.current = initialJobId
+  }, [initialJobId])
 
   // Sidebar → "open this job": resolve the focus id (or name) to a job, select
   // it, queue a scroll, then clear the one-shot focus so re-opening cron

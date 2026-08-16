@@ -90,7 +90,6 @@ import {
   columnMeta,
   type KanbanAttachment,
   type KanbanBoard,
-  type KanbanTag,
   type KanbanTask,
   type TaskEstimate,
   type TaskSortDirection,
@@ -108,7 +107,9 @@ import {
   columnLabel,
   errText,
   FIELD_LABEL,
+  isAiManagedTag,
   isLockedTarget,
+  kanbanTagDisplayName,
   lockedReason,
   RunClock,
   shortId,
@@ -117,6 +118,7 @@ import {
   useOrchestration
 } from './ui'
 
+export { isAiManagedTag, kanbanTagDisplayName } from './ui'
 export { isUnreadAttentionCard } from './unread'
 export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
@@ -266,14 +268,6 @@ export function taskTimeLabel(task: KanbanTask, display: TaskTimeDisplay, nowMs 
 
 export function taskTagsLabel(task: KanbanTask): string {
   return task.tags?.map(tag => tag.name).join(' ') ?? ''
-}
-
-const AI_TAG_NORMALIZED_PREFIX = 'ai:'
-
-export function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
-  return (
-    tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
-  )
 }
 
 // ── card ─────────────────────────────────────────────────────────────────────
@@ -492,7 +486,7 @@ function Card({
                   key={tag.normalized_name}
                   title={isAiManagedTag(tag) ? k.aiTagTip : undefined}
                 >
-                  {tag.name}
+                  {kanbanTagDisplayName(tag)}
                   {isAiManagedTag(tag) && (
                     <span className="text-[0.5rem] font-semibold uppercase tracking-[0.08em]">{k.aiTagBadge}</span>
                   )}

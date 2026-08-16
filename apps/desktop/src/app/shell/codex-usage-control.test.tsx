@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { codexUsageRemainingPercent, CodexUsageTitlebarControl } from './codex-usage-control'
@@ -71,6 +72,29 @@ describe('CodexUsageTitlebarControl', () => {
     expect(screen.getByText('Weekly messages')).toBeTruthy()
     expect(screen.getByText('50% left')).toBeTruthy()
     expect(screen.getByText('Monday 00:00 UTC')).toBeTruthy()
+  })
+
+  it('does not toggle the hover popover from trigger clicks and closes on blur', () => {
+    vi.useFakeTimers()
+
+    try {
+      render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
+
+      const button = screen.getByRole('button', { name: 'Codex subscription usage' })
+      fireEvent.pointerEnter(button)
+      expect(screen.getByText('Pro')).toBeTruthy()
+
+      fireEvent.click(button)
+      expect(screen.getByText('Pro')).toBeTruthy()
+
+      fireEvent.blur(button, { relatedTarget: button.ownerDocument.body })
+      act(() => {
+        vi.advanceTimersByTime(80)
+      })
+      expect(screen.queryByText('Pro')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('renders unavailable and hidden states without requiring usage data', async () => {

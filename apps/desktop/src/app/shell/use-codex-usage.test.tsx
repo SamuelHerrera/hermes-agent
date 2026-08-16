@@ -32,6 +32,23 @@ function availableUsage(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function withLocalClock(timeZone: string, now: string, callback: () => void) {
+  const previousTimeZone = process.env.TZ
+  process.env.TZ = timeZone
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date(now))
+
+  try {
+    callback()
+  } finally {
+    if (previousTimeZone === undefined) {
+      delete process.env.TZ
+    } else {
+      process.env.TZ = previousTimeZone
+    }
+  }
+}
+
 describe('useCodexUsage', () => {
   it('maps the sanitized Desktop RPC payload into the titlebar control shape', () => {
     const result = mapCodexUsageSnapshot(
@@ -47,7 +64,7 @@ describe('useCodexUsage', () => {
     expect(result.usage).toMatchObject({
       plan: 'Pro',
       remainingPercent: 68,
-      resetAt: '2026-08-15T12:00:00Z',
+      resetAt: expect.any(String),
       resetCredits: 1,
       usedPercent: 32,
       buckets: [
@@ -55,7 +72,7 @@ describe('useCodexUsage', () => {
           id: 'primary',
           label: 'Primary window',
           remainingPercent: 68,
-          resetAt: '2026-08-15T12:00:00Z',
+          resetAt: expect.any(String),
           usedPercent: 32
         }
       ]
@@ -65,6 +82,37 @@ describe('useCodexUsage', () => {
     expect(encoded).not.toContain('should-not-escape')
     expect(encoded).not.toContain('chatgpt.com')
     expect(encoded).not.toContain('token_should_not_escape')
+  })
+
+  it('formats UTC reset instants on the viewer local calendar day across UTC/local date boundaries', () => {
+    withLocalClock('America/Mexico_City', '2026-08-15T07:00:00Z', () => {
+      const result = mapCodexUsageSnapshot(
+        availableUsage({
+          buckets: [
+            {
+              detail: null,
+              key: 'primary',
+              label: 'Primary window',
+              remaining_percent: 68,
+              reset_time: '2026-08-20T03:32:23+00:00',
+              used_percent: 32
+            }
+          ],
+          reset_time: '2026-08-20T03:32:23+00:00'
+        })
+      )
+
+      expect(result.usage?.resetAt).toBe('in 4d 20h (2026-08-19 21:32)')
+      expect(result.usage?.buckets?.[0]?.resetAt).toBe('in 4d 20h (2026-08-19 21:32)')
+    })
+  })
+
+  it('formats UTC reset instants on the viewer local calendar day for same-day resets', () => {
+    withLocalClock('America/Mexico_City', '2026-08-15T07:00:00Z', () => {
+      const result = mapCodexUsageSnapshot(availableUsage({ reset_time: '2026-08-15T12:30:00+00:00' }))
+
+      expect(result.usage?.resetAt).toBe('in 5h 30m (2026-08-15 06:30)')
+    })
   })
 
   it('fetches usage from the sanitized backend bridge for the active profile', async () => {

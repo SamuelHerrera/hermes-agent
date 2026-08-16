@@ -32,7 +32,7 @@ import {
   useQueryClient,
   useValue
 } from '@hermes/plugin-sdk'
-import { type ClipboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import {
   boardKey,
@@ -91,7 +91,9 @@ import {
   columnLabel,
   duration,
   errText,
+  isAiManagedTag,
   isLockedTarget,
+  kanbanTagDisplayName,
   type KanbanText,
   lockedReason,
   ScrollFade,
@@ -101,8 +103,6 @@ import {
   useDefaultAssignee,
   useKanban
 } from './ui'
-
-const AI_TAG_NORMALIZED_PREFIX = 'ai:'
 
 type TaskReadState = Awaited<ReturnType<typeof markTaskRead>>
 
@@ -187,12 +187,6 @@ function DetailPanel({
     >
       {children}
     </div>
-  )
-}
-
-function isAiManagedTag(tag: Pick<KanbanTag, 'name' | 'normalized_name'>): boolean {
-  return (
-    tag.normalized_name.toLowerCase().startsWith(AI_TAG_NORMALIZED_PREFIX) || tag.name.toLowerCase().startsWith('ai:')
   )
 }
 
@@ -1977,8 +1971,18 @@ export function TaskTagsSection({
 }) {
   const k = useKanban()
   const [draft, setDraft] = useState('')
+  const [existingTagsOpen, setExistingTagsOpen] = useState(false)
+  const existingTagsDropdownId = useId()
   const attached = new Set(tags.map(tag => tag.normalized_name))
   const suggestions = existingTags.filter(tag => !attached.has(tag.normalized_name))
+  const normalizedDraft = draft.trim().toLocaleLowerCase()
+  const filteredSuggestions = normalizedDraft
+    ? suggestions.filter(tag => {
+        const displayName = kanbanTagDisplayName(tag).toLocaleLowerCase()
+
+        return tag.name.toLocaleLowerCase().includes(normalizedDraft) || displayName.includes(normalizedDraft)
+      })
+    : suggestions
 
   const addDraft = () => {
     const name = draft.trim()
@@ -1989,6 +1993,7 @@ export function TaskTagsSection({
 
     onAdd(name)
     setDraft('')
+    setExistingTagsOpen(false)
   }
 
   return (
@@ -2007,7 +2012,7 @@ export function TaskTagsSection({
                 key={tag.normalized_name}
                 title={isAiManagedTag(tag) ? k.aiTagTip : undefined}
               >
-                {tag.name}
+                {kanbanTagDisplayName(tag)}
                 {isAiManagedTag(tag) && (
                   <span className="rounded-full bg-sky-400/15 px-1 text-[0.55rem] font-semibold uppercase tracking-[0.08em] text-sky-200">
                     {k.aiTagBadge}
@@ -2029,47 +2034,92 @@ export function TaskTagsSection({
           <p className="text-[0.75rem] text-(--ui-text-quaternary)">{k.noTags}</p>
         )}
 
-        <div className="flex items-center gap-1.5">
-          <Input
-            aria-label={k.tagName}
-            className="h-7 text-[0.75rem]"
-            disabled={pending}
-            onChange={event => setDraft(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                addDraft()
-              }
-            }}
-            placeholder={k.tagName}
-            value={draft}
-          />
-          <Button disabled={pending || !draft.trim()} onClick={addDraft} size="xs" variant="secondary">
-            <Codicon name={pending ? 'loading' : 'tag'} size="0.75rem" spinning={pending} />
-            {k.addTag}
-          </Button>
-        </div>
+        <div
+          className="flex flex-col gap-1.5"
+          onBlur={event => {
+            const nextTarget = event.relatedTarget as Node | null
 
-        {suggestions.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <span className="text-[0.625rem] text-(--ui-text-quaternary)">{k.existingTags}</span>
-            <div className="flex flex-wrap gap-1.5">
-              {suggestions.map(tag => (
-                <button
-                  aria-label={k.addExistingTag(tag.name)}
-                  className="inline-flex items-center gap-1 rounded-full border border-dashed border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground"
-                  disabled={pending}
-                  key={tag.normalized_name}
-                  onClick={() => onAdd(tag.name)}
-                  type="button"
-                >
-                  <Codicon name="add" size="0.65rem" />
-                  {tag.name}
-                </button>
-              ))}
-            </div>
+            if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+              setExistingTagsOpen(false)
+            }
+          }}
+        >
+          <div className="flex items-center gap-1.5">
+            <Input
+              aria-autocomplete="list"
+              aria-controls={suggestions.length > 0 ? existingTagsDropdownId : undefined}
+              aria-expanded={suggestions.length > 0 ? existingTagsOpen : undefined}
+              aria-label={k.tagName}
+              className="h-7 text-[0.75rem]"
+              disabled={pending}
+              onChange={event => {
+                setDraft(event.target.value)
+                if (suggestions.length > 0) {
+                  setExistingTagsOpen(true)
+                }
+              }}
+              onFocus={() => {
+                if (suggestions.length > 0) {
+                  setExistingTagsOpen(true)
+                }
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  setExistingTagsOpen(false)
+                  return
+                }
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  addDraft()
+                }
+              }}
+              placeholder={k.tagName}
+              role="combobox"
+              value={draft}
+            />
+            <Button disabled={pending || !draft.trim()} onClick={addDraft} size="xs" variant="secondary">
+              <Codicon name={pending ? 'loading' : 'tag'} size="0.75rem" spinning={pending} />
+              {k.addTag}
+            </Button>
           </div>
-        )}
+
+          {suggestions.length > 0 && existingTagsOpen && (
+            <div
+              aria-label={k.existingTags}
+              className="flex max-w-full flex-col gap-1.5 overflow-hidden rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-secondary) p-1.5"
+              id={existingTagsDropdownId}
+              role="listbox"
+            >
+              <div className="flex items-center justify-between px-1 text-[0.6875rem] text-(--ui-text-quaternary)">
+                <span>{k.existingTags}</span>
+                <span>{filteredSuggestions.length}</span>
+              </div>
+              {filteredSuggestions.length > 0 ? (
+                <div className="flex max-h-40 flex-col gap-1 overflow-y-auto pr-0.5">
+                  {filteredSuggestions.map(tag => (
+                    <button
+                      aria-label={k.addExistingTag(tag.name)}
+                      className="inline-flex w-full min-w-0 items-center gap-1 rounded-md border border-dashed border-(--ui-stroke-secondary) px-2 py-1 text-left text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={pending}
+                      key={tag.normalized_name}
+                      onClick={() => {
+                        onAdd(tag.name)
+                        setDraft('')
+                        setExistingTagsOpen(false)
+                      }}
+                      type="button"
+                    >
+                      <Codicon name="add" size="0.65rem" />
+                      <span className="min-w-0 truncate">{kanbanTagDisplayName(tag)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="px-1 py-1 text-[0.75rem] text-(--ui-text-quaternary)">{k.noExistingTagMatches}</p>
+              )}
+            </div>
+          )}
+        </div>
       </DetailPanel>
     </Section>
   )

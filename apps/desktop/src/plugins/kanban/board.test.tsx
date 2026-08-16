@@ -8,6 +8,7 @@ import {
   draftBarClassName,
   isAiManagedTag,
   isUnreadAttentionCard,
+  kanbanTagDisplayName,
   KANBAN_BOARD_SCROLL_CLASS,
   KANBAN_COLUMN_TASKS_CLASS,
   KANBAN_LANE_WIDTH_CLASS,
@@ -211,15 +212,25 @@ describe('kanban board time sorting', () => {
       taskTagsLabel({
         id: 't_demo',
         status: 'ready',
-        tags: [{ id: 1, name: 'Feature Alpha', normalized_name: 'feature alpha' }],
+        tags: [
+          { id: 1, name: 'Feature Alpha', normalized_name: 'feature alpha' },
+          { id: 2, name: 'Billing Module', normalized_name: 'billing module' },
+          { id: 3, name: 'Status: Customer Ready', normalized_name: 'status: customer ready' }
+        ],
         title: 'Demo'
       })
-    ).toContain('Feature Alpha')
+    ).toBe('Feature Alpha Billing Module Status: Customer Ready')
   })
 
   it('identifies AI-managed tags from the backend namespace for special rendering', () => {
     expect(isAiManagedTag({ name: 'AI:Status Ready', normalized_name: 'ai:status ready' })).toBe(true)
     expect(isAiManagedTag({ name: 'Feature Alpha', normalized_name: 'feature alpha' })).toBe(false)
+  })
+
+  it('removes only the redundant AI namespace from displayed AI tag labels', () => {
+    expect(kanbanTagDisplayName({ name: 'AI:Status Ready', normalized_name: 'ai:status ready' })).toBe('Status Ready')
+    expect(kanbanTagDisplayName({ name: 'AI:Feature AI', normalized_name: 'ai:feature ai' })).toBe('Feature AI')
+    expect(kanbanTagDisplayName({ name: 'Feature Alpha', normalized_name: 'feature alpha' })).toBe('Feature Alpha')
   })
 
   it('shows unread badges only for unread completed or attention-needed cards', () => {
@@ -404,6 +415,98 @@ describe('kanban board lane layout classes', () => {
 })
 
 describe('KanbanBoardPage header', () => {
+  it('renders AI-managed card tags without the redundant AI namespace while keeping the AI badge', async () => {
+    vi.mocked(fetchBoard).mockResolvedValueOnce({
+      assignees: [],
+      columns: [
+        {
+          name: 'ready',
+          tasks: [
+            {
+              created_at: 1,
+              id: 't_ai_tag',
+              status: 'ready',
+              tags: [
+                { id: 1, name: 'AI:Feature Billing Module', normalized_name: 'ai:feature billing module' },
+                { id: 2, name: 'AI:Status Ready', normalized_name: 'ai:status ready' }
+              ],
+              title: 'AI tagged billing card'
+            }
+          ]
+        }
+      ],
+      latest_event_id: 2,
+      now: 1000,
+      tenants: []
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={client}>
+        <KanbanBoardPage />
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByText('AI tagged billing card')).toBeTruthy()
+    expect(screen.getByText('Feature Billing Module')).toBeTruthy()
+    expect(screen.getByText('Status Ready')).toBeTruthy()
+    expect(screen.queryByText('AI:Feature Billing Module')).toBeNull()
+    expect(screen.queryByText('AI:Status Ready')).toBeNull()
+    expect(screen.getAllByText('AI')).toHaveLength(2)
+  })
+
+  it('filters cards by business module, feature, and status tag text', async () => {
+    vi.mocked(fetchBoard).mockResolvedValueOnce({
+      assignees: [],
+      columns: [
+        {
+          name: 'ready',
+          tasks: [
+            {
+              created_at: 1,
+              id: 't_billing_module',
+              status: 'ready',
+              tags: [
+                { id: 1, name: 'Billing Module', normalized_name: 'billing module' },
+                { id: 2, name: 'Feature: Invoice Sync', normalized_name: 'feature: invoice sync' }
+              ],
+              title: 'Billing work'
+            },
+            {
+              created_at: 2,
+              id: 't_status_ready',
+              status: 'ready',
+              tags: [{ id: 3, name: 'Status: Customer Ready', normalized_name: 'status: customer ready' }],
+              title: 'Customer status work'
+            },
+            { created_at: 3, id: 't_unrelated', status: 'ready', title: 'Unrelated work' }
+          ]
+        }
+      ],
+      latest_event_id: 3,
+      now: 1000,
+      tenants: []
+    })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+    render(
+      <QueryClientProvider client={client}>
+        <KanbanBoardPage />
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByText('Billing work')).toBeTruthy()
+    const search = screen.getByLabelText('Filter cards')
+
+    fireEvent.change(search, { target: { value: 'billing module' } })
+    await waitFor(() => expect(screen.queryByText('Customer status work')).toBeNull())
+    expect(screen.getByText('Billing work')).toBeTruthy()
+
+    fireEvent.change(search, { target: { value: 'customer ready' } })
+    await waitFor(() => expect(screen.queryByText('Billing work')).toBeNull())
+    expect(screen.getByText('Customer status work')).toBeTruthy()
+  })
+
   it('renders a compact unread badge for qualifying cards on the board', async () => {
     vi.mocked(fetchBoard).mockResolvedValueOnce({
       assignees: [],

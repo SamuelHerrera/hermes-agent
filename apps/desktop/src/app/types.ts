@@ -3,6 +3,8 @@ import type * as React from 'react'
 import type { ChatMessage } from '@/lib/chat-messages'
 import type { SessionMessage, UsageStats } from '@/types/hermes'
 
+import type { SidebarNavChildrenProps } from './routes'
+
 export interface ContextSuggestion {
   text: string
   display: string
@@ -167,6 +169,8 @@ export interface SidebarNavItem {
   icon: React.ComponentType<{ className?: string }>
   /** Optional right-side chrome for live status badges/spinners. */
   adornment?: React.ComponentType
+  /** Optional nested row renderer for contributed dropdown/sidebar choices. */
+  children?: React.ComponentType<SidebarNavChildrenProps>
   route?: string
   /** Plain sidebar clicks open the route as a movable tab instead of main. */
   openAsTile?: boolean

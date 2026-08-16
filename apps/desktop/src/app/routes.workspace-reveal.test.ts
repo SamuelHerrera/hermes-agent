@@ -96,7 +96,8 @@ describe('classification of targets carrying a query', () => {
     [`${SKILLS_ROUTE}?tab=skills`, 'skills'],
     [`${SKILLS_ROUTE}?tab=toolsets`, 'skills'],
     [`${SKILLS_ROUTE}?tab=mcp&server=ctx7`, 'skills'],
-    [`${SETTINGS_ROUTE}?tab=keys`, 'settings']
+    [`${SETTINGS_ROUTE}?tab=keys`, 'settings'],
+    [`${CRON_ROUTE}/daily`, 'cron']
   ])('%s is not a session route', (to, view) => {
     expect(routeSessionId(to)).toBeNull()
     expect(appViewForPath(to)).toBe(view)
@@ -129,6 +130,20 @@ describe('syncWorkspaceRoute', () => {
     expect(fronted()).toBe(true)
   })
 
+  it('fronts on the cron page route', () => {
+    syncWorkspaceRoute(CRON_ROUTE)
+
+    expect($workspaceIsPage.get()).toBe(true)
+    expect(fronted()).toBe(true)
+  })
+
+  it('fronts on a cron job page route', () => {
+    syncWorkspaceRoute(`${CRON_ROUTE}/daily`)
+
+    expect($workspaceIsPage.get()).toBe(true)
+    expect(fronted()).toBe(true)
+  })
+
   it('fronts on a contributed page route', () => {
     const dispose = contributeRoute()
 
@@ -147,8 +162,7 @@ describe('syncWorkspaceRoute', () => {
     ['the new-chat route', NEW_CHAT_ROUTE],
     ['an overlay', SETTINGS_ROUTE],
     ['an overlay with a query', `${SETTINGS_ROUTE}?tab=keys`],
-    ['another overlay', CRON_ROUTE],
-    ['yet another overlay', AGENTS_ROUTE]
+    ['another overlay', AGENTS_ROUTE]
   ])('leaves the tab alone on %s', (_label, to) => {
     syncWorkspaceRoute(to)
 
@@ -215,6 +229,17 @@ describe('openWorkspacePageRoute', () => {
     expect(openRouteTile).not.toHaveBeenCalled()
     expect(navigate).toHaveBeenCalledWith(to, undefined)
     expect(fronted()).toBe(true)
+  })
+
+  it('opens cron routes as center tabs', () => {
+    const navigate = vi.fn()
+
+    openWorkspacePageRoute(navigate, CRON_ROUTE)
+    openWorkspacePageRoute(navigate, `${CRON_ROUTE}/daily`)
+
+    expect(openRouteTile).toHaveBeenNthCalledWith(1, CRON_ROUTE, 'center')
+    expect(openRouteTile).toHaveBeenNthCalledWith(2, `${CRON_ROUTE}/daily`, 'center')
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it('still navigates chat and overlay routes normally', () => {
