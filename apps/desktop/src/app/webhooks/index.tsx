@@ -74,7 +74,7 @@ function CopyValueRow({ copyLabel, mono = true, value }: { copyLabel: string; mo
 }
 
 interface WebhooksViewProps {
-  onClose: () => void
+  onClose?: () => void
 }
 
 export function WebhooksView({ onClose }: WebhooksViewProps) {

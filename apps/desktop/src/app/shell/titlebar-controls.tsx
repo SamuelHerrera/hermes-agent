@@ -6,7 +6,9 @@ import { hudTargetSessionId } from '@/app/hud/handoff'
 import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
+import { ContribRender } from '@/contrib/react/boundary'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { cn } from '@/lib/utils'
@@ -20,6 +22,7 @@ import {
   toggleSidebarOpen
 } from '@/store/layout'
 import { openRouteTile } from '@/store/route-tiles'
+import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
 
 import {
   appViewForPath,
@@ -30,6 +33,7 @@ import {
 } from '../routes'
 
 import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
+import type { StatusbarItem } from './statusbar-controls'
 import {
   TITLEBAR_ICON_BADGE_SCALE,
   titlebarButtonClass,
@@ -61,6 +65,8 @@ interface TitlebarControlsProps extends ComponentProps<'div'> {
   codexUsage?: CodexUsageData | null
   codexUsageState?: CodexUsageControlState
   leftTools?: readonly TitlebarTool[]
+  statusbarLeftItems?: readonly StatusbarItem[]
+  statusbarItems?: readonly StatusbarItem[]
   tools?: readonly TitlebarTool[]
   onOpenSettings: () => void
 }
@@ -115,6 +121,8 @@ export function TitlebarControls({
   codexUsage,
   codexUsageState = 'unavailable',
   leftTools = [],
+  statusbarLeftItems = [],
+  statusbarItems = [],
   tools = [],
   onOpenSettings
 }: TitlebarControlsProps) {
@@ -125,6 +133,7 @@ export function TitlebarControls({
   const hapticsMuted = useStore($hapticsMuted)
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
+  const hiddenStatusbarIds = useStore($statusbarHiddenIds)
 
   const toggleHaptics = () => {
     if (!hapticsMuted) {
@@ -277,6 +286,10 @@ export function TitlebarControls({
   const visibleWorkspacePageTools = workspacePageTools.filter(tool => !tool.hidden)
   const visiblePaneTools = tools.filter(tool => !tool.hidden)
 
+  const visibleStatusbarItems = [...statusbarLeftItems, ...statusbarItems].filter(
+    item => !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+  )
+
   return (
     <>
       <div
@@ -319,6 +332,9 @@ export function TitlebarControls({
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
+        {visibleStatusbarItems.map(item => (
+          <TitlebarStatusbarItemButton item={item} key={`status:${item.id}`} navigate={navigate} />
+        ))}
         {visibleWorkspacePageTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
@@ -329,6 +345,137 @@ export function TitlebarControls({
         <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
       </div>
     </>
+  )
+}
+
+function statusbarTooltip(item: StatusbarItem): ReactNode {
+  if (item.actionId) {
+    return <TipKeybindLabel actionId={item.actionId} text={item.title} />
+  }
+
+  return item.title ?? item.label
+}
+
+function TitlebarStatusbarItemButton({
+  item,
+  navigate
+}: {
+  item: StatusbarItem
+  navigate: ReturnType<typeof useNavigate>
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  if (item.render) {
+    return (
+      <span className="flex h-(--titlebar-control-height) items-center" data-titlebar-statusbar-item={item.id}>
+        <ContribRender render={item.render} />
+      </span>
+    )
+  }
+
+  const tooltipLabel = statusbarTooltip(item)
+  const menuContent = typeof item.menuContent === 'function' ? item.menuContent(() => setMenuOpen(false)) : item.menuContent
+  const hasMenu = item.variant === 'menu' || Boolean(menuContent) || Boolean(item.menuItems?.length)
+
+  const content = (
+    <>
+      {item.icon}
+      {!item.icon && item.label ? <span className="max-w-16 truncate text-[0.625rem] leading-none">{item.label}</span> : null}
+    </>
+  )
+
+  const className = cn(titlebarButtonClass, 'bg-transparent select-none', item.className)
+
+  const run = (event: MouseEvent) => {
+    if (item.to) {
+      navigate(item.to)
+    }
+
+    item.onSelect?.({ shiftKey: event.shiftKey })
+  }
+
+  if (item.href) {
+    return (
+      <Tip label={tooltipLabel}>
+        <Button asChild className={className} size="icon-titlebar" variant="ghost">
+          <a
+            aria-label={String(item.title ?? item.label ?? item.id)}
+            href={item.href}
+            onPointerDown={event => event.stopPropagation()}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {content}
+          </a>
+        </Button>
+      </Tip>
+    )
+  }
+
+  if (hasMenu) {
+    return (
+      <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
+        <Tip label={tooltipLabel}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={String(item.title ?? item.label ?? item.id)}
+              className={className}
+              disabled={item.disabled}
+              onClick={event => {
+                if (item.to || item.onSelect) {
+                  run(event)
+                }
+              }}
+              onPointerDown={event => event.stopPropagation()}
+              size="icon-titlebar"
+              type="button"
+              variant="ghost"
+            >
+              {content}
+            </Button>
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent align={item.menuAlign ?? 'end'} className={item.menuClassName}>
+          {menuContent}
+          {item.menuItems?.map(entry => (
+            <DropdownMenuItem
+              disabled={entry.disabled}
+              key={entry.id}
+              onSelect={event => {
+                event.preventDefault()
+
+                if (entry.to) {
+                  navigate(entry.to)
+                }
+
+                entry.onSelect?.()
+                setMenuOpen(false)
+              }}
+            >
+              {entry.icon}
+              <span className="truncate">{entry.label}</span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
+
+  return (
+    <Tip label={tooltipLabel}>
+      <Button
+        aria-label={String(item.title ?? item.label ?? item.id)}
+        className={className}
+        disabled={item.disabled}
+        onClick={run}
+        onPointerDown={event => event.stopPropagation()}
+        size="icon-titlebar"
+        type="button"
+        variant="ghost"
+      >
+        {content}
+      </Button>
+    </Tip>
   )
 }
 

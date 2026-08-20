@@ -3,9 +3,9 @@ import { Codecs, persistentAtom } from '@/lib/persisted'
 const STATUSBAR_HIDDEN_STORAGE_KEY = 'hermes.desktop.statusbarHidden'
 const STATUSBAR_VISIBLE_STORAGE_KEY = 'hermes.desktop.statusbarVisible'
 
-// Whole-bar visibility, VS Code's `workbench.statusBar.visible`. On by default.
-// Hiding it unmounts the bar (its 15s status poll goes with it), so the way back
-// is the `view.toggleStatusbar` keybind or the ⌘K row, never the bar itself.
+// Whole status cluster visibility, VS Code's `workbench.statusBar.visible`. On
+// by default. Hiding it suppresses the titlebar status items (and their status
+// poll), so the way back is the `view.toggleStatusbar` keybind or the ⌘K row.
 export const $statusbarVisible = persistentAtom(STATUSBAR_VISIBLE_STORAGE_KEY, true, Codecs.bool)
 
 export function toggleStatusbarVisible() {
@@ -14,7 +14,7 @@ export function toggleStatusbarVisible() {
 
 // Items the bar hides until the user turns them on from its context menu. The
 // bar's job is to answer "is the backend healthy, where am I, what's it doing" —
-// route shortcuts (cron/webhooks/agents), the terminal toggle, and the approval
+// route shortcuts (webhooks/agents), the terminal toggle, and the approval
 // pill are navigation, not status, so they start out of the way. The per-turn
 // session readouts (running/session timers, context meter) are diagnostics most
 // users don't watch, so they start hidden too and the bar stays quiet mid-turn.
@@ -22,7 +22,6 @@ export const STATUSBAR_HIDDEN_BY_DEFAULT: readonly string[] = [
   'agents',
   'approval-mode',
   'context-usage',
-  'cron',
   'running-timer',
   'session-timer',
   'terminal',

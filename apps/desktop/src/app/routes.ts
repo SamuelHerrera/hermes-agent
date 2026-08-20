@@ -171,8 +171,7 @@ export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
   'command-center',
   'profiles',
   'settings',
-  'starmap',
-  'webhooks'
+  'starmap'
 ])
 
 export function isOverlayView(view: AppView): boolean {

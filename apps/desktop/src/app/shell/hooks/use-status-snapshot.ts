@@ -12,13 +12,20 @@ const REFRESH_MS = 60_000
 
 type GatewayRequester = <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
 
-export function useStatusSnapshot(gatewayState: string | undefined, requestGateway: GatewayRequester) {
+export function useStatusSnapshot(gatewayState: string | undefined, requestGateway: GatewayRequester, enabled = true) {
   const [statusSnapshot, setStatusSnapshot] = useState<StatusResponse | null>(null)
   const [inferenceStatus, setInferenceStatus] = useState<RuntimeReadinessResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
     let timer: number | undefined
+
+    if (!enabled) {
+      setStatusSnapshot(null)
+      setInferenceStatus(null)
+
+      return undefined
+    }
 
     // A closed/connecting gateway cannot have an authoritative live-runtime
     // result. Clear readiness before starting the REST status leg so a hung
@@ -100,7 +107,7 @@ export function useStatusSnapshot(gatewayState: string | undefined, requestGatew
         window.clearTimeout(timer)
       }
     }
-  }, [gatewayState, requestGateway])
+  }, [enabled, gatewayState, requestGateway])
 
   return { inferenceStatus, statusSnapshot }
 }

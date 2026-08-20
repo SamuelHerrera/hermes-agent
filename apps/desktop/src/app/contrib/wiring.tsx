@@ -67,6 +67,7 @@ import {
   setMessages,
   setWorkspaceEmptyPlaceholder
 } from '@/store/session'
+import { $statusbarHiddenIds, $statusbarVisible } from '@/store/statusbar-prefs'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { armWakeWord, stopClientCapture } from '@/store/wake-word'
 import { isAuxiliaryWindow, isHudWindow } from '@/store/windows'
@@ -114,6 +115,8 @@ import { useSessionListActions } from '../session/hooks/use-session-list-actions
 import { useSessionStateCache } from '../session/hooks/use-session-state-cache'
 import { startWorkspaceSession } from '../session/workspace-session-target'
 import { useOverlayRouting } from '../shell/hooks/use-overlay-routing'
+import { useStatusSnapshot } from '../shell/hooks/use-status-snapshot'
+import { useStatusbarItems } from '../shell/hooks/use-statusbar-items'
 import { useWindowControlsOverlayWidth } from '../shell/hooks/use-window-controls-overlay-width'
 import {
   titlebarControlsPosition,
@@ -131,8 +134,8 @@ import { useDesktopIntegrations } from './hooks/use-desktop-integrations'
 import { usePetBridge } from './hooks/use-pet-bridge'
 import { useQuickEntryBridge } from './hooks/use-quick-entry-bridge'
 import { useSessionTileDelegate } from './hooks/use-session-tile-delegate'
-import { $restartPreviewServer, useTitlebarToolContributions } from './panes'
-import { ChatRoutesSurface, SidebarSurface, StatusbarSurface, TerminalSurface } from './surfaces'
+import { $restartPreviewServer, useStatusbarContributions, useTitlebarToolContributions } from './panes'
+import { ChatRoutesSurface, SidebarSurface, TerminalSurface } from './surfaces'
 import type { WiringActions, WiringApi } from './types'
 
 // Overlay views the controller mounts over the shell — lazy, load on demand.
@@ -140,7 +143,6 @@ import type { WiringActions, WiringApi } from './types'
 // ChatRoutesSurface's and live in ./surfaces.
 const AgentsView = lazy(async () => ({ default: (await import('../agents')).AgentsView }))
 const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
-const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 const ProfilesView = lazy(async () => ({ default: (await import('../profiles')).ProfilesView }))
 const SettingsView = lazy(async () => ({ default: (await import('../settings')).SettingsView }))
 const StarmapView = lazy(async () => ({ default: (await import('../starmap')).StarmapView }))
@@ -247,8 +249,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     resetOverlayReturnRoute,
     settingsOpen,
     starmapOpen,
-    toggleCommandCenter,
-    webhooksOpen
+    toggleCommandCenter
   } = useOverlayRouting()
 
   const {
@@ -271,6 +272,12 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   })
 
   const { connectionRef, gateway, gatewayRef, requestGateway } = useGatewayRequest()
+
+  const statusbarVisible = useStore($statusbarVisible)
+  const hiddenStatusbarIds = useStore($statusbarHiddenIds)
+  const { inferenceStatus, statusSnapshot } = useStatusSnapshot(gatewayState, requestGateway, statusbarVisible)
+  const extraLeftStatusbarItems = useStatusbarContributions('left')
+  const extraRightStatusbarItems = useStatusbarContributions('right')
 
   const { loadMoreMessagingForPlatform, loadMoreSessions, refreshCronJobs, refreshMessagingSessions, refreshSessions } =
     useSessionListActions({ profileScope })
@@ -305,6 +312,32 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     queryClient,
     requestGateway
   })
+
+  const { leftStatusbarItems, statusbarItems } = useStatusbarItems({
+    agentsOpen,
+    chatOpen,
+    commandCenterOpen,
+    extraLeftItems: extraLeftStatusbarItems,
+    extraRightItems: extraRightStatusbarItems,
+    freshDraftReady,
+    gatewayState,
+    inferenceStatus,
+    openAgents,
+    openCommandCenterSection,
+    requestGateway,
+    statusSnapshot,
+    toggleCommandCenter
+  })
+
+  const titlebarStatusbarItemCount = useMemo(() => {
+    if (!statusbarVisible) {
+      return 0
+    }
+
+    return [...leftStatusbarItems, ...statusbarItems].filter(
+      item => !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+    ).length
+  }, [hiddenStatusbarIds, leftStatusbarItems, statusbarItems, statusbarVisible])
 
   const openProviderSettings = useCallback(() => navigate(`${SETTINGS_ROUTE}?tab=providers`), [navigate])
 
@@ -965,17 +998,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
   const terminalNode = useMemo(() => <TerminalSurface />, [])
 
-  const statusbarNode = useMemo(
-    () => (
-      <StatusbarSurface
-        actions={actions}
-        agentsOpen={agentsOpen}
-        chatOpen={chatOpen}
-        commandCenterOpen={commandCenterOpen}
-      />
-    ),
-    [actions, agentsOpen, chatOpen, commandCenterOpen]
-  )
+  // The former bottom statusbar now renders inside the top-right titlebar
+  // controls. Keep the wired part present for plugin/fallback type stability, but
+  // don't mount the old footer anywhere in the shell.
+  const statusbarNode = null
 
   // The voice cap changes only on config load; the gateway instance + all
   // chat reactivity are subscribed inside ChatRoutesSurface / ChatView.
@@ -1017,7 +1043,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
   // against the static app-control cluster — in the tree layout the titlebar
   // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  const APP_CONTROL_TOOL_COUNT = 9
+  const APP_CONTROL_TOOL_COUNT = 9 + titlebarStatusbarItemCount
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
@@ -1048,6 +1074,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             codexUsageState={codexUsage.state}
             leftTools={leftTitlebarTools}
             onOpenSettings={() => navigate(SETTINGS_ROUTE)}
+            statusbarItems={statusbarVisible ? statusbarItems : []}
+            statusbarLeftItems={statusbarVisible ? leftStatusbarItems : []}
             tools={rightTitlebarTools}
           />
         )}
@@ -1120,13 +1148,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       {agentsOpen && (
         <Suspense fallback={null}>
           <AgentsView onClose={closeOverlayToPreviousRoute} />
-        </Suspense>
-      )}
-
-
-      {webhooksOpen && (
-        <Suspense fallback={null}>
-          <WebhooksView onClose={closeOverlayToPreviousRoute} />
         </Suspense>
       )}
 

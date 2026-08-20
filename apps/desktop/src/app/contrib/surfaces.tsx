@@ -37,6 +37,7 @@ const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
+const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 
 export function LegacySessionRedirect() {
   const { sessionId } = useParams()
@@ -183,12 +184,12 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
       <Route element={page(<ArtifactsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="artifacts" />
       <Route element={page(<CronRouteView />)} path="cron" />
       <Route element={page(<CronRouteView />)} path="cron/:jobId" />
+      <Route element={page(<WebhooksView />)} path="webhooks" />
       <Route element={null} path="agents" />
       <Route element={null} path="command-center" />
       <Route element={null} path="profiles" />
       <Route element={null} path="settings" />
       <Route element={null} path="starmap" />
-      <Route element={null} path="webhooks" />
       {/* Registry-contributed pages (core features + plugins) render in the
           workspace pane like any built-in view — behind the same blast wall
           as every other contribution mount. */}

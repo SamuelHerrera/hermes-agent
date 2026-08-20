@@ -29,7 +29,8 @@ import {
   sessionRoute,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
-  syncWorkspaceRoute
+  syncWorkspaceRoute,
+  WEBHOOKS_ROUTE
 } from './routes'
 
 vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
@@ -137,6 +138,13 @@ describe('syncWorkspaceRoute', () => {
     expect(fronted()).toBe(true)
   })
 
+  it('fronts on the webhooks page route', () => {
+    syncWorkspaceRoute(WEBHOOKS_ROUTE)
+
+    expect($workspaceIsPage.get()).toBe(true)
+    expect(fronted()).toBe(true)
+  })
+
   it('fronts on a cron job page route', () => {
     syncWorkspaceRoute(`${CRON_ROUTE}/daily`)
 
@@ -239,6 +247,15 @@ describe('openWorkspacePageRoute', () => {
 
     expect(openRouteTile).toHaveBeenNthCalledWith(1, CRON_ROUTE, 'center')
     expect(openRouteTile).toHaveBeenNthCalledWith(2, `${CRON_ROUTE}/daily`, 'center')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('opens webhooks as a center tab', () => {
+    const navigate = vi.fn()
+
+    openWorkspacePageRoute(navigate, WEBHOOKS_ROUTE)
+
+    expect(openRouteTile).toHaveBeenCalledWith(WEBHOOKS_ROUTE, 'center')
     expect(navigate).not.toHaveBeenCalled()
   })
 

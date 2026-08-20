@@ -23,7 +23,8 @@ import {
   isCronRoute,
   MESSAGING_ROUTE,
   ROUTES_AREA,
-  SKILLS_ROUTE
+  SKILLS_ROUTE,
+  WEBHOOKS_ROUTE
 } from '../routes'
 
 import { paneMirror } from './pane-mirror'
@@ -32,12 +33,14 @@ const SkillsView = lazy(async () => ({ default: (await import('../skills')).Skil
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
+const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 
 // Built-in page views + their pane titles, keyed by route.
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
-  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' }
+  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' },
+  [WEBHOOKS_ROUTE]: { render: () => <WebhooksView />, title: 'Webhooks' }
 }
 
 function cronTitle(path: string): string {

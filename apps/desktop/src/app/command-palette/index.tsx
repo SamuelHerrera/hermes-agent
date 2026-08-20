@@ -97,7 +97,8 @@ import {
   PROFILES_ROUTE,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
-  STARMAP_ROUTE
+  STARMAP_ROUTE,
+  WEBHOOKS_ROUTE
 } from '../routes'
 import { FIELD_LABELS, SECTIONS } from '../settings/constants'
 import { fieldCopyForSchemaKey } from '../settings/field-copy'
@@ -806,6 +807,14 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             keywords: ['schedule', 'jobs'],
             label: t.shell.statusbar.cron,
             run: go(CRON_ROUTE)
+          },
+          {
+            action: 'nav.webhooks',
+            icon: Globe,
+            id: 'nav-webhooks',
+            keywords: ['webhook', 'hooks', 'events', 'automation'],
+            label: t.shell.statusbar.webhooks,
+            run: go(WEBHOOKS_ROUTE)
           },
           { action: 'nav.profiles', icon: Users, id: 'nav-profiles', label: t.profiles.title, run: go(PROFILES_ROUTE) },
           { action: 'nav.agents', icon: Cpu, id: 'nav-agents', label: t.agents.title, run: go(AGENTS_ROUTE) },

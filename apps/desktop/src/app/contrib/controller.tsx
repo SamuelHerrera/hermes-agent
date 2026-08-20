@@ -83,9 +83,10 @@ import { ContribWiring, WiredPane } from './wiring'
  * Stripped-down app root (bb/contrib-areas) on the layout TREE model, mounting
  * the REAL app surfaces. The title bar and status bar sit OUTSIDE the grid
  * (fixed chrome) but are fully composable: title bar renders `titleBar.left/
- * right` slots; the status bar consumes `statusBar.left/right` DATA
- * contributions (payload = StatusbarItem). Core registers its items through
- * the same calls a plugin would use.
+ * right` slots and the former status items in its right cluster; status chrome
+ * still consumes `statusBar.left/right` DATA contributions (payload =
+ * StatusbarItem). Core registers its items through the same calls a plugin
+ * would use.
  */
 
 // ---------------------------------------------------------------------------
@@ -719,7 +720,6 @@ function TitlebarSlot({ area, className, style }: TitlebarSlotProps) {
 
 export function ContribController() {
   const sidebarOpen = useStore($sidebarOpen)
-  const statusbarVisible = useStore($statusbarVisible)
 
   // HUD mode is the SAME app with its frame removed: the wiring (gateway,
   // sessions, streams, submit) mounts identically, and only the shell around
@@ -795,11 +795,6 @@ export function ContribController() {
 
             <LayoutTreeRoot />
 
-            {/* The REAL statusbar (model pill, command center, agents, …) with
-              statusBar.left/right contributions merged in. Unmounted — not
-              just hidden — while toggled off, so its 15s status poll and the
-              per-turn readouts stop with it. */}
-            {statusbarVisible && <WiredPane part="statusbar" />}
           </div>
         </ShellContextMenu>
       </ContribWiring>
