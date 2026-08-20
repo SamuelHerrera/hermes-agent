@@ -79,7 +79,7 @@ import {
 } from '../routes'
 
 export interface KeybindRuntimeDeps {
-  /** Open/close the command center overlay (sessions / system / usage). */
+  /** Open/front the command center tab (sessions / system / usage). */
   toggleCommandCenter: () => void
   /** Drop to a fresh new-session draft. */
   startFreshSession: () => void

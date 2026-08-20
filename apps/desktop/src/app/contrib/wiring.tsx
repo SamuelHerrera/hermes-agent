@@ -142,7 +142,6 @@ import type { WiringActions, WiringApi } from './types'
 // The workspace-route full-page views (skills/messaging/artifacts) are the
 // ChatRoutesSurface's and live in ./surfaces.
 const AgentsView = lazy(async () => ({ default: (await import('../agents')).AgentsView }))
-const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
 const ProfilesView = lazy(async () => ({ default: (await import('../profiles')).ProfilesView }))
 const SettingsView = lazy(async () => ({ default: (await import('../settings')).SettingsView }))
 const StarmapView = lazy(async () => ({ default: (await import('../starmap')).StarmapView }))
@@ -239,7 +238,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     agentsOpen,
     chatOpen,
     closeOverlayToPreviousRoute,
-    commandCenterInitialSection,
     commandCenterOpen,
     currentView,
     openAgents,
@@ -1129,18 +1127,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
               void refreshCurrentModel()
               void queryClient.invalidateQueries({ queryKey: ['model-options'] })
             }}
-          />
-        </Suspense>
-      )}
-
-      {commandCenterOpen && (
-        <Suspense fallback={null}>
-          <CommandCenterView
-            initialSection={commandCenterInitialSection}
-            onClose={closeOverlayToPreviousRoute}
-            onDeleteSession={removeSession}
-            onNavigateRoute={path => openWorkspacePageRoute(navigate, path)}
-            onOpenSession={sessionId => openSession(sessionId, navigate)}
           />
         </Suspense>
       )}

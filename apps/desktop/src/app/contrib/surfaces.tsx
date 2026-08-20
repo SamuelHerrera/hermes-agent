@@ -34,6 +34,7 @@ import type { SidebarActions, WiringActions } from './types'
 // full-page views the workspace route table mounts live here; overlay views
 // (agents/settings/…) are the controller's and stay in wiring.tsx.
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
+const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
@@ -182,11 +183,19 @@ export const ChatRoutesSurface = memo(function ChatRoutesSurface({
       <Route element={page(<SkillsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="skills" />
       <Route element={page(<MessagingView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="messaging" />
       <Route element={page(<ArtifactsView setStatusbarItemGroup={setStatusbarItemGroup} />)} path="artifacts" />
+      <Route
+        element={page(
+          <CommandCenterView
+            onDeleteSession={actions.onDeleteSession}
+            onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')}
+          />
+        )}
+        path="command-center"
+      />
       <Route element={page(<CronRouteView />)} path="cron" />
       <Route element={page(<CronRouteView />)} path="cron/:jobId" />
       <Route element={page(<WebhooksView />)} path="webhooks" />
       <Route element={null} path="agents" />
-      <Route element={null} path="command-center" />
       <Route element={null} path="profiles" />
       <Route element={null} path="settings" />
       <Route element={null} path="starmap" />

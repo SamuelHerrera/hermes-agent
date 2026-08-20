@@ -10,6 +10,7 @@ import {
   NEW_CHAT_ROUTE,
   STARMAP_ROUTE
 } from '@/app/routes'
+import { openRouteTile } from '@/store/route-tiles'
 
 const SECTIONS = ['sessions', 'system', 'usage'] as const
 
@@ -58,12 +59,8 @@ export function useOverlayRouting() {
   )
 
   const toggleCommandCenter = useCallback(() => {
-    if (commandCenterOpen) {
-      closeOverlayToPreviousRoute()
-    } else {
-      navigate(COMMAND_CENTER_ROUTE)
-    }
-  }, [closeOverlayToPreviousRoute, commandCenterOpen, navigate])
+    openRouteTile(COMMAND_CENTER_ROUTE, 'center')
+  }, [])
 
   const openAgents = useCallback(() => navigate(AGENTS_ROUTE), [navigate])
   const openStarmap = useCallback(() => navigate(STARMAP_ROUTE), [navigate])

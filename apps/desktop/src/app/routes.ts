@@ -168,7 +168,6 @@ export interface SidebarNavChildrenProps {
 // bleed over the overlay (they sit at a higher z-index than the overlay card).
 export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
   'agents',
-  'command-center',
   'profiles',
   'settings',
   'starmap'

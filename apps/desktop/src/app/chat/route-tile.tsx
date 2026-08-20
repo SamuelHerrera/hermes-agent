@@ -18,6 +18,7 @@ import { jobTitle } from '../cron/job-state'
 import { openSession } from '../open-session'
 import {
   ARTIFACTS_ROUTE,
+  COMMAND_CENTER_ROUTE,
   contributedRoutes,
   cronJobIdFromRoute,
   isCronRoute,
@@ -34,10 +35,15 @@ const MessagingView = lazy(async () => ({ default: (await import('../messaging')
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
+const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
 
 // Built-in page views + their pane titles, keyed by route.
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
+  [COMMAND_CENTER_ROUTE]: {
+    render: () => <CommandCenterView onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')} />,
+    title: 'Command Center'
+  },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
   [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' },
   [WEBHOOKS_ROUTE]: { render: () => <WebhooksView />, title: 'Webhooks' }

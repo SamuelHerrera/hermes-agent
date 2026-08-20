@@ -56,8 +56,8 @@ const EMPTY_PINNED: readonly string[] = []
 
 interface CommandCenterViewProps {
   initialSection?: CommandCenterSection
-  onClose: () => void
-  onDeleteSession: (sessionId: string) => Promise<void>
+  onClose?: () => void
+  onDeleteSession?: (sessionId: string) => Promise<void> | void
   // Accepted for call-site parity; navigation lives in the global Cmd+K palette.
   onNavigateRoute?: (path: string) => void
   onOpenSession: (sessionId: string) => void
@@ -321,9 +321,8 @@ export function CommandCenterView({ initialSection, onClose, onDeleteSession, on
     [cc, section, setSection]
   )
 
-  return (
-    <OverlayView closeLabel={cc.close} onClose={onClose}>
-      <OverlaySplitLayout>
+  const content = (
+    <OverlaySplitLayout>
         <OverlayNav groups={navGroups} />
 
         <OverlayMain>
@@ -393,13 +392,15 @@ export function CommandCenterView({ initialSection, onClose, onDeleteSession, on
                           >
                             <Download className="size-3.5" />
                           </RowIconButton>
-                          <RowIconButton
-                            className="hover:text-destructive"
-                            onClick={() => void onDeleteSession(session.id)}
-                            title={cc.deleteSession}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </RowIconButton>
+                          {onDeleteSession && (
+                            <RowIconButton
+                              className="hover:text-destructive"
+                              onClick={() => void onDeleteSession(session.id)}
+                              title={cc.deleteSession}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </RowIconButton>
+                          )}
                         </div>
                       </li>
                     )
@@ -508,9 +509,18 @@ export function CommandCenterView({ initialSection, onClose, onDeleteSession, on
             </div>
           )}
         </OverlayMain>
-      </OverlaySplitLayout>
-    </OverlayView>
+    </OverlaySplitLayout>
   )
+
+  if (onClose) {
+    return (
+      <OverlayView closeLabel={cc.close} onClose={onClose}>
+        {content}
+      </OverlayView>
+    )
+  }
+
+  return <div className="flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)">{content}</div>
 }
 
 interface UsagePanelProps {

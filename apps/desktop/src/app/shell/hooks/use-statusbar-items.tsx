@@ -29,7 +29,6 @@ import {
   $currentUsage,
   $selectedStoredSessionId,
   $sessions,
-  $sessionStartedAt,
   $turnStartedAt,
   idsShareLineage,
   sessionMatchesStoredId,
@@ -100,7 +99,6 @@ export function useStatusbarItems({
   const primaryCwd = useStore($currentCwd)
   const primaryUsage = useStore($currentUsage)
   const gatewayRestarting = useStore($gatewayRestarting)
-  const primarySessionStartedAt = useStore($sessionStartedAt)
   const primaryTurnStartedAt = useStore($turnStartedAt)
 
   // The indicator must speak the same scope as the Spawn-tree panel it opens:
@@ -164,12 +162,6 @@ export function useStatusbarItems({
   // knows runtime state). Only these scalars are read off `$sessions`, so
   // select them — a whole-list `useStore` re-ran the hook on every session-list
   // write (title updates, poll refreshes, archives).
-  const focusedRowStartedAt = useStoreSelector($sessions, sessions =>
-    focusedStoredSessionId
-      ? (sessions.find(s => sessionMatchesStoredId(s, focusedStoredSessionId))?.started_at ?? null)
-      : null
-  )
-
   const focusedRowCwd = useStoreSelector($sessions, sessions => {
     if (!focusedStoredSessionId) {
       return ''
@@ -218,12 +210,6 @@ export function useStatusbarItems({
   // the tree changes; null (no named project) falls back to the cwd leaf below.
   const projectTree = useStore($projectTree)
   const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd, projectTree])
-
-  const sessionStartedAt = primaryFocused
-    ? primarySessionStartedAt
-    : focusedRowStartedAt
-      ? focusedRowStartedAt * 1000
-      : null
 
   const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage])
   const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
@@ -394,7 +380,7 @@ export function useStatusbarItems({
         // settings that would bring a hidden item back. Never hideable.
         lockedVisible: true,
         onSelect: toggleCommandCenter,
-        title: commandCenterOpen ? copy.closeCommandCenter : copy.openCommandCenter,
+        title: copy.openCommandCenter,
         toggleLabel: copy.toggleCommandCenter,
         variant: 'action'
       },
@@ -539,14 +525,6 @@ export function useStatusbarItems({
         variant: 'menu'
       },
       {
-        detail: <LiveDuration since={sessionStartedAt} />,
-        hidden: !sessionStartedAt,
-        id: 'session-timer',
-        label: copy.session,
-        toggleLabel: copy.toggleSessionTimer,
-        variant: 'text'
-      },
-      {
         ...approvalModeItem,
         hidden: gatewayState !== 'open',
         toggleLabel: copy.toggleApprovalMode
@@ -578,7 +556,6 @@ export function useStatusbarItems({
       currentUsage,
       publishContextUsage,
       requestGateway,
-      sessionStartedAt,
       gatewayState,
       terminalShowing,
       turnStartedAt
