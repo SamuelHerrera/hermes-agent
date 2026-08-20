@@ -443,7 +443,21 @@ async function switchBranch(repoPath, branch, gitBin) {
     throw new Error('Branch name is required.')
   }
 
-  await runGit(gitBin, ['switch', target], resolved)
+  try {
+    await runGit(gitBin, ['switch', target], resolved)
+  } catch (err) {
+    const stderr = String(err.stderr || '')
+
+    // Git may have already established the requested state before a checkout
+    // hook emits noisy stderr and turns the command into a non-zero exit. The
+    // Project "new chat" path should not fail when git itself says the target
+    // branch was already current.
+    if (stderr.includes(`Already on '${target}'`) || stderr.includes(`Already on "${target}"`)) {
+      return { branch: target }
+    }
+
+    throw err
+  }
 
   return { branch: target }
 }

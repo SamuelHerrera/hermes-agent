@@ -35,10 +35,10 @@ import {
 import { type ClipboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import {
-  boardKey,
   $boardSlug,
   addComment,
   addTaskTag,
+  boardKey,
   deleteTask,
   estimateTask,
   fetchLog,
@@ -83,7 +83,6 @@ import {
   type TaskEstimate,
   type WorkerLog
 } from './types'
-import { isUnreadAttentionCard } from './unread'
 import {
   ago,
   Avatar,
@@ -103,6 +102,7 @@ import {
   useDefaultAssignee,
   useKanban
 } from './ui'
+import { isUnreadAttentionCard } from './unread'
 
 type TaskReadState = Awaited<ReturnType<typeof markTaskRead>>
 
@@ -687,17 +687,25 @@ function latestRun(runs: KanbanRun[]): KanbanRun | undefined {
   )[0]
 }
 
-type StructuredWorkerLogTone = 'error' | 'output' | 'system' | 'tool' | 'warning'
+export type StructuredWorkerLogTone = 'error' | 'output' | 'system' | 'tool' | 'warning'
 
-interface StructuredWorkerLogBlock {
+export interface StructuredWorkerLogBlock {
   body?: string[]
+  bodyLabel?: string
   detail?: string
   duration?: string
   id: string
   label: string
+  openByDefault?: boolean
   status?: string
   tone: StructuredWorkerLogTone
 }
+
+const TRACE_SECRET_ASSIGNMENT_RE =
+  /\b([a-z0-9_.-]*(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|cookie|credential|password|secret|token)[a-z0-9_.-]*)\s*[:=]\s*([^\s,;]+)/gi
+const TRACE_SECRET_HEADER_RE = /\b(authorization|cookie)\s*:\s*([^\n]+)/gi
+const TRACE_PREVIEW_CHARS = 4096
+const TRACE_RAW_LINES = 120
 
 const WORKER_LOG_TOOL_LABELS: Record<string, string> = {
   $: 'Terminal',
@@ -718,6 +726,304 @@ const WORKER_LOG_TOOL_LABELS: Record<string, string> = {
 
 function workerLogToolLabel(tool: string): string {
   return WORKER_LOG_TOOL_LABELS[tool] ?? tool.replace(/[-_]+/g, ' ')
+}
+
+function redactedTraceText(value: unknown): string {
+  return String(value ?? '')
+    .replace(TRACE_SECRET_ASSIGNMENT_RE, '$1=[redacted]')
+    .replace(TRACE_SECRET_HEADER_RE, '$1: [redacted]')
+}
+
+function previewTraceText(value: unknown, limit = TRACE_PREVIEW_CHARS): string {
+  const redacted = redactedTraceText(value)
+
+  return redacted.length > limit ? `${redacted.slice(0, Math.max(0, limit - 1)).trimEnd()}…` : redacted
+}
+
+function previewTraceLines(value: unknown, maxLines = TRACE_RAW_LINES): string[] {
+  const lines = previewTraceText(value, TRACE_PREVIEW_CHARS * 2)
+    .split('\n')
+    .map(line => line.trimEnd())
+    .filter(Boolean)
+
+  if (lines.length <= maxLines) {
+    return lines
+  }
+
+  return [...lines.slice(0, maxLines), `… ${lines.length - maxLines} more redacted/truncated log lines hidden`]
+}
+
+function plural(count: number, singular: string, pluralLabel = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralLabel}`
+}
+
+function formatTraceDurationMs(value: unknown): string | undefined {
+  const ms = typeof value === 'number' && Number.isFinite(value) ? value : undefined
+
+  if (ms == null || ms <= 0) {
+    return undefined
+  }
+
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`
+  }
+
+  if (ms < 60_000) {
+    return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+  }
+
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+}
+
+function parseTraceSummary(summary: string | null | undefined): {
+  detail?: string
+  duration?: string
+  status?: string
+  tone?: StructuredWorkerLogTone
+} {
+  const bits = summary
+    ?.split('·')
+    .map(bit => bit.trim())
+    .filter(Boolean)
+
+  if (!bits?.length) {
+    return {}
+  }
+
+  const duration = bits.find(bit => /^\d+(?:\.\d+)?(?:ms|s|m(?:\s+\d+s)?)$/.test(bit))
+  const status = bits.find(bit => /^exit\s+\d+$/i.test(bit))
+  const detail = bits.filter(bit => bit !== duration && bit !== status).join(' · ') || undefined
+  const tone = status && !/^exit\s+0$/i.test(status) ? 'error' : undefined
+
+  return { detail, duration, status, tone }
+}
+
+function childTraceLabel(child: KanbanActivityTimelineItem): string {
+  const title = child.title?.trim() || child.type.replace(/\./g, ' ')
+
+  if (child.type === 'agent.command') {
+    return /^ran\b/i.test(title) ? title : `Ran ${title}`
+  }
+
+  if (child.type === 'agent.file_search' || child.type === 'agent.file_read' || child.type === 'agent.file_edit') {
+    return title
+  }
+
+  if (child.type === 'agent.handoff') {
+    return title.replace(/^Used kanban /, 'Kanban ')
+  }
+
+  return /^used\b/i.test(title) ? title : `Used ${title}`
+}
+
+function activityTraceTitle(item: KanbanActivityTimelineItem): string | undefined {
+  const details = item.details
+  const counts = asRecord(details?.counts)
+  const files = typeof counts?.files === 'number' ? counts.files : 0
+  const tools = typeof counts?.tools === 'number' ? counts.tools : 0
+  const commands = typeof counts?.commands === 'number' ? counts.commands : 0
+  const parts: string[] = []
+
+  if (item.type === 'agent.file_inspection' && files > 0) {
+    parts.push(`Explored ${plural(files, 'file')}`)
+  } else if (item.type === 'agent.code_changes' && files > 0) {
+    parts.push(`Edited ${plural(files, 'file')}`)
+  } else if (item.type === 'agent.verification' && commands > 0) {
+    parts.push(`Ran ${plural(commands, 'command')}`)
+  } else if (files > 1) {
+    parts.push(`Touched ${plural(files, 'file')}`)
+  }
+
+  if (tools > 1) {
+    parts.push(`used ${plural(tools, 'tool')}`)
+  }
+
+  return parts.length ? parts.join(', ') : undefined
+}
+
+function activityOutputRows(
+  item: KanbanActivityTimelineItem,
+  push: (block: Omit<StructuredWorkerLogBlock, 'id'>) => void
+) {
+  const details = item.details
+  const output = asRecord(details?.output)
+
+  if (!output) {
+    return
+  }
+
+  const body: string[] = []
+  const stdout = asString(output.stdout_preview)
+  const stderr = asString(output.stderr_preview)
+
+  if (stdout) {
+    body.push('stdout:', ...previewTraceLines(stdout, 80))
+  }
+  if (stderr) {
+    body.push('stderr:', ...previewTraceLines(stderr, 80))
+  }
+
+  if (!body.length) {
+    return
+  }
+
+  const flags = [output.redacted ? 'redacted' : null, output.truncated ? 'truncated' : null].filter(Boolean)
+
+  push({
+    body,
+    bodyLabel: flags.length ? `Output preview · ${flags.join(' · ')}` : 'Output preview',
+    detail: flags.length ? `Output was ${flags.join(' and ')} before display.` : undefined,
+    label: stderr ? 'Reviewed command output' : 'Reviewed tool output',
+    tone: stderr ? 'warning' : 'output'
+  })
+}
+
+function activityTraceRows(activity: KanbanActivityTimelineItem[] | undefined): StructuredWorkerLogBlock[] {
+  const blocks: StructuredWorkerLogBlock[] = []
+  const push = (block: Omit<StructuredWorkerLogBlock, 'id'>) => {
+    blocks.push({ ...block, id: `worker-trace-${blocks.length}` })
+  }
+
+  const traceChildren = (item: KanbanActivityTimelineItem): KanbanActivityTimelineItem[] => {
+    const children: KanbanActivityTimelineItem[] = []
+    const seen = new Set<string>()
+    const add = (child: KanbanActivityTimelineItem) => {
+      const id = String(child.id)
+      if (seen.has(id)) {
+        return
+      }
+      seen.add(id)
+      children.push(child)
+    }
+
+    item.children?.forEach(add)
+    const detailChildren = Array.isArray(item.details?.children) ? item.details.children : []
+    detailChildren.forEach(child => {
+      if (asRecord(child)) {
+        add(child as KanbanActivityTimelineItem)
+      }
+    })
+
+    return children
+  }
+
+  activity?.filter(isAgentStepActivity).forEach(item => {
+    const title = activityTraceTitle(item)
+    const detail = activityDetailText(item)
+    const duration = formatTraceDurationMs(item.details?.duration_ms)
+    const failed = item.status === 'failed' || Boolean(asRecord(item.details?.failure))
+
+    if (title || detail || duration || failed) {
+      push({
+        detail,
+        duration,
+        label: title ?? item.title,
+        status: item.status ?? undefined,
+        tone: failed ? 'error' : item.status === 'progress' ? 'system' : 'tool'
+      })
+    }
+
+    traceChildren(item).forEach(child => {
+      const parsed = parseTraceSummary(child.summary)
+      const label = childTraceLabel(child)
+
+      push({
+        detail: parsed.detail ?? activityDetailText(child),
+        duration: parsed.duration,
+        label,
+        status: parsed.status,
+        tone: parsed.tone ?? (label.startsWith('Ran ') ? 'tool' : 'output')
+      })
+    })
+
+    const failure = asRecord(item.details?.failure)
+    const failureMessage = asString(failure?.message)
+
+    if (failureMessage) {
+      push({ detail: failureMessage, label: 'Failure cause', tone: 'error' })
+    }
+
+    activityOutputRows(item, push)
+  })
+
+  return blocks
+}
+
+function projectedWorkTraceRows(rows: KanbanTaskDetail['work_trace'] | undefined): StructuredWorkerLogBlock[] {
+  const blocks: StructuredWorkerLogBlock[] = []
+  const push = (block: Omit<StructuredWorkerLogBlock, 'id'>, id?: string) => {
+    blocks.push({ ...block, id: id ?? `worker-trace-${blocks.length}` })
+  }
+
+  rows?.forEach(row => {
+    const parsed = parseTraceSummary(row.summary)
+    const failure = asRecord(row.failure)
+    const failureMessage = asString(failure?.message)
+    const tone: StructuredWorkerLogTone =
+      row.tone === 'error' || row.status === 'failed' || failureMessage || parsed.tone === 'error'
+        ? 'error'
+        : row.tone === 'warning'
+          ? 'warning'
+          : row.row_type === 'lifecycle' || row.row_type === 'status_span' || row.row_type === 'thought_span'
+            ? 'system'
+            : 'tool'
+
+    push(
+      {
+        detail: failureMessage ?? parsed.detail ?? (row.summary ?? undefined),
+        duration: formatTraceDurationMs(row.duration_ms) ?? parsed.duration,
+        label: row.title,
+        status: parsed.status ?? (row.status ?? undefined),
+        tone
+      },
+      row.id
+    )
+
+    if (row.output) {
+      const stdout = asString(row.output.stdout_preview)
+      const stderr = asString(row.output.stderr_preview)
+      const body = [stdout ? 'stdout:' : null, stdout, stderr ? 'stderr:' : null, stderr].filter(
+        (part): part is string => Boolean(part)
+      )
+
+      if (body.length) {
+        const flags = [row.output.redacted ? 'redacted' : null, row.output.truncated ? 'truncated' : null].filter(Boolean)
+        push({
+          body: previewTraceLines(body.join('\n'), 80),
+          bodyLabel: flags.length ? `Output preview · ${flags.join(' · ')}` : 'Output preview',
+          label: 'Reviewed output',
+          tone: stderr ? 'warning' : 'output'
+        })
+      }
+    }
+  })
+
+  return blocks
+}
+
+function fallbackToolTraceLabel(tool: string, detail: string | undefined): string {
+  const clean = previewTraceText(detail, 220)
+
+  switch (tool) {
+    case '$':
+      return clean ? `Ran ${clean}` : 'Ran terminal command'
+    case 'grep':
+      return clean ? `Searched ${clean}` : 'Searched files'
+    case 'find':
+      return clean ? `Found files matching ${clean}` : 'Found files'
+    case 'read':
+      return clean ? `Read ${clean}` : 'Read file'
+    case 'patch':
+    case 'write':
+      return clean ? `Edited ${clean}` : workerLogToolLabel(tool)
+    case 'skill':
+      return clean ? `Loaded ${clean} guidance` : 'Loaded guidance'
+    default:
+      return clean ? `${workerLogToolLabel(tool)} · ${clean}` : workerLogToolLabel(tool)
+  }
 }
 
 function parseWorkerLogToolLine(
@@ -758,6 +1064,7 @@ function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] 
   const blocks: StructuredWorkerLogBlock[] = []
   let pendingOutput: string[] = []
   let pendingOutputLabel = 'Log output'
+  let pendingWarnings: string[] = []
 
   const push = (block: Omit<StructuredWorkerLogBlock, 'id'>) => {
     blocks.push({ ...block, id: `worker-log-${blocks.length}` })
@@ -768,9 +1075,29 @@ function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] 
       return
     }
 
-    push({ body: pendingOutput, label: pendingOutputLabel, tone: workerLogOutputTone(pendingOutput) })
+    push({
+      body: pendingOutput,
+      bodyLabel: pendingOutputLabel === 'Tool result' ? 'Raw tool output' : `${pendingOutput.length} output line${pendingOutput.length === 1 ? '' : 's'}`,
+      label: pendingOutputLabel,
+      tone: workerLogOutputTone(pendingOutput)
+    })
     pendingOutput = []
     pendingOutputLabel = 'Log output'
+  }
+
+  const flushWarnings = () => {
+    if (!pendingWarnings.length) {
+      return
+    }
+
+    push({
+      body: pendingWarnings,
+      bodyLabel: `${pendingWarnings.length} warning${pendingWarnings.length === 1 ? '' : 's'}`,
+      detail: pendingWarnings.length === 1 ? pendingWarnings[0] : `${pendingWarnings.length} warnings grouped from the worker output.`,
+      label: `${pendingWarnings.length} warning${pendingWarnings.length === 1 ? '' : 's'}`,
+      tone: 'warning'
+    })
+    pendingWarnings = []
   }
 
   stripAnsi(content)
@@ -789,10 +1116,10 @@ function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] 
 
       if (tool) {
         flushOutput()
+        flushWarnings()
         push({
-          detail: tool.detail,
           duration: tool.duration,
-          label: workerLogToolLabel(tool.tool),
+          label: fallbackToolTraceLabel(tool.tool, tool.detail),
           status: tool.status,
           tone: tool.status && /exit [1-9]\d*/i.test(tool.status) ? 'error' : 'tool'
         })
@@ -802,6 +1129,7 @@ function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] 
 
       if (/^review diff$/i.test(cleaned)) {
         flushOutput()
+        flushWarnings()
         pendingOutputLabel = 'Tool result'
 
         return
@@ -809,38 +1137,69 @@ function structuredWorkerLogBlocks(content: string): StructuredWorkerLogBlock[] 
 
       if (/^Query:\s*/.test(compact)) {
         flushOutput()
-        push({ detail: compact.replace(/^Query:\s*/, ''), label: 'Task request', tone: 'system' })
+        flushWarnings()
+        push({ detail: previewTraceText(compact.replace(/^Query:\s*/, ''), 500), label: 'Task request received', tone: 'system' })
 
         return
       }
 
       if (/^Initializing agent/.test(compact)) {
         flushOutput()
-        push({ label: 'Worker started', tone: 'system' })
+        flushWarnings()
+        push({ label: 'Started worker session', tone: 'system' })
 
         return
       }
 
       if (/^(?:Resume this session with:|Session:|Title:|Duration:|Messages:)\b/.test(compact)) {
         flushOutput()
-        push({ detail: compact, label: 'Session info', tone: 'system' })
+        flushWarnings()
+        push({ detail: previewTraceText(compact, 500), label: 'Session metadata', tone: 'system' })
 
         return
       }
 
       if (/⚠|\bwarning\b/i.test(compact)) {
         flushOutput()
-        push({ detail: cleaned || compact, label: 'Warning', tone: 'warning' })
+        pendingWarnings.push(previewTraceText(cleaned || compact, 1000))
 
         return
       }
 
-      pendingOutput.push(line)
+      pendingOutput.push(previewTraceText(line, 1000))
     })
 
   flushOutput()
+  flushWarnings()
 
   return blocks
+}
+
+export function buildWorkerTraceRows(detail?: KanbanTaskDetail, log?: WorkerLog): StructuredWorkerLogBlock[] {
+  const durableRows = projectedWorkTraceRows(detail?.work_trace)
+
+  if (!durableRows.length) {
+    durableRows.push(...activityTraceRows(detail?.activity_timeline))
+  }
+
+  if (durableRows.length > 0) {
+    if (log?.exists && log.content) {
+      durableRows.push({
+        body: previewTraceLines(log.content),
+        bodyLabel: log.truncated ? 'Raw log tail' : 'Raw worker log',
+        detail: log.truncated
+          ? 'Durable trace rows are shown above; raw log tail is available for debugging and may be incomplete.'
+          : 'Durable trace rows are shown above; raw log remains available for debugging.',
+        id: `worker-trace-${durableRows.length}`,
+        label: log.truncated ? 'Raw log tail available' : 'Raw log available',
+        tone: 'output'
+      })
+    }
+
+    return durableRows
+  }
+
+  return log?.exists && log.content ? structuredWorkerLogBlocks(log.content) : []
 }
 
 function currentStatusLabel(task: KanbanTaskFull, run: KanbanRun | undefined, k: KanbanText) {
@@ -954,7 +1313,87 @@ function activityTime(item: KanbanActivityTimelineItem): null | number | undefin
   return item.started_at ?? item.created_at ?? item.ended_at
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function activityDetailFiles(details: Record<string, unknown>): string[] {
+  const files = Array.isArray(details.files) ? details.files : []
+
+  return files
+    .map(file => asRecord(file)?.path)
+    .filter((path): path is string => typeof path === 'string' && path.trim().length > 0)
+}
+
+function activityWorkDetailText(details: Record<string, unknown>): string | undefined {
+  const parts: string[] = []
+  const workSummary = asString(details.work_summary)
+
+  if (workSummary) {
+    parts.push(workSummary)
+  }
+
+  const command = asRecord(details.command)
+  const commandText = asString(command?.text)
+
+  if (commandText && !parts.some(part => part.includes(commandText))) {
+    const exitCode = typeof command?.exit_code === 'number' ? `exit ${command.exit_code}` : null
+    parts.push(['Ran command', exitCode].filter(Boolean).join(' · '))
+  }
+
+  const files = activityDetailFiles(details)
+
+  if (files.length) {
+    parts.push(compactSubjects(files, 'touched files'))
+  }
+
+  const counts = asRecord(details.counts)
+  const countBits: string[] = []
+  const tools = typeof counts?.tools === 'number' ? counts.tools : undefined
+  const matches = typeof counts?.matches === 'number' ? counts.matches : undefined
+
+  if (tools && tools > 1) {
+    countBits.push(`used ${tools} tools`)
+  }
+
+  if (typeof matches === 'number') {
+    countBits.push(`${matches} match${matches === 1 ? '' : 'es'}`)
+  }
+
+  if (countBits.length) {
+    parts.push(countBits.join(', '))
+  }
+
+  const failure = asRecord(details.failure)
+  const failureMessage = asString(failure?.message)
+
+  if (failureMessage) {
+    parts.push(`Failure: ${failureMessage}`)
+  }
+
+  const output = asRecord(details.output)
+  const outputFlags = [output?.redacted ? 'output redacted' : null, output?.truncated ? 'output truncated' : null].filter(Boolean)
+
+  if (outputFlags.length) {
+    parts.push(outputFlags.join(', '))
+  }
+
+  return parts.length ? sentenceList([...new Set(parts)]) : undefined
+}
+
 function activityDetailText(item: KanbanActivityTimelineItem): string | undefined {
+  if (item.details) {
+    const workDetail = activityWorkDetailText(item.details)
+
+    if (workDetail) {
+      return workDetail
+    }
+  }
+
   if (item.description?.trim()) {
     return item.description.trim()
   }
@@ -1026,13 +1465,37 @@ function activityChildItem(item: KanbanActivityTimelineItem): TimelineSubitem {
   }
 }
 
+function activityTimelineChildren(item: KanbanActivityTimelineItem): TimelineSubitem[] {
+  const children: TimelineSubitem[] = []
+  const seen = new Set<string>()
+  const addChild = (child: KanbanActivityTimelineItem) => {
+    const rendered = activityChildItem(child)
+    if (seen.has(rendered.id)) {
+      return
+    }
+    seen.add(rendered.id)
+    children.push(rendered)
+  }
+
+  item.children?.forEach(addChild)
+
+  const detailChildren = Array.isArray(item.details?.children) ? item.details.children : []
+  detailChildren.forEach(child => {
+    if (asRecord(child)) {
+      addChild(child as KanbanActivityTimelineItem)
+    }
+  })
+
+  return children
+}
+
 function persistedActivityTimelineItems(activity: KanbanActivityTimelineItem[] | undefined): TimelineItem[] {
   if (!activity?.length) {
     return []
   }
 
   return activity.map(item => {
-    const children = item.children?.map(activityChildItem) ?? []
+    const children = activityTimelineChildren(item)
     const omitted = item.group?.omitted_count ?? 0
 
     if (omitted > 0) {
@@ -1411,9 +1874,9 @@ function StructuredWorkerLogBlockView({ block }: { block: StructuredWorkerLogBlo
             </span>
           </div>
           {block.body && block.body.length > 0 && (
-            <details className="group mt-1.5" open={block.body.length <= 4 || block.tone === 'error'}>
+            <details className="group mt-1.5" open={block.openByDefault ?? false}>
               <summary className="cursor-pointer select-none text-[0.625rem] uppercase tracking-[0.14em] text-(--ui-text-quaternary)">
-                {block.body.length} log {block.body.length === 1 ? 'line' : 'lines'}
+                {block.bodyLabel ?? `${block.body.length} log ${block.body.length === 1 ? 'line' : 'lines'}`}
               </summary>
               <pre
                 className="mt-1.5 max-h-56 overflow-auto rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-primary)/70 p-2 font-mono text-[0.6875rem] leading-relaxed whitespace-pre-wrap text-(--ui-text-secondary)"
@@ -1429,10 +1892,10 @@ function StructuredWorkerLogBlockView({ block }: { block: StructuredWorkerLogBlo
   )
 }
 
-export function WorkerLogSection({ log }: { log?: WorkerLog }) {
+export function WorkerLogSection({ detail, log }: { detail?: KanbanTaskDetail; log?: WorkerLog }) {
   const k = useKanban()
   const title = log?.truncated ? k.workerLogTail : k.workerLog
-  const blocks = log?.exists && log.content ? structuredWorkerLogBlocks(log.content) : []
+  const blocks = buildWorkerTraceRows(detail, log)
 
   return (
     <section className="min-h-0 flex flex-1 flex-col gap-1.5">
@@ -2498,6 +2961,7 @@ export function TaskDrawer({
   const running = task?.status === 'running'
   const defaultAssignee = useDefaultAssignee()
 
+  // eslint-disable-next-line no-restricted-syntax -- Tracks one-shot mark-read requests, not reactive atom mirroring.
   useEffect(() => {
     if (!id) {
       readAttemptRef.current = null
@@ -2967,7 +3431,7 @@ export function TaskDrawer({
             </DrawerTabContent>
 
             <DrawerTabContent value="logs">
-              <WorkerLogSection log={log} />
+              <WorkerLogSection detail={detail} log={log} />
             </DrawerTabContent>
           </Tabs>
         )}

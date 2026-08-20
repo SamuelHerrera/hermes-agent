@@ -1553,6 +1553,7 @@ def handle_function_call(
                 duration_ms=duration_ms,
                 error_type=error_type,
                 error_message=error_message,
+                result=result,
             )
         except Exception:
             pass
@@ -1629,6 +1630,7 @@ def handle_function_call(
                 duration_ms=duration_ms,
                 error_type=type(e).__name__,
                 error_message=str(e),
+                result=result,
             )
         except Exception:
             pass

@@ -5229,10 +5229,39 @@ def _merge_activity_step_details(
 
     incoming = incoming if isinstance(incoming, dict) else {}
     for key, value in incoming.items():
-        if key in {"raw_sources", "tools", "started_at", "last_update_at", "ended_at", "updates_count"}:
+        if key in {
+            "raw_sources",
+            "tools",
+            "children",
+            "files",
+            "started_at",
+            "last_update_at",
+            "ended_at",
+            "updates_count",
+        }:
             continue
         if value is not None:
             merged[key] = value
+
+    def merge_dict_list(key: str, max_items: int) -> None:
+        combined: list[Any] = []
+        seen: set[str] = set()
+        for source in (merged.get(key), incoming.get(key)):
+            if not isinstance(source, list):
+                continue
+            for item in source:
+                if not isinstance(item, dict):
+                    continue
+                fingerprint = json.dumps(item, sort_keys=True, ensure_ascii=False, default=str)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                combined.append(item)
+        if combined:
+            merged[key] = combined[-max_items:]
+
+    merge_dict_list("children", 25)
+    merge_dict_list("files", 25)
 
     raw_sources: list[Any] = []
     for source in merged.get("raw_sources") or []:
@@ -5253,6 +5282,23 @@ def _merge_activity_step_details(
             tools.append(tool)
     if tools:
         merged["tools"] = tools[-25:]
+    counts: dict[str, int] = {}
+    for source in (merged.get("counts"), incoming.get("counts")):
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            if isinstance(value, bool) or not isinstance(value, int):
+                continue
+            counts[str(key)] = max(counts.get(str(key), 0), value)
+    if tools:
+        counts["tools"] = len(tools)
+    files = merged.get("files")
+    if isinstance(files, list):
+        paths = {item.get("path") for item in files if isinstance(item, dict) and item.get("path")}
+        if paths:
+            counts["files"] = len(paths)
+    if counts:
+        merged["counts"] = counts
     return merged
 
 
@@ -5416,8 +5462,27 @@ def _activity_spec_for_event(kind: str, payload: Optional[dict]) -> dict[str, An
     if kind == "created":
         created_by = payload.get("created_by") if payload else None
         summary_bits = []
+        assignee = payload.get("assignee") if payload else None
+        if isinstance(assignee, str) and assignee.strip():
+            summary_bits.append(f"Assigned to {assignee.strip()}")
         if payload and payload.get("status"):
             summary_bits.append(f"Initial status: {payload.get('status')}")
+        parents = payload.get("parents") if payload else None
+        if isinstance(parents, list) and parents:
+            summary_bits.append(f"{len(parents)} parent dependency{'ies' if len(parents) != 1 else ''}")
+        workspace_kind = payload.get("workspace_kind") if payload else None
+        workspace_path = payload.get("workspace_path") if payload else None
+        if workspace_kind:
+            if workspace_path:
+                summary_bits.append(f"Workspace: {workspace_kind} @ {workspace_path}")
+            else:
+                summary_bits.append(f"Workspace: {workspace_kind}")
+        model_override = payload.get("model_override") if payload else None
+        provider_override = payload.get("provider_override") if payload else None
+        if model_override or provider_override:
+            summary_bits.append(
+                "Model override: " + "/".join(str(part) for part in (provider_override, model_override) if part)
+            )
         if isinstance(created_by, str) and created_by.strip():
             summary_bits.append(f"Created by {created_by.strip()}")
         return {
@@ -5444,12 +5509,33 @@ def _activity_spec_for_event(kind: str, payload: Optional[dict]) -> dict[str, An
         }
     if kind == "claimed":
         lock = payload.get("lock") if payload else None
+        run_id = payload.get("run_id") if payload else None
+        expires = payload.get("expires") if payload else None
         title = "Worker claimed task"
         if isinstance(lock, str) and lock:
             title = f"Claimed by {lock.split(':', 1)[0]}"
+        summary_bits = []
+        if run_id is not None:
+            summary_bits.append(f"Run {run_id}")
+        if isinstance(lock, str) and lock:
+            summary_bits.append(f"Lock {lock}")
+        if expires is not None:
+            summary_bits.append(f"Claim expires at {expires}")
         return {
             "semantic_type": "worker.claimed",
             "title": title,
+            "summary": " · ".join(summary_bits) or None,
+            "status": "started",
+            "tone": "current",
+            "actor_type": "worker",
+            "details": details,
+        }
+    if kind == "spawned":
+        pid = payload.get("pid") if payload else None
+        return {
+            "semantic_type": "worker.spawned",
+            "title": "Worker process spawned",
+            "summary": f"PID {pid}" if pid is not None else None,
             "status": "started",
             "tone": "current",
             "actor_type": "worker",
@@ -5562,19 +5648,21 @@ def _activity_spec_for_event(kind: str, payload: Optional[dict]) -> dict[str, An
         return {
             "semantic_type": "dependency.promoted",
             "title": "Dependencies satisfied",
-            "summary": "Task promoted to Ready",
+            "summary": "All parent dependencies are done; task promoted to Ready",
             "status": "succeeded",
             "tone": "done",
             "actor_type": "dispatcher",
             "details": details,
         }
     if kind == "linked":
+        parent = payload.get("parent") if payload else None
+        child = payload.get("child") if payload else None
         return {
             "semantic_type": "dependency.linked",
             "importance": "low",
             "group_key": "dependency:link",
             "title": "Dependency linked",
-            "summary": None,
+            "summary": f"{parent} → {child}" if parent and child else None,
             "tone": "info",
             "actor_type": "dispatcher",
             "details": details,
@@ -5734,6 +5822,9 @@ def _activity_item_dict(event: ActivityEvent) -> dict[str, Any]:
     details = event.details if isinstance(event.details, dict) else None
     started_at = _coerce_activity_int(details.get("started_at")) if details else None
     ended_at = _coerce_activity_int(details.get("ended_at")) if details else None
+    children = details.get("children") if isinstance(details, dict) else None
+    if not isinstance(children, list):
+        children = None
     return {
         "id": event.id,
         "task_id": event.task_id,
@@ -5754,6 +5845,7 @@ def _activity_item_dict(event: ActivityEvent) -> dict[str, Any]:
         "icon": event.icon,
         "group": None,
         "details": event.details,
+        "children": children,
     }
 
 

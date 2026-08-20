@@ -161,6 +161,36 @@ export interface KanbanActivityTimelineItem {
   children?: KanbanActivityTimelineItem[]
 }
 
+export interface KanbanWorkTraceRow {
+  id: string
+  task_id?: string
+  run_id?: null | number
+  session_id?: null | string
+  message_id?: null | number
+  tool_call_id?: null | string
+  source_kind?: null | string
+  source_ref?: null | string
+  sequence?: number
+  row_type?: string
+  title: string
+  summary?: null | string
+  status?: null | string
+  tone?: null | KanbanActivityTone
+  icon?: null | string
+  started_at?: null | number
+  ended_at?: null | number
+  duration_ms?: null | number
+  actor?: null | KanbanActivityActor
+  tool?: null | Record<string, unknown>
+  command?: null | Record<string, unknown>
+  files?: Array<Record<string, unknown>>
+  counts?: null | Record<string, number>
+  output?: null | Record<string, unknown>
+  failure?: null | Record<string, unknown>
+  raw?: null | Record<string, unknown>
+  children?: KanbanWorkTraceRow[]
+}
+
 export interface KanbanAttachment {
   id: number | string
   filename: string
@@ -204,6 +234,9 @@ export interface KanbanTaskDetail {
   /** Persisted, backend-grouped Activity projection. Prefer this when present;
    *  keep `events` as the raw audit/fallback stream for older servers. */
   activity_timeline?: KanbanActivityTimelineItem[]
+  /** Optional chronological worker trace projection. Older backends omit this;
+   *  the drawer derives equivalent rows from activity_timeline/log fallback. */
+  work_trace?: KanbanWorkTraceRow[]
   attachments: KanbanAttachment[]
   links: { parents: string[]; children: string[] }
   link_details?: { parents?: KanbanTaskLink[]; children?: KanbanTaskLink[] }

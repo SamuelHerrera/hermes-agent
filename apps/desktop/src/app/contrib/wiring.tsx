@@ -39,6 +39,7 @@ import { $pinnedSessionIds, pinSession, restoreWorktree, unpinSession } from '@/
 import { $previewTarget } from '@/store/preview'
 import {
   $activeGatewayProfile,
+  $emptyWorkspaceRequest,
   $freshSessionRequest,
   $profileScope,
   ensureGatewayProfile,
@@ -63,7 +64,8 @@ import {
   sessionPinId,
   setAwaitingResponse,
   setBusy,
-  setMessages
+  setMessages,
+  setWorkspaceEmptyPlaceholder
 } from '@/store/session'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { armWakeWord, stopClientCapture } from '@/store/wake-word'
@@ -197,6 +199,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     }
   }, [cronReviewRequest, navigate])
   const freshDraftReady = useStore($freshDraftReady)
+  const emptyWorkspaceRequest = useStore($emptyWorkspaceRequest)
   const resumeFailedSessionId = useStore($resumeFailedSessionId)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
@@ -486,6 +489,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // previously open session doesn't bleed across contexts. Skip initial value.
   const freshSessionRequest = useStore($freshSessionRequest)
   const lastFreshRef = useRef(freshSessionRequest)
+  const lastEmptyWorkspaceRef = useRef(emptyWorkspaceRequest)
 
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
@@ -496,6 +500,20 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     lastFreshRef.current = freshSessionRequest
     startFreshSessionDraft()
   }, [freshSessionRequest, startFreshSessionDraft])
+
+  // Close-all/close-final-tab should not materialize another visible "New
+  // session" tab. It still clears the primary chat state through the same fresh
+  // draft reset path, then parks the workspace on a cheap empty placeholder.
+  // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
+  useEffect(() => {
+    if (emptyWorkspaceRequest === lastEmptyWorkspaceRef.current) {
+      return
+    }
+
+    lastEmptyWorkspaceRef.current = emptyWorkspaceRequest
+    startFreshSessionDraft({ replaceRoute: true })
+    setWorkspaceEmptyPlaceholder(true)
+  }, [emptyWorkspaceRequest, startFreshSessionDraft])
 
   // Swapping the live gateway to another profile must re-pull that profile's
   // global model + active-profile pill (both are nanostores — the blanket

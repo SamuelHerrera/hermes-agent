@@ -144,6 +144,14 @@ export interface SidebarNavChildContribution {
   active?: boolean
   /** Optional right-side chrome for per-child status counts. */
   adornment?: ComponentType
+  /** Nest this row visually under the previous sibling. */
+  depth?: number
+  /** Optional row-level disclosure action for grandchildren. */
+  disclosure?: {
+    ariaLabel: string
+    expanded: boolean
+    onToggle: () => void
+  }
   /** Called when the child row is selected. */
   onSelect?: () => void
 }

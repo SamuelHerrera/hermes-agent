@@ -38,6 +38,7 @@ import {
   $introSeed,
   $resumeExhaustedSessionId,
   $sessions,
+  $workspaceEmptyPlaceholder,
   resolveComposerSessionKey,
   sessionMatchesStoredId,
   sessionPinId,
@@ -350,6 +351,7 @@ export const ChatView = memo(function ChatView({
   const selectedSessionId = useStore(view.$storedId)
   const sessions = useStore($sessions)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
+  const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
 
   // Durable composer/queue scope (lineage root) so auto-compression tip rotation
   // does not wipe an in-progress draft or orphan /queue entries. For the
@@ -408,6 +410,13 @@ export const ChatView = memo(function ChatView({
     isPrimary &&
     !isAuxiliaryWindow() &&
     freshDraftReady &&
+    !isRoutedSessionView &&
+    !selectedSessionId &&
+    !activeSessionId &&
+    messagesEmpty
+  const showWorkspaceEmptyPlaceholder =
+    isPrimary &&
+    workspaceEmptyPlaceholder &&
     !isRoutedSessionView &&
     !selectedSessionId &&
     !activeSessionId &&
@@ -538,7 +547,17 @@ export const ChatView = memo(function ChatView({
           stalling to timeout. */}
       <PromptOverlays sessionId={activeSessionId} />
 
-      <ChatRuntimeBoundary
+      {showWorkspaceEmptyPlaceholder ? (
+        <div className="relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-(--ui-chat-surface-background) px-8 py-10">
+          <div className="select-none text-center text-sm text-(--ui-muted-fg)">
+            <div className="mb-2 text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-(--ui-subtle-fg)">
+              No tabs open
+            </div>
+            <div className="text-xs text-(--ui-faint-fg)">Open a session or press the tab + button to start.</div>
+          </div>
+        </div>
+      ) : (
+        <ChatRuntimeBoundary
         busy={busy}
         onCancel={haltRun}
         onEdit={onEdit}
@@ -635,6 +654,7 @@ export const ChatView = memo(function ChatView({
           </Suspense>
         )}
       </ChatRuntimeBoundary>
+      )}
     </div>
   )
 })

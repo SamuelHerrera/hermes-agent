@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type * as React from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import type { Contribution } from '@/contrib/types'
 import { $boardSlug } from '@/plugins/kanban/api'
+import { setCronJobs } from '@/store/cron'
 import { $routeTiles, openRouteTile } from '@/store/route-tiles'
 
 import type { SidebarNavChildrenProps } from '../../routes'
@@ -13,6 +14,12 @@ import type { SidebarNavChildrenProps } from '../../routes'
 import { ChatSidebar } from './index'
 
 const mockNavContributions = vi.hoisted<Contribution[]>(() => [])
+const mockGetCronJobRuns = vi.hoisted(() => vi.fn())
+
+vi.mock('@/hermes', async importOriginal => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getCronJobRuns: mockGetCronJobRuns
+}))
 
 vi.mock('@/contrib/react/use-contributions', () => ({
   useContributions: () => mockNavContributions
@@ -73,7 +80,7 @@ function KanbanTestDashboards({ renderItem }: SidebarNavChildrenProps) {
   )
 }
 
-function renderSidebar() {
+function renderSidebar(overrides: Partial<React.ComponentProps<typeof ChatSidebar>> = {}) {
   return render(
     <MemoryRouter initialEntries={['/']}>
       <SidebarProvider>
@@ -93,6 +100,7 @@ function renderSidebar() {
           onNewSessionSplit={vi.fn()}
           onOpenSessionTab={vi.fn()}
           onResumeSession={vi.fn()}
+          {...overrides}
         />
       </SidebarProvider>
     </MemoryRouter>
@@ -120,6 +128,7 @@ afterEach(() => {
   mockNavContributions.length = 0
   $boardSlug.set('')
   $routeTiles.set([])
+  setCronJobs([])
   localStorage.clear()
   vi.clearAllMocks()
   vi.restoreAllMocks()
@@ -161,5 +170,40 @@ describe('Kanban sidebar dropdown behavior', () => {
 
     expect($boardSlug.get()).toBe('personal')
     expect($routeTiles.get()).toEqual([{ dir: 'center', path: '/kanban' }])
+  })
+
+  it('keeps cron executions behind each job disclosure and opens runs as tabs without refetching on selection', async () => {
+    const onManageCronJob = vi.fn()
+    const onOpenSessionTab = vi.fn()
+    mockGetCronJobRuns.mockResolvedValue([
+      { id: 'run-1', last_active: 1_700_000_000, title: 'First run' },
+      { id: 'run-2', last_active: 1_700_000_060, title: 'Second run' }
+    ])
+    setCronJobs([
+      { enabled: true, id: 'daily', name: 'Daily digest' },
+      { enabled: true, id: 'weekly', name: 'Weekly review' }
+    ])
+
+    renderSidebar({ onManageCronJob, onOpenSessionTab })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Scheduled jobs' }))
+
+    expect(screen.getByText('Daily digest')).toBeTruthy()
+    expect(screen.queryByText('First run')).toBeNull()
+    expect(mockGetCronJobRuns).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand executions for Daily digest' }))
+
+    await waitFor(() => expect(screen.getAllByText(/Nov 14/).length).toBe(2))
+    expect(mockGetCronJobRuns).toHaveBeenCalledTimes(1)
+    expect(mockGetCronJobRuns).toHaveBeenCalledWith('daily', 5)
+
+    fireEvent.click(screen.getAllByText(/Nov 14/)[0])
+
+    expect(onOpenSessionTab).toHaveBeenCalledWith('run-1')
+    expect(mockGetCronJobRuns).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByText('Daily digest'))
+    expect(onManageCronJob).toHaveBeenCalledWith('daily')
   })
 })

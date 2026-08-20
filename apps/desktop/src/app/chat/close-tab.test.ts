@@ -4,14 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const closeFocusedSessionTab = vi.fn(() => false)
 const closeFocusedToolTab = vi.fn(() => false)
 const hideLoneTreeTab = vi.fn<(paneId: string) => boolean>(() => true)
+const isClosingAllTreeTabs = vi.fn(() => false)
 const nextSessionTileForWorkspace = vi.fn<() => null | string>(() => null)
 const closeSessionTile = vi.fn()
-const requestFreshSession = vi.fn()
+const requestEmptyWorkspace = vi.fn()
 
 vi.mock('@/components/pane-shell/tree/store', () => ({
   closeFocusedSessionTab: () => closeFocusedSessionTab(),
   closeFocusedToolTab: () => closeFocusedToolTab(),
-  hideLoneTreeTab: (paneId: string) => hideLoneTreeTab(paneId)
+  hideLoneTreeTab: (paneId: string) => hideLoneTreeTab(paneId),
+  isClosingAllTreeTabs: () => isClosingAllTreeTabs()
 }))
 
 vi.mock('@/store/session-states', () => ({
@@ -21,9 +23,9 @@ vi.mock('@/store/session-states', () => ({
 
 vi.mock('@/store/profile', () => ({
   // The layout store reads the sidebar's profile scope; this suite only cares
-  // about the fresh-session call.
+  // about the empty-workspace request.
   $showAllProfiles: atom(false),
-  requestFreshSession: () => requestFreshSession(),
+  requestEmptyWorkspace: () => requestEmptyWorkspace(),
   setShowAllProfiles: () => {}
 }))
 
@@ -61,6 +63,7 @@ beforeEach(() => {
   closeFocusedSessionTab.mockReturnValue(false)
   closeFocusedToolTab.mockReturnValue(false)
   hideLoneTreeTab.mockReturnValue(true)
+  isClosingAllTreeTabs.mockReturnValue(false)
   nextSessionTileForWorkspace.mockReturnValue(null)
   vi.clearAllMocks()
 })
@@ -102,26 +105,50 @@ describe('closeWorkspaceTab', () => {
     expect(closeSessionTile).toHaveBeenCalledWith('stored-b')
     expect(load).toHaveBeenCalledWith('stored-b')
     // Promotion refills main — it must not ALSO blank it.
-    expect(requestFreshSession).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).not.toHaveBeenCalled()
+    expect(hideLoneTreeTab).not.toHaveBeenCalled()
   })
 
-  it('drops a lone loaded main to a fresh draft', () => {
+  it('Close all does not promote a surviving/stale tile back into main', () => {
+    loadedMainOnly()
+    nextSessionTileForWorkspace.mockReturnValue('stored-b')
+    isClosingAllTreeTabs.mockReturnValue(true)
+    const load = vi.fn()
+
+    expect(closeWorkspaceTab(load)).toBe(true)
+    expect(closeSessionTile).not.toHaveBeenCalled()
+    expect(load).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).toHaveBeenCalledTimes(1)
+    expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
+  })
+
+  it('drops a lone loaded main to a fresh draft and closes its tab chrome', () => {
     loadedMainOnly()
 
     expect(closeWorkspaceTab(vi.fn())).toBe(true)
-    expect(requestFreshSession).toHaveBeenCalledTimes(1)
+    expect(requestEmptyWorkspace).toHaveBeenCalledTimes(1)
+    expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
   })
 
-  it('empties main even with no session loader wired', () => {
+  it('empties main even with no session loader wired and closes its tab chrome', () => {
     loadedMainOnly()
 
     expect(closeWorkspaceTab()).toBe(true)
-    expect(requestFreshSession).toHaveBeenCalledTimes(1)
+    expect(requestEmptyWorkspace).toHaveBeenCalledTimes(1)
+    expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
   })
 
   it('hides the lone workspace tab when its draft is already blank', () => {
     expect(closeWorkspaceTab(vi.fn())).toBe(true)
-    expect(requestFreshSession).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).not.toHaveBeenCalled()
+    expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
+  })
+
+  it('does not claim a blank workspace when another tab still shares the strip', () => {
+    hideLoneTreeTab.mockReturnValue(false)
+
+    expect(closeWorkspaceTab(vi.fn())).toBe(false)
+    expect(requestEmptyWorkspace).not.toHaveBeenCalled()
     expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
   })
 
@@ -130,14 +157,14 @@ describe('closeWorkspaceTab', () => {
     $workspaceIsPage.set(true)
 
     expect(closeWorkspaceTab(vi.fn())).toBe(false)
-    expect(requestFreshSession).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).not.toHaveBeenCalled()
   })
 
   it('⌘W reaches it once the terminal and zone tabs pass', () => {
     loadedMainOnly()
 
     expect(closeActiveTab(vi.fn())).toBe(true)
-    expect(requestFreshSession).toHaveBeenCalledTimes(1)
+    expect(requestEmptyWorkspace).toHaveBeenCalledTimes(1)
   })
 
   it('a focused tool panel (terminal / logs) claims ⌘W before main empties', () => {
@@ -146,6 +173,6 @@ describe('closeWorkspaceTab', () => {
 
     expect(closeActiveTab(vi.fn())).toBe(true)
     // The logs/terminal tab closed — main keeps its loaded chat.
-    expect(requestFreshSession).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).not.toHaveBeenCalled()
   })
 })

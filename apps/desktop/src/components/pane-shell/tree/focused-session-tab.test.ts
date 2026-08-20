@@ -19,7 +19,7 @@ describe('focused chat zone drives the tab verbs', () => {
     const model = await import('@/components/pane-shell/tree/model')
     const { registry } = await import('@/contrib/registry')
 
-    for (const id of ['workspace', 'files', 'session-tile:a', 'session-tile:b']) {
+    for (const id of ['workspace', 'files', 'session-tile:a', 'session-tile:b', 'route-tile:/kanban']) {
       registry.register({
         area: 'panes',
         data: id === 'workspace' ? { placement: 'main', uncloseable: true } : { placement: 'main' },
@@ -81,6 +81,25 @@ describe('focused chat zone drives the tab verbs', () => {
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
   })
 
+  it('plain tab activation restores a main strip hidden by a stale lone-tab close', async () => {
+    const { model, tree } = await setup()
+
+    tree.$layoutTree.set(
+      model.group(['workspace', 'session-tile:a'], {
+        active: 'workspace',
+        headerHidden: true,
+        id: 'grp-main'
+      })
+    )
+
+    tree.activateTreePane('grp-main', 'session-tile:a')
+
+    const group = model.findGroup(tree.$layoutTree.get()!, 'grp-main')
+
+    expect(group?.active).toBe('session-tile:a')
+    expect(group?.headerHidden).toBe(false)
+  })
+
   it('Close all empties the store-owned workspace tab without removing its pane', async () => {
     const { model, tree } = await setup()
     const closed: string[] = []
@@ -103,6 +122,37 @@ describe('focused chat zone drives the tab verbs', () => {
     // Workspace is a permanent rendering host. Closing its TAB is routed to
     // the owner above; the pane remains while its now-empty strip disappears.
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
+    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(true)
+  })
+
+  it('Close all can close every session/page tab in sequence and leave only the empty workspace host', async () => {
+    const { model, tree } = await setup()
+    const closed: string[] = []
+
+    for (const id of ['session-tile:a', 'route-tile:/kanban', 'session-tile:b']) {
+      tree.registerPaneCloser(id, () => {
+        closed.push(id)
+        tree.dismissTreePane(id)
+      })
+    }
+
+    tree.registerPaneCloser('workspace', () => {
+      closed.push('workspace')
+      tree.hideLoneTreeTab('workspace')
+    })
+    tree.$layoutTree.set(
+      model.group(['workspace', 'session-tile:a', 'route-tile:/kanban', 'session-tile:b'], {
+        active: 'route-tile:/kanban',
+        id: 'grp-main'
+      })
+    )
+
+    expect(tree.treeTabCloseTargets('route-tile:/kanban').all).toBe(4)
+
+    tree.closeAllTreeTabs('route-tile:/kanban')
+
+    expect(closed).toEqual(['session-tile:a', 'route-tile:/kanban', 'session-tile:b', 'workspace'])
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toEqual(['workspace'])
     expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(true)
   })
 

@@ -7,6 +7,8 @@ best-effort: failures here must never break the agent loop.
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 import re
 from typing import Any, Optional
 
@@ -60,6 +62,16 @@ _INSPECT_COMMAND_RE = re.compile(
     r"\b(git\s+(status|diff|show|log)|rg\b|grep\b|find\b|ls\b|pwd\b)\b",
     re.IGNORECASE,
 )
+_SECRET_KEY_RE = re.compile(
+    r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|cookie|credential|password|secret|token)"
+)
+_ASSIGNMENT_SECRET_RE = re.compile(
+    r"(?i)\b([a-z0-9_.-]*(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|cookie|credential|password|secret|token)[a-z0-9_.-]*)\s*[:=]\s*([^\s,;]+)"
+)
+_MAX_TITLE_CHARS = 160
+_MAX_SUMMARY_CHARS = 500
+_MAX_PREVIEW_CHARS = 4096
+_MAX_RAW_PREVIEW_CHARS = 16_384
 
 _STEP_COPY = {
     "planning": (
@@ -103,6 +115,226 @@ _STEP_COPY = {
         "send",
     ),
 }
+
+
+def _truncate_text(value: Any, limit: int) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _redact_text(value: Any, *, limit: int = _MAX_SUMMARY_CHARS) -> str:
+    text = _truncate_text(value, limit)
+    return _ASSIGNMENT_SECRET_RE.sub(lambda m: f"{m.group(1)}=[redacted]", text)
+
+
+def _redact_value(key: str, value: Any, *, limit: int = _MAX_SUMMARY_CHARS) -> Any:
+    if _SECRET_KEY_RE.search(str(key)):
+        return "[redacted]"
+    if isinstance(value, str):
+        return _redact_text(value, limit=limit)
+    if isinstance(value, dict):
+        return {
+            str(k): _redact_value(str(k), v, limit=limit)
+            for k, v in list(value.items())[:50]
+        }
+    if isinstance(value, list):
+        return [_redact_value(key, v, limit=limit) for v in value[:50]]
+    return value
+
+
+def _safe_args(args: dict[str, Any]) -> dict[str, Any]:
+    return {str(k): _redact_value(str(k), v, limit=1024) for k, v in args.items()}
+
+
+def _parse_result(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        return result
+    if not isinstance(result, str) or not result.strip():
+        return {}
+    try:
+        parsed = json.loads(result)
+    except Exception:
+        return {"preview": _redact_text(result, limit=_MAX_RAW_PREVIEW_CHARS)}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}
+
+
+def _child_id(tool_name: str, title: str, summary: str = "") -> str:
+    digest = hashlib.sha1(f"{tool_name}\0{title}\0{summary}".encode("utf-8", "replace")).hexdigest()[:12]
+    return f"tool-{tool_name}-{digest}"
+
+
+def _duration_summary(duration_ms: int) -> Optional[str]:
+    if duration_ms <= 0:
+        return None
+    if duration_ms < 1000:
+        return f"{duration_ms}ms"
+    return f"{duration_ms / 1000:.1f}s"
+
+
+def _count_from_result(result: dict[str, Any], *keys: str) -> Optional[int]:
+    for key in keys:
+        value = result.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            return value
+        if isinstance(value, list):
+            return len(value)
+    return None
+
+
+def _output_preview(result: dict[str, Any]) -> Optional[dict[str, Any]]:
+    output: dict[str, Any] = {}
+    for source_key, dest_key in (
+        ("output", "stdout_preview"),
+        ("stdout", "stdout_preview"),
+        ("stderr", "stderr_preview"),
+        ("error", "stderr_preview"),
+        ("preview", "stdout_preview"),
+    ):
+        value = result.get(source_key)
+        if isinstance(value, str) and value.strip() and dest_key not in output:
+            preview = _redact_text(value, limit=_MAX_PREVIEW_CHARS)
+            output[dest_key] = preview
+            stream = "stdout" if dest_key == "stdout_preview" else "stderr"
+            output[f"total_{stream}_bytes"] = len(value.encode("utf-8", "replace"))
+            output["truncated"] = output.get("truncated") or preview != value
+            output["redacted"] = output.get("redacted") or preview != _truncate_text(value, _MAX_PREVIEW_CHARS)
+    return output or None
+
+
+def _tool_evidence(
+    tool_name: str,
+    args: dict[str, Any],
+    *,
+    result: Any = None,
+    observer_status: str = "ok",
+    phase: str = "end",
+    duration_ms: int = 0,
+    error_type: Optional[str] = None,
+    error_message: Optional[str] = None,
+) -> dict[str, Any]:
+    """Build bounded, redacted concrete evidence for Activity details."""
+    safe_args = _safe_args(args)
+    parsed = _parse_result(result)
+    details: dict[str, Any] = {
+        "tools": [tool_name],
+        "raw_sources": [{"kind": "tool", "name": tool_name}],
+    }
+    if phase != "end":
+        return details
+    child: dict[str, Any] = {
+        "type": "agent.tool_call",
+        "title": tool_name.replace("_", " "),
+        "status": "failed" if observer_status == "error" else "succeeded",
+    }
+    summary_parts: list[str] = []
+    files: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    duration = _duration_summary(duration_ms)
+
+    if tool_name == "terminal":
+        command = _redact_text(safe_args.get("command"), limit=240)
+        exit_code = parsed.get("exit_code")
+        child["type"] = "agent.command"
+        child["title"] = _truncate_text(f"Ran {command}" if command else "Ran terminal command", _MAX_TITLE_CHARS)
+        bits = []
+        if duration:
+            bits.append(duration)
+        if isinstance(exit_code, int):
+            bits.append(f"exit {exit_code}")
+        if safe_args.get("workdir"):
+            bits.append(f"cwd {safe_args.get('workdir')}")
+        child["summary"] = " · ".join(bits) or None
+        details["command"] = {
+            "text": command,
+            "cwd": safe_args.get("workdir"),
+            "exit_code": exit_code if isinstance(exit_code, int) else None,
+        }
+        if command:
+            summary_parts.append(child["title"])
+    elif tool_name == "read_file":
+        path = _redact_text(safe_args.get("path"), limit=220).strip()
+        offset = safe_args.get("offset")
+        total_lines = parsed.get("total_lines")
+        raw_content = parsed.get("content")
+        content = raw_content if isinstance(raw_content, str) else ""
+        returned_lines = content.count("\n") + (1 if content else 0)
+        line_suffix = f":{offset}" if offset else ""
+        child["type"] = "agent.file_read"
+        child["title"] = _truncate_text(f"Read {path}{line_suffix}" if path else "Read file", _MAX_TITLE_CHARS)
+        child["summary"] = (
+            f"Returned {returned_lines} of {total_lines} lines" if isinstance(total_lines, int) else None
+        )
+        if path:
+            files.append({"path": path, "action": "read", "line_start": offset if isinstance(offset, int) else None})
+            summary_parts.append(child["title"])
+    elif tool_name == "search_files":
+        pattern = _redact_text(safe_args.get("pattern"), limit=120)
+        path = _redact_text(safe_args.get("path") or ".", limit=220).strip()
+        count = _count_from_result(parsed, "total_count", "matches")
+        child["type"] = "agent.file_search"
+        child["title"] = _truncate_text(f"Searched {pattern}" if pattern else "Searched files", _MAX_TITLE_CHARS)
+        child["summary"] = (
+            f"Found {count} match{'es' if count != 1 else ''} under {path}" if count is not None else f"Searched under {path}"
+        )
+        if count is not None:
+            counts["matches"] = count
+        files.append({"path": path, "action": "searched", "matches": count})
+        summary_parts.append(child["title"])
+    elif tool_name in {"patch", "write_file"}:
+        path = _redact_text(safe_args.get("path"), limit=220).strip()
+        mode = str(safe_args.get("mode") or "")
+        diff = parsed.get("diff") if isinstance(parsed.get("diff"), str) else ""
+        additions = len(re.findall(r"^\+(?!\+\+\+)", diff, flags=re.MULTILINE)) if diff else None
+        deletions = len(re.findall(r"^-(?!---)", diff, flags=re.MULTILINE)) if diff else None
+        action = "edited" if tool_name == "patch" or mode == "patch" else "created"
+        child["type"] = "agent.file_edit"
+        child["title"] = _truncate_text(f"Edited {path}" if path else f"{tool_name.replace('_', ' ').title()} applied", _MAX_TITLE_CHARS)
+        edit_bits = []
+        if additions is not None or deletions is not None:
+            edit_bits.append(f"+{additions or 0}/-{deletions or 0}")
+        if parsed.get("verified") is True:
+            edit_bits.append("verified")
+        child["summary"] = " · ".join(edit_bits) or None
+        if path:
+            files.append({"path": path, "action": action, "additions": additions, "deletions": deletions})
+            summary_parts.append(child["title"])
+    elif tool_name in _REVIEW_HANDOFF_TOOLS or tool_name in _LIFECYCLE_TOOLS:
+        target_task = safe_args.get("task_id") or os.environ.get("HERMES_KANBAN_TASK")
+        child["type"] = "agent.handoff"
+        child["title"] = _truncate_text(f"Used {tool_name.replace('_', ' ')}", _MAX_TITLE_CHARS)
+        if target_task:
+            child["summary"] = f"Target task {target_task}"
+        summary_parts.append(child["title"])
+    else:
+        child["title"] = _truncate_text(f"Used {tool_name.replace('_', ' ')}", _MAX_TITLE_CHARS)
+        if duration:
+            child["summary"] = duration
+        summary_parts.append(child["title"])
+
+    if duration_ms > 0:
+        details["duration_ms"] = int(duration_ms)
+    if files:
+        details["files"] = files
+        counts["files"] = len({f.get("path") for f in files if f.get("path")})
+    counts["tools"] = 1
+    if counts:
+        details["counts"] = counts
+    output = _output_preview(parsed)
+    if output:
+        details["output"] = output
+    if error_type or error_message or observer_status == "error":
+        failure_message = _redact_text(error_message or parsed.get("error") or "Tool failed", limit=_MAX_SUMMARY_CHARS)
+        details["failure"] = {"type": error_type, "message": failure_message}
+        child["summary"] = failure_message
+    child["id"] = _child_id(tool_name, str(child.get("title") or ""), str(child.get("summary") or ""))
+    details["children"] = [child]
+    if summary_parts:
+        details["work_summary"] = _truncate_text("; ".join(summary_parts), _MAX_SUMMARY_CHARS)
+    return details
 
 
 def _dispatcher_owned_worker() -> bool:
@@ -193,6 +425,7 @@ def record_kanban_tool_activity(
     duration_ms: int = 0,
     error_type: Optional[str] = None,
     error_message: Optional[str] = None,
+    result: Any = None,
 ) -> Optional[int]:
     """Record or update one grouped Kanban Activity step for a tool call."""
     if not _dispatcher_owned_worker():
@@ -208,16 +441,17 @@ def record_kanban_tool_activity(
     target = _tool_target(tool_name, safe_args)
     title, summary, icon = _STEP_COPY[step_type]
     status = _status_for_phase(phase, observer_status)
-    details: dict[str, Any] = {
-        "tools": [tool_name],
-        "raw_sources": [{"kind": "tool", "name": tool_name}],
-    }
-    if duration_ms > 0:
-        details["duration_ms"] = int(duration_ms)
-    if error_type:
-        details["error_type"] = error_type
-    if error_message:
-        details["error_message"] = str(error_message)[:500]
+    details = _tool_evidence(
+        tool_name,
+        safe_args,
+        result=result,
+        observer_status=observer_status,
+        phase=phase,
+        duration_ms=duration_ms,
+        error_type=error_type,
+        error_message=error_message,
+    )
+    summary = details.get("work_summary") or summary
     try:
         from hermes_cli import kanban_db as kb
 

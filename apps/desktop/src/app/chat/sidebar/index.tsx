@@ -125,7 +125,6 @@ import { $sessionDotStateById, sessionStatusBucket } from '@/store/session-dot-s
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive'
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
-import type { CronJob } from '@/types/hermes'
 
 import { jobTitle } from '../../cron/job-state'
 import {
@@ -133,6 +132,7 @@ import {
   CRON_ROUTE,
   cronJobRoute,
   routePathname,
+  routeSessionId,
   SIDEBAR_NAV_AREA,
   type SidebarNavChildContribution,
   type SidebarNavChildrenProps
@@ -1355,18 +1355,9 @@ export function ChatSidebar({
     }
 
     return function CronNavChildrenComponent({ renderItem }: SidebarNavChildrenProps) {
-      return (
-        <CronNavJobs
-          activePath={routePathname(pathname)}
-          activeSessionId={activeSidebarSessionId}
-          jobs={cronJobs}
-          onOpenJob={onManageCronJob}
-          onOpenRun={onOpenSessionTab}
-          renderItem={renderItem}
-        />
-      )
+      return <CronNavJobs onOpenJob={onManageCronJob} onOpenRun={onOpenSessionTab} renderItem={renderItem} />
     }
-  }, [activeSidebarSessionId, cronJobs, onManageCronJob, onOpenSessionTab, pathname])
+  }, [cronJobs.length, onManageCronJob, onOpenSessionTab])
 
   const navItems = useMemo<SidebarNavItem[]>(() => {
     const items = [...SIDEBAR_NAV]
@@ -1491,11 +1482,13 @@ export function ChatSidebar({
                 )
 
                 const renderChildItem = (child: SidebarNavChildContribution) => (
-                  <SidebarMenuSubItem key={child.id}>
+                  <SidebarMenuSubItem className={cn(child.depth && 'ml-3')} key={child.id}>
                     <SidebarMenuSubButton
                       asChild
                       className={cn(
                         'h-6 px-2 text-[0.75rem] text-(--ui-text-secondary) hover:bg-(--ui-control-hover-background) hover:text-foreground',
+                        child.depth && 'text-[0.71875rem] text-(--ui-text-tertiary)',
+                        child.disclosure && 'pr-7',
                         child.active && 'bg-(--ui-control-active-background) text-foreground'
                       )}
                       isActive={child.active}
@@ -1514,6 +1507,25 @@ export function ChatSidebar({
                         ) : null}
                       </button>
                     </SidebarMenuSubButton>
+                    {child.disclosure ? (
+                      <SidebarMenuAction
+                        aria-expanded={child.disclosure.expanded}
+                        aria-label={child.disclosure.ariaLabel}
+                        className="top-0.5 right-0.5 h-5 w-5 opacity-70 hover:opacity-100"
+                        onClick={event => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          child.disclosure?.onToggle()
+                        }}
+                        type="button"
+                      >
+                        <Codicon
+                          className="-translate-y-px leading-none"
+                          name={child.disclosure.expanded ? 'chevron-down' : 'chevron-right'}
+                          size="0.75rem"
+                        />
+                      </SidebarMenuAction>
+                    ) : null}
                   </SidebarMenuSubItem>
                 )
 
@@ -1870,40 +1882,56 @@ export function ChatSidebar({
 
 
 function CronNavJobs({
-  activePath,
-  activeSessionId,
-  jobs,
   onOpenJob,
   onOpenRun,
   renderItem
 }: {
-  activePath: string
-  activeSessionId: null | string
-  jobs: CronJob[]
   onOpenJob: (jobId: string) => void
   onOpenRun: (sessionId: string) => void
   renderItem: (item: SidebarNavChildContribution) => React.ReactNode
 }) {
+  const { pathname } = useLocation()
+  const jobs = useStore($cronJobs)
+  const focusedSessionId = useStore($focusedStoredSessionId)
+  const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({})
+  const activePath = routePathname(pathname)
+  const activeSessionId = routeSessionId(pathname) ? focusedSessionId : null
   const sorted = useMemo(() => [...jobs].sort((a, b) => jobTitle(a).localeCompare(jobTitle(b))), [jobs])
+
+  const toggleJob = useCallback((jobId: string) => {
+    setExpandedJobIds(current => ({ ...current, [jobId]: !current[jobId] }))
+  }, [])
 
   return (
     <>
-      {sorted.map(job => (
-        <Fragment key={job.id}>
-          {renderItem({
-            active: activePath === cronJobRoute(job.id),
-            id: `cron-job-${job.id}`,
-            label: jobTitle(job),
-            onSelect: () => onOpenJob(job.id)
-          })}
-          <CronNavJobRuns
-            activeSessionId={activeSessionId}
-            jobId={job.id}
-            onOpenRun={onOpenRun}
-            renderItem={renderItem}
-          />
-        </Fragment>
-      ))}
+      {sorted.map(job => {
+        const title = jobTitle(job)
+        const expanded = Boolean(expandedJobIds[job.id])
+
+        return (
+          <Fragment key={job.id}>
+            {renderItem({
+              active: activePath === cronJobRoute(job.id),
+              disclosure: {
+                ariaLabel: `${expanded ? 'Collapse' : 'Expand'} executions for ${title}`,
+                expanded,
+                onToggle: () => toggleJob(job.id)
+              },
+              id: `cron-job-${job.id}`,
+              label: title,
+              onSelect: () => onOpenJob(job.id)
+            })}
+            {expanded ? (
+              <CronNavJobRuns
+                activeSessionId={activeSessionId}
+                jobId={job.id}
+                onOpenRun={onOpenRun}
+                renderItem={renderItem}
+              />
+            ) : null}
+          </Fragment>
+        )
+      })}
     </>
   )
 }
@@ -1919,11 +1947,13 @@ function CronNavJobRuns({
   onOpenRun: (sessionId: string) => void
   renderItem: (item: SidebarNavChildContribution) => React.ReactNode
 }) {
+  const [loading, setLoading] = useState(true)
   const [runs, setRuns] = useState<SessionInfo[]>([])
 
   useEffect(() => {
     let cancelled = false
 
+    setLoading(true)
     void getCronJobRuns(jobId, 5)
       .then(result => {
         if (!cancelled) {
@@ -1935,19 +1965,41 @@ function CronNavJobRuns({
           setRuns([])
         }
       })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
 
     return () => {
       cancelled = true
     }
   }, [jobId])
 
+  if (loading) {
+    return renderItem({
+      depth: 1,
+      id: `cron-runs-loading-${jobId}`,
+      label: 'Loading executions…'
+    })
+  }
+
+  if (runs.length === 0) {
+    return renderItem({
+      depth: 1,
+      id: `cron-runs-empty-${jobId}`,
+      label: 'No executions yet'
+    })
+  }
+
   return (
     <>
       {runs.map(run =>
         renderItem({
           active: run.id === activeSessionId,
+          depth: 1,
           id: `cron-run-${jobId}-${run.id}`,
-          label: `↳ ${cronRunLabel(run)}`,
+          label: cronRunLabel(run),
           onSelect: () => onOpenRun(run.id)
         })
       )}

@@ -580,11 +580,22 @@ export function closeTreeTabsToRight(paneId: string): void {
 /** Close every semantically closeable tab in `paneId`'s group. A permanent
  * pane such as workspace stays in the tree while its registered closer empties
  * the loaded tab, leaving the editor host ready for the next session. */
+let closeAllTreeTabsDepth = 0
+
+export function isClosingAllTreeTabs(): boolean {
+  return closeAllTreeTabsDepth > 0
+}
+
 export function closeAllTreeTabs(paneId: string): void {
   const tree = $layoutTree.get()
   const panes = (tree ? findGroupOfPane(tree, paneId) : null)?.panes ?? []
 
-  closeTreeTabsInOrder(panes)
+  closeAllTreeTabsDepth += 1
+  try {
+    closeTreeTabsInOrder(panes)
+  } finally {
+    closeAllTreeTabsDepth -= 1
+  }
 }
 
 /** Pane ids in the tree under a `${prefix}:` namespace — lets a mirror prune
@@ -686,13 +697,6 @@ export function cycleTreeTabInFocusedZone(direction: 1 | -1): null | string {
   const idx = panes.includes(group.active ?? '') ? current : 0
   const nextId = panes[(idx + direction + panes.length) % panes.length]
   activateTreePane(group.id, nextId)
-
-  // Cycling onto a session/main tab must surface the name card — a zone that
-  // was double-tap-hidden stays headerless otherwise ("the one that cycles
-  // never gets it").
-  if (isMainStripPane(nextId)) {
-    setTreeGroupHeaderHidden(group.id, false)
-  }
 
   return nextId
 }
@@ -1414,7 +1418,18 @@ export function activateTreePane(groupId: string, paneId: string) {
   const tree = $layoutTree.get()
 
   if (tree) {
-    commit(setActivePaneOp(tree, groupId, paneId))
+    let next = setActivePaneOp(tree, groupId, paneId)
+    const group = findGroup(next, groupId)
+
+    // Activating a chat/page tab is user intent to see that tab's strip. A
+    // stale hidden flag can survive from the empty/lone workspace host, which
+    // otherwise leaves ordinary tab selection looking fullscreen until Ctrl+Tab
+    // happens to clear it. Tool zones keep their explicit hidden preference.
+    if (group?.active === paneId && group.headerHidden === true && isMainStripPane(paneId)) {
+      next = setGroupHeaderHiddenOp(next, groupId, false)
+    }
+
+    commit(next)
   }
 }
 

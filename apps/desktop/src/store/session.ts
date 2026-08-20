@@ -546,6 +546,7 @@ export const $messagesEmpty = computed($messages, messages => messages.length ==
 export const $lastVisibleMessageIsUser = computed($messages, lastVisibleMessageIsUser)
 
 export const $freshDraftReady = atom(false)
+export const $workspaceEmptyPlaceholder = atom(false)
 export const $busy = atom(false)
 export const $awaitingResponse = atom(false)
 // Stored-session id whose most recent resume FAILED terminally (the gateway RPC
@@ -639,7 +640,13 @@ export const setSessionProfilesTruncated = (next: Updater<Record<string, boolean
 export const setSessionProfilesUsage = (next: Updater<Record<string, ProfileUsage>>) =>
   updateAtom($sessionProfilesUsage, next)
 export const setSessionsLoading = (next: Updater<boolean>) => updateAtom($sessionsLoading, next)
-export const setActiveSessionId = (next: Updater<string | null>) => updateAtom($activeSessionId, next)
+export const setActiveSessionId = (next: Updater<string | null>) => {
+  updateAtom($activeSessionId, next)
+
+  if ($activeSessionId.get()) {
+    $workspaceEmptyPlaceholder.set(false)
+  }
+}
 export const setActiveSessionStoredIdRotation = (next: Updater<ActiveSessionStoredIdRotation | null>) =>
   updateAtom($activeSessionStoredIdRotation, next)
 
@@ -672,10 +679,15 @@ export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
   updateAtom($selectedStoredSessionId, next)
   // Opening a session clears its unread state — the user is now looking at it.
   markSessionRead($selectedStoredSessionId.get())
+
+  if ($selectedStoredSessionId.get()) {
+    $workspaceEmptyPlaceholder.set(false)
+  }
 }
 
 export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)
 export const setFreshDraftReady = (next: Updater<boolean>) => updateAtom($freshDraftReady, next)
+export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => updateAtom($workspaceEmptyPlaceholder, next)
 export const setResumeFailedSessionId = (next: Updater<string | null>) => updateAtom($resumeFailedSessionId, next)
 export const setResumeExhaustedSessionId = (next: Updater<string | null>) => updateAtom($resumeExhaustedSessionId, next)
 export const setBusy = (next: Updater<boolean>) => updateAtom($busy, next)

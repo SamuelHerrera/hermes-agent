@@ -56,6 +56,7 @@ import {
   setSessionStartedAt,
   setTurnStartedAt,
   setWorkspaceCwdOwner,
+  setWorkspaceEmptyPlaceholder,
   setYoloActive
 } from '@/store/session'
 import {
@@ -294,6 +295,7 @@ export function useSessionActions({
         : undefined
 
       resetViewSync()
+      setWorkspaceEmptyPlaceholder(false)
       busyRef.current = false
       setBusy(false)
       setAwaitingResponse(false)

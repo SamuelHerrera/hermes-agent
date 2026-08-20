@@ -94,6 +94,58 @@ test('switchBranch: switches a normal checkout branch', async () => {
   }
 })
 
+test('switchBranch: treats already-on-target hook noise as success', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-switch-current-'))
+  const fakeGit = path.join(dir, 'git')
+
+  try {
+    fs.writeFileSync(
+      fakeGit,
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "switch" ] && [ "$2" = "main" ]; then',
+        "  printf \"Already on 'main'\\n\" >&2",
+        '  printf ".git/hooks/post-checkout: line 1: git-lfs: command not found\\n" >&2',
+        '  exit 1',
+        'fi',
+        'exit 2',
+        ''
+      ].join('\n')
+    )
+    fs.chmodSync(fakeGit, 0o755)
+
+    assert.deepEqual(await switchBranch(dir, 'main', fakeGit), { branch: 'main' })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('switchBranch: still surfaces real switch failures', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-switch-failure-'))
+  const fakeGit = path.join(dir, 'git')
+
+  try {
+    fs.writeFileSync(
+      fakeGit,
+      [
+        '#!/bin/sh',
+        'printf "fatal: invalid reference: %s\\n" "$2" >&2',
+        'exit 1',
+        ''
+      ].join('\n')
+    )
+    fs.chmodSync(fakeGit, 0o755)
+
+    await assert.rejects(() => switchBranch(dir, 'missing', fakeGit), err => {
+      assert.match((err as { stderr?: string }).stderr || '', /fatal: invalid reference: missing/)
+
+      return true
+    })
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('listBranches: lists locals and flags the checked-out branch', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-branches-'))
 

@@ -160,9 +160,14 @@ export const $newChatProfile = atom<string | null>(null)
 // currently-open session (store/projects). The chat controller subscribes and
 // resets to the intro draft, so we never strand the user in an orphaned view.
 export const $freshSessionRequest = atom(0)
+export const $emptyWorkspaceRequest = atom(0)
 
 export function requestFreshSession(): void {
   $freshSessionRequest.set($freshSessionRequest.get() + 1)
+}
+
+export function requestEmptyWorkspace(): void {
+  $emptyWorkspaceRequest.set($emptyWorkspaceRequest.get() + 1)
 }
 
 // Route profile-scoped REST settings (config/env/skills/tools/model/…) to the

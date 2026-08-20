@@ -8,6 +8,7 @@ import {
   AttachmentsSection,
   buildDiscussionItems,
   buildTimelineItems,
+  buildWorkerTraceRows,
   CommentComposer,
   DependenciesSection,
   TaskDetailHeaderControls,
@@ -1189,6 +1190,68 @@ describe('buildTimelineItems', () => {
     ).toBeTruthy()
   })
 
+  it('renders concrete tool evidence from persisted activity details', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          actor: { id: 'default', type: 'agent' },
+          created_at: 1010,
+          details: {
+            children: [
+              {
+                id: 'tool-read-drawer',
+                summary: 'Returned 240 of 2977 lines',
+                title: 'Read apps/desktop/src/plugins/kanban/drawer.tsx',
+                type: 'agent.file_read'
+              },
+              {
+                id: 'tool-search-activity',
+                summary: 'Found 7 matches under plugins/kanban',
+                title: 'Searched activity_timeline',
+                type: 'agent.file_search'
+              }
+            ],
+            counts: { files: 2, matches: 7, tools: 2 },
+            files: [
+              { action: 'read', path: 'apps/desktop/src/plugins/kanban/drawer.tsx' },
+              { action: 'searched', matches: 7, path: 'plugins/kanban' }
+            ],
+            output: { redacted: true, truncated: true },
+            work_summary: 'Read drawer.tsx; searched activity_timeline'
+          },
+          id: 10,
+          importance: 'normal',
+          source_kind: 'agent_step',
+          started_at: 1005,
+          status: 'succeeded',
+          summary: 'Generic inspection fallback.',
+          title: 'Inspecting relevant files',
+          type: 'agent.file_inspection'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [{ id: 9, profile: 'default', started_at: 1000, status: 'running' }],
+      task: { assignee: 'default', created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+
+    const items = buildTimelineItems(detail, undefined, testKanbanText as never)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].detail).toContain('Read drawer.tsx; searched activity_timeline')
+    expect(items[0].detail).toContain('used 2 tools')
+    expect(items[0].detail).toContain('7 matches')
+    expect(items[0].detail).toContain('output redacted, output truncated')
+    expect(items[0].detail).not.toContain('Generic inspection fallback')
+    expect(items[0].children?.map(child => child.label)).toEqual([
+      'Read apps/desktop/src/plugins/kanban/drawer.tsx',
+      'Searched activity_timeline'
+    ])
+    expect(items[0].children?.[0].detail).toBe('Returned 240 of 2977 lines')
+  })
+
   it('renders running, completed, and failed grouped step statuses', () => {
     const detail = {
       activity_timeline: [
@@ -1359,10 +1422,11 @@ describe('buildTimelineItems', () => {
     expect(screen.queryByText('Runs · 1')).toBeNull()
   })
 
-  it('renders worker logs as structured blocks instead of one raw text dump', () => {
+  it('renders raw worker log fallback as chat-like trace rows', () => {
     const log = {
       content: [
         'Query: work kanban task t_demo',
+        'Initializing agent for Kanban worker',
         '  ┊ 💻 $         npm run test:ui -- src/plugins/kanban/drawer.test.tsx  1.4s [exit 1]',
         '  ┊ 🔎 grep      WorkerLogSection  0.2s',
         '  ┊ review diff',
@@ -1378,12 +1442,248 @@ describe('buildTimelineItems', () => {
     render(<WorkerLogSection log={log} />)
 
     expect(screen.getByText('Worker log')).toBeTruthy()
-    expect(screen.getByText('Task request')).toBeTruthy()
-    expect(screen.getByText('Terminal')).toBeTruthy()
-    expect(screen.getByText('Search')).toBeTruthy()
+    expect(screen.getByText('Task request received')).toBeTruthy()
+    expect(screen.getByText('Started worker session')).toBeTruthy()
+    expect(screen.getByText('Ran npm run test:ui -- src/plugins/kanban/drawer.test.tsx')).toBeTruthy()
+    expect(screen.getByText('Searched WorkerLogSection')).toBeTruthy()
     expect(screen.getByText('Tool result')).toBeTruthy()
     expect(screen.getByText('exit 1')).toBeTruthy()
     expect(screen.getByText('@@ -1,1 +1,1 @@', { exact: false })).toBeTruthy()
+  })
+
+  it('builds durable worker trace rows from activity details before raw logs', () => {
+    const detail = {
+      activity_timeline: [
+        {
+          created_at: 1005,
+          details: {
+            children: [
+              {
+                id: 'command-vitest',
+                status: 'failed',
+                summary: '302ms · exit 1',
+                title: 'Ran npm run test:ui -- src/plugins/kanban/drawer.test.tsx',
+                type: 'agent.command'
+              },
+              {
+                id: 'read-drawer',
+                summary: 'Returned 240 of 3379 lines',
+                title: 'Read apps/desktop/src/plugins/kanban/drawer.tsx',
+                type: 'agent.file_read'
+              }
+            ],
+            counts: { files: 1, tools: 3 },
+            files: [{ action: 'read', path: 'apps/desktop/src/plugins/kanban/drawer.tsx' }],
+            output: { redacted: true, stderr_preview: 'API_KEY=abc123\nError: failed', truncated: true },
+            work_summary: 'Read drawer.tsx; ran focused Vitest coverage'
+          },
+          id: 10,
+          source_kind: 'agent_step',
+          status: 'failed',
+          title: 'Inspecting relevant files',
+          type: 'agent.file_inspection'
+        }
+      ],
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'running', title: 'Demo' }
+    } as KanbanTaskDetail
+    const log = {
+      content: 'raw fallback should not become primary\nTOKEN=raw-secret',
+      exists: true,
+      size_bytes: 80,
+      truncated: true
+    } as WorkerLog
+
+    const rows = buildWorkerTraceRows(detail, log)
+
+    expect(rows.map(row => row.label)).toEqual([
+      'Explored 1 file, used 3 tools',
+      'Ran npm run test:ui -- src/plugins/kanban/drawer.test.tsx',
+      'Read apps/desktop/src/plugins/kanban/drawer.tsx',
+      'Reviewed command output',
+      'Raw log tail available'
+    ])
+    expect(rows[1]).toMatchObject({ duration: '302ms', status: 'exit 1', tone: 'error' })
+    expect(rows[3].body?.join('\n')).toContain('API_KEY=[redacted]')
+    expect(rows[4].body?.join('\n')).toContain('TOKEN=[redacted]')
+  })
+
+  it('renders projected work_trace rows when the backend supplies them', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'done', title: 'Demo' },
+      work_trace: [
+        {
+          duration_ms: 8000,
+          id: 'thought-1',
+          row_type: 'thought_span',
+          status: 'succeeded',
+          title: 'Thought for 8s'
+        },
+        {
+          id: 'cmd-1',
+          output: { stdout_preview: 'ok\npassword=hunter2', redacted: true, truncated: false },
+          row_type: 'command',
+          summary: '1.2s · exit 0',
+          title: 'Ran scripts/run_tests.sh tests/hermes_cli/test_kanban_db.py'
+        }
+      ]
+    } as KanbanTaskDetail
+
+    render(<WorkerLogSection detail={detail} />)
+
+    expect(screen.getByText('Thought for 8s')).toBeTruthy()
+    expect(screen.getByText('8.0s')).toBeTruthy()
+    expect(screen.getByText('Ran scripts/run_tests.sh tests/hermes_cli/test_kanban_db.py')).toBeTruthy()
+    expect(screen.getByText('Output preview · redacted')).toBeTruthy()
+    expect(screen.getByText('password=[redacted]', { exact: false })).toBeTruthy()
+  })
+
+  it('covers a representative projected worker trace fixture with concrete summaries', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'done', title: 'Demo' },
+      work_trace: [
+        {
+          duration_ms: 8000,
+          id: 'thought-1',
+          row_type: 'thought_span',
+          status: 'succeeded',
+          title: 'Thought for 8s'
+        },
+        {
+          id: 'explore-1',
+          row_type: 'exploration_summary',
+          status: 'succeeded',
+          summary: 'Read drawer.tsx; searched activity_timeline',
+          title: 'Explored 2 files, used 4 tools'
+        },
+        {
+          id: 'cmd-1',
+          row_type: 'command',
+          status: 'succeeded',
+          summary: '302ms · exit 0',
+          title: 'Ran npm run test:ui -- src/plugins/kanban/drawer.test.tsx'
+        },
+        {
+          id: 'read-1',
+          row_type: 'file_read',
+          summary: 'Returned 240 of 3379 lines',
+          title: 'Read apps/desktop/src/plugins/kanban/drawer.tsx'
+        },
+        {
+          id: 'edit-1',
+          row_type: 'file_edit',
+          summary: 'Applied focused trace fixture coverage',
+          title: 'Edited apps/desktop/src/plugins/kanban/drawer.test.tsx'
+        },
+        {
+          failure: { message: 'Initial fixture expected generic Worker log rows' },
+          id: 'recovery-1',
+          row_type: 'recovery',
+          status: 'failed',
+          title: 'Recovered from failed assertion'
+        }
+      ]
+    } as KanbanTaskDetail
+
+    const log = {
+      content: 'raw fallback preserved for debugging\nAuthorization: Bearer ***',
+      exists: true,
+      size_bytes: 120,
+      truncated: false
+    } as WorkerLog
+
+    const rows = buildWorkerTraceRows(detail, log)
+
+    expect(rows.map(row => row.label)).toEqual([
+      'Thought for 8s',
+      'Explored 2 files, used 4 tools',
+      'Ran npm run test:ui -- src/plugins/kanban/drawer.test.tsx',
+      'Read apps/desktop/src/plugins/kanban/drawer.tsx',
+      'Edited apps/desktop/src/plugins/kanban/drawer.test.tsx',
+      'Recovered from failed assertion',
+      'Raw log available'
+    ])
+    expect(rows[0]).toMatchObject({ duration: '8.0s', tone: 'system' })
+    expect(rows[1].detail).toBe('Read drawer.tsx; searched activity_timeline')
+    expect(rows[2]).toMatchObject({ duration: '302ms', status: 'exit 0', tone: 'tool' })
+    expect(rows[3].detail).toBe('Returned 240 of 3379 lines')
+    expect(rows[4].detail).toBe('Applied focused trace fixture coverage')
+    expect(rows[5]).toMatchObject({ detail: 'Initial fixture expected generic Worker log rows', tone: 'error' })
+    expect(rows[6].body?.join('\n')).toContain('Authorization=[redacted]')
+    expect(rows.map(row => row.label)).not.toContain('Terminal')
+  })
+
+  it('groups raw worker warnings and bounds long fallback output before display', () => {
+    const longOutput = `stdout ${'x'.repeat(1200)}`
+
+    const rows = buildWorkerTraceRows(undefined, {
+      content: [
+        longOutput,
+        '⚠ API_KEY=abc123 leaked in warning',
+        'Warning: cookie: session=secret should be hidden'
+      ].join('\n'),
+      exists: true,
+      size_bytes: 1400,
+      truncated: true
+    } as WorkerLog)
+
+    expect(rows.map(row => row.label)).toEqual(['Log output', '2 warnings'])
+    expect(rows[0].body?.[0].endsWith('…')).toBe(true)
+    expect(rows[0].body?.[0].length).toBeLessThanOrEqual(1000)
+    expect(rows[1]).toMatchObject({ detail: '2 warnings grouped from the worker output.', tone: 'warning' })
+    expect(rows[1].body?.join('\n')).toContain('API_KEY=[redacted]')
+    expect(rows[1].body?.join('\n')).toContain('cookie=[redacted]')
+  })
+
+  it('keeps raw trace details expandable and collapsed by default', () => {
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      links: { children: [], parents: [] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'done', title: 'Demo' },
+      work_trace: [
+        {
+          id: 'cmd-1',
+          output: { stdout_preview: 'short output', truncated: true },
+          row_type: 'command',
+          summary: '1.2s · exit 0',
+          title: 'Ran focused fixture tests'
+        }
+      ]
+    } as KanbanTaskDetail
+
+    const log = {
+      content: 'raw log detail should be hidden until expanded',
+      exists: true,
+      size_bytes: 60,
+      truncated: true
+    } as WorkerLog
+
+    const { container } = render(<WorkerLogSection detail={detail} log={log} />)
+    const disclosures = Array.from(container.querySelectorAll('details'))
+
+    expect(screen.getByText('Ran focused fixture tests')).toBeTruthy()
+    expect(screen.getByText('Output preview · truncated')).toBeTruthy()
+    expect(screen.getByText('Raw log tail')).toBeTruthy()
+    expect(screen.getByText('Raw log tail available')).toBeTruthy()
+    expect(disclosures).toHaveLength(2)
+    expect(disclosures.every(disclosure => !disclosure.open)).toBe(true)
   })
 
   it('keeps malformed or unknown worker log lines visible safely', () => {
@@ -1588,6 +1888,51 @@ describe('buildTimelineItems', () => {
 })
 
 describe('DependenciesSection', () => {
+  it('keeps dependency layout readable beside trace-heavy task details', () => {
+    const onOpen = vi.fn()
+
+    const detail = {
+      attachments: [],
+      comments: [],
+      events: [],
+      link_details: {
+        children: [{ id: 't_child123456', status: 'ready', title: 'Run focused Kanban QA' }],
+        parents: [{ id: 't_parent123456', status: 'done', title: 'Implement Worker Trace summaries' }]
+      },
+      links: { children: ['t_child123456'], parents: ['t_parent123456'] },
+      runs: [],
+      task: { created_at: 995, id: 't_demo', status: 'ready', title: 'Demo' },
+      work_trace: [
+        {
+          id: 'trace-heavy-row',
+          output: { stdout_preview: 'large output hidden in worker trace', truncated: true },
+          row_type: 'command',
+          title: 'Ran focused Kanban drawer tests'
+        }
+      ]
+    } as KanbanTaskDetail
+
+    render(
+      <TaskDrawerShell mode="sheet" onPaste={vi.fn()}>
+        <TitleSection onSave={vi.fn()} title="Trace-heavy Kanban detail" />
+        <DependenciesSection detail={detail} onOpen={onOpen} />
+        <TimelineSection detail={detail} />
+        <WorkerLogSection detail={detail} />
+      </TaskDrawerShell>
+    )
+
+    expect(screen.getByTestId('kanban-task-detail-shell')).toBeTruthy()
+    expect(screen.getByText('Trace-heavy Kanban detail')).toBeTruthy()
+    expect(screen.getByText('Dependencies')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Implement Worker Trace summaries' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Run focused Kanban QA' })).toBeTruthy()
+    expect(screen.getByText('Timeline (2)')).toBeTruthy()
+    expect(screen.getByText('Worker log')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run focused Kanban QA' }))
+    expect(onOpen).toHaveBeenCalledWith('t_child123456')
+  })
+
   it('renders dependency titles instead of short ids and keeps ids for navigation', () => {
     const onOpen = vi.fn()
 

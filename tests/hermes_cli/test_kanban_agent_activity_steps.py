@@ -150,4 +150,54 @@ def test_handle_function_call_records_grouped_kanban_tool_step(kanban_home, monk
     assert rows[0].semantic_type == "agent.file_inspection"
     assert rows[0].title == "Inspecting relevant files"
     assert rows[0].status == "succeeded"
-    assert rows[0].details["tools"] == ["search_files"]
+    details = rows[0].details
+    assert details is not None
+    assert details["tools"] == ["search_files"]
+    assert details["counts"] == {"matches": 0, "tools": 1, "files": 1}
+    assert details["children"][0]["title"] == "Searched activity_timeline"
+    assert details["children"][0]["summary"] == "Found 0 matches under plugins/kanban"
+
+
+def test_handle_function_call_records_redacted_failed_command_details(kanban_home, monkeypatch):
+    from tools.registry import registry
+    import model_tools
+
+    with kb.connect() as conn:
+        tid = kb.create_task(conn, title="failed command details", assignee="worker-a")
+        claimed = kb.claim_task(conn, tid, claimer="worker-a:1")
+        assert claimed is not None
+        run_id = claimed.current_run_id
+
+    monkeypatch.setenv("HERMES_KANBAN_TASK", tid)
+    monkeypatch.setenv("HERMES_KANBAN_RUN_ID", str(run_id))
+    monkeypatch.setenv("HERMES_PROFILE", "worker-a")
+    monkeypatch.setattr(
+        registry,
+        "dispatch",
+        lambda *args, **kwargs: '{"output":"token=supersecret\\n", "exit_code": 1, "error": "api_key=abc123"}',
+    )
+
+    result = model_tools.handle_function_call(
+        "terminal",
+        {"command": "API_KEY=secret pytest -q", "workdir": "/repo"},
+        task_id="session-1",
+        session_id="session-1",
+    )
+    assert json.loads(result)["exit_code"] == 1
+
+    with kb.connect() as conn:
+        rows = [row for row in kb.list_activity_events(conn, tid) if row.source_kind == "agent_step"]
+
+    assert len(rows) == 2
+    row = next(row for row in rows if row.status == "failed")
+    assert row.semantic_type == "agent.error_retry"
+    assert row.status == "failed"
+    details = row.details
+    assert details is not None
+    rendered = json.dumps(details)
+    assert "secret" not in rendered
+    assert "supersecret" not in rendered
+    assert "abc123" not in rendered
+    assert details["command"]["text"] == "API_KEY=[redacted] pytest -q"
+    assert details["children"][0]["title"] == "Ran API_KEY=[redacted] pytest -q"
+    assert details["failure"]["message"] == "api_key=[redacted]"
