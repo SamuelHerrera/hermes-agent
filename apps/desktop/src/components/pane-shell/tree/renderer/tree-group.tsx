@@ -56,7 +56,6 @@ import {
   reloadTreePane,
   restoreTreePane,
   SESSION_TILE_DRAG,
-  setTreeGroupHeaderHidden,
   setTreeGroupMinimized,
   treeTabCloseTargets
 } from '../store'
@@ -70,7 +69,6 @@ import {
 } from '../tab-selection'
 
 import { startPaneDrag } from './drag-session'
-import { forceLoneHeaderForPanes } from './lone-header'
 import { useActiveTabVisible } from './tab-strip-scroll'
 import { paneChrome } from './track-model'
 
@@ -83,7 +81,6 @@ function ZoneMenu({
   children,
   closable,
   minimizable = true,
-  headerHidden,
   minimized,
   nodeId,
   targetPane
@@ -95,7 +92,6 @@ function ZoneMenu({
   /** False for the zone hosting the uncloseable workspace — collapsing the
    *  MAIN pane strands the app behind a strip. */
   minimizable?: boolean
-  headerHidden?: boolean
   minimized?: boolean
   nodeId: string
   /** The right-clicked chip (else the active pane) — what the close-others /
@@ -130,11 +126,6 @@ function ZoneMenu({
           onCloseToRight: () => closeTreeTabsToRight(targetId)
         })}
         <kit.Separator />
-        {renderActionItem(kit, {
-          icon: headerHidden ? 'eye' : 'eye-closed',
-          label: headerHidden ? t.zones.showHeader : t.zones.hideHeader,
-          onSelect: () => setTreeGroupHeaderHidden(nodeId, !headerHidden)
-        })}
         {minimizable &&
           renderActionItem(kit, {
             icon: minimized ? 'chevron-down' : 'chevron-up',
@@ -236,23 +227,10 @@ export function TreeGroup({
 
   const keptPanes = shown.filter(id => id === activeId || everActivePanesRef.current.has(id))
 
-  // ONE header style: the app's compact pane-header. DEFAULT is contextual —
-  // a single pane isn't a "tab", so its header auto-hides; a stack shows its
-  // chips. EXCEPTIONS force a lone pane to keep its header (tab + close X):
-  //  - a TILE (closeable, placement 'main' — a session/page split), else a
-  //    tile in its own zone is unclosable (the "3rd tile has no tab" trap);
-  //  - a TOOL PANEL (terminal/logs — a collapse pane) dragged out of the main
-  //    stack, else it's a dead zone with no tab to grab or ✕ to close.
-  // The uncloseable workspace and side chrome (sessions/files) keep the clean
-  // no-tab default. Double-click toggles it either way; a minimized group
-  // always shows its header (it IS the header).
-  // Session-tile ids force the header even before chrome registers — cycling
-  // onto a freshly-split tile used to land headerless ("name card missing").
-  const forceLoneHeader = forceLoneHeaderForPanes(shown, id => paneChrome(paneFor(id)), isCollapsePane)
-
-  // A full-page view (headerVeto) suppresses the strip while it's the active
-  // pane — a page is not a tab-able surface; the bar returns with the chat.
-  const headerHidden = paneChrome(active).headerVeto || (node.headerHidden ?? (shown.length <= 1 && !forceLoneHeader))
+  // ONE header style: the app's compact pane-header. The user-visible contract
+  // is simple: pane/tab chrome stays visible for every non-minimized zone —
+  // including lone chats, the empty workspace, and full-page workspace routes.
+  const headerHidden = false
 
   // A group collapses ALONG its parent split's axis. In a row that means the
   // WIDTH collapses — a full-width horizontal header would strand a tall
@@ -313,7 +291,6 @@ export function TreeGroup({
   // Same menu on the header strip and the edit veil — one prop bag.
   const zoneMenu = {
     closable,
-    headerHidden,
     minimizable,
     minimized: node.minimized,
     nodeId: node.id,
@@ -321,10 +298,9 @@ export function TreeGroup({
   }
 
   // NO body double-click toggle: virtualized content (the thread) recreates
-  // its nodes between clicks, so the gesture was hopelessly unreliable. The
-  // bar's lifecycle is explicit instead — gaining a tab sticky-shows it
-  // (insertAtGroup pins headerHidden false), the main tab's context menu
-  // hides it, and full-page views veto it via paneChrome.headerVeto.
+  // its nodes between clicks, so the gesture was hopelessly unreliable. Header
+  // visibility is not a mode anymore; the tab strip stays visible whenever the
+  // zone is not minimized.
 
   return (
     <div

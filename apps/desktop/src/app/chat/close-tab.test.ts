@@ -138,7 +138,7 @@ describe('closeWorkspaceTab', () => {
     expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
   })
 
-  it('hides the lone workspace tab when its draft is already blank', () => {
+  it('keeps the lone workspace tab header visible when its draft is already blank', () => {
     expect(closeWorkspaceTab(vi.fn())).toBe(true)
     expect(requestEmptyWorkspace).not.toHaveBeenCalled()
     expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')

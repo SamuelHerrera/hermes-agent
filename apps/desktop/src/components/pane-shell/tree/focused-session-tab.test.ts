@@ -120,9 +120,10 @@ describe('focused chat zone drives the tab verbs', () => {
 
     expect(closed).toEqual(['session-tile:a', 'workspace'])
     // Workspace is a permanent rendering host. Closing its TAB is routed to
-    // the owner above; the pane remains while its now-empty strip disappears.
+    // the owner above; the pane remains as an empty host and the strip stays
+    // visible so the next opened chat does not inherit hidden chrome.
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
-    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(true)
+    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(false)
   })
 
   it('Close all can close every session/page tab in sequence and leave only the empty workspace host', async () => {
@@ -153,7 +154,7 @@ describe('focused chat zone drives the tab verbs', () => {
 
     expect(closed).toEqual(['session-tile:a', 'route-tile:/kanban', 'session-tile:b', 'workspace'])
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toEqual(['workspace'])
-    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(true)
+    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')?.headerHidden).toBe(false)
   })
 
   // Preview/page tiles share `placement: 'main'` but not the session-tile id

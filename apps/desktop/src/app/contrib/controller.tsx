@@ -66,7 +66,6 @@ import { watchPreviewTiles } from '../chat/preview-tile'
 import { watchRouteTiles } from '../chat/route-tile'
 import { startSessionDrag } from '../chat/session-drag'
 import {
-  SessionTileCloseConfirm,
   stackSessionTilesIntoMain,
   watchSessionTiles,
   WorkspaceTabMenu
@@ -795,9 +794,6 @@ export function ContribController() {
             </div>
 
             <LayoutTreeRoot />
-
-            {/* "Close running tab?" — the busy/input-blocked tile close gate. */}
-            <SessionTileCloseConfirm />
 
             {/* The REAL statusbar (model pill, command center, agents, …) with
               statusBar.left/right contributions merged in. Unmounted — not

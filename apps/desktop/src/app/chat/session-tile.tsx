@@ -27,11 +27,9 @@ import { ModelMenuPanel } from '@/app/shell/model-menu-panel'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { CenteredThreadSpinner } from '@/components/assistant-ui/thread/status'
 import { findGroupOfPane } from '@/components/pane-shell/tree/model'
-import { $layoutTree, closeTreePane, moveTreePane, setTreeGroupHeaderHidden } from '@/components/pane-shell/tree/store'
+import { $layoutTree, closeTreePane, moveTreePane } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { transcribeAudio } from '@/hermes'
-import { useI18n } from '@/i18n'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { NEW_SESSION_TITLE, sessionTitle } from '@/lib/chat-runtime'
 import { $draftTitles, createComposerAttachmentScope, draftTitleFor, draftTitleIn } from '@/store/composer'
@@ -406,46 +404,17 @@ function tileDragPayload(storedSessionId: string): SessionDragPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Close confirmation — a BUSY tab (streaming, or blocked on clarify/approval
-// input) doesn't close silently.
+// Closing a tab detaches its pane only. The underlying run keeps going in the
+// background, so no confirmation is needed for busy/input-blocked sessions.
 // ---------------------------------------------------------------------------
 
-/** Stored id awaiting close confirmation (null = no dialog). */
-const $confirmCloseTile = atom<null | string>(null)
-
-/** The tile closer, gated: a quiet session closes immediately; a busy or
- *  input-blocked one asks first. One state read — the tile's runtime slice. */
 export function requestCloseSessionTile(storedSessionId: string): void {
-  const runtimeId = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)?.runtimeId
-  const state = runtimeId ? $sessionStates.get()[runtimeId] : undefined
-
-  if (state?.busy || state?.awaitingResponse || state?.needsInput) {
-    $confirmCloseTile.set(storedSessionId)
-  } else {
-    closeSessionTile(storedSessionId)
-  }
+  closeSessionTile(storedSessionId)
 }
 
-/** Mounted once at the shell root: the "Close running tab?" confirmation. */
+/** Kept as a no-op shell mount for compatibility with the app root. */
 export function SessionTileCloseConfirm() {
-  const { t } = useI18n()
-  const storedSessionId = useStore($confirmCloseTile)
-
-  return (
-    <ConfirmDialog
-      confirmLabel={t.zones.closeRunningConfirm}
-      description={t.zones.closeRunningBody}
-      destructive
-      onClose={() => $confirmCloseTile.set(null)}
-      onConfirm={() => {
-        if (storedSessionId) {
-          closeSessionTile(storedSessionId)
-        }
-      }}
-      open={storedSessionId !== null}
-      title={t.zones.closeRunningTitle}
-    />
-  )
+  return null
 }
 
 /** Layout reset → every session tile collapses into the MAIN zone as a tab
@@ -557,26 +526,12 @@ export function SessionTabMenu({
 export function WorkspaceTabMenu({ children }: { children: React.ReactElement }) {
   const selected = useStore($selectedStoredSessionId)
 
-  const hideTabBar = () => {
-    const tree = $layoutTree.get()
-    const group = tree ? findGroupOfPane(tree, 'workspace') : null
-
-    if (group) {
-      setTreeGroupHeaderHidden(group.id, true)
-    }
-  }
-
   if (!selected) {
     return children
   }
 
   return (
-    <SessionTabMenu
-      onClose={() => closeTreePane('workspace')}
-      onHideTabBar={hideTabBar}
-      storedSessionId={selected}
-      tabPaneId="workspace"
-    >
+    <SessionTabMenu onClose={() => closeTreePane('workspace')} storedSessionId={selected} tabPaneId="workspace">
       {children}
     </SessionTabMenu>
   )

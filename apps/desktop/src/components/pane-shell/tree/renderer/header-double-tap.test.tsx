@@ -57,6 +57,31 @@ function tap(target: HTMLElement, pointerId: number) {
 }
 
 describe('pane tab/header double tap', () => {
+  it('renders the tab strip for a lone workspace, even with stale hidden state', () => {
+    const node = group(['workspace'], { active: 'workspace', headerHidden: true, id: 'grp-main' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-main"]')).toBeTruthy()
+  })
+
+  it('renders the tab strip for a full-page workspace route', () => {
+    disposers.push(
+      registry.register({
+        area: 'panes',
+        data: { headerVeto: true, placement: 'main', uncloseable: true },
+        id: 'page-workspace',
+        render: () => null,
+        title: 'page'
+      })
+    )
+    const node = group(['page-workspace'], { active: 'page-workspace', id: 'grp-page' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-page"]')).toBeTruthy()
+  })
+
   it('does not hide the tab strip on double click', () => {
     const node = group(['workspace', 'session-tile:one'], { active: 'workspace', headerHidden: false, id: 'grp-main' })
     declareDefaultTree(node)

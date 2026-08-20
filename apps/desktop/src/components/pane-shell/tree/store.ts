@@ -1684,9 +1684,9 @@ export function setTreeGroupHeaderHidden(groupId: string, headerHidden: boolean)
   }
 }
 
-/** Hide the strip when `paneId` is the only pane left in its zone. The pane
- * remains mounted as the editor host; only the now-empty tab chrome disappears.
- * Returns whether a lone tab was found and hidden. */
+/** Keep the strip visible when `paneId` is the only pane left in its zone. The
+ * pane remains mounted as the empty editor host; only its content changes.
+ * Returns whether a lone tab host was found. */
 export function hideLoneTreeTab(paneId: string): boolean {
   const tree = $layoutTree.get()
   const group = tree ? findGroupOfPane(tree, paneId) : null
@@ -1695,7 +1695,7 @@ export function hideLoneTreeTab(paneId: string): boolean {
     return false
   }
 
-  setTreeGroupHeaderHidden(group.id, true)
+  setTreeGroupHeaderHidden(group.id, false)
 
   return true
 }
