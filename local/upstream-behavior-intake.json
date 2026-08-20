@@ -54,8 +54,8 @@
     {
       "id": "kanban-reliability-and-worker-lifecycle",
       "business_feature": "Kanban reliability: worker lifecycle observers, dispatch/concurrency caps, task mutation notifications, safer worktree cleanup, native Kanban completion/failure/blocker notifications.",
-      "decision": "keep_carefully_pending",
-      "policy": "Recommended to keep in a later pass, but preserve Samuel\u2019s AI tags, display names, activity timeline, shared-dirty-worktree safety, and local notification semantics.",
+      "decision": "completed_selected_reliability_migration",
+      "policy": "Completed only the approved reliability subset; ignored/deferred all other Kanban bucket items for this migration. Preserve Samuel AI tags, display names, activity timeline, notify_task_updated/apply_ai_task_tags, and shared dirty worktree safety.",
       "match_terms": [
         "kanban",
         "worker",
@@ -408,6 +408,47 @@
         {
           "sha": "d604ba6585b856d90c02232ed08ab06f5fdc78f3",
           "subject": "fix(bot-mode): running kanban/tool workers now light the Bots roster (#90268)"
+        }
+      ],
+      "migration_completed_at": "2026-08-20T21:00:17.568000+00:00",
+      "applied_subset": [
+        {
+          "sha": "44665783a9",
+          "subject": "fix(kanban): detect WS client disconnect on idle board, prevent zombie poll tasks",
+          "business_behavior": "Dashboard websocket disconnect detection prevents idle zombie poll tasks."
+        },
+        {
+          "sha": "fa72a1edf8",
+          "subject": "fix(kanban): re-create the schema when a cached DB path loses it (#83445)",
+          "business_behavior": "Kanban DB reconnect recovers when a cached path was deleted/replaced and lost schema."
+        },
+        {
+          "sha": "1f8c057832",
+          "subject": "fix(kanban): apply max_in_progress constraint before both ready and review queues",
+          "business_behavior": "Dispatch concurrency cap applies consistently across ready and review queues."
+        },
+        {
+          "sha": "00c184170b",
+          "subject": "fix(kanban): reap worktree workspaces at task completion and archive",
+          "business_behavior": "Task-owned worktree workspaces are cleaned up at completion/archive when safe."
+        },
+        {
+          "sha": "395eedb189",
+          "subject": "fix(kanban): kill tmux worker before removing its worktree cwd",
+          "business_behavior": "Cleanup kills the worker tmux session before removing its current working directory."
+        },
+        {
+          "sha": "77ed972f48",
+          "subject": "fix(kanban): drop --force from worktree remove so git re-verifies dirtiness (TOCTOU)",
+          "business_behavior": "Worktree removal avoids --force so Git can re-check dirty state."
+        }
+      ],
+      "ignored_for_this_migration": "All remaining commits in this bucket are intentionally ignored/deferred until a new upstream intake pass.",
+      "supporting_test_commits": [
+        {
+          "sha": "edd73daaf4",
+          "subject": "test(kanban): regression for idle-board WS disconnect detection (#77833)",
+          "supports": "44665783a9 websocket zombie-poll prevention"
         }
       ]
     },
