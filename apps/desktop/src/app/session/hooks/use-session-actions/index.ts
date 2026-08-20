@@ -32,6 +32,7 @@ import {
   $messages,
   $newChatWorkspaceTarget,
   $sessions,
+  $workspaceEmptyPlaceholder,
   $yoloActive,
   type NewChatWorkspaceTarget,
   resolveComposerSessionKey,
@@ -504,6 +505,12 @@ export function useSessionActions({
    *  first message persists a turn. "Open in split" keeps the listed behavior. */
   const openNewSessionTile = useCallback(
     async (dir: TileDock = 'right', options?: { cwd?: null | string; listed?: boolean }) => {
+      if (dir === 'center' && $workspaceEmptyPlaceholder.get()) {
+        startFreshSessionDraft({ replaceRoute: true })
+
+        return
+      }
+
       const listed = options?.listed ?? true
 
       try {
@@ -557,7 +564,7 @@ export function useSessionActions({
         notifyError(error, copy.createSessionFailed)
       }
     },
-    [copy, requestGateway, updateSessionState]
+    [copy, requestGateway, startFreshSessionDraft, updateSessionState]
   )
 
   const openSettings = useCallback(() => {

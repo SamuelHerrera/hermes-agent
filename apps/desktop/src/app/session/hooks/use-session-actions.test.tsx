@@ -23,6 +23,7 @@ import {
   $newChatWorkspaceTarget,
   $resumeFailedSessionId,
   $selectedStoredSessionId,
+  $workspaceEmptyPlaceholder,
   setActiveSessionId,
   setActiveSessionStoredIdRotation,
   setCurrentCwd,
@@ -83,7 +84,7 @@ function deferred<T>() {
 
 type HarnessHandle = Pick<
   ReturnType<typeof useSessionActions>,
-  'createBackendSessionForSend' | 'selectSidebarItem' | 'startFreshSessionDraft'
+  'createBackendSessionForSend' | 'openNewSessionTile' | 'selectSidebarItem' | 'startFreshSessionDraft'
 >
 
 function storedSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -1657,6 +1658,36 @@ describe('resumeSession warm-cache mapping integrity', () => {
     expect(requestGateway.mock.calls.map(([method]) => method)).not.toContain('session.resume')
     expect(runtimeIdByStoredSessionIdRef.current.get('stored-A')).toBe('rt-A')
     expect(sessionStateByRuntimeIdRef.current.get('rt-A')?.messages[0]?.id).toBe('user-optimistic')
+  })
+})
+
+describe('openNewSessionTile empty workspace placeholder', () => {
+  afterEach(() => {
+    cleanup()
+    $workspaceEmptyPlaceholder.set(false)
+    $sessionTiles.set([])
+    setSelectedStoredSessionId(null)
+    setActiveSessionId(null)
+    vi.restoreAllMocks()
+  })
+
+  it('spends the close-all placeholder instead of adding a second New Session tab', async () => {
+    const navigate = vi.fn()
+    const requestGateway = vi.fn(async () => ({ session_id: 'runtime-new', stored_session_id: 'stored-new', info: {} }) as never)
+    let handle: HarnessHandle | null = null
+
+    $workspaceEmptyPlaceholder.set(true)
+    render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.openNewSessionTile('center', { listed: false })
+    })
+
+    expect(requestGateway).not.toHaveBeenCalled()
+    expect($sessionTiles.get()).toEqual([])
+    expect($workspaceEmptyPlaceholder.get()).toBe(false)
+    expect(navigate).toHaveBeenCalledWith('/', { replace: true })
   })
 })
 
