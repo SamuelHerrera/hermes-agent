@@ -234,16 +234,16 @@ export const CodingStatusRow = memo(function CodingStatusRow({
               </span>
             </button>
 
-            {/* Worktree path + copy — plain muted text, not a chip. Always in the
-                flex so hover doesn't reflow the row; opacity alone reveals the
-                pair. The path sizes to its content (the `flex-1` lives on the
-                wrapper) so the glyph sits against the end of the text instead of
-                drifting to the far edge of the row. `displayPath` collapses
-                home → ~; the copy still takes the real absolute path, and it's
-                the shared `CopyButton` so it confirms with the same inline
-                checkmark as every other copy in the app. */}
+            {/* Worktree path + copy — plain muted text, not a chip. Always visible
+                so the composer names both the branch and the folder it is running
+                in without requiring hover. The path sizes to its content (the
+                `flex-1` lives on the wrapper) so the glyph sits against the end
+                of the text instead of drifting to the far edge of the row.
+                `displayPath` collapses home → ~; the copy still takes the real
+                absolute path, and it's the shared `CopyButton` so it confirms
+                with the same inline checkmark as every other copy in the app. */}
             {resolvedRepoPath && (
-              <div className="flex min-w-0 flex-1 items-center gap-0.5 opacity-0 transition-opacity group-hover/status-row:opacity-100 group-focus-within/status-row:opacity-100">
+              <div className="flex min-w-0 flex-1 items-center gap-0.5">
                 <span
                   className="min-w-0 truncate font-mono text-[0.62rem] leading-4 text-muted-foreground/50"
                   data-slot="coding-status-cwd"
@@ -253,7 +253,7 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                 <CopyButton
                   appearance="icon"
                   buttonSize="icon-xs"
-                  className="pointer-events-none size-4 shrink-0 text-muted-foreground/50 hover:text-foreground group-hover/status-row:pointer-events-auto group-focus-within/status-row:pointer-events-auto"
+                  className="size-4 shrink-0 text-muted-foreground/50 hover:text-foreground"
                   iconClassName="size-3"
                   label={fileMenu.copyPath}
                   side="top"
