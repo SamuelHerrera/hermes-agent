@@ -27,7 +27,7 @@ vi.mock('./routes', () => ({
   sessionRoute: (id: string) => `/c/${encodeURIComponent(id)}`
 }))
 
-import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
+import { $activeSessionId, $selectedStoredSessionId, $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { mainChatOccupied, openSession, openSessionIntentFromModifiers } from './open-session'
 
@@ -94,6 +94,7 @@ describe('openSession', () => {
     reuseBlankDraftTile.mockReset()
     $activeSessionId.set(null)
     $selectedStoredSessionId.set(null)
+    $workspaceEmptyPlaceholder.set(false)
   })
 
   it('in-place focuses an existing tile and does not navigate', () => {
@@ -128,6 +129,17 @@ describe('openSession', () => {
     openSession('s1', navigate, 'preview')
     expect(openPreviewSessionTile).toHaveBeenCalledWith('s1', 'center')
     expect(navigate).not.toHaveBeenCalled()
+    expect(openSessionTile).not.toHaveBeenCalled()
+  })
+
+  it('preview spends the empty close-all placeholder instead of adding a tab', () => {
+    $workspaceEmptyPlaceholder.set(true)
+    focusOpenSession.mockReturnValue(null)
+
+    openSession('s1', navigate, 'preview')
+
+    expect(navigate).toHaveBeenCalledWith('/c/s1')
+    expect(openPreviewSessionTile).not.toHaveBeenCalled()
     expect(openSessionTile).not.toHaveBeenCalled()
   })
 

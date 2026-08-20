@@ -16,7 +16,7 @@
  *   - `window` (⇧⌘-click) — pop into its own window; falls back to `tab` when
  *     the bridge has no session-window support.
  */
-import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
+import { $activeSessionId, $selectedStoredSessionId, $workspaceEmptyPlaceholder } from '@/store/session'
 import {
   focusedSessionNeedsRoute,
   focusOpenSession,
@@ -92,6 +92,14 @@ export function openSession(
 
     // No pop-out support → treat like a new tab.
     resolved = 'tab'
+  }
+
+  // Close All leaves an inert workspace placeholder, not a draft worth
+  // preserving. Any in-window open should spend that placeholder before adding
+  // a preview/tab, so the strip changes from "no tabs" directly to the chosen
+  // chat instead of keeping a stale "New session" tab beside it.
+  if ($workspaceEmptyPlaceholder.get()) {
+    resolved = 'in-place'
   }
 
   // A `stack` open arrives from outside the workspace, so unlike a sidebar

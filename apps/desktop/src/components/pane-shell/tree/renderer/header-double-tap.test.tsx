@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { registry } from '@/contrib/registry'
+import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { findGroup, group } from '../model'
 import { $layoutTree, declareDefaultTree } from '../store'
@@ -28,6 +29,7 @@ const disposers: (() => void)[] = []
 
 beforeEach(() => {
   window.localStorage.clear()
+  $workspaceEmptyPlaceholder.set(false)
   disposers.push(
     registry.register({
       area: 'panes',
@@ -80,6 +82,16 @@ describe('pane tab/header double tap', () => {
     const { container } = render(<TreeGroup node={node} />)
 
     expect(container.querySelector('[data-zone-tabstrip="grp-page"]')).toBeTruthy()
+  })
+
+  it('keeps the strip but hides the workspace chip for the close-all placeholder', () => {
+    $workspaceEmptyPlaceholder.set(true)
+    const node = group(['workspace'], { active: 'workspace', id: 'grp-empty' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-empty"]')).toBeTruthy()
+    expect(container.querySelector('[data-tree-tab="workspace"]')).toBeNull()
   })
 
   it('does not hide the tab strip on double click', () => {

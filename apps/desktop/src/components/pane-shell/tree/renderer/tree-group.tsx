@@ -29,6 +29,7 @@ import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { $layoutEditMode } from '../../edit-mode'
 import { useWindowControlsOverlap } from '../../geometry'
@@ -177,6 +178,7 @@ export function TreeGroup({
   const hiddenPanes = useStore($hiddenTreePanes)
   const narrow = useStore($narrowViewport)
   const newSessionTabAction = useStore($newSessionTabAction)
+  const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
   const panesWithCloser = useStore($panesWithCloser)
   // Multi-tab selection (⌥/Ctrl-click, Shift-click) — null for every zone but
   // the one holding it, so this subscription is quiet during normal use.
@@ -199,6 +201,9 @@ export function TreeGroup({
     Boolean(paneFor(id)) && (editMode || !hiddenPanes.has(id)) && !(narrow && paneChrome(paneFor(id)).collapsible)
 
   const shown = node.panes.filter(paneShown)
+  const workspacePlaceholderOnly =
+    workspaceEmptyPlaceholder && node.panes.length === 1 && node.panes[0] === 'workspace'
+  const tabbedShown = workspacePlaceholderOnly ? shown.filter(id => id !== 'workspace') : shown
   const activeId = shown.includes(node.active) ? node.active : (shown[0] ?? node.active)
   const active = paneFor(activeId)
   const isEmpty = node.panes.length === 0
@@ -415,7 +420,7 @@ export function TreeGroup({
               </>
             }
           >
-            {shown.map(paneId => {
+            {tabbedShown.map(paneId => {
               const isActive = paneId === activeId && !node.minimized
               const chrome = paneChrome(paneFor(paneId))
               const closeable = closeableTab(paneId)
@@ -439,7 +444,7 @@ export function TreeGroup({
                     if (e.button === 0 && e.shiftKey) {
                       e.preventDefault()
                       e.stopPropagation()
-                      selectTabRange(node.id, shown, paneId, activeId)
+                      selectTabRange(node.id, tabbedShown, paneId, activeId)
 
                       return
                     }
@@ -480,7 +485,7 @@ export function TreeGroup({
                     // one block through the generic pane move — a multi-tab
                     // drag outranks the pane's own tab drag (the session drop
                     // language is single-session).
-                    const dragSelection = selectionFor(node.id, shown, paneId)
+                    const dragSelection = selectionFor(node.id, tabbedShown, paneId)
 
                     if (dragSelection) {
                       startPaneDrag(
@@ -543,7 +548,7 @@ export function TreeGroup({
                 a new session tab (mirrors ⌘T) via the app-registered action;
                 the pointerdown focuses this zone first, so the tab lands in
                 THIS strip. Hidden when unwired or the zone is minimized. */}
-            {shown.some(isSessionStripPane) && newSessionTabAction && !node.minimized && (
+            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholderOnly) && newSessionTabAction && !node.minimized && (
               <span
                 // The action docks into the FOCUSED chat zone; clicking a
                 // background strip's "+" must make THAT zone the focused one
