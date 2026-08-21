@@ -7,15 +7,19 @@ import { $selectedStoredSessionId, $unreadFinishedSessionIds } from '@/store/ses
 import type { SessionTile } from '@/store/session-states'
 import {
   blankDraftTile,
+  detachWorkspaceSessionToTile,
   focusedSessionNeedsRoute,
   focusOpenSession,
   markSelectionRestore,
   openPreviewSessionTile,
+  openSessionTile,
   orderTilesByTree,
   promoteSessionTile,
   selectionHomesToWorkspace
 } from '@/store/session-states'
 import { $sessionTiles } from '@/store/session-states'
+
+import { $emptyWorkspaceRequest } from './profile'
 
 const tile = (storedSessionId: string): SessionTile => ({ storedSessionId })
 const tilePane = (id: string) => `session-tile:${id}`
@@ -183,6 +187,29 @@ describe('preview session tiles', () => {
 
     expect(focusOpenSession('first')).toBe('tile')
     expect($unreadFinishedSessionIds.get()).toEqual([])
+  })
+})
+
+describe('workspace tab drag detaches the main session', () => {
+  beforeEach(() => {
+    $layoutTree.set(group(['workspace'], { active: 'workspace', id: 'main' }))
+    $sessionTiles.set([])
+    $selectedStoredSessionId.set('primary')
+    $emptyWorkspaceRequest.set(0)
+  })
+
+  it('keeps ordinary tile open from duplicating the main session', () => {
+    openSessionTile('primary', 'right', 'workspace')
+
+    expect($sessionTiles.get()).toEqual([])
+    expect($emptyWorkspaceRequest.get()).toBe(0)
+  })
+
+  it('moves the workspace session into a tile and empties the host', () => {
+    detachWorkspaceSessionToTile('primary', 'right', 'workspace')
+
+    expect($sessionTiles.get()).toEqual([{ anchor: 'workspace', before: undefined, dir: 'right', storedSessionId: 'primary' }])
+    expect($emptyWorkspaceRequest.get()).toBe(1)
   })
 })
 

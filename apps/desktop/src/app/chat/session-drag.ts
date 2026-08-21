@@ -103,7 +103,11 @@ function tileZoneHost(groupId: string): { chat: boolean; pane: string } | null {
 export function startSessionDrag(
   payload: SessionDragPayload,
   e: ReactPointerEvent<HTMLElement>,
-  opts?: { double?: DoubleTapContext; onTap?: () => void }
+  opts?: {
+    double?: DoubleTapContext
+    onSplit?: (storedSessionId: string, dir: TileDock, anchor?: string, before?: null | string) => void
+    onTap?: () => void
+  }
 ) {
   let zones: EngineZone[] = []
   let strips: StripSnapshot[] = []
@@ -115,6 +119,7 @@ export function startSessionDrag(
   // move before commit, so these always match the released-at position).
   let split: { anchor: string; before?: null | string; pos: TileDock } | null = null
   let link: null | string = null
+  const splitSession = opts?.onSplit ?? openSessionTile
 
   // The drag SOURCE (sidebar row or tile tab). Captured synchronously — React
   // clears `currentTarget` after the pointerdown handler returns, but this runs
@@ -193,7 +198,7 @@ export function startSessionDrag(
 
     onCommit() {
       if (split) {
-        openSessionTile(payload.id, split.pos, split.anchor, split.before)
+        splitSession(payload.id, split.pos, split.anchor, split.before)
         // A tile for this session may already exist (openSessionTile is
         // idempotent — e.g. persisted from an earlier run): a drop must never
         // feel dead, so front/unhide/un-dismiss it either way.

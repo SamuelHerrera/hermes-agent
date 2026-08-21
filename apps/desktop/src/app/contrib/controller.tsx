@@ -58,6 +58,7 @@ import { $projectTree } from '@/store/projects'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
 import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
+import { detachWorkspaceSessionToTile } from '@/store/session-states'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { isHudWindow } from '@/store/windows'
 
@@ -156,7 +157,7 @@ const workspaceTabDrag = (event: ReactPointerEvent<HTMLElement>, onTap: () => vo
     return false
   }
 
-  startSessionDrag(payload, event, { double, onTap })
+  startSessionDrag(payload, event, { double, onSplit: detachWorkspaceSessionToTile, onTap })
 
   return true
 }

@@ -24,6 +24,7 @@ import {
   $activeTreeGroup,
   $layoutTree,
   focusedSessionTabAnchor,
+  hideLoneTreeTab,
   moveTreePane,
   noteActiveTreeGroup,
   revealTreePane
@@ -32,7 +33,7 @@ import { stableArray } from '@/lib/stable-array'
 import { readJson, writeJson } from '@/lib/storage'
 import type { SessionInfo } from '@/types/hermes'
 
-import { $activeGatewayProfile, normalizeProfileKey } from './profile'
+import { $activeGatewayProfile, normalizeProfileKey, requestEmptyWorkspace } from './profile'
 import {
   $activeSessionId,
   $selectedStoredSessionId,
@@ -647,11 +648,36 @@ export function openSessionTile(
   anchor?: string,
   before?: null | string
 ) {
-  const tiles = $sessionTiles.get()
-
   if (storedSessionId === $selectedStoredSessionId.get()) {
     return
   }
+
+  placeSessionTile(storedSessionId, dir, anchor, before)
+}
+
+/** Move the primary workspace session into a real session tile. This is the
+ * workspace-tab drag path: unlike opening a sidebar row, it is a MOVE, not a
+ * duplicate, so the permanent workspace host is emptied/parked after the tile
+ * is created. */
+export function detachWorkspaceSessionToTile(
+  storedSessionId: string,
+  dir: TileDock = 'right',
+  anchor?: string,
+  before?: null | string
+) {
+  if (storedSessionId !== $selectedStoredSessionId.get()) {
+    placeSessionTile(storedSessionId, dir, anchor, before)
+
+    return
+  }
+
+  placeSessionTile(storedSessionId, dir, anchor, before)
+  requestEmptyWorkspace()
+  hideLoneTreeTab('workspace')
+}
+
+function placeSessionTile(storedSessionId: string, dir: TileDock, anchor?: string, before?: null | string) {
+  const tiles = $sessionTiles.get()
 
   const dock = anchor ?? focusedSessionTabAnchor() ?? undefined
 

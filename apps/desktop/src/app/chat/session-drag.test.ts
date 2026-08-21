@@ -61,14 +61,19 @@ function mountStackedTabs() {
 
 /** Press on `source`, drag to (x, y), release. The drag session flushes its
  *  pending move synchronously on release, so no frame wait is needed. */
-function dragTo(source: HTMLElement, x: number, y: number) {
+function dragTo(
+  source: HTMLElement,
+  x: number,
+  y: number,
+  opts?: Parameters<typeof startSessionDrag>[2]
+) {
   startSessionDrag({ id: 'dragged', profile: 'default', title: 'Dragged chat' }, {
     button: 0,
     clientX: 0,
     clientY: 0,
     currentTarget: source,
     pointerId: 1
-  } as unknown as ReactPointerEvent<HTMLElement>)
+  } as unknown as ReactPointerEvent<HTMLElement>, opts)
 
   window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
   window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: x, clientY: y }))
@@ -98,6 +103,17 @@ describe('session drop targeting across stacked tabs', () => {
     dragTo(row, 980, 400)
 
     expect(openSessionTile).toHaveBeenCalledWith('dragged', 'right', 'session-tile:visible', undefined)
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+  })
+
+  it('lets workspace-tab drags provide their own split/move commit', () => {
+    const row = mountStackedTabs()
+    const onSplit = vi.fn()
+
+    dragTo(row, 980, 400, { onSplit })
+
+    expect(onSplit).toHaveBeenCalledWith('dragged', 'right', 'session-tile:visible', undefined)
+    expect(openSessionTile).not.toHaveBeenCalled()
     expect(requestComposerInsertRefs).not.toHaveBeenCalled()
   })
 
