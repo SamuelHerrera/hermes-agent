@@ -2,9 +2,11 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createClientSessionState } from '@/lib/chat-runtime'
+import { $unreadFinishedSessionIds } from '@/store/session'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 
 import { SessionStatusDot } from './session-status-dot'
+import { SessionTabAttentionDot, SessionTabLead } from './subagent-session-icon'
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -26,6 +28,7 @@ vi.mock('@/i18n', () => ({
 afterEach(() => {
   cleanup()
   clearAllSessionStates()
+  $unreadFinishedSessionIds.set([])
 })
 
 describe('SessionStatusDot running icon', () => {
@@ -59,5 +62,20 @@ describe('SessionStatusDot running icon', () => {
 
     expect(spinner(container)).toBeNull()
     expect(normalDot(container)).toBeTruthy()
+  })
+})
+
+describe('session tab attention treatment', () => {
+  it('keeps the identity dot in the lead slot and renders unread attention separately', () => {
+    $unreadFinishedSessionIds.set(['s1'])
+
+    const lead = render(<SessionTabLead session={{ id: 's1' } as never} storedSessionId="s1" />)
+
+    expect(lead.container.querySelector('[data-session-project-dot]')).toBeTruthy()
+    expect(lead.container.querySelector('[data-session-status]')).toBeNull()
+
+    const attention = render(<SessionTabAttentionDot storedSessionId="s1" />)
+
+    expect(attention.container.querySelector('[data-session-attention-dot][data-session-status="unread"]')).toBeTruthy()
   })
 })

@@ -71,7 +71,7 @@ import {
   watchSessionTiles,
   WorkspaceTabMenu
 } from '../chat/session-tile'
-import { SessionTabLead } from '../chat/subagent-session-icon'
+import { SessionTabAttentionDot, SessionTabLead } from '../chat/subagent-session-icon'
 import { HudShell } from '../hud/hud-shell'
 import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
 import { $workspaceIsPage } from '../routes'
@@ -460,10 +460,11 @@ const syncWorkspaceTitle = () => {
     // that. Keeping it here would re-register the pane on every keystroke.
     title: stored ? storedSessionTitle(stored) : NEW_SESSION_TITLE,
     data: {
-      // One tab lead: subagents swap robot -> spinner while running; other
-      // sessions use the normal status/project-color treatment. A fresh draft
-      // has no session to key by, so the status treatment marks it as a draft.
+      // The leading slot is stable identity (project color or subagent). Transient
+      // attention is a separate trailing dot so completion/unread does not mask
+      // the user's chosen color.
       tabLead: () => <SessionTabLead session={stored} storedSessionId={selected} />,
+      tabTrailing: () => <SessionTabAttentionDot storedSessionId={selected} />,
       // A draft's name lives in its composer, not in any session row, so the
       // label subscribes to it directly — typing renames the tab without
       // re-registering the pane.

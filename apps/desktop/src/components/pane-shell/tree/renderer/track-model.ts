@@ -80,10 +80,11 @@ interface PaneChrome extends PaneSizing {
    *  flow — e.g. a running arc that should wrap the whole tab. */
   tabActivity?: () => React.ReactNode
   /** A lead NODE for this pane's TAB, rendered before the label. A session
-   *  pane (main workspace + tiles) passes its live `SessionStatusDot` here so
-   *  the tab and the sidebar row render status/color from the ONE primitive
-   *  (self-subscribing — it updates without the strip re-registering). */
+   *  pane passes its stable identity here (project color dot or subagent icon). */
   tabLead?: () => React.ReactNode
+  /** A trailing NODE for this pane's TAB, rendered after the label. Session
+   *  panes use this for transient attention state so it cannot mask identity. */
+  tabTrailing?: () => React.ReactNode
   /** This pane's TAB LABEL, when it changes faster than the contribution
    *  should. A session pane whose draft is being typed renames on every
    *  debounce beat; re-registering `title` that often would re-render the

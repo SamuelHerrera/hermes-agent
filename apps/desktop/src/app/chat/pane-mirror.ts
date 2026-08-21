@@ -33,9 +33,11 @@ export interface PaneMirror<T> {
   minWidth: string
   title: (key: string) => string
   /** Custom lead NODE for the tile's tab (rendered before the label). A live,
-   *  self-subscribing component (e.g. a session's status dot) so the strip needn't
+   *  self-subscribing component (e.g. a session's identity dot) so the strip needn't
    *  re-sync on status/color change — only `title` drives re-registration. */
   tabLead?: (key: string) => ReactNode
+  /** Custom trailing NODE for the tile's tab (rendered after the label). */
+  tabTrailing?: (key: string) => ReactNode
   /** Custom tab-level decoration rendered in the tab shell but outside the
    *  label flow — e.g. the session-running arc around a tab. */
   tabActivity?: (key: string) => ReactNode
@@ -94,6 +96,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
         data: {
           tabActivity: cfg.tabActivity ? () => cfg.tabActivity!(key) : undefined,
           tabLead: cfg.tabLead ? () => cfg.tabLead!(key) : undefined,
+          tabTrailing: cfg.tabTrailing ? () => cfg.tabTrailing!(key) : undefined,
           tabPreview: cfg.tabPreview ? () => preview : undefined,
           tabTitle: cfg.tabTitle ? () => cfg.tabTitle!(key) : undefined,
           stripTools: cfg.stripTools ? () => cfg.stripTools!(key) : undefined,

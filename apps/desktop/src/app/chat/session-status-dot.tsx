@@ -219,8 +219,60 @@ export function SessionStatusIcon({ className, storedSessionId }: SessionStatusI
   )
 }
 
+export interface SessionAttentionDotProps {
+  className?: string
+  storedSessionId: null | string
+}
+
+/** Compact transient status for pane tabs. Idle/draft stay out of the trailing
+ *  slot so the left identity dot remains the stable project/session color. */
+export function SessionAttentionDot({ className, storedSessionId }: SessionAttentionDotProps) {
+  const { t } = useI18n()
+  const r = t.sidebar.row
+
+  const dotState = useStoreSelector($sessionDotStateById, states =>
+    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
+  )
+
+  if (dotState === 'idle' || dotState === 'draft') {
+    return null
+  }
+
+  const variant = DOT_VARIANTS[dotState]
+
+  if (variant.icon === 'loading') {
+    return (
+      <span
+        aria-label={variant.ariaLabel?.(r)}
+        className={cn('grid size-4 shrink-0 place-items-center', variant.className, className)}
+        data-session-attention-dot
+        data-session-status={dotState}
+        role={variant.role}
+        title={variant.title?.(r)}
+      >
+        <Codicon className="block leading-none" name="loading" size="0.625rem" spinning />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      aria-label={variant.ariaLabel?.(r)}
+      className={cn(
+        variant.className,
+        'shrink-0 shadow-[0_0_0_2px_var(--tab-bg),0_1px_3px_rgba(0,0,0,0.45)]',
+        className
+      )}
+      data-session-attention-dot
+      data-session-status={dotState}
+      role={variant.role}
+      title={variant.title?.(r)}
+    />
+  )
+}
+
 /**
- * SESSION STATUS DOT — the compact combined treatment used by pane tabs and
+ * SESSION STATUS DOT — the compact combined treatment used by the session
  * the session switcher. It resolves everything itself from the stored session id:
  * the live state (via `$sessionDotStateById`, already reduced to one mutually
  * exclusive answer) and the color (override → project, via `sessionColorFor`).

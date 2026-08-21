@@ -13,7 +13,7 @@ import { translateNow } from '@/i18n'
 import { readJson, readKey, writeJson, writeKey } from '@/lib/storage'
 import { notify } from '@/store/notifications'
 import { clearAllPaneSizeOverrides } from '@/store/panes'
-import { $workspaceEmptyPlaceholder } from '@/store/session'
+import { $selectedStoredSessionId, $workspaceEmptyPlaceholder, markSessionRead } from '@/store/session'
 import { isSecondaryWindow } from '@/store/windows'
 
 import {
@@ -430,6 +430,18 @@ const isCloseableTreeTab = (paneId: string): boolean => !isUncloseablePane(paneI
  *  not which zones the generic tab verbs serve — that's `isMainStripPane`. */
 export const isSessionStripPane = (paneId: string): boolean =>
   paneId === 'workspace' || paneId.startsWith('session-tile:')
+
+function markSessionPaneRead(paneId: string): void {
+  if (paneId === 'workspace') {
+    markSessionRead($selectedStoredSessionId.get())
+
+    return
+  }
+
+  if (paneId.startsWith('session-tile:')) {
+    markSessionRead(paneId.slice('session-tile:'.length))
+  }
+}
 
 /** Any MAIN-placement tile's pane — a session, a page, a preview. The zones
  *  these stack into are real tab strips, so the generic tab verbs (⌘W, ⌃Tab)
@@ -1431,6 +1443,7 @@ export function activateTreePane(groupId: string, paneId: string) {
   const tree = $layoutTree.get()
 
   if (tree) {
+    markSessionPaneRead(paneId)
     let next = setActivePaneOp(tree, groupId, paneId)
     const group = findGroup(next, groupId)
 

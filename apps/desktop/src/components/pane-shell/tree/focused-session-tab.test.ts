@@ -130,6 +130,20 @@ describe('focused chat zone drives the tab verbs', () => {
     expect(group?.headerHidden).toBe(false)
   })
 
+  it('plain tab activation marks the selected session tab as read', async () => {
+    const { tree } = await setup()
+    const session = await import('@/store/session')
+
+    session.$selectedStoredSessionId.set('primary')
+    session.$unreadFinishedSessionIds.set(['a', 'primary'])
+
+    tree.activateTreePane('grp-side', 'session-tile:a')
+    expect(session.$unreadFinishedSessionIds.get()).toEqual(['primary'])
+
+    tree.activateTreePane('grp-main', 'workspace')
+    expect(session.$unreadFinishedSessionIds.get()).toEqual([])
+  })
+
   it('Close all empties the store-owned workspace tab without removing its pane', async () => {
     const { model, tree } = await setup()
     const closed: string[] = []

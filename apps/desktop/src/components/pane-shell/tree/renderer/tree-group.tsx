@@ -438,6 +438,7 @@ export function TreeGroup({
               const closeable = closeableTab(paneId)
               const title = paneFor(paneId)?.title ?? paneId
               const isSelected = tabSelection?.groupId === node.id && tabSelection.ids.has(paneId)
+              const tabTrailing = chrome.tabTrailing?.()
 
               const tab = (
                 <PaneTab
@@ -538,6 +539,11 @@ export function TreeGroup({
                     <span className="ml-2 -mr-1 flex shrink-0 items-center">{chrome.tabLead()}</span>
                   ) : null}
                   <PaneTabLabel>{tabLabel(paneId)}</PaneTabLabel>
+                  {tabTrailing ? (
+                    <span className="-ml-1 mr-2 flex shrink-0 items-center group-data-[closeable]/tab:mr-5">
+                      {tabTrailing}
+                    </span>
+                  ) : null}
                 </PaneTab>
               )
 

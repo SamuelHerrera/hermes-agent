@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { $sessionDotStateById, showsRunningArc } from '@/store/session-dot-state'
 import type { SessionInfo } from '@/types/hermes'
 
-import { SessionStatusDot } from './session-status-dot'
+import { SessionAttentionDot, SessionProjectDot } from './session-status-dot'
 
 export interface SubagentSessionIconProps {
   className?: string
@@ -21,14 +21,19 @@ export interface SessionTabLeadProps {
   storedSessionId: null | string
 }
 
-/** A tab has one leading glyph: subagent identity owns the slot when present;
- * every other session uses the normal state/project-color treatment. */
+/** A tab has a stable leading identity glyph: subagents keep the robot, every
+ * other session keeps the project/session color dot. Transient status renders
+ * separately on the tab's trailing edge via SessionTabAttentionDot. */
 export function SessionTabLead({ session, storedSessionId }: SessionTabLeadProps) {
   return isSubagentSession(session) ? (
     <SubagentSessionIcon session={session} storedSessionId={storedSessionId} />
   ) : (
-    <SessionStatusDot session={session} storedSessionId={storedSessionId} />
+    <SessionProjectDot session={session} />
   )
+}
+
+export function SessionTabAttentionDot({ storedSessionId }: Pick<SessionTabLeadProps, 'storedSessionId'>) {
+  return <SessionAttentionDot storedSessionId={storedSessionId} />
 }
 
 /** Secondary subagent identity glyph. While the subagent's own turn is running,

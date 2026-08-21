@@ -65,7 +65,7 @@ import { startSessionDrag } from './session-drag'
 import { useSessionTileActions } from './session-tile-actions'
 import { type SessionView, SessionViewProvider } from './session-view'
 import { SessionContextMenu } from './sidebar/session-actions-menu'
-import { SessionTabLead } from './subagent-session-icon'
+import { SessionTabAttentionDot, SessionTabLead } from './subagent-session-icon'
 import { lastVisibleMessageIsUser } from './thread-loading'
 
 import { ChatView } from '.'
@@ -552,13 +552,14 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   before: t => t.before,
   minWidth: '20rem',
   title: tileTitle,
-  // One self-subscribing tab lead: subagents swap robot -> spinner while
-  // running; other sessions use the normal state/project-color treatment.
+  // The leading tab glyph is stable identity; transient unread/running/attention
+  // state sits at the tab's trailing edge so it cannot hide the project color.
   tabLead: storedSessionId => {
     const stored = tileStoredRow(storedSessionId)
 
     return <SessionTabLead session={stored} storedSessionId={storedSessionId} />
   },
+  tabTrailing: storedSessionId => <SessionTabAttentionDot storedSessionId={storedSessionId} />,
   // Until the first turn lists a row there is no title to register, so the tab
   // takes its name from the composer instead — live, without re-registering.
   tabTitle: storedSessionId => (tileStoredRow(storedSessionId) ? null : <SessionDraftTitle scope={storedSessionId} />),
