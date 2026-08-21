@@ -50,7 +50,6 @@ import {
   closeTabPane,
   closeTreeTabsToRight,
   collapseTreePane,
-  isCollapsePane,
   isMainStripPane,
   isSessionStripPane,
   noteActiveTreeGroup,
@@ -201,10 +200,23 @@ export function TreeGroup({
     Boolean(paneFor(id)) && (editMode || !hiddenPanes.has(id)) && !(narrow && paneChrome(paneFor(id)).collapsible)
 
   const shown = node.panes.filter(paneShown)
-  const workspacePlaceholderOnly =
-    workspaceEmptyPlaceholder && node.panes.length === 1 && node.panes[0] === 'workspace'
-  const tabbedShown = workspacePlaceholderOnly ? shown.filter(id => id !== 'workspace') : shown
-  const activeId = shown.includes(node.active) ? node.active : (shown[0] ?? node.active)
+  // VS Code-style empty editor host: the permanent workspace pane remains in
+  // the model as the place the next chat opens, but when it represents the
+  // close-all/final-tab placeholder it is not a visible tab chip. If sibling
+  // page/session tabs exist, they are the real editor tabs and one of them owns
+  // the body; if workspace is alone, the body shows the empty placeholder with
+  // only the trailing "+" affordance.
+  const workspacePlaceholder = workspaceEmptyPlaceholder && node.panes.includes('workspace')
+  const tabbedShown = workspacePlaceholder ? shown.filter(id => id !== 'workspace') : shown
+
+  const activeId = tabbedShown.includes(node.active)
+    ? node.active
+    : workspacePlaceholder && tabbedShown.length > 0
+      ? tabbedShown[0]
+      : shown.includes(node.active)
+        ? node.active
+        : (shown[0] ?? node.active)
+
   const active = paneFor(activeId)
   const isEmpty = node.panes.length === 0
 
@@ -548,7 +560,7 @@ export function TreeGroup({
                 a new session tab (mirrors ⌘T) via the app-registered action;
                 the pointerdown focuses this zone first, so the tab lands in
                 THIS strip. Hidden when unwired or the zone is minimized. */}
-            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholderOnly) && newSessionTabAction && !node.minimized && (
+            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholder) && newSessionTabAction && !node.minimized && (
               <span
                 // The action docks into the FOCUSED chat zone; clicking a
                 // background strip's "+" must make THAT zone the focused one

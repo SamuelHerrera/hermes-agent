@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { registry } from '@/contrib/registry'
@@ -92,6 +92,33 @@ describe('pane tab/header double tap', () => {
 
     expect(container.querySelector('[data-zone-tabstrip="grp-empty"]')).toBeTruthy()
     expect(container.querySelector('[data-tree-tab="workspace"]')).toBeNull()
+  })
+
+  it('fronts sibling editor tabs instead of showing an empty workspace tab beside them', () => {
+    $workspaceEmptyPlaceholder.set(true)
+    disposers.push(
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main' },
+        id: 'route-tile:/kanban',
+        render: () => <div>Kanban body</div>,
+        title: 'Kanban'
+      })
+    )
+
+    const node = group(['workspace', 'route-tile:/kanban', 'session-tile:one'], {
+      active: 'workspace',
+      id: 'grp-main'
+    })
+
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-main"]')).toBeTruthy()
+    expect(container.querySelector('[data-tree-tab="workspace"]')).toBeNull()
+    expect(container.querySelector('[data-tree-tab="route-tile:/kanban"]')).toBeTruthy()
+    expect(container.querySelector('[data-tree-tab="session-tile:one"]')).toBeTruthy()
+    expect(screen.getByText('Kanban body')).toBeTruthy()
   })
 
   it('does not hide the tab strip on double click', () => {

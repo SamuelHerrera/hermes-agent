@@ -20,7 +20,7 @@ import { FindBar } from '@/components/find-bar'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
-import { $newSessionTabAction, registerPaneCloser } from '@/components/pane-shell/tree/store'
+import { $newSessionTabAction, hideLoneTreeTab, registerPaneCloser } from '@/components/pane-shell/tree/store'
 import { FloatingPet } from '@/components/pet/floating-pet'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { emitGatewayEvent } from '@/contrib/events'
@@ -544,6 +544,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     lastEmptyWorkspaceRef.current = emptyWorkspaceRequest
     startFreshSessionDraft({ replaceRoute: true })
     setWorkspaceEmptyPlaceholder(true)
+    hideLoneTreeTab('workspace')
   }, [emptyWorkspaceRequest, startFreshSessionDraft])
 
   // Swapping the live gateway to another profile must re-pull that profile's

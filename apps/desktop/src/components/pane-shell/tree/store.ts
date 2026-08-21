@@ -13,6 +13,7 @@ import { translateNow } from '@/i18n'
 import { readJson, readKey, writeJson, writeKey } from '@/lib/storage'
 import { notify } from '@/store/notifications'
 import { clearAllPaneSizeOverrides } from '@/store/panes'
+import { $workspaceEmptyPlaceholder } from '@/store/session'
 import { isSecondaryWindow } from '@/store/windows'
 
 import {
@@ -472,7 +473,9 @@ export function focusedSessionTabAnchor(): null | string {
  *  MAIN chat instead. Returns false when there's nothing to close, so ⌘W
  *  stays a no-op — it never closes the window. */
 export function closeFocusedSessionTab(): boolean {
-  const active = tabTargetGroup(group => group.panes.some(isMainStripPane))?.active
+  const group = tabTargetGroup(group => group.panes.some(isMainStripPane))
+  const shown = group ? shownPanesInGroup(group) : []
+  const active = group && shown.includes(group.active) ? group.active : shown.find(isMainStripPane)
 
   if (!active || isUncloseablePane(active)) {
     return false
@@ -517,7 +520,8 @@ export function closeFocusedToolTab(): boolean {
  *  the tab menu's Close-others / Close-to-the-right verbs (and their enablement). */
 function closeableTreeSiblings(paneId: string): { others: string[]; right: string[] } {
   const tree = $layoutTree.get()
-  const panes = (tree ? findGroupOfPane(tree, paneId) : null)?.panes ?? []
+  const group = tree ? findGroupOfPane(tree, paneId) : null
+  const panes = group ? shownPanesInGroup(group) : []
   const idx = panes.indexOf(paneId)
 
   return {
@@ -588,9 +592,11 @@ export function isClosingAllTreeTabs(): boolean {
 
 export function closeAllTreeTabs(paneId: string): void {
   const tree = $layoutTree.get()
-  const panes = (tree ? findGroupOfPane(tree, paneId) : null)?.panes ?? []
+  const group = tree ? findGroupOfPane(tree, paneId) : null
+  const panes = group ? shownPanesInGroup(group) : []
 
   closeAllTreeTabsDepth += 1
+
   try {
     closeTreeTabsInOrder(panes)
   } finally {
@@ -628,6 +634,13 @@ function shownPanesInGroup(group: { panes: readonly string[] }): string[] {
   const paneFor = (id: string) => registered.find(c => c.id === id)
 
   return group.panes.filter(id => {
+    // Match TreeGroup: when the permanent workspace is parked on the
+    // close-all/final-tab placeholder, it is the invisible empty editor host,
+    // not a user-visible tab. Sibling page/session tabs remain the real strip.
+    if (id === 'workspace' && $workspaceEmptyPlaceholder.get()) {
+      return false
+    }
+
     const pane = paneFor(id)
 
     if (!pane) {
@@ -1684,18 +1697,27 @@ export function setTreeGroupHeaderHidden(groupId: string, headerHidden: boolean)
   }
 }
 
-/** Keep the strip visible when `paneId` is the only pane left in its zone. The
- * pane remains mounted as the empty editor host; only its content changes.
- * Returns whether a lone tab host was found. */
+/** Park `paneId` as an empty editor host. If sibling visible tabs remain, front
+ * the next one (VS Code close-editor behavior) while the parked pane stays in
+ * the model for the next chat. If no sibling remains, keep the strip visible
+ * with only the trailing "+" affordance. */
 export function hideLoneTreeTab(paneId: string): boolean {
   const tree = $layoutTree.get()
   const group = tree ? findGroupOfPane(tree, paneId) : null
 
-  if (!group || group.panes.length !== 1) {
+  if (!tree || !group) {
     return false
   }
 
-  setTreeGroupHeaderHidden(group.id, false)
+  const shown = shownPanesInGroup(group).filter(id => id !== paneId)
+  const replacement = shown[Math.max(0, group.panes.indexOf(paneId))] ?? shown.at(-1) ?? null
+  let next = setGroupHeaderHiddenOp(tree, group.id, false)
+
+  if (replacement && group.active === paneId) {
+    next = setActivePaneOp(next, group.id, replacement)
+  }
+
+  commit(next)
 
   return true
 }

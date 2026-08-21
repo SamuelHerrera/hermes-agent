@@ -18,6 +18,9 @@ describe('focused chat zone drives the tab verbs', () => {
     const tree = await import('@/components/pane-shell/tree/store')
     const model = await import('@/components/pane-shell/tree/model')
     const { registry } = await import('@/contrib/registry')
+    const { $workspaceEmptyPlaceholder } = await import('@/store/session')
+
+    $workspaceEmptyPlaceholder.set(false)
 
     for (const id of ['workspace', 'files', 'session-tile:a', 'session-tile:b', 'route-tile:/kanban']) {
       registry.register({
@@ -79,6 +82,33 @@ describe('focused chat zone drives the tab verbs', () => {
     tree.noteActiveTreeGroup('grp-main')
     expect(tree.closeFocusedSessionTab()).toBe(false)
     expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
+  })
+
+  it('empty workspace placeholder behaves like a hidden editor host beside route tabs', async () => {
+    const { model, tree } = await setup()
+    const { $workspaceEmptyPlaceholder } = await import('@/store/session')
+
+    $workspaceEmptyPlaceholder.set(true)
+    tree.$layoutTree.set(
+      model.group(['workspace', 'route-tile:/kanban', 'session-tile:a'], {
+        active: 'workspace',
+        id: 'grp-main'
+      })
+    )
+    tree.noteActiveTreeGroup('grp-main')
+
+    expect(tree.activateTreeTabSlot(1)).toBe('route-tile:/kanban')
+    expect(model.findGroup(tree.$layoutTree.get()!, 'grp-main')?.active).toBe('route-tile:/kanban')
+    expect(tree.treeTabCloseTargets('route-tile:/kanban')).toEqual({ all: 2, others: 1, right: 1 })
+
+    const closed: string[] = []
+
+    for (const id of ['workspace', 'route-tile:/kanban', 'session-tile:a']) {
+      tree.registerPaneCloser(id, () => closed.push(id))
+    }
+
+    tree.closeAllTreeTabs('route-tile:/kanban')
+    expect(closed).toEqual(['route-tile:/kanban', 'session-tile:a'])
   })
 
   it('plain tab activation restores a main strip hidden by a stale lone-tab close', async () => {
