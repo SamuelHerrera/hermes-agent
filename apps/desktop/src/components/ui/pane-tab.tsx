@@ -2,6 +2,7 @@ import * as React from 'react'
 
 import { type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
 import { Button } from '@/components/ui/button'
+import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { translateNow } from '@/i18n'
 import { isMetaClose, middleClickHandlers } from '@/lib/middle-click'
@@ -102,6 +103,7 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
         className
       )}
       data-active={active}
+      data-closeable={onClose ? true : undefined}
       data-preview={preview || undefined}
       data-selected={selected || undefined}
       data-vertical={vertical || undefined}
@@ -144,6 +146,28 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
       {...props}
     >
       {children}
+      {onClose && (
+        <button
+          aria-label={translateNow('common.close')}
+          className={cn(
+            'absolute grid size-4 place-items-center rounded-sm text-(--ui-text-quaternary) opacity-70 transition hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-focus-ring)',
+            vertical ? 'right-1 top-1' : 'right-1 top-1/2 -translate-y-1/2'
+          )}
+          onClick={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            onClose()
+          }}
+          onPointerDown={event => {
+            event.preventDefault()
+            event.stopPropagation()
+          }}
+          title={translateNow('common.close')}
+          type="button"
+        >
+          <Codicon name="close" size="0.7rem" />
+        </button>
+      )}
       {dirty && (
         <span
           aria-hidden
@@ -175,7 +199,7 @@ export const PaneTabLabel = React.forwardRef<HTMLElement, PaneTabLabelProps>(fun
 
   return (
     <Comp
-      className="flex h-full min-w-0 max-w-full items-center overflow-hidden px-2 text-left outline-none group-data-[vertical]/tab:h-auto group-data-[vertical]/tab:w-full group-data-[vertical]/tab:justify-center group-data-[vertical]/tab:py-2"
+      className="flex h-full min-w-0 max-w-full items-center overflow-hidden px-2 text-left outline-none group-data-[closeable]/tab:pr-6 group-data-[vertical]/tab:h-auto group-data-[vertical]/tab:w-full group-data-[vertical]/tab:justify-center group-data-[vertical]/tab:py-2 group-data-[vertical]/tab:pr-2"
       ref={ref}
       {...props}
     >

@@ -90,6 +90,22 @@ describe('PaneTab close gestures', () => {
     expect(onActivate).toHaveBeenCalledTimes(1)
   })
 
+  it('renders a close button on every closeable tab and routes it to onClose', () => {
+    const onClose = vi.fn()
+    const onPointerDown = vi.fn()
+    render(
+      <PaneTab onClose={onClose} onPointerDown={onPointerDown}>
+        <PaneTabLabel>tab</PaneTabLabel>
+      </PaneTab>
+    )
+
+    const close = screen.getByRole('button', { name: /^close$/i })
+    fireEvent.pointerDown(close, { button: 0 })
+    fireEvent.click(close, { button: 0 })
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onPointerDown).not.toHaveBeenCalled()
+  })
+
   it('does nothing without an onClose (uncloseable workspace tab)', () => {
     const onPointerDown = vi.fn()
     render(
