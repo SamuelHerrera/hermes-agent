@@ -124,6 +124,25 @@ function clearSettled(storedId: string) {
   settledExpiry.delete(storedId)
 }
 
+function visibleSessionPane(storedId: string): boolean {
+  const tree = $layoutTree.get()
+
+  if (!tree) {
+    return false
+  }
+
+  const tilePaneId = `session-tile:${storedId}`
+  const tileGroup = findGroupOfPane(tree, tilePaneId)
+
+  if (tileGroup?.active === tilePaneId) {
+    return true
+  }
+
+  const workspaceGroup = findGroupOfPane(tree, 'workspace')
+
+  return workspaceGroup?.active === 'workspace' && storedId === $selectedStoredSessionId.get()
+}
+
 /** Stored ids whose turn ended within the grace window. Prunes expired. */
 export function getRecentlySettledSessionIds(now: number = Date.now()): string[] {
   const live: string[] = []
@@ -184,7 +203,7 @@ function handleTransition(previous: ClientSessionState | null, next: ClientSessi
   } else if (!next.busy && wasWorking) {
     markSettled(storedId)
 
-    if (storedId !== $selectedStoredSessionId.get()) {
+    if (!visibleSessionPane(storedId)) {
       const cur = $unreadFinishedSessionIds.get()
 
       if (!cur.includes(storedId)) {

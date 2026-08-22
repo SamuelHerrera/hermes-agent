@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClientSessionState } from '@/app/types'
 import { findGroupOfPane, group, split } from '@/components/pane-shell/tree/model'
 import { $layoutTree } from '@/components/pane-shell/tree/store'
+import { createClientSessionState } from '@/lib/chat-runtime'
 import { $selectedStoredSessionId, $unreadFinishedSessionIds } from '@/store/session'
 import type { SessionTile } from '@/store/session-states'
 import {
   blankDraftTile,
+  clearAllSessionStates,
   detachWorkspaceSessionToTile,
   focusedSessionNeedsRoute,
   focusOpenSession,
@@ -15,6 +17,7 @@ import {
   openSessionTile,
   orderTilesByTree,
   promoteSessionTile,
+  publishSessionState,
   selectionHomesToWorkspace
 } from '@/store/session-states'
 import { $sessionTiles } from '@/store/session-states'
@@ -187,6 +190,33 @@ describe('preview session tiles', () => {
 
     expect(focusOpenSession('first')).toBe('tile')
     expect($unreadFinishedSessionIds.get()).toEqual([])
+  })
+})
+
+describe('completion unread state for visible session tabs', () => {
+  beforeEach(() => {
+    $selectedStoredSessionId.set('primary')
+    $layoutTree.set(group(['workspace', tilePane('a'), tilePane('b')], { active: tilePane('a'), id: 'main' }))
+    $sessionTiles.set([
+      { runtimeId: 'rt-a', storedSessionId: 'a' },
+      { runtimeId: 'rt-b', storedSessionId: 'b' }
+    ])
+    $unreadFinishedSessionIds.set([])
+    clearAllSessionStates()
+  })
+
+  it('does not mark a tile unread when its visible tab finishes', () => {
+    publishSessionState('rt-a', { ...createClientSessionState('a'), busy: true })
+    publishSessionState('rt-a', createClientSessionState('a'))
+
+    expect($unreadFinishedSessionIds.get()).toEqual([])
+  })
+
+  it('marks an inactive tile unread when it finishes', () => {
+    publishSessionState('rt-b', { ...createClientSessionState('b'), busy: true })
+    publishSessionState('rt-b', createClientSessionState('b'))
+
+    expect($unreadFinishedSessionIds.get()).toEqual(['b'])
   })
 })
 
