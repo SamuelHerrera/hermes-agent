@@ -168,6 +168,23 @@ describe('focused chat zone drives the tab verbs', () => {
     )
   })
 
+  it('auto-parks the empty workspace when another main pane arrives later', async () => {
+    const { model, tree } = await setup()
+    const { $workspaceEmptyPlaceholder } = await import('@/store/session')
+
+    tree.$layoutTree.set(model.group(['workspace'], { active: 'workspace', id: 'grp-empty-origin' }))
+    $workspaceEmptyPlaceholder.set(true)
+    tree.$layoutTree.set(
+      model.split('column', [
+        model.group(['workspace'], { active: 'workspace', id: 'grp-empty-origin' }),
+        model.group(['session-tile:a'], { active: 'session-tile:a', id: 'grp-tabs' })
+      ])
+    )
+    await Promise.resolve()
+
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toEqual(['session-tile:a'])
+  })
+
   it('Close all empties the store-owned workspace tab without removing its pane', async () => {
     const { model, tree } = await setup()
     const closed: string[] = []

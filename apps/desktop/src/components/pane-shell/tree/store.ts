@@ -775,6 +775,30 @@ export function parkEmptyWorkspaceHost(): boolean {
   return true
 }
 
+let emptyWorkspaceParkScheduled = false
+
+function scheduleParkEmptyWorkspaceHost(): void {
+  if (emptyWorkspaceParkScheduled || !$workspaceEmptyPlaceholder.get()) {
+    return
+  }
+
+  emptyWorkspaceParkScheduled = true
+  queueMicrotask(() => {
+    emptyWorkspaceParkScheduled = false
+    parkEmptyWorkspaceHost()
+  })
+}
+
+// The tile pane can be registered/adopted after the workspace has already been
+// marked empty (or vice versa). Watch both signals so the placeholder never
+// survives as a whole split once a real main tab appears elsewhere.
+$layoutTree.listen(scheduleParkEmptyWorkspaceHost)
+$workspaceEmptyPlaceholder.listen(empty => {
+  if (empty) {
+    scheduleParkEmptyWorkspaceHost()
+  }
+})
+
 /** The layout's root ROW — the split that contains main + the side columns.
  *  Usually the root itself (Default, Focus); in a column-root layout (Terminal
  *  deck, Quad) it's the row child that holds sessions/workspace/files. Returns
