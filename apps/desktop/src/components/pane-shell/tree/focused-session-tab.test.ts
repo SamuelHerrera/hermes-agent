@@ -144,6 +144,30 @@ describe('focused chat zone drives the tab verbs', () => {
     expect(session.$unreadFinishedSessionIds.get()).toEqual([])
   })
 
+  it('parks a lone empty workspace origin once another main tab owns the screen', async () => {
+    const { model, tree } = await setup()
+    const { $workspaceEmptyPlaceholder } = await import('@/store/session')
+
+    $workspaceEmptyPlaceholder.set(true)
+    tree.$layoutTree.set(
+      model.split('column', [
+        model.group(['workspace'], { active: 'workspace', id: 'grp-empty-origin' }),
+        model.group(['session-tile:a', 'session-tile:b'], { active: 'session-tile:a', id: 'grp-tabs' })
+      ])
+    )
+
+    expect(tree.parkEmptyWorkspaceHost()).toBe(true)
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toEqual(['session-tile:a', 'session-tile:b'])
+
+    // The host is only parked, not dead: route/new-session navigation can reveal
+    // it again and adoption stacks it into an existing main tab zone.
+    tree.revealTreePane('workspace')
+    expect(model.allPaneIds(tree.$layoutTree.get()!)).toContain('workspace')
+    expect(model.findGroupOfPane(tree.$layoutTree.get()!, 'workspace')).toBe(
+      model.findGroupOfPane(tree.$layoutTree.get()!, 'session-tile:a')
+    )
+  })
+
   it('Close all empties the store-owned workspace tab without removing its pane', async () => {
     const { model, tree } = await setup()
     const closed: string[] = []

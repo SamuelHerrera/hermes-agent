@@ -738,6 +738,43 @@ export function removeTreePane(paneId: string) {
   }
 }
 
+/**
+ * The workspace pane is a permanent renderer host, but its EMPTY placeholder is
+ * not allowed to reserve a whole split once a real main tab has moved elsewhere.
+ * Close-all/final-tab still leaves the placeholder when it is the only main
+ * surface; moving the loaded workspace session out should collapse the emptied
+ * origin zone so the remaining main tabs absorb the space.
+ */
+export function parkEmptyWorkspaceHost(): boolean {
+  const tree = $layoutTree.get()
+
+  if (!tree || !$workspaceEmptyPlaceholder.get()) {
+    return false
+  }
+
+  const workspaceGroup = findGroupOfPane(tree, 'workspace')
+
+  if (!workspaceGroup || workspaceGroup.panes.length !== 1) {
+    return false
+  }
+
+  const hasOtherMainSurface = allPaneIds(tree).some(id => id !== 'workspace' && isMainStripPane(id))
+
+  if (!hasOtherMainSurface) {
+    return false
+  }
+
+  const next = removePane(tree, 'workspace')
+
+  if (!next || next === tree) {
+    return false
+  }
+
+  commit(next)
+
+  return true
+}
+
 /** The layout's root ROW — the split that contains main + the side columns.
  *  Usually the root itself (Default, Focus); in a column-root layout (Terminal
  *  deck, Quad) it's the row child that holds sessions/workspace/files. Returns
@@ -976,6 +1013,16 @@ export function revealTreePane(paneId: string) {
   // Reveal beats a Close: un-dismiss and let adoption put the pane back.
   if ($dismissedPanes.get().has(paneId)) {
     setDismissed(paneId, false)
+    adoptContributedPanes()
+  }
+
+  const beforeReveal = $layoutTree.get()
+
+  if (
+    beforeReveal &&
+    !allPaneIds(beforeReveal).includes(paneId) &&
+    registry.getArea('panes').some(pane => pane.id === paneId)
+  ) {
     adoptContributedPanes()
   }
 
