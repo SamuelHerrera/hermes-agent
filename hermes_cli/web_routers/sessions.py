@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Query, Request  # noqa: F401
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
+from agent.memory_manager import flush_session_archive
 from hermes_cli.web_deps import late
 from hermes_cli.web_models import (
     BulkDeleteSessions,
@@ -727,6 +728,15 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
                 # Title too long, invalid characters, or already in use.
                 raise HTTPException(status_code=400, detail=str(e))
         if body.archived is not None:
+            if body.archived:
+                try:
+                    flush_session_archive(sid, wait=True, timeout=10.0)
+                except Exception:
+                    _log.debug(
+                        "Memory archive flush failed for session %s",
+                        sid,
+                        exc_info=True,
+                    )
             db.set_session_archived(sid, body.archived)
         if body.pinned is not None:
             db.set_session_pinned(sid, body.pinned)

@@ -302,6 +302,23 @@ class MemoryProvider(ABC):
         Default is no-op for backward compatibility.
         """
 
+    def on_session_archive(
+        self,
+        session_id: str = "",
+        *,
+        wait: bool = False,
+        timeout: float = 10.0,
+        **kwargs,
+    ) -> bool:
+        """Called before a session is soft-archived.
+
+        Archive hides a conversation without rotating the agent's session id.
+        Providers with partial per-turn buffers can use this as a final
+        durability boundary. Return True when work was dispatched/completed,
+        False when there was nothing to do.
+        """
+        return False
+
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         """Called before context compression discards old messages.
 

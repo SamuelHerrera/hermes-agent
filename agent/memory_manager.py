@@ -39,6 +39,37 @@ from tools.registry import tool_error
 
 logger = logging.getLogger(__name__)
 
+# Active in-process memory managers by session id. Archive requests usually
+# arrive through the Desktop/dashboard REST layer, while the Hindsight provider
+# holding partial retain_every_n_turns buffers lives on the cached agent. This
+# registry lets the archive endpoint ask the live provider to flush before the
+# session row is soft-hidden, without changing the user's retain cadence.
+_archive_registry_lock = threading.RLock()
+_archive_registry: Dict[str, "MemoryManager"] = {}
+
+
+def flush_session_archive(
+    session_id: str,
+    *,
+    wait: bool = True,
+    timeout: float = 10.0,
+) -> bool:
+    """Ask the active memory manager for *session_id* to flush archive buffers.
+
+    Returns False when no live manager is registered or no provider had work to
+    do. This is intentionally best-effort: archived chat history remains in
+    state.db even if no live memory buffer exists.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    with _archive_registry_lock:
+        manager = _archive_registry.get(sid)
+    if manager is None:
+        return False
+    return manager.on_session_archive(sid, wait=wait, timeout=timeout)
+
+
 # How long shutdown_all() waits for in-flight background sync/prefetch work
 # to drain before abandoning it. A wedged provider must never block process
 # teardown indefinitely — the worker threads are daemon, so anything still
@@ -392,6 +423,7 @@ class MemoryManager:
         # a bounded FIFO drain, then explicitly report anything abandoned.
         self._background_futures: Dict[Future, str] = {}
         self._shutting_down = False
+        self._session_id: Optional[str] = None
         self._shutdown_drain_state: Dict[str, Any] = {
             "status": "not_started",
             "abandoned_writes": 0,
@@ -1007,6 +1039,7 @@ class MemoryManager:
         # rewound=True explicitly; everyone else stays clean.
         if rewound:
             kwargs["rewound"] = True
+        old_session_id = self._session_id
         for provider in self._providers:
             try:
                 provider.on_session_switch(
@@ -1020,6 +1053,38 @@ class MemoryManager:
                     "Memory provider '%s' on_session_switch failed: %s",
                     provider.name, e,
                 )
+        self._register_archive_session(new_session_id, old_session_id=old_session_id)
+
+    def on_session_archive(
+        self,
+        session_id: str = "",
+        *,
+        wait: bool = True,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Notify providers that *session_id* is about to be archived.
+
+        Returns True if any provider dispatched/completed a flush. Providers are
+        responsible for keeping the hook bounded when ``wait`` is requested.
+        """
+        did_flush = False
+        for provider in self._providers:
+            try:
+                did_flush = bool(
+                    provider.on_session_archive(
+                        session_id,
+                        wait=wait,
+                        timeout=timeout,
+                    )
+                ) or did_flush
+            except Exception as e:
+                logger.warning(
+                    "Memory provider '%s' on_session_archive failed: %s",
+                    provider.name,
+                    e,
+                    exc_info=True,
+                )
+        return did_flush
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         """Notify all providers before context compression.
@@ -1209,6 +1274,7 @@ class MemoryManager:
                     "Memory provider '%s' shutdown failed: %s",
                     provider.name, e,
                 )
+        self._unregister_archive_session()
 
     @property
     def shutdown_drain_state(self) -> Dict[str, Any]:
@@ -1271,6 +1337,31 @@ class MemoryManager:
             active_tasks,
         )
 
+    def _register_archive_session(
+        self,
+        session_id: str,
+        *,
+        old_session_id: str | None = None,
+    ) -> None:
+        sid = str(session_id or "").strip()
+        old = str(old_session_id or "").strip()
+        if not sid:
+            return
+        with _archive_registry_lock:
+            if old and old != sid and _archive_registry.get(old) is self:
+                _archive_registry.pop(old, None)
+            _archive_registry[sid] = self
+        self._session_id = sid
+
+    def _unregister_archive_session(self) -> None:
+        sid = self._session_id
+        if not sid:
+            return
+        with _archive_registry_lock:
+            if _archive_registry.get(sid) is self:
+                _archive_registry.pop(sid, None)
+        self._session_id = None
+
     def initialize_all(self, session_id: str, **kwargs) -> None:
         """Initialize all providers.
 
@@ -1289,3 +1380,5 @@ class MemoryManager:
                     "Memory provider '%s' initialize failed: %s",
                     provider.name, e,
                 )
+        if self._providers:
+            self._register_archive_session(session_id)

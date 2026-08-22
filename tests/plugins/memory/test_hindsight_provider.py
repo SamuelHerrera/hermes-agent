@@ -57,6 +57,14 @@ def _clean_env(tmp_path, monkeypatch):
     isolated_home = tmp_path / "user-home"
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: isolated_home))
 
+    # The Hindsight append-capability probe is process-cached by API URL in
+    # production. Tests monkeypatch the version endpoint differently per case,
+    # so clear the cache per test to prevent order-dependent document_id
+    # expectations.
+    from plugins.memory.hindsight import _append_capability_cache, _append_capability_lock
+    with _append_capability_lock:
+        _append_capability_cache.clear()
+
 
 def _make_mock_client():
     """Create a mock Hindsight client with async methods."""
@@ -1141,6 +1149,77 @@ class TestSessionSwitchBufferFlush:
         # switch time (3 turns accumulated, _turn_index was set to 3
         # by the last sync_turn).
         assert call_order[1] == "3"
+
+
+# ---------------------------------------------------------------------------
+# session archive — final retain of partial cadence buffers
+# ---------------------------------------------------------------------------
+
+
+class TestSessionArchiveBufferFlush:
+    def test_archive_flushes_partial_retain_buffer_without_rotating_session(
+        self, provider_with_config
+    ):
+        """Archiving a live chat is a session boundary for memory durability:
+        partial retain_every_n_turns buffers must be retained before the row is
+        hidden, but the provider must stay bound to the same session id."""
+        p = provider_with_config(retain_every_n_turns=3, retain_async=False)
+        doc = p._document_id
+
+        p.sync_turn("turn1-user", "turn1-asst")
+        p.sync_turn("turn2-user", "turn2-asst")
+        p._client.aretain_batch.assert_not_called()
+
+        assert p.on_session_archive("test-session", wait=True) is True
+        p._retain_queue.join()
+
+        p._client.aretain_batch.assert_called_once()
+        kw = p._client.aretain_batch.call_args.kwargs
+        assert kw["document_id"] == doc
+        item = kw["items"][0]
+        content = json.loads(item["content"])
+        flat = json.dumps(content)
+        assert "turn1-user" in flat
+        assert "turn2-user" in flat
+        assert item["metadata"]["session_id"] == "test-session"
+        assert "session:test-session" in item["tags"]
+
+        # Archive hides the session; it must not rotate the provider to a new id.
+        assert p._session_id == "test-session"
+        assert p._document_id == doc
+
+    def test_archive_append_flush_sends_only_unretained_tail(
+        self, provider_with_config, monkeypatch
+    ):
+        """With append-capable Hindsight, an archive flush must not re-append
+        turns that already crossed the normal retain cadence. Only the tail
+        since _last_retained_turn_count should be sent."""
+        TestUpdateModeAppendCapability()._clear_capability_cache()
+        monkeypatch.setattr(
+            "plugins.memory.hindsight._fetch_hindsight_api_version",
+            lambda *a, **kw: "0.5.6",
+        )
+        p = provider_with_config(retain_every_n_turns=2, retain_async=False)
+
+        p.sync_turn("turn1-user", "turn1-asst")
+        p.sync_turn("turn2-user", "turn2-asst")
+        p._retain_queue.join()
+        p._client.aretain_batch.reset_mock()
+
+        p.sync_turn("turn3-user", "turn3-asst")
+        assert p.on_session_archive("test-session", wait=True) is True
+        p._retain_queue.join()
+
+        p._client.aretain_batch.assert_called_once()
+        kw = p._client.aretain_batch.call_args.kwargs
+        assert kw["document_id"] == "test-session"
+        item = kw["items"][0]
+        assert item["update_mode"] == "append"
+        content = json.loads(item["content"])
+        flat = json.dumps(content)
+        assert "turn3-user" in flat
+        assert "turn1-user" not in flat
+        assert "turn2-user" not in flat
 
 
 # ---------------------------------------------------------------------------
