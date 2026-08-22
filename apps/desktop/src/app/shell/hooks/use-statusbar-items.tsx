@@ -1,9 +1,8 @@
 import { useStore } from '@nanostores/react'
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 
 import type { CommandCenterSection } from '@/app/command-center'
 import { useApprovalModeStatusbarItem } from '@/app/shell/approval-mode-menu'
-import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
 import { $paneVisible, togglePaneVisible } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
@@ -12,7 +11,7 @@ import { useI18n } from '@/i18n'
 import { displayPath, pathLeaf } from '@/lib/display-path'
 import { Activity, AlertCircle, Command, FolderOpen, Globe, Hash, Loader2, Terminal } from '@/lib/icons'
 import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
-import { contextBarLabel, LiveDuration, usageContextLabel } from '@/lib/statusbar'
+import { LiveDuration } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { resolveVersionStatus } from '@/lib/version-status'
@@ -22,19 +21,16 @@ import { $activeGatewayProfile } from '@/store/profile'
 import { $projectTree, projectNameForCwd } from '@/store/projects'
 import { openRouteTile } from '@/store/route-tiles'
 import {
-  $activeSessionId,
   $busy,
   $connection,
   $currentCwd,
-  $currentUsage,
   $selectedStoredSessionId,
   $sessions,
   $turnStartedAt,
   idsShareLineage,
-  sessionMatchesStoredId,
-  setCurrentUsage
+  sessionMatchesStoredId
 } from '@/store/session'
-import { $focusedRuntimeId, $focusedSessionState, $focusedStoredSessionId } from '@/store/session-states'
+import { $focusedSessionState, $focusedStoredSessionId } from '@/store/session-states'
 import { $subagentsBySession, activeSubagentCount, failedSubagentCount } from '@/store/subagents'
 import { $gatewayRestarting } from '@/store/system-actions'
 import {
@@ -46,12 +42,10 @@ import {
   openUpdateOverlayFor,
   UPDATE_UI_DISABLED_FOR_LOCAL_FORK
 } from '@/store/updates'
-import type { StatusResponse, UsageStats } from '@/types/hermes'
+import type { StatusResponse } from '@/types/hermes'
 
 import { SETTINGS_ROUTE, WEBHOOKS_ROUTE } from '../../routes'
 import type { StatusbarItem } from '../statusbar-controls'
-
-const EMPTY_USAGE = { calls: 0, input: 0, output: 0, total: 0 } as const
 
 interface StatusbarItemsOptions {
   agentsOpen: boolean
@@ -86,7 +80,6 @@ export function useStatusbarItems({
   const { t } = useI18n()
   const copy = t.shell.statusbar
   const fileMenu = t.fileMenu
-  const primaryActiveSessionId = useStore($activeSessionId)
   const activeGatewayProfile = useStore($activeGatewayProfile)
   // What the button paints and flips is whether the terminal is ON SCREEN —
   // the takeover store alone stays true behind a stacked sibling tab or a
@@ -97,7 +90,6 @@ export function useStatusbarItems({
   // primary (or a draft with no runtime slice yet). A focused TILE keeps its
   // own cwd in `$sessionStates` and must not paint the primary's workspace.
   const primaryCwd = useStore($currentCwd)
-  const primaryUsage = useStore($currentUsage)
   const gatewayRestarting = useStore($gatewayRestarting)
   const primaryTurnStartedAt = useStore($turnStartedAt)
 
@@ -126,18 +118,12 @@ export function useStatusbarItems({
   // below (workspace cwd, context count, timers, busy pulse) tracks it, so
   // clicking into a tile makes the statusbar describe THAT session.
   const focusedStoredSessionId = useStore($focusedStoredSessionId)
-  const focusedRuntimeId = useStore($focusedRuntimeId)
   // `$focusedSessionState` is a projection of `$sessionStates`, which is
   // republished on EVERY message delta — tens of times a second during a turn.
   // Only the fields read here are selected, so an unchanged readout bails out
   // instead of rebuilding all ~9 statusbar items per token.
   const focusedBusy = useStoreSelector($focusedSessionState, state => Boolean(state?.busy))
   const focusedTurnStartedAt = useStoreSelector($focusedSessionState, state => state?.turnStartedAt ?? null)
-  // `usage` is an object, so it can't be compared as a scalar. It IS however
-  // replaced wholesale rather than mutated, and only changes when the backend
-  // reports new usage — far rarer than a delta — so its reference is a valid
-  // bail-out key on its own.
-  const focusedUsage = useStoreSelector($focusedSessionState, state => state?.usage ?? null)
   const focusedStateCwd = useStoreSelector($focusedSessionState, state => state?.cwd?.trim() || '')
 
   // Runtime slices carry the stored id they were bound for. During a primary
@@ -149,13 +135,7 @@ export function useStatusbarItems({
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
   const primaryFocused = !focusedStoredSessionId || focusedStoredSessionId === selectedStoredSessionId
 
-  const activeSessionId = primaryFocused ? primaryActiveSessionId : (focusedRuntimeId ?? null)
   const busy = primaryFocused ? primaryBusy : focusedBusy
-
-  // EMPTY_USAGE (module constant) keeps the fallback referentially stable —
-  // a fresh `{...}` each render would bust the usage-label memos below.
-  const currentUsage = primaryFocused ? primaryUsage : (focusedUsage ?? EMPTY_USAGE)
-
   const turnStartedAt = primaryFocused ? primaryTurnStartedAt : focusedTurnStartedAt
 
   // A tile's session-start + cold cwd come from its stored row (the cache only
@@ -209,17 +189,8 @@ export function useStatusbarItems({
   // a second per-session copy of the same fact. Re-derives whenever the cwd or
   // the tree changes; null (no named project) falls back to the cwd leaf below.
   const projectTree = useStore($projectTree)
-  const projectName = useMemo(() => projectNameForCwd(currentCwd), [currentCwd, projectTree])
-
-  const contextUsage = useMemo(() => usageContextLabel(currentUsage), [currentUsage])
-  const contextBar = useMemo(() => contextBarLabel(currentUsage), [currentUsage])
-
-  const publishContextUsage = useCallback(
-    (snapshot: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => {
-      setCurrentUsage(current => ({ ...current, ...snapshot }))
-    },
-    []
-  )
+  void projectTree
+  const projectName = projectNameForCwd(currentCwd)
 
   const approvalModeItem = useApprovalModeStatusbarItem(activeGatewayProfile, requestGateway)
 
@@ -507,24 +478,6 @@ export function useStatusbarItems({
         variant: 'text'
       },
       {
-        detail: contextBar || undefined,
-        hidden: !contextUsage,
-        id: 'context-usage',
-        label: contextUsage,
-        menuAlign: 'end',
-        menuClassName: 'w-auto border-(--ui-stroke-secondary) p-0',
-        menuContent: (
-          <ContextUsagePanel
-            currentUsage={currentUsage}
-            onUsageSnapshot={publishContextUsage}
-            requestGateway={requestGateway}
-            sessionId={activeSessionId}
-          />
-        ),
-        toggleLabel: copy.toggleContextUsage,
-        variant: 'menu'
-      },
-      {
         ...approvalModeItem,
         hidden: gatewayState !== 'open',
         toggleLabel: copy.toggleApprovalMode
@@ -543,19 +496,12 @@ export function useStatusbarItems({
       ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK ? [] : [clientVersionItem, ...(backendVersionItem ? [backendVersionItem] : [])])
     ],
     [
-      activeSessionId,
       approvalModeItem,
       backendVersionItem,
       busy,
       chatOpen,
       clientVersionItem,
-      UPDATE_UI_DISABLED_FOR_LOCAL_FORK,
-      contextBar,
-      contextUsage,
       copy,
-      currentUsage,
-      publishContextUsage,
-      requestGateway,
       gatewayState,
       terminalShowing,
       turnStartedAt

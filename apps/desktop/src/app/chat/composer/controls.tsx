@@ -1,7 +1,10 @@
 import { useStore } from '@nanostores/react'
+import { useCallback } from 'react'
 
+import { ContextUsagePanel } from '@/app/shell/context-usage-panel'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
@@ -17,8 +20,10 @@ import {
   Volume2,
   VolumeX
 } from '@/lib/icons'
+import { contextBarLabel, usageContextLabel } from '@/lib/statusbar'
 import { cn } from '@/lib/utils'
 import { $wakeWord, toggleWakeWord } from '@/store/wake-word'
+import type { UsageStats } from '@/types/hermes'
 
 import type { ConversationStatus } from './hooks/use-voice-conversation'
 import { ModelPill } from './model-pill'
@@ -50,12 +55,20 @@ interface ConversationProps {
   onToggleMute: () => void
 }
 
+interface ComposerContextUsageProps {
+  currentUsage: UsageStats
+  onUsageSnapshot?: (usage: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => void
+  requestGateway: null | (<T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>)
+  sessionId: string | null
+}
+
 export function ComposerControls({
   autoSpeak,
   busy,
   busyAction,
   canSubmit,
   compactModelPill = false,
+  contextUsage,
   conversation,
   disabled,
   hasComposerPayload,
@@ -70,6 +83,7 @@ export function ComposerControls({
   busyAction: 'steer' | 'queue' | 'stop'
   canSubmit: boolean
   compactModelPill?: boolean
+  contextUsage?: ComposerContextUsageProps
   conversation: ConversationProps
   disabled: boolean
   hasComposerPayload: boolean
@@ -91,6 +105,7 @@ export function ComposerControls({
 
   return (
     <div className="ml-auto flex shrink-0 items-center gap-(--composer-control-gap)">
+      <ComposerContextUsageButton disabled={disabled} usage={contextUsage} />
       <ModelPill compact={compactModelPill} disabled={disabled} model={state.model} />
       <DictationButton disabled={disabled} onToggle={onDictate} state={state.voice} status={voiceStatus} />
       <AutoSpeakButton active={autoSpeak} disabled={disabled} onToggle={onToggleAutoSpeak} />
@@ -166,6 +181,58 @@ export function ComposerControls({
         </Tip>
       )}
     </div>
+  )
+}
+
+function ComposerContextUsageButton({ disabled, usage }: { disabled: boolean; usage?: ComposerContextUsageProps }) {
+  const { t } = useI18n()
+  const label = usage ? usageContextLabel(usage.currentUsage) : ''
+  const detail = usage ? contextBarLabel(usage.currentUsage) : ''
+  const requestGateway = usage?.requestGateway ?? null
+  const canOpen = Boolean(requestGateway && usage?.sessionId)
+
+  const panelRequester = useCallback(
+    <T,>(method: string, params?: Record<string, unknown>) => {
+      if (!requestGateway) {
+        return Promise.reject(new Error('Hermes gateway is not connected'))
+      }
+
+      return requestGateway<T>(method, params)
+    },
+    [requestGateway]
+  )
+
+  if (!usage || !label) {
+    return null
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          aria-label={`${t.shell.statusbar.contextUsage}: ${label}`}
+          className={cn(
+            'h-(--composer-control-size) max-w-[8rem] shrink min-w-0 rounded-md px-2 text-[0.72rem] tabular-nums text-(--ui-text-tertiary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground disabled:cursor-default disabled:opacity-45 data-[state=open]:bg-accent/55 data-[state=open]:text-foreground',
+            (usage.currentUsage.context_percent ?? 0) >= 80 && 'text-amber-500 hover:text-amber-500'
+          )}
+          disabled={disabled || !canOpen}
+          title={detail || t.shell.statusbar.contextUsage}
+          type="button"
+        >
+          <span className="block truncate">{label}</span>
+        </button>
+      </DropdownMenuTrigger>
+      {canOpen && requestGateway && (
+        <DropdownMenuContent align="end" className="w-auto border-(--ui-stroke-secondary) p-0" side="top" sideOffset={10}>
+          <ContextUsagePanel
+            currentUsage={usage.currentUsage}
+            onUsageSnapshot={usage.onUsageSnapshot}
+            requestGateway={panelRequester}
+            sessionId={usage.sessionId}
+          />
+        </DropdownMenuContent>
+      )}
+    </DropdownMenu>
   )
 }
 

@@ -8,6 +8,9 @@ import { applyWakeStartResult, applyWakeStatus, resetWakeWordState } from '@/sto
 import { ComposerControls } from './controls'
 
 vi.mock('./model-pill', () => ({ ModelPill: () => null }))
+vi.mock('@/app/shell/context-usage-panel', () => ({
+  ContextUsagePanel: () => <div data-testid="context-usage-panel" />
+}))
 
 const state: ChatBarState = {
   model: { canSwitch: false, model: '', provider: '' },
@@ -76,6 +79,40 @@ describe('ComposerControls shortcut tooltips', () => {
     renderControls({ busy: true, busyAction: 'queue' })
 
     await expectShortcutTooltip('Queue message', 'Ctrl+↵')
+  })
+})
+
+describe('ComposerControls context usage', () => {
+  it('renders the context usage meter in the composer controls instead of the status bar', () => {
+    renderControls({
+      contextUsage: {
+        currentUsage: {
+          calls: 1,
+          context_max: 272_000,
+          context_percent: 80,
+          context_used: 218_800,
+          input: 0,
+          output: 0,
+          total: 0
+        },
+        requestGateway: vi.fn(),
+        sessionId: 'runtime-1'
+      }
+    })
+
+    expect(screen.getByRole('button', { name: /context usage: 218\.8k\/272k/i })).toBeTruthy()
+  })
+
+  it('keeps the context usage meter hidden until usage exists', () => {
+    renderControls({
+      contextUsage: {
+        currentUsage: { calls: 0, input: 0, output: 0, total: 0 },
+        requestGateway: vi.fn(),
+        sessionId: 'runtime-1'
+      }
+    })
+
+    expect(screen.queryByRole('button', { name: /context usage/i })).toBeNull()
   })
 })
 

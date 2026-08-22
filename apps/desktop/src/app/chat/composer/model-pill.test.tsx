@@ -98,7 +98,8 @@ describe('ModelPill per-surface model label', () => {
       $provider: atom('anthropic'),
       $reasoningEffort: atom('high'),
       $runtimeId: atom('tile-runtime'),
-      $storedId: atom('stored-tile')
+      $storedId: atom('stored-tile'),
+      $usage: atom({ calls: 0, input: 0, output: 0, total: 0 })
     }
 
     render(

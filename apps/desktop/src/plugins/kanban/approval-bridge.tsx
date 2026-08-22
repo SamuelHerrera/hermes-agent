@@ -1,6 +1,12 @@
 import {
   Button,
   Codicon,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   host,
   queryClient,
   Tip,
@@ -10,16 +16,7 @@ import {
 } from '@hermes/plugin-sdk'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from '@/components/ui/dialog'
-
-import { APPROVALS_KEY, $boardSlug, fetchPendingApprovals, respondKanbanApproval } from './api'
+import { $boardSlug, APPROVALS_KEY, fetchPendingApprovals, respondKanbanApproval } from './api'
 import type { KanbanApprovalRequest } from './types'
 import { errText } from './ui'
 

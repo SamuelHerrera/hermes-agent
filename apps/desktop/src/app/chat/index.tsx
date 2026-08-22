@@ -32,20 +32,19 @@ import { $petOverlayActive } from '@/store/pet-overlay'
 import { $activeGatewayProfile, $gatewaySwapTarget, $profiles } from '@/store/profile'
 import {
   $contextSuggestions,
-  $freshDraftReady,
   $gatewayState,
-  $introPersonality,
-  $introSeed,
   $resumeExhaustedSessionId,
   $sessions,
   $workspaceEmptyPlaceholder,
   resolveComposerSessionKey,
   sessionMatchesStoredId,
   sessionPinId,
+  setCurrentUsage,
   shouldMigrateComposerScope
 } from '@/store/session'
+import { $sessionStates, publishSessionState } from '@/store/session-states'
 import { isAuxiliaryWindow, isWatchWindow } from '@/store/windows'
-import type { ModelOptionsResponse } from '@/types/hermes'
+import type { ModelOptionsResponse, UsageStats } from '@/types/hermes'
 
 import { primaryRouteSelectedSessionId, routeSessionId } from '../routes'
 import { titlebarHeaderBaseClass, titlebarHeaderShadowClass, titlebarHeaderTitleClass } from '../shell/titlebar'
@@ -330,16 +329,14 @@ export const ChatView = memo(function ChatView({
   const currentCwd = useStore(view.$cwd)
   const currentModel = useStore(view.$model)
   const currentProvider = useStore(view.$provider)
+  const currentUsage = useStore(view.$usage)
   // A pet anywhere (in-window or popped out) owns the hearts; composer only when none.
   const petActive = useStore($petActive)
   const petOverlayActive = useStore($petOverlayActive)
   const petPresent = petActive || petOverlayActive
-  const freshDraftReady = useStore($freshDraftReady)
   const gatewayState = useStore($gatewayState)
   const gatewaySwapTarget = useStore($gatewaySwapTarget)
   const gatewayOpen = gatewayState === 'open'
-  const introPersonality = useStore($introPersonality)
-  const introSeed = useStore($introSeed)
   // PERF: ChatView must not subscribe to the view's $messages — the atom is
   // replaced on every streaming delta flush (~30×/s) and a subscription here
   // re-renders the entire chat shell (header, chat bar, thread wrapper) per
@@ -394,6 +391,28 @@ export const ChatView = memo(function ChatView({
     return onCancel()
   }, [activeSessionId, onCancel, queueSessionKey])
 
+  const publishContextUsage = useCallback(
+    (snapshot: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => {
+      if (isPrimary) {
+        setCurrentUsage(current => ({ ...current, ...snapshot }))
+      }
+
+      if (!activeSessionId) {
+        return
+      }
+
+      const state = $sessionStates.get()[activeSessionId]
+
+      if (state) {
+        publishSessionState(activeSessionId, {
+          ...state,
+          usage: { ...(state.usage ?? currentUsage), ...snapshot }
+        })
+      }
+    },
+    [activeSessionId, currentUsage, isPrimary]
+  )
+
   // A tile IS its session — no route involved, never "mismatched".
   const routedSessionId = isPrimary ? routeSessionId(location.pathname) : selectedSessionId
   const isRoutedSessionView = Boolean(routedSessionId)
@@ -404,16 +423,9 @@ export const ChatView = memo(function ChatView({
   // waiting for the resume effect (which paints a frame later) to clear them.
   const routeSessionMismatch = isRoutedSessionView && routedSessionId !== selectedSessionId
 
-  // The compact new-session pop-out skips the wordmark/tagline intro — it's a
-  // scratch window, not the full-height empty state.
-  const showIntro =
-    isPrimary &&
-    !isAuxiliaryWindow() &&
-    freshDraftReady &&
-    !isRoutedSessionView &&
-    !selectedSessionId &&
-    !activeSessionId &&
-    messagesEmpty
+  // Primary drafts and empty session tabs intentionally share the same blank
+  // transcript surface. The old primary-only intro wordmark made New Session
+  // look different depending on which "+"/project/tab path created it.
   const showWorkspaceEmptyPlaceholder =
     isPrimary &&
     workspaceEmptyPlaceholder &&
@@ -574,7 +586,6 @@ export const ChatView = memo(function ChatView({
             clampToComposer={showChatBar}
             cwd={currentCwd}
             gateway={gateway}
-            intro={showIntro ? { personality: introPersonality, seed: introSeed } : undefined}
             loading={threadLoading}
             onBranchInNewChat={onBranchInNewChat}
             onCancel={haltRun}
@@ -628,6 +639,7 @@ export const ChatView = memo(function ChatView({
           <Suspense fallback={<ChatBarFallback />}>
             <ChatBar
               busy={busy}
+              currentUsage={currentUsage}
               cwd={currentCwd}
               disabled={!gatewayOpen}
               focusKey={activeSessionId}
@@ -647,6 +659,7 @@ export const ChatView = memo(function ChatView({
               onSteer={onSteer}
               onSubmit={onSubmit}
               onTranscribeAudio={onTranscribeAudio}
+              onUsageSnapshot={publishContextUsage}
               queueSessionKey={queueSessionKey}
               sessionId={activeSessionId}
               state={chatBarState}

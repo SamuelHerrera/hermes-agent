@@ -85,6 +85,7 @@ import { VoiceActivity, VoicePlaybackActivity } from './voice-activity'
 export function ChatBar({
   busy,
   cwd,
+  currentUsage,
   disabled,
   focusKey,
   gateway,
@@ -104,7 +105,8 @@ export function ChatBar({
   onRemoveAttachment,
   onSteer,
   onSubmit: onSubmitProp,
-  onTranscribeAudio
+  onTranscribeAudio,
+  onUsageSnapshot
 }: ChatBarProps) {
   const hudMode = useStore($hudMode)
   const { grabbing: hudGrabbing, onPointerDown: onHudDragPointerDown } = useHudComposerDrag(hudMode)
@@ -168,6 +170,17 @@ export function ChatBar({
   // session id — gateway events and process.list both speak that id. Only the
   // queue uses the stored-session fallback key (prompts can queue pre-resume).
   const statusSessionId = sessionId ?? null
+
+  const requestGateway = useCallback(
+    <T,>(method: string, params?: Record<string, unknown>) => {
+      if (!gateway) {
+        return Promise.reject(new Error('Hermes gateway is not connected'))
+      }
+
+      return gateway.request<T>(method, params ?? {})
+    },
+    [gateway]
+  )
 
   // Coarse edge: re-renders ChatBar only when the stack shows/hides, NOT on
   // every per-item status mutation or other sessions' churn (see the hook).
@@ -966,6 +979,12 @@ export function ChatBar({
       busyAction={busyAction}
       canSubmit={canSubmit}
       compactModelPill={poppedOut || compactPill}
+      contextUsage={{
+        currentUsage,
+        onUsageSnapshot,
+        requestGateway: gateway ? requestGateway : null,
+        sessionId: statusSessionId
+      }}
       conversation={{
         active: voiceConversationActive,
         level: conversation.level,

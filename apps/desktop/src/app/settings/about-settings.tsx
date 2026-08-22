@@ -15,8 +15,8 @@ import {
   checkUpdates,
   openUpdatesWindow,
   refreshDesktopVersion,
-  UPDATE_UI_DISABLED_FOR_LOCAL_FORK,
-  startActiveUpdate
+  startActiveUpdate,
+  UPDATE_UI_DISABLED_FOR_LOCAL_FORK
 } from '@/store/updates'
 
 import { ListRow, SectionHeading, SettingsContent } from './primitives'

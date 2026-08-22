@@ -102,16 +102,13 @@ describe('statusbar item visibility', () => {
     expect(screen.getByText('Plugin thing')).toBeTruthy()
   })
 
-  it('starts the per-turn readouts hidden and restores them from the menu', async () => {
+  it('starts the per-turn readout hidden and restores it from the menu', async () => {
     const statusbar = bar([
       item('running-timer', 'Turn timer', { variant: 'text' }),
-      item('context-usage', 'Context meter', { variant: 'menu' }),
       item('gateway-health', 'Gateway')
     ])
 
-    for (const label of ['Turn timer', 'Context meter']) {
-      expect(screen.queryByText(label)).toBeNull()
-    }
+    expect(screen.queryByText('Turn timer')).toBeNull()
 
     openContextMenu(statusbar)
 

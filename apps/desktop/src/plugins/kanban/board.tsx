@@ -96,7 +96,6 @@ import {
   type TaskSortDirections,
   type TaskTimeDisplay
 } from './types'
-import { isUnreadAttentionCard } from './unread'
 import {
   $newTaskLane,
   ago,
@@ -117,10 +116,11 @@ import {
   useKanban,
   useOrchestration
 } from './ui'
+import { isUnreadAttentionCard } from './unread'
 
+export type { TaskSortDirection, TaskTimeDisplay } from './types'
 export { isAiManagedTag, kanbanTagDisplayName } from './ui'
 export { isUnreadAttentionCard } from './unread'
-export type { TaskSortDirection, TaskTimeDisplay } from './types'
 
 const fmtTaskDateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 export const VISIBLE_BOARD_MUTATION_KEY = ['kanban', 'visible-board-mutation'] as const

@@ -71,6 +71,7 @@ import { lastVisibleMessageIsUser } from './thread-loading'
 import { ChatView } from '.'
 
 const NO_MESSAGES: ChatMessage[] = []
+const NO_USAGE = { calls: 0, input: 0, output: 0, total: 0 } as const
 
 /** The tile's SessionView: the same atom shape the primary chat renders
  *  from, computed from this session's slice of `$sessionStates`. */
@@ -85,6 +86,7 @@ function buildTileView(storedSessionId: string): SessionView {
   )
 
   const $messages = computed($state, state => state?.messages ?? NO_MESSAGES)
+  const $usage = computed($state, state => state?.usage ?? NO_USAGE)
 
   return {
     kind: 'tile',
@@ -100,7 +102,8 @@ function buildTileView(storedSessionId: string): SessionView {
     $reasoningEffort: computed($state, state => state?.reasoningEffort ?? ''),
     $runtimeId,
     // Constant for the tile's lifetime — a plain atom, not a computed.
-    $storedId: atom(storedSessionId)
+    $storedId: atom(storedSessionId),
+    $usage
   }
 }
 

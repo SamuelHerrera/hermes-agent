@@ -21,13 +21,15 @@ import {
 } from '@/store/session'
 
 const threadRenderCount = vi.hoisted(() => ({ current: 0 }))
+const threadProps = vi.hoisted(() => ({ current: null as null | { intro?: unknown } }))
 
 vi.mock('@/components/assistant-ui/thread', async () => {
   const React = await import('react')
 
   return {
-    Thread: () => {
+    Thread: (props: { intro?: unknown }) => {
       threadRenderCount.current += 1
+      threadProps.current = props
 
       return React.createElement('div', { 'data-testid': 'thread' })
     }
@@ -70,6 +72,71 @@ function assistantMessage(id: string, text: string): ChatMessage {
     role: 'assistant'
   }
 }
+
+describe('ChatView empty new sessions', () => {
+  beforeEach(() => {
+    threadProps.current = null
+    $activeSessionId.set(null)
+    $awaitingResponse.set(false)
+    $busy.set(false)
+    $contextSuggestions.set([])
+    $currentCwd.set('')
+    $currentModel.set('test-model')
+    $currentProvider.set('test-provider')
+    $freshDraftReady.set(true)
+    $gatewayState.set('open')
+    $messages.set([])
+    $selectedStoredSessionId.set(null)
+    $sessions.set([])
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    $freshDraftReady.set(false)
+    $gatewayState.set('idle')
+  })
+
+  it('keeps a primary fresh draft visually empty instead of rendering the intro wordmark', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/']}>
+          <ChatView
+            gateway={null}
+            maxVoiceRecordingSeconds={120}
+            onAddContextRef={vi.fn()}
+            onAddUrl={vi.fn()}
+            onAttachDroppedItems={vi.fn()}
+            onAttachImageBlob={vi.fn()}
+            onBranchInNewChat={vi.fn()}
+            onCancel={vi.fn()}
+            onDeleteSelectedSession={vi.fn()}
+            onEdit={vi.fn()}
+            onPasteClipboardImage={vi.fn()}
+            onPickFiles={vi.fn()}
+            onPickFolders={vi.fn()}
+            onPickImages={vi.fn()}
+            onReload={vi.fn()}
+            onRemoveAttachment={vi.fn()}
+            onRetryResume={vi.fn()}
+            onSteer={vi.fn()}
+            onSubmit={vi.fn()}
+            onThreadMessagesChange={vi.fn()}
+            onToggleSelectedPin={vi.fn()}
+            onTranscribeAudio={vi.fn()}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByTestId('thread')).toBeTruthy()
+    expect(threadProps.current?.intro).toBeUndefined()
+  })
+})
 
 describe('ChatView render isolation', () => {
   beforeEach(() => {

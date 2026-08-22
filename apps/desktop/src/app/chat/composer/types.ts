@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { SubmitTextOptions } from '@/app/session/hooks/use-prompt-actions/utils'
 import type { HermesGateway } from '@/hermes'
+import type { UsageStats } from '@/types/hermes'
 
 import type { DroppedFile } from '../hooks/use-composer-actions'
 
@@ -37,11 +38,13 @@ export interface ChatBarProps {
   focusKey?: string | null
   maxRecordingSeconds?: number
   state: ChatBarState
+  currentUsage: UsageStats
   gateway?: HermesGateway | null
   queueSessionKey?: string | null
   sessionId?: string | null
   cwd?: string | null
   onCancel: () => Promise<void> | void
+  onUsageSnapshot?: (usage: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => void
   onAddContextRef?: (refText: string, label?: string, detail?: string) => void
   onAddUrl?: (url: string) => void
   onAttachImageBlob?: (blob: Blob) => Promise<boolean | void> | boolean | void
