@@ -182,19 +182,22 @@ describe('SidebarSessionRow compact layout', () => {
     expect(container.querySelector('[data-session-project-dot]')).toBeTruthy()
   })
 
-  it('shows archive and session menu as visible row buttons without removing the context menu actions', () => {
+  it('shows archive and session menu as visible second-row buttons without removing the context menu actions', () => {
     const { container } = renderRow(makeSession({ title: 'Action row' }))
 
     const archive = screen.getByRole('button', { name: 'Archive' })
     const menu = screen.getByRole('button', { name: 'Session actions' })
 
-    const actions = container.querySelector('[data-row-actions]')
+    const primaryLine = screen.getByText('Action row').closest('[data-session-row-primary]')
+    const actionLine = container.querySelector('[data-session-row-secondary-actions]')
 
     expect(archive).toBeTruthy()
     expect(menu).toBeTruthy()
     expect(menu.className).not.toContain('text-transparent')
-    expect(actions?.contains(archive)).toBe(true)
-    expect(actions?.contains(menu)).toBe(true)
+    expect(primaryLine?.contains(archive)).toBe(false)
+    expect(primaryLine?.contains(menu)).toBe(false)
+    expect(actionLine?.contains(archive)).toBe(true)
+    expect(actionLine?.contains(menu)).toBe(true)
   })
 })
 

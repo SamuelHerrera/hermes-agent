@@ -260,12 +260,9 @@ function SidebarSessionRowImpl({
     </SidebarRowLeadGlyph>
   ) : null
 
-  // The trailing metadata sits in normal flow and the kebab lifts out of it,
-  // so this cluster's intrinsic width IS the metadata's. In the one-line row
-  // it rides the shell's `auto` actions column and the title truncates
-  // against it. In the card it renders INSIDE the header row instead — the
-  // shell column would span the card's full height and shave every line,
-  // when only the header shares its line with the age and kebab.
+  // The action cluster is an explicit control row. Compact rows position it on
+  // the second line so the title line owns the full width; cards still render it
+  // in their header line where that variant already keeps the title separate.
   const actionsNode = (
     <div className="relative z-2 flex shrink-0 items-center justify-end gap-1" data-row-actions>
       {hasBranchChildren ? (
@@ -339,8 +336,7 @@ function SidebarSessionRowImpl({
       title={title}
     >
       <SidebarRowShell
-        actions={card ? undefined : actionsNode}
-        actionsClassName={card ? undefined : 'self-start pt-1 pr-1'}
+        actions={undefined}
         className={cn(
           'group row-hover relative',
           card && SIDEBAR_ROW_CARD_MIN_H,
@@ -487,9 +483,9 @@ function SidebarSessionRowImpl({
                       </SidebarRowLabel>
                     </OverflowTip>
                   </div>
-                  {metadataNode ? (
-                    <div className={cn('flex min-w-0 pl-5', branchStem && 'pl-8')}>{metadataNode}</div>
-                  ) : null}
+                  <div className={cn('flex min-h-5 min-w-0 items-center pl-5 pr-12', branchStem && 'pl-8')} data-session-row-secondary>
+                    {metadataNode}
+                  </div>
                 </>
               )
             }
@@ -545,6 +541,11 @@ function SidebarSessionRowImpl({
             )
           })()}
         </SidebarRowBody>
+        {!card ? (
+          <div className="absolute bottom-0.5 right-1 flex items-center" data-row-actions data-session-row-secondary-actions>
+            {actionsNode}
+          </div>
+        ) : null}
       </SidebarRowShell>
     </SessionContextMenu>
   )
