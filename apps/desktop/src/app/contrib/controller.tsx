@@ -215,11 +215,12 @@ registry.registerMany([
     id: 'files',
     area: 'panes',
     title: 'files',
-    // dock: re-adoption target after a stale dismissal (see sessions).
+    // The file tree now lives in the fixed left panel with sessions. Keep it
+    // as a tab in that panel instead of opening another side rail.
     data: {
-      placement: 'right',
+      placement: 'left',
       collapsible: true,
-      dock: { pane: 'workspace', pos: 'right' },
+      dock: { pane: 'sessions', pos: 'center' },
       revealAliases: ['file-browser'],
       width: FILE_BROWSER_DEFAULT_WIDTH,
       minWidth: FILE_BROWSER_MIN_WIDTH,
@@ -355,9 +356,9 @@ registry.registerMany([
 // Layout presets — CHAT (main) always dominates.
 // ---------------------------------------------------------------------------
 
-// The REAL default: sessions left, chat main, and the right sidebars in column
-// order main | … | review | file-browser (files outermost). Each is its OWN
-// zone. Review collapses to nothing while its pane is hidden (⌘G off).
+// The REAL default: one fixed left panel (sessions + file tree), chat main, and
+// non-navigation panels on the other side / bottom. Review collapses to nothing
+// while hidden (⌘G off).
 //
 // Preview tiles are DYNAMIC panes (like session tiles), so no preset names one:
 // they're registered by watchPreviewTiles as tabs open, and dockPaneBeside lands
@@ -367,33 +368,25 @@ registry.registerMany([
 const DEFAULT_TREE = split(
   'row',
   [
-    group(['sessions'], { id: 'grp-sessions' }),
+    group(['sessions', 'files'], { id: 'grp-sessions' }),
     group(['workspace'], { id: 'grp-main' }),
     split(
       'column',
-      [
-        split(
-          'row',
-          [group(['review'], { id: 'grp-review' }), group(['files'], { id: 'grp-files' })],
-          [1, 1.2],
-          'spl-rail'
-        ),
-        group(['terminal'], { id: 'grp-terminal' })
-      ],
+      [group(['review'], { id: 'grp-review' }), group(['terminal'], { id: 'grp-terminal' })],
       [1.6, 1],
       'spl-right'
     )
   ],
-  [1, 3.4, 1.25],
+  [1, 3.4, 1.05],
   'spl-root'
 )
 
-const FOCUS_TREE = split('row', [group(['sessions']), group(['workspace', 'files', 'review', 'terminal'])], [1, 4.6])
+const FOCUS_TREE = split('row', [group(['sessions', 'files']), group(['workspace', 'review', 'terminal'])], [1, 4.6])
 
 const TERMINAL_TREE = split(
   'column',
   [
-    split('row', [group(['sessions']), group(['workspace']), group(['files', 'review'])], [1, 3.2, 1.2]),
+    split('row', [group(['sessions', 'files']), group(['workspace']), group(['review'])], [1, 3.2, 1.2]),
     group(['terminal'])
   ],
   [3, 1]
@@ -540,11 +533,10 @@ $panesFlipped.listen(flipped => {
   }
 })
 
-// POSITIONAL side toggles (titlebar buttons, ⌘B / ⌘J): $sidebarOpen ≙ the
-// LEFT side of the main zone, $fileBrowserOpen ≙ the RIGHT — everything on
-// that side hides together, whatever panes have been rearranged there.
+// The left side is fixed to app navigation: sessions + file tree. File tree
+// visibility is pane-owned below; the side toggle collapses the whole left
+// navigation panel together.
 bindTreeSideVisibility('left', $sidebarOpen, setSidebarOpen)
-bindTreeSideVisibility('right', $fileBrowserOpen, setFileBrowserOpen)
 
 // Workspace-scoped surfaces: the file tree and git diff only mean something
 // inside a project. A detached chat (no cwd) hides them — their zones
@@ -694,9 +686,7 @@ registry.register(
 registerPaneCloser('sessions', () =>
   paneRootSide('sessions') === 'left' ? setSidebarOpen(false) : dismissTreePane('sessions')
 )
-registerPaneCloser('files', () =>
-  paneRootSide('files') === 'right' ? setFileBrowserOpen(false) : dismissTreePane('files')
-)
+registerPaneCloser('files', () => setFileBrowserOpen(false))
 
 // ---------------------------------------------------------------------------
 

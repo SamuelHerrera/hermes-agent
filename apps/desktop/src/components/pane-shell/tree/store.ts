@@ -1189,12 +1189,12 @@ export function declareDefaultTree(tree: LayoutNode) {
   const current = $layoutTree.get()
 
   if (!current) {
-    $layoutTree.set(tree)
+    $layoutTree.set(enforceFixedLeftPanel(tree))
 
     return
   }
 
-  const next = adoptMissingPanes(current, tree)
+  const next = enforceFixedLeftPanel(adoptMissingPanes(current, tree))
 
   if (next !== current) {
     commit(next)
@@ -1222,6 +1222,78 @@ interface PaneDockHint {
   pos: DropPosition
   /** Center docks: stack BEFORE this pane id (the strip divider's slot). */
   before?: null | string
+}
+
+const FIXED_LEFT_PANEL_PANES = new Set(['sessions', 'files'])
+
+function fixedLeftPanelOwns(group: GroupNode | null): boolean {
+  return Boolean(group?.panes.some(paneId => FIXED_LEFT_PANEL_PANES.has(paneId)))
+}
+
+function panePlacement(paneId: string): string | undefined {
+  return (registry.getArea('panes').find(c => c.id === paneId)?.data as { placement?: string } | undefined)?.placement
+}
+
+function redirectFromFixedLeftPanel(
+  tree: LayoutNode,
+  paneId: string,
+  target: { groupId: string; pos: DropPosition; before?: null | string }
+): { groupId: string; pos: DropPosition; before?: null | string } {
+  const targetGroup = findGroup(tree, target.groupId)
+
+  if (!fixedLeftPanelOwns(targetGroup) || FIXED_LEFT_PANEL_PANES.has(paneId)) {
+    return target
+  }
+
+  const workspaceGroup = findGroupOfPane(tree, 'workspace')
+
+  if (!workspaceGroup) {
+    return target
+  }
+
+  return panePlacement(paneId) === 'main'
+    ? { groupId: workspaceGroup.id, pos: 'center' }
+    : { groupId: workspaceGroup.id, pos: 'right' }
+}
+
+function enforceFixedLeftPanel(tree: LayoutNode): LayoutNode {
+  let next = tree
+  const hasSessions = allPaneIds(next).includes('sessions')
+  const hasFiles = allPaneIds(next).includes('files')
+
+  if (hasSessions && hasFiles) {
+    const sessionsGroup = findGroupOfPane(next, 'sessions')
+    const filesGroup = findGroupOfPane(next, 'files')
+
+    if (sessionsGroup && filesGroup && sessionsGroup.id !== filesGroup.id) {
+      const withoutFiles = removePane(next, 'files')
+      const target = withoutFiles ? findGroupOfPane(withoutFiles, 'sessions') : null
+
+      if (withoutFiles && target) {
+        next = insertAtGroup(withoutFiles, target.id, 'files', 'center', null, false) ?? withoutFiles
+      }
+    }
+  }
+
+  const leftGroup = findGroupOfPane(next, 'sessions')
+  const extras = leftGroup?.panes.filter(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? []
+
+  for (const paneId of extras) {
+    const withoutPane = removePane(next, paneId)
+    const workspaceGroup = withoutPane ? findGroupOfPane(withoutPane, 'workspace') : null
+
+    if (!withoutPane || !workspaceGroup) {
+      continue
+    }
+
+    const target = panePlacement(paneId) === 'main'
+      ? { groupId: workspaceGroup.id, pos: 'center' as const }
+      : { groupId: workspaceGroup.id, pos: 'right' as const }
+
+    next = insertAtGroup(withoutPane, target.groupId, paneId, target.pos, undefined, false) ?? withoutPane
+  }
+
+  return next
 }
 
 function adoptContributedPanes(): void {
@@ -1268,21 +1340,27 @@ function adoptContributedPanes(): void {
     const target = findGroupOfPane(next, anchor ?? '')?.id
 
     if (target) {
+      const redirected = redirectFromFixedLeftPanel(next, pane.id, {
+        before: dock?.before,
+        groupId: target,
+        pos: dock?.pos ?? 'center'
+      })
+
       // Whether the DESTINATION zone's header was explicitly hidden, read
       // BEFORE the insert — `insertAtGroup` pins `headerHidden: false` on a
       // center drop (a stack you can't see is a trap), which is right for a
       // drag but wrong for adoption into a zone whose bar the user hid.
-      const hostHeaderHidden = findGroup(next, target)?.headerHidden === true
+      const hostHeaderHidden = findGroup(next, redirected.groupId)?.headerHidden === true
 
       // Silent adoption: don't front over the zone's active tab — a reveal
       // does. An edge dock re-takes the share the pane held when it closed.
       next =
         insertAtGroup(
           next,
-          target,
+          redirected.groupId,
           pane.id,
-          dock?.pos ?? 'center',
-          dock?.before,
+          redirected.pos,
+          redirected.before,
           false,
           recalledEdgeWeights(pane.id)
         ) ?? next
@@ -1319,8 +1397,10 @@ function commit(next: LayoutNode | null) {
     return
   }
 
-  $layoutTree.set(next)
-  persist(next)
+  const normalized = enforceFixedLeftPanel(next)
+
+  $layoutTree.set(normalized)
+  persist(normalized)
 }
 
 // ---------------------------------------------------------------------------
@@ -1394,9 +1474,11 @@ export function dockPaneBeside(paneId: string, anchorPaneId: string) {
     setDismissed(paneId, false)
   }
 
+  const target = redirectFromFixedLeftPanel(tree, paneId, { groupId: anchor.id, pos })
+
   const next = findGroupOfPane(tree, paneId)
-    ? movePaneOp(tree, paneId, { groupId: anchor.id, pos })
-    : insertAtGroup(tree, anchor.id, paneId, pos, undefined, true, recalledEdgeWeights(paneId))
+    ? movePaneOp(tree, paneId, target)
+    : insertAtGroup(tree, target.groupId, paneId, target.pos, target.before, true, recalledEdgeWeights(paneId))
 
   if (next && next !== tree) {
     commit(next)
@@ -1410,7 +1492,7 @@ export function moveTreePane(paneId: string, target: { groupId: string; pos: Dro
     return
   }
 
-  const next = movePaneOp(tree, paneId, target)
+  const next = movePaneOp(tree, paneId, redirectFromFixedLeftPanel(tree, paneId, target))
 
   // movePane returns the SAME root for no-op drops ("stays here") — only a
   // real move customizes the preset or pins the pane as user-placed.
@@ -1471,7 +1553,14 @@ export function moveTreePanes(
     return
   }
 
-  const next = movePanesOp(tree, paneIds, target, activeId)
+  const next = movePanesOp(
+    tree,
+    paneIds,
+    paneIds.some(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId))
+      ? redirectFromFixedLeftPanel(tree, paneIds.find(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? paneIds[0], target)
+      : target,
+    activeId
+  )
 
   if (next !== tree) {
     commit(next)

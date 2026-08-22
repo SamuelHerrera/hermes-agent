@@ -6,23 +6,45 @@ import { hudTargetSessionId } from '@/app/hud/handoff'
 import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Codicon } from '@/components/ui/codicon'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { ProfileGlyph } from '@/components/ui/profile-glyph'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { ContribRender } from '@/contrib/react/boundary'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
+import { resolveProfileColor } from '@/lib/profile-color'
 import { cn } from '@/lib/utils'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import {
-  $fileBrowserOpen,
   $sidebarOpen,
-  toggleFileBrowserOpen,
-  togglePanesFlipped,
   toggleSidebarOpen
 } from '@/store/layout'
+import {
+  $activeGatewayProfile,
+  $profileColors,
+  $profileOrder,
+  $profiles,
+  $showAllProfiles,
+  ALL_PROFILES,
+  normalizeProfileKey,
+  refreshActiveProfile,
+  selectProfile,
+  setShowAllProfiles,
+  sortByProfileOrder
+} from '@/store/profile'
 import { openRouteTile } from '@/store/route-tiles'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
+import type { ProfileInfo } from '@/types/hermes'
 
 import {
   appViewForPath,
@@ -117,6 +139,123 @@ function useModifierHeld(): boolean {
   return held
 }
 
+function orderedProfiles(profiles: ProfileInfo[], order: string[]): ProfileInfo[] {
+  const defaultProfile = profiles.find(profile => profile.is_default)
+  const namedProfiles = sortByProfileOrder(profiles.filter(profile => !profile.is_default), order)
+
+  return defaultProfile ? [defaultProfile, ...namedProfiles] : namedProfiles
+}
+
+function profileDisplayName(profile: ProfileInfo | undefined, activeKey: string): string {
+  if (profile) {
+    return profile.name
+  }
+
+  return activeKey || 'default'
+}
+
+/** Compact titlebar profile switcher: active profile image + dropdown list.
+ *  Profile creation/import stay out of this chrome by design. */
+function TitlebarProfileMenu() {
+  const { t } = useI18n()
+  const p = t.profiles
+  const profiles = useStore($profiles)
+  const order = useStore($profileOrder)
+  const colors = useStore($profileColors)
+  const gatewayProfile = useStore($activeGatewayProfile)
+  const showAllProfiles = useStore($showAllProfiles)
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    void refreshActiveProfile()
+  }, [])
+
+  const activeKey = normalizeProfileKey(gatewayProfile)
+  const rows = orderedProfiles(profiles, order)
+  const activeProfile = rows.find(profile => normalizeProfileKey(profile.name) === activeKey) ?? rows.find(profile => profile.is_default)
+  const activeName = profileDisplayName(activeProfile, activeKey)
+  const activeColor = activeProfile?.is_default ? null : resolveProfileColor(activeName, colors)
+  const triggerLabel = showAllProfiles ? p.allProfiles : p.switchToProfile(activeName)
+  const currentScope = showAllProfiles ? ALL_PROFILES : activeKey
+
+  return (
+    <DropdownMenu
+      onOpenChange={next => {
+        setOpen(next)
+
+        if (next) {
+          void refreshActiveProfile()
+        }
+      }}
+      open={open}
+    >
+      <Tip label={triggerLabel}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label={p.title}
+            className={cn(
+              titlebarButtonClass,
+              'w-auto gap-1 bg-transparent px-1.5 select-none data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground'
+            )}
+            onPointerDown={event => event.stopPropagation()}
+            size="icon-titlebar"
+            type="button"
+            variant="ghost"
+          >
+            <ProfileGlyph
+              aria-hidden="true"
+              className="size-3.5"
+              color={activeColor}
+              isDefault={activeProfile?.is_default ?? activeKey === 'default'}
+              name={activeName}
+            />
+            <Codicon className="text-(--ui-text-tertiary)" name="chevron-down" size="0.625rem" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tip>
+      <DropdownMenuContent align="start" className="min-w-44">
+        <DropdownMenuLabel>{p.title}</DropdownMenuLabel>
+        {rows.length > 1 && (
+          <>
+            <DropdownMenuCheckboxItem checked={currentScope === ALL_PROFILES} onSelect={() => setShowAllProfiles(true)}>
+              <Codicon className="text-(--ui-text-tertiary)" name="layers" size="0.8125rem" />
+              <span className="truncate">{p.allProfiles}</span>
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        {rows.length === 0 ? (
+          <DropdownMenuItem disabled>
+            <ProfileGlyph aria-hidden="true" color={null} isDefault name="default" />
+            <span className="truncate">default</span>
+          </DropdownMenuItem>
+        ) : (
+          rows.map(profile => {
+            const key = normalizeProfileKey(profile.name)
+            const selected = currentScope === key
+
+            return (
+              <DropdownMenuCheckboxItem
+                checked={selected}
+                key={profile.name}
+                onSelect={() => selectProfile(profile.name)}
+              >
+                <ProfileGlyph
+                  aria-hidden="true"
+                  color={profile.is_default ? null : resolveProfileColor(profile.name, colors)}
+                  isDefault={profile.is_default}
+                  name={profile.name}
+                />
+                <span className="truncate">{profile.name}</span>
+              </DropdownMenuCheckboxItem>
+            )
+          })
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function TitlebarControls({
   codexUsage,
   codexUsageState = 'unavailable',
@@ -131,7 +270,6 @@ export function TitlebarControls({
   const location = useLocation()
   const modHeld = useModifierHeld()
   const hapticsMuted = useStore($hapticsMuted)
-  const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
 
@@ -147,13 +285,8 @@ export function TitlebarControls({
     }
   }
 
-  // POSITIONAL toggles: each button shows/hides everything on its physical
-  // side of the main zone (the layout tree collapses the whole side), so they
-  // stay correct through flips and rearranges. $sidebarOpen ≙ left side,
-  // $fileBrowserOpen ≙ right side. Never an active highlight — plain
-  // show/hide affordances.
+  // The left chrome toggle owns the fixed sessions/files panel.
   const leftEdge = { open: sidebarOpen, toggle: toggleSidebarOpen }
-  const rightEdge = { open: fileBrowserOpen, toggle: toggleFileBrowserOpen }
 
   const leftToolbarTools: TitlebarTool[] = [
     {
@@ -164,16 +297,6 @@ export function TitlebarControls({
       onSelect: () => {
         triggerHaptic('tap')
         leftEdge.toggle()
-      }
-    },
-    {
-      actionId: 'view.flipPanes',
-      icon: <TitlebarIcon name="arrow-swap" />,
-      id: 'flip-panes',
-      label: t.titlebar.swapSidebarSides,
-      onSelect: () => {
-        triggerHaptic('tap')
-        togglePanesFlipped()
       }
     },
     ...leftTools
@@ -207,17 +330,6 @@ export function TitlebarControls({
       onSelect: () => openRouteTile(ARTIFACTS_ROUTE, 'center')
     }
   ]
-
-  const rightSidebarTool: TitlebarTool = {
-    actionId: 'view.toggleRightSidebar',
-    icon: <TitlebarIcon name="layout-sidebar-right" />,
-    id: 'right-sidebar',
-    label: rightEdge.open ? t.titlebar.hideRightSidebar : t.titlebar.showRightSidebar,
-    onSelect: () => {
-      triggerHaptic('tap')
-      rightEdge.toggle()
-    }
-  }
 
   // Static system tools — always pinned to the screen's right edge.
   const systemTools: TitlebarTool[] = [
@@ -304,6 +416,7 @@ export function TitlebarControls({
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
+        <TitlebarProfileMenu />
       </div>
 
       {/*
@@ -342,7 +455,6 @@ export function TitlebarControls({
         {visibleSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
-        <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
       </div>
     </>
   )
