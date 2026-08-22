@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { atom } from 'nanostores'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { SessionActionsMenu } from './session-actions-menu'
+import { SessionActionsMenu, SessionContextMenu } from './session-actions-menu'
 
 afterEach(cleanup)
 
@@ -97,6 +97,14 @@ function renderMenu() {
   )
 }
 
+function renderContextMenu() {
+  return render(
+    <SessionContextMenu onArchive={vi.fn()} sessionId="s1" title="My session">
+      <div data-testid="session-row">My session</div>
+    </SessionContextMenu>
+  )
+}
+
 describe('SessionActionsMenu', () => {
   it('opens the dropdown on click without a tooltip on the kebab', async () => {
     renderMenu()
@@ -114,6 +122,15 @@ describe('SessionActionsMenu', () => {
 
     expect(await screen.findByRole('menu')).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /rename/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /archive/i })).toBeTruthy()
+  })
+
+  it('keeps archive available from the right-click context menu', async () => {
+    renderContextMenu()
+
+    fireEvent.contextMenu(screen.getByTestId('session-row'))
+
+    expect(await screen.findByRole('menu')).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /archive/i })).toBeTruthy()
   })
 

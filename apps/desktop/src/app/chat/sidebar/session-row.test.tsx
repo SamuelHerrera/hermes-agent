@@ -8,6 +8,7 @@ import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
 import type * as Time from '@/lib/time'
 import type * as ComposerStatusStore from '@/store/composer-status'
+import { $sidebarRowMeta } from '@/store/layout'
 import { setSessions } from '@/store/session'
 import type * as SessionStore from '@/store/session'
 import { setSessionColorOverride } from '@/store/session-color'
@@ -17,7 +18,12 @@ import type * as WindowsStore from '@/store/windows'
 
 import { SidebarSessionRow } from './session-row'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  act(() => {
+    $sidebarRowMeta.set(['preview', 'updated'])
+  })
+})
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -26,6 +32,7 @@ vi.mock('@/i18n', () => ({
         row: {
           ageMin: 'm',
           ageNow: 'now',
+          archive: 'Archive',
           backgroundRunning: 'Running in background',
           finishedUnread: 'Finished',
           handoffOrigin: (platform: string) => `Started on ${platform}`,
@@ -151,6 +158,45 @@ const handoffAvatar = (container: HTMLElement) =>
   container.querySelector<HTMLElement>('span[aria-hidden="true"].inline-grid')
 
 const noop = vi.fn()
+
+describe('SidebarSessionRow compact layout', () => {
+  it('keeps title and leading icon on the first line and moves tokens/age to a metadata line', () => {
+    act(() => {
+      $sidebarRowMeta.set(['tokens', 'updated'])
+    })
+
+    const { container } = renderRow(
+      makeSession({ input_tokens: 1_200, last_active: 1_000, output_tokens: 300, started_at: 1_000, title: 'Two line chat' })
+    )
+
+    const title = screen.getByText('Two line chat')
+    const tokenMeta = screen.getByText('1.5k')
+    const ageMeta = screen.getByText('5m')
+    const primaryLine = title.closest('[data-session-row-primary]')
+    const metadataLine = tokenMeta.closest('[data-session-row-meta]')
+
+    expect(primaryLine).toBeTruthy()
+    expect(metadataLine).toBeTruthy()
+    expect(primaryLine).not.toBe(metadataLine)
+    expect(metadataLine?.contains(ageMeta)).toBe(true)
+    expect(container.querySelector('[data-session-project-dot]')).toBeTruthy()
+  })
+
+  it('shows archive and session menu as visible row buttons without removing the context menu actions', () => {
+    const { container } = renderRow(makeSession({ title: 'Action row' }))
+
+    const archive = screen.getByRole('button', { name: 'Archive' })
+    const menu = screen.getByRole('button', { name: 'Session actions' })
+
+    const actions = container.querySelector('[data-row-actions]')
+
+    expect(archive).toBeTruthy()
+    expect(menu).toBeTruthy()
+    expect(menu.className).not.toContain('text-transparent')
+    expect(actions?.contains(archive)).toBe(true)
+    expect(actions?.contains(menu)).toBe(true)
+  })
+})
 
 const renderRow = (session: SessionInfo) => {
   act(() => {

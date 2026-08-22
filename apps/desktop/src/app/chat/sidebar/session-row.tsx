@@ -103,13 +103,6 @@ function disarmMarquee(event: React.PointerEvent<HTMLElement>) {
   delete event.currentTarget.dataset.marquee
 }
 
-// The last thing in the trailing slot hands its place to the ⋯ button on hover,
-// and is never narrower than the button that has to cover it. A PR chip is the
-// exception while the pointer is on it: it's a link, and the kebab sits
-// absolute over this space, so it has to stop taking clicks too, not just fade.
-const TAIL_HIDES = 'min-w-5 transition-opacity group-hover:opacity-0 group-has-[[data-pr-link]:hover]:opacity-100'
-const KEBAB_YIELDS = 'group-has-[[data-pr-link]:hover]:pointer-events-none group-has-[[data-pr-link]:hover]:opacity-0'
-
 function formatAge(seconds: number, r: Translations['sidebar']['row']): string {
   const { unit, value } = coarseElapsed(Date.now() - seconds * 1000)
 
@@ -168,8 +161,9 @@ function SidebarSessionRowImpl({
   const totalTokens = session.input_tokens + session.output_tokens
   const cost = sessionCostUsd(session)
 
-  // Tokens, cost and age share one figure rather than each claiming a column:
-  // several switched on read as one number, not as a widening gutter.
+  // Tokens, cost and age now live in a real metadata line instead of fighting
+  // the title for the row's only line. Identity chips ride that same line so
+  // the top row can stay: leading icon, title, then right-side action buttons.
   const figures = [
     rowMeta.includes('tokens') && totalTokens > 0 ? compactNumber(totalTokens) : null,
     // Sub-cent spend rounds to "$0.00", which reads as a bug rather than as a
@@ -177,62 +171,53 @@ function SidebarSessionRowImpl({
     rowMeta.includes('cost') && cost >= 0.01 ? `$${cost.toFixed(2)}` : null
   ].filter(Boolean) as string[]
 
-  // Everything the Show menu puts after the title shares ONE right-aligned
-  // slot, in reading order: identity chips, then the figures. The kebab covers
-  // the END of that slot on hover, so only the last thing in it steps aside —
-  // with tokens and age both on you lose the age and keep the number you
-  // switched on, and a PR keeps its place (and its click) unless it IS the last
-  // thing. Chips used to render in the body instead, which left them stranded
-  // to the left of the kebab's own column: never flush right, never swapping.
-  const trailing: { key: string; node: React.ReactNode }[] = []
+  const showAge = pinnedAge || card
+  const metadata: { key: string; node: React.ReactNode }[] = []
 
   if ((showProfile || pinnedProfile) && hasProfileTag) {
-    trailing.push({ key: 'profile', node: <ProfileTag profile={session.profile} /> })
+    metadata.push({ key: 'profile', node: <ProfileTag profile={session.profile} /> })
   }
 
   if (pr) {
-    trailing.push({ key: 'pr', node: <PrTag pr={pr} /> })
+    metadata.push({ key: 'pr', node: <PrTag pr={pr} /> })
   }
 
-  const showAge = pinnedAge || card
+  figures.forEach((figure, index) => {
+    metadata.push({ key: `figure-${index}`, node: <span className="whitespace-nowrap tabular-nums">{figure}</span> })
+  })
 
-  if (figures.length || showAge) {
-    // The card's meta lines separate by spacing alone, so its header figures
-    // match (non-breaking pair — plain spaces collapse to one); the one-line
-    // row keeps the interpunct between joined figures.
-    const sep = card ? '\u00A0\u00A0' : ' · '
-    const head = (showAge ? figures : figures.slice(0, -1)).join(sep)
-
-    trailing.push({
-      key: 'figures',
+  if (showAge) {
+    metadata.push({
+      key: 'age',
       node: (
-        <span className="pointer-events-none whitespace-nowrap text-[0.625rem] leading-none text-(--ui-text-tertiary)">
-          {head}
-          {/* The figures own their tail: the separator goes with it. */}
-          <span className={cn('inline-block text-right', TAIL_HIDES)}>
-            {head && sep}
-            {showAge ? (
-              <Tip label={absoluteAge} side="top">
-                <time
-                  aria-label={`${age}, ${absoluteAge}`}
-                  className="pointer-events-auto focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring"
-                  dateTime={timestampDate.toISOString()}
-                  tabIndex={0}
-                >
-                  {age}
-                </time>
-              </Tip>
-            ) : (
-              figures.at(-1)
-            )}
-          </span>
-        </span>
+        <Tip label={absoluteAge} side="top">
+          <time
+            aria-label={`${age}, ${absoluteAge}`}
+            className="pointer-events-auto whitespace-nowrap tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring"
+            dateTime={timestampDate.toISOString()}
+            tabIndex={0}
+          >
+            {age}
+          </time>
+        </Tip>
       )
     })
   }
 
-  // A chip that ends the slot hides whole; the figures handle their own tail.
-  const chipEndsSlot = trailing.length > 0 && !figures.length && !showAge
+  const metadataNode =
+    metadata.length > 0 ? (
+      <span
+        className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[0.625rem] leading-none text-(--ui-text-tertiary)"
+        data-session-row-meta
+      >
+        {metadata.map(({ key, node }) => (
+          <span className="min-w-0 shrink-0" key={key}>
+            {node}
+          </span>
+        ))}
+      </span>
+    ) : null
+
   // A handed-off session's live source is local, but it originated on a
   // messaging platform — surface that origin as a small badge so e.g. a
   // Telegram thread continued here still reads as Telegram.
@@ -299,16 +284,25 @@ function SidebarSessionRowImpl({
         </button>
       ) : null}
       {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
-      {trailing.map(({ key, node }, index) => (
-        <span
-          className={
-            chipEndsSlot && index === trailing.length - 1 ? cn('inline-flex justify-end', TAIL_HIDES) : undefined
-          }
-          key={key}
+      {card && metadataNode ? <span className="min-w-0 max-w-24">{metadataNode}</span> : null}
+      {!session.archived ? (
+        <Button
+          aria-label={r.archive}
+          className="size-5 rounded-[4px] bg-transparent text-(--ui-text-tertiary) transition-colors duration-100 hover:bg-(--ui-control-active-background) hover:text-foreground focus-visible:bg-(--ui-control-active-background) focus-visible:text-foreground focus-visible:ring-0 [&_svg]:size-3.5!"
+          onClick={event => {
+            event.preventDefault()
+            event.stopPropagation()
+            triggerHaptic('selection')
+            onArchive()
+          }}
+          onPointerDown={event => event.stopPropagation()}
+          size="icon"
+          type="button"
+          variant="ghost"
         >
-          {node}
-        </span>
-      ))}
+          <Codicon name="archive" size="0.875rem" />
+        </Button>
+      ) : null}
       <SessionActionsMenu
         onArchive={onArchive}
         onBranch={onBranch}
@@ -321,12 +315,10 @@ function SidebarSessionRowImpl({
       >
         <Button
           aria-label={r.sessionActions}
-          className={cn(
-            'size-5 rounded-[4px] bg-transparent text-transparent transition-colors duration-100 hover:bg-(--ui-control-active-background) hover:text-foreground focus-visible:bg-(--ui-control-active-background) focus-visible:text-foreground focus-visible:ring-0 data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground group-hover:text-(--ui-text-tertiary) [&_svg]:size-3.5!',
-            trailing.length > 0 && 'absolute right-0',
-            pr && KEBAB_YIELDS
-          )}
+          className="size-5 rounded-[4px] bg-transparent text-(--ui-text-tertiary) transition-colors duration-100 hover:bg-(--ui-control-active-background) hover:text-foreground focus-visible:bg-(--ui-control-active-background) focus-visible:text-foreground focus-visible:ring-0 data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground [&_svg]:size-3.5!"
+          onClick={event => event.stopPropagation()}
           size="icon"
+          type="button"
           variant="ghost"
         >
           <Codicon name="kebab-vertical" size="0.875rem" />
@@ -348,6 +340,7 @@ function SidebarSessionRowImpl({
     >
       <SidebarRowShell
         actions={card ? undefined : actionsNode}
+        actionsClassName={card ? undefined : 'self-start pt-1 pr-1'}
         className={cn(
           'group row-hover relative',
           card && SIDEBAR_ROW_CARD_MIN_H,
@@ -397,10 +390,9 @@ function SidebarSessionRowImpl({
           className={cn(
             'z-0 pr-2',
             branchStem && 'pl-3.5',
-            // The card is a grid with ONE spacing knob: --card-gap. Every row
-            // gap is gap-y-(--card-gap); the title/preview group opts out
-            // with its own tighter internal flex gap.
-            card && 'flex-col items-stretch justify-center py-1.5 [--card-gap:0.6rem] gap-(--card-gap)'
+            card
+              ? 'flex-col items-stretch justify-center py-1.5 [--card-gap:0.6rem] gap-(--card-gap)'
+              : 'flex-col items-stretch justify-center gap-1 py-1',
           )}
           // Middle-click = open in a new tab (browser muscle memory).
           {...middleClickHandlers(() => {
@@ -481,18 +473,23 @@ function SidebarSessionRowImpl({
             if (!card) {
               return (
                 <>
-                  {leadNode}
-                  {handoffBadge}
-                  <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
-                  <OverflowTip label={title}>
-                    <SidebarRowLabel
-                      className="hover-marquee flex-1 font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90"
-                      onPointerEnter={armMarquee}
-                      onPointerLeave={disarmMarquee}
-                    >
-                      <span className="hover-marquee-inner">{title}</span>
-                    </SidebarRowLabel>
-                  </OverflowTip>
+                  <div className="flex min-w-0 items-center gap-1.5" data-session-row-primary>
+                    {leadNode}
+                    {handoffBadge}
+                    <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
+                    <OverflowTip label={title}>
+                      <SidebarRowLabel
+                        className="hover-marquee flex-1 font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90"
+                        onPointerEnter={armMarquee}
+                        onPointerLeave={disarmMarquee}
+                      >
+                        <span className="hover-marquee-inner">{title}</span>
+                      </SidebarRowLabel>
+                    </OverflowTip>
+                  </div>
+                  {metadataNode ? (
+                    <div className={cn('flex min-w-0 pl-5', branchStem && 'pl-8')}>{metadataNode}</div>
+                  ) : null}
                 </>
               )
             }
