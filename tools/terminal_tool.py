@@ -974,6 +974,173 @@ def _rewrite_compound_background(command: str) -> str:
     return result
 
 
+def _scoped_secret_or_env(name: str) -> str | None:
+    """Read a process/profile-scoped secret env var without raising on scope gaps."""
+    try:
+        from agent.secret_scope import UnscopedSecretError, get_secret
+
+        try:
+            return get_secret(name)
+        except UnscopedSecretError:
+            return os.environ.get(name)
+    except Exception:
+        return os.environ.get(name)
+
+
+def _read_sudo_password_file(path_value: str | None) -> str | None:
+    """Read a sudo password from an operator-configured file path.
+
+    The value is used only as subprocess stdin by _transform_sudo_command; it is
+    never embedded in the shell command string or returned in tool output.
+    """
+    if path_value is None:
+        return None
+    raw_path = str(path_value).strip()
+    if not raw_path:
+        return None
+    try:
+        path = Path(os.path.expandvars(os.path.expanduser(raw_path)))
+        return path.read_text(encoding="utf-8").rstrip("\r\n")
+    except Exception:
+        return None
+
+
+_SSH_OPTIONS_WITH_ARGUMENT = frozenset({
+    "-B", "-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J",
+    "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w",
+})
+
+
+def _ssh_option_consumes_next(token: str) -> bool:
+    if token in _SSH_OPTIONS_WITH_ARGUMENT:
+        return True
+    # Common attached forms, e.g. -p22, -i~/.ssh/id, -oBatchMode=yes.
+    if len(token) > 2 and token[:2] in _SSH_OPTIONS_WITH_ARGUMENT:
+        return False
+    return False
+
+
+def _normalize_ssh_target_host(target: str | None) -> str | None:
+    if not target:
+        return None
+    host = target.strip()
+    if not host:
+        return None
+    if "@" in host:
+        host = host.rsplit("@", 1)[1]
+    if host.startswith("[") and "]" in host:
+        host = host[1:host.index("]")]
+    elif ":" in host:
+        # scp-style suffixes are unusual for ssh but harmless to normalize.
+        host = host.split(":", 1)[0]
+    return host.strip() or None
+
+
+def _ssh_target_index(tokens: list[str], ssh_index: int) -> int | None:
+    j = ssh_index + 1
+    while j < len(tokens):
+        current = tokens[j]
+        if current == "--":
+            j += 1
+            return j if j < len(tokens) else None
+        if current.startswith("-"):
+            j += 2 if _ssh_option_consumes_next(current) else 1
+            continue
+        return j
+    return None
+
+
+def _extract_ssh_target_host(command: str) -> str | None:
+    """Return the first host targeted by an ssh command inside *command*.
+
+    This intentionally recognizes the common local-shell pattern Samuel uses:
+    ``ssh hp 'sudo ...'``.  It is conservative: if parsing fails or no ssh
+    target is obvious, callers fall back to local/default password-file keys.
+    """
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    for i, token in enumerate(tokens):
+        if Path(token).name != "ssh":
+            continue
+        target_index = _ssh_target_index(tokens, i)
+        if target_index is not None:
+            return _normalize_ssh_target_host(tokens[target_index])
+    return None
+
+
+def _rewrite_ssh_remote_sudo_invocations(command: str) -> tuple[str, int]:
+    """Rewrite sudo inside a simple ``ssh host 'sudo ...'`` remote command."""
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return command, 0
+    if not tokens or Path(tokens[0]).name != "ssh":
+        return command, 0
+    target_index = _ssh_target_index(tokens, 0)
+    if target_index is None or target_index + 1 >= len(tokens):
+        return command, 0
+    # Keep this helper intentionally narrow: if the local shell command uses
+    # chaining/pipes around ssh, leave it to the existing local sudo scanner.
+    if any(tok in {"&&", "||", ";", "|"} for tok in tokens[target_index + 1:]):
+        return command, 0
+    remote_command = " ".join(tokens[target_index + 1:])
+    rewritten_remote, sudo_count = _rewrite_real_sudo_invocations(remote_command)
+    if sudo_count == 0:
+        return command, 0
+    rebuilt = tokens[:target_index + 1] + [rewritten_remote]
+    return " ".join(shlex.quote(tok) for tok in rebuilt), sudo_count
+
+
+def _sudo_password_mapping_hosts(command: str) -> list[str]:
+    hosts: list[str] = []
+    ssh_host = _extract_ssh_target_host(command)
+    if ssh_host:
+        hosts.extend([ssh_host, ssh_host.lower()])
+    elif (os.environ.get("TERMINAL_ENV") or "").strip().lower() == "ssh":
+        configured_host = _normalize_ssh_target_host(os.environ.get("TERMINAL_SSH_HOST"))
+        if configured_host:
+            hosts.extend([configured_host, configured_host.lower()])
+    hosts.extend(["local", "default"])
+    deduped: list[str] = []
+    for host in hosts:
+        if host and host not in deduped:
+            deduped.append(host)
+    return deduped
+
+
+def _configured_sudo_password_for_command(command: str) -> tuple[bool, str | None]:
+    """Resolve sudo credentials from env, password files, or host mappings.
+
+    Returns (has_configured_password, password).  ``has_configured_password`` is
+    true for explicit empty values too, matching the legacy SUDO_PASSWORD
+    behavior that intentionally sends a blank sudo password instead of prompting.
+    """
+    env_password = _scoped_secret_or_env("SUDO_PASSWORD")
+    if env_password is not None:
+        return True, env_password
+
+    files_raw = _scoped_secret_or_env("SUDO_PASSWORD_FILES")
+    if files_raw:
+        try:
+            mapping = json.loads(files_raw)
+        except Exception:
+            mapping = None
+        if isinstance(mapping, dict):
+            for host in _sudo_password_mapping_hosts(command):
+                if host in mapping:
+                    password = _read_sudo_password_file(str(mapping[host]))
+                    if password is not None:
+                        return True, password
+
+    file_password = _read_sudo_password_file(_scoped_secret_or_env("SUDO_PASSWORD_FILE"))
+    if file_password is not None:
+        return True, file_password
+
+    return False, None
+
+
 def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None]:
     """
     Transform sudo commands to use -S flag if SUDO_PASSWORD is available.
@@ -1014,21 +1181,17 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
         return None, None
     transformed, sudo_count = _rewrite_real_sudo_invocations(command)
     if sudo_count == 0:
+        transformed, sudo_count = _rewrite_ssh_remote_sudo_invocations(command)
+    if sudo_count == 0:
         return command, None
 
     # Scope-aware read (Slack pattern): under multiplex the process env may
     # hold another profile's SUDO_PASSWORD, so honor the installed scope's
-    # verdict; unscoped callers keep the legacy os.environ read.
-    try:
-        from agent.secret_scope import UnscopedSecretError, get_secret
-
-        try:
-            _configured_password = get_secret("SUDO_PASSWORD")
-        except UnscopedSecretError:
-            _configured_password = os.environ.get("SUDO_PASSWORD")
-    except Exception:
-        _configured_password = os.environ.get("SUDO_PASSWORD")
-    has_configured_password = _configured_password is not None
+    # verdict; unscoped callers keep the legacy os.environ read.  Operators can
+    # also configure SUDO_PASSWORD_FILE or a JSON SUDO_PASSWORD_FILES host map;
+    # those read secrets from disk inside the tool runtime, never from the LLM's
+    # command text.
+    has_configured_password, _configured_password = _configured_sudo_password_for_command(command)
     sudo_password = (
         _configured_password
         if has_configured_password
@@ -1056,7 +1219,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     if has_configured_password or sudo_password:
         # Trailing newline is required: sudo -S reads one line per invocation.
         # Compound commands (`sudo a && sudo b`) need one password line each.
-        password_line = sudo_password + "\n"
+        password_line = (sudo_password or "") + "\n"
         return transformed, password_line * sudo_count
 
     return command, None

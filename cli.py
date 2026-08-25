@@ -687,6 +687,8 @@ def load_cli_config() -> Dict[str, Any]:
         "persistent_shell": "TERMINAL_PERSISTENT_SHELL",
         # Sudo support (works with all backends)
         "sudo_password": "SUDO_PASSWORD",
+        "sudo_password_file": "SUDO_PASSWORD_FILE",
+        "sudo_password_files": "SUDO_PASSWORD_FILES",
     }
     
     # Bridge config → env vars for terminal_tool. TERMINAL_CWD is force-exported

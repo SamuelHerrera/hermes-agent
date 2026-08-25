@@ -1,5 +1,7 @@
 """Regression tests for sudo detection and sudo password handling."""
 
+import json
+
 import tools.terminal_tool as terminal_tool
 
 
@@ -54,12 +56,75 @@ def test_non_command_argument_named_sudo_does_not_trigger_rewrite(monkeypatch):
 
 def test_actual_sudo_command_uses_configured_password(monkeypatch):
     monkeypatch.setenv("SUDO_PASSWORD", "testpass")
+    monkeypatch.delenv("SUDO_PASSWORD_FILE", raising=False)
+    monkeypatch.delenv("SUDO_PASSWORD_FILES", raising=False)
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
 
     transformed, sudo_stdin = terminal_tool._transform_sudo_command("sudo apt install -y ripgrep")
 
     assert transformed == "sudo -S -p '' apt install -y ripgrep"
     assert sudo_stdin == "testpass\n"
+
+
+def test_sudo_password_file_reads_secret_without_exposing_value(monkeypatch, tmp_path):
+    monkeypatch.delenv("SUDO_PASSWORD", raising=False)
+    monkeypatch.delenv("SUDO_PASSWORD_FILES", raising=False)
+    monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+    password_file = tmp_path / "hp-sudo-password"
+    password_file.write_text("from-file\n")
+    monkeypatch.setenv("SUDO_PASSWORD_FILE", str(password_file))
+
+    transformed, sudo_stdin = terminal_tool._transform_sudo_command("sudo ufw status")
+
+    assert transformed == "sudo -S -p '' ufw status"
+    assert sudo_stdin == "from-file\n"
+
+
+def test_sudo_password_file_empty_path_is_ignored(monkeypatch):
+    monkeypatch.delenv("SUDO_PASSWORD", raising=False)
+    monkeypatch.delenv("SUDO_PASSWORD_FILES", raising=False)
+    monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+    monkeypatch.setenv("SUDO_PASSWORD_FILE", "")
+
+    transformed, sudo_stdin = terminal_tool._transform_sudo_command("sudo ufw status")
+
+    assert transformed == "sudo ufw status"
+    assert sudo_stdin is None
+
+
+def test_sudo_password_files_selects_remote_ssh_host(monkeypatch, tmp_path):
+    monkeypatch.delenv("SUDO_PASSWORD", raising=False)
+    monkeypatch.delenv("SUDO_PASSWORD_FILE", raising=False)
+    monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+    hp_password = tmp_path / "hp-sudo-password"
+    higole_password = tmp_path / "higole-sudo-password"
+    hp_password.write_text("hp-pass\n")
+    higole_password.write_text("higole-pass\n")
+    monkeypatch.setenv(
+        "SUDO_PASSWORD_FILES",
+        json.dumps({"hp": str(hp_password), "higole": str(higole_password)}),
+    )
+
+    _transformed, sudo_stdin = terminal_tool._transform_sudo_command(
+        "ssh -o BatchMode=yes hp 'sudo ufw status'"
+    )
+
+    assert sudo_stdin == "hp-pass\n"
+
+
+def test_sudo_password_files_understands_user_at_host(monkeypatch, tmp_path):
+    monkeypatch.delenv("SUDO_PASSWORD", raising=False)
+    monkeypatch.delenv("SUDO_PASSWORD_FILE", raising=False)
+    monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
+    password_file = tmp_path / "higole-sudo-password"
+    password_file.write_text("higole-pass\n")
+    monkeypatch.setenv("SUDO_PASSWORD_FILES", json.dumps({"higole": str(password_file)}))
+
+    _transformed, sudo_stdin = terminal_tool._transform_sudo_command(
+        "ssh samuel@higole 'sudo systemctl restart docker'"
+    )
+
+    assert sudo_stdin == "higole-pass\n"
 
 
 def test_explicit_empty_sudo_password_tries_empty_without_prompt(monkeypatch):

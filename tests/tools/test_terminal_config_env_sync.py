@@ -322,3 +322,19 @@ def test_docker_forward_env_is_bridged_everywhere():
     assert "docker_forward_env" in _gateway_env_map_keys()
     assert "docker_forward_env" in _save_config_env_sync_keys()
     assert "TERMINAL_DOCKER_FORWARD_ENV" in _terminal_tool_env_var_names()
+
+
+
+def test_sudo_password_file_paths_are_bridged_everywhere():
+    """Operators can point Hermes at sudo-password files without exposing values.
+
+    These are credential *locations*, not TERMINAL_* backend knobs, but they must
+    still bridge on CLI, gateway/desktop, and `hermes config set` paths so AFK
+    fleet automation works consistently after restart.
+    """
+    assert "sudo_password_file" in _cli_env_map_keys()
+    assert "sudo_password_files" in _cli_env_map_keys()
+    assert "sudo_password_file" in _gateway_env_map_keys()
+    assert "sudo_password_files" in _gateway_env_map_keys()
+    assert "sudo_password_file" in _save_config_env_sync_keys()
+    assert "sudo_password_files" in _save_config_env_sync_keys()

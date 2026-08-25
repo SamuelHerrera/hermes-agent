@@ -405,6 +405,13 @@ DEFAULT_CONFIG = {
         # When on, SETUID/SETGID caps are omitted from the container since
         # no privilege drop is needed.
         "docker_run_as_host_user": False,
+        # Sudo automation. Prefer file paths for multi-machine fleets so the
+        # value is read by the tool runtime only when needed and never appears
+        # in command text or model-visible output. `sudo_password_files` maps
+        # SSH host aliases (for example hp/higole) plus optional local/default
+        # keys to local password-file paths.
+        "sudo_password_file": "",
+        "sudo_password_files": {},
         # Persistent shell — keep a long-lived bash shell across execute() calls
         # so cwd/env vars/shell variables survive between commands.
         # Enabled by default for non-local backends (SSH); local is always opt-in
