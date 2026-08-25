@@ -723,6 +723,17 @@ export const ja = defineLocale({
       localTitle: 'ローカルゲートウェイ',
       localDesc:
         'ローカルホストでプライベートな Hermes バックエンドを起動します。これがデフォルトで、オフラインでも動作します。',
+      localServicesTitle: 'Always-on local services',
+      localServicesDesc: (manager, serviceName) =>
+        `Install or manage ${serviceName} with ${manager}. This keeps the local Desktop backend running even when the UI is closed.`,
+      localServicesUnknownManager: 'the OS service manager',
+      installAlwaysOnBackend: 'Install always-on backend',
+      restartBackend: 'Restart backend',
+      restartGateway: 'Restart WhatsApp gateway',
+      localServicesUpdatedTitle: 'Local services updated',
+      localServicesFailed: 'Local service operation failed',
+      localServicesUnavailableTitle: 'Local services unavailable',
+      localServicesUnavailableDesc: 'This Desktop build does not expose local service controls.',
       inheritTitle: 'デフォルトゲートウェイを使用',
       inheritDesc: 'このプロファイルのオーバーライドを削除し、デフォルト接続を使用します。',
       remoteTitle: 'リモートゲートウェイ',

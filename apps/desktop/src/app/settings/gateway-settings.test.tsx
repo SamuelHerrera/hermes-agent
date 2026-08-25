@@ -6,6 +6,10 @@ import type { ProfileInfo } from '@/types/hermes'
 
 const getConnectionConfig = vi.fn()
 const saveConnectionConfig = vi.fn()
+const localServicesStatus = vi.fn()
+const installBackend = vi.fn()
+const restartBackend = vi.fn()
+const restartGateway = vi.fn()
 const profiles = atom<ProfileInfo[]>([])
 
 vi.mock('@/store/profile', () => ({
@@ -47,9 +51,31 @@ beforeEach(() => {
   ])
   getConnectionConfig.mockResolvedValue(localConnection)
   saveConnectionConfig.mockResolvedValue(localConnection)
+  localServicesStatus.mockResolvedValue({
+    descriptor: {
+      installLabel: 'Install always-on local backend',
+      manager: 'launchd',
+      restartLabel: 'Restart local backend',
+      serviceName: 'ai.hermes.serve',
+      supported: true
+    },
+    service: { action: 'status-local-backend', manager: 'launchd', message: 'running', ok: true, serviceName: 'ai.hermes.serve' }
+  })
+  installBackend.mockResolvedValue({ action: 'install-local-backend', message: 'installed', ok: true })
+  restartBackend.mockResolvedValue({ action: 'restart-local-backend', message: 'restarted backend', ok: true })
+  restartGateway.mockResolvedValue({ action: 'restart-gateway', message: 'restarted gateway', ok: true })
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
-    value: { getConnectionConfig, saveConnectionConfig }
+    value: {
+      getConnectionConfig,
+      localServices: {
+        installBackend,
+        restartBackend,
+        restartGateway,
+        status: localServicesStatus
+      },
+      saveConnectionConfig
+    }
   })
 })
 
@@ -76,6 +102,20 @@ describe('GatewaySettings', () => {
     expect(
       screen.queryByText('Start a private Hermes backend on localhost. This is the default and works offline.')
     ).toBeNull()
+  })
+
+  it('shows and wires local always-on service controls in local mode', async () => {
+    const { GatewaySettings } = await import('./gateway-settings')
+
+    render(<GatewaySettings />)
+
+    expect(await screen.findByRole('button', { name: 'Restart backend' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restart WhatsApp gateway' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Install always-on backend' })).toBeTruthy()
+    expect(screen.getByText('Always-on local services')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart backend' }))
+    await waitFor(() => expect(restartBackend).toHaveBeenCalled())
   })
 
   it('shows and clears an SSH remote-profile mapping for a named Desktop profile', async () => {

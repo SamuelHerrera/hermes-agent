@@ -123,6 +123,12 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   saveConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:save', payload),
   applyConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:apply', payload),
   testConnectionConfig: payload => ipcRenderer.invoke('hermes:connection-config:test', payload),
+  localServices: {
+    status: () => ipcRenderer.invoke('hermes:local-services:status'),
+    installBackend: () => ipcRenderer.invoke('hermes:local-services:install-backend'),
+    restartBackend: () => ipcRenderer.invoke('hermes:local-services:restart-backend'),
+    restartGateway: () => ipcRenderer.invoke('hermes:local-services:restart-gateway')
+  },
   sshConfigHosts: () => ipcRenderer.invoke('hermes:ssh-config:hosts'),
   sshResolveHost: host => ipcRenderer.invoke('hermes:ssh-config:resolve', host),
   probeConnectionConfig: remoteUrl => ipcRenderer.invoke('hermes:connection-config:probe', remoteUrl),

@@ -60,3 +60,14 @@ test('quitPromptFor speaks singular for one chat', () => {
   assert.equal(prompt.message, 'Hermes is still working on 1 chat.')
   assert.ok(prompt.detail.includes('mid-turn'))
 })
+
+test('quitPromptFor offers detach copy when backend can survive the UI quit', () => {
+  const prompt = quitPromptFor({ count: 1, titles: ['Long review'] }, false, { canDetach: true })
+
+  assert.ok(prompt)
+  assert.equal(prompt.message, 'Hermes is still working on 1 chat.')
+  assert.ok(prompt.detail.includes('You can quit the Desktop UI and keep this work running'))
+  assert.deepEqual(prompt.buttons, ['Keep Open', 'Quit UI, Keep Work Running', 'Stop Work and Quit'])
+  assert.equal(prompt.detachButtonIndex, 1)
+  assert.equal(prompt.destructiveButtonIndex, 2)
+})

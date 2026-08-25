@@ -88,7 +88,26 @@ import {
 } from './connection-config'
 import { describeCrashReason, installCrashForensics } from './crash-forensics'
 import { adoptServedDashboardToken } from './dashboard-token'
+import {
+  buildDetachRecords,
+  canDetachBackendTopology,
+  type DetachRecordInput,
+  hasCompleteDetachCoverage,
+  readDetachState,
+  supportsBackendDetachLease,
+  writeDetachState
+} from './desktop-detach-state'
 import { loadOrCreateInstallationId, sshOwnershipId } from './desktop-installation'
+import {
+  installLocalBackendService,
+  localBackendServiceDescriptor,
+  localBackendServiceStatus,
+  resolveEffectiveLocalProfile,
+  resolveLocalBackendServiceUrl,
+  restartGatewayService,
+  restartLocalBackendService,
+  shouldUsePersistentLocalBackend
+} from './desktop-service-control'
 import {
   buildPosixCleanupScript,
   buildWindowsCleanupScript,
@@ -671,6 +690,10 @@ const DESKTOP_WINDOW_STATE_PATH = path.join(app.getPath('userData'), 'window-sta
 // ~/.hermes/active_profile file. Unset (null) preserves the legacy behavior:
 // no --profile flag, so the backend honors active_profile / default.
 const DESKTOP_PROFILE_CONFIG_PATH = path.join(app.getPath('userData'), 'active-profile.json')
+const DESKTOP_DETACH_STATE_PATH = path.join(app.getPath('userData'), 'detached-backends.json')
+const DESKTOP_SERVE_TOKEN_PATH = path.join(HERMES_HOME, 'desktop-serve-token')
+const DESKTOP_SERVE_BASE_URL = resolveLocalBackendServiceUrl(process.env.HERMES_DESKTOP_SERVE_BASE_URL)
+const DESKTOP_DETACH_LEASE_TTL_MS = 24 * 60 * 60 * 1000
 // Mirrors hermes_cli.profiles._PROFILE_ID_RE so we never hand the backend a
 // value its profile resolver would reject and exit on.
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
@@ -1108,6 +1131,8 @@ function registerMediaProtocol() {
 
 let mainWindow = null
 const backendConnectionState = createBackendConnectionState<ReturnType<typeof spawn>, any>()
+let lastPrimaryConnection: any = null
+let primaryDetachNonce: string | null = null
 const remoteLiveness = new RemoteLivenessTracker()
 const remoteRevalidation = new RemoteRevalidationCoordinator()
 // True while connection-config:apply soft-rehomes the primary — suppresses the
@@ -2791,6 +2816,7 @@ let isQuittingForHandoff = false
 // (the app.quit() that follows re-enters before-quit and must pass through).
 let quitPromptOpen = false
 let quitConfirmedWithActiveWork = false
+let quitDetachedWithActiveWork = false
 
 // Resolve the staged updater binary the desktop may hand an update to. On
 // Windows that binary owns ALL repo mutation — running `hermes update` +
@@ -5177,7 +5203,7 @@ async function buildReadinessHealthProbe(baseUrl, authMode, token) {
   return { probeHealth: fetchPublicJson, probeIsCredentialed: false }
 }
 
-async function waitForHermes(baseUrl, token, signal?, authMode?) {
+async function waitForHermes(baseUrl, token, signal?, authMode?, readyOptions: any = {}) {
   const { probeHealth, probeIsCredentialed } = await buildReadinessHealthProbe(baseUrl, authMode, token)
 
   return waitForHermesReady(baseUrl, {
@@ -5186,7 +5212,8 @@ async function waitForHermes(baseUrl, token, signal?, authMode?) {
     fetchPublicJson,
     fetchJson: probeIsCredentialed ? (url, _token, options) => probeHealth(url, options) : fetchJson,
     probeHealth,
-    probeIsCredentialed
+    probeIsCredentialed,
+    ...readyOptions
   })
 }
 
@@ -8096,7 +8123,7 @@ function sendConnectionApplied() {
   webContents.send('hermes:connection:applied')
 }
 
-async function waitForBackendExit(child, timeoutMs = 5000) {
+function waitForBackendExit(child, timeoutMs = 5000) {
   if (!child) {
     return
   }
@@ -8105,7 +8132,7 @@ async function waitForBackendExit(child, timeoutMs = 5000) {
     return
   }
 
-  await new Promise<void>(resolve => {
+  return new Promise<void>(resolve => {
     const timer = setTimeout(() => {
       try {
         if (IS_WINDOWS && Number.isInteger(child.pid)) {
@@ -8135,11 +8162,228 @@ async function waitForBackendExit(child, timeoutMs = 5000) {
   })
 }
 
-// The profile the primary (window) backend runs as. readActiveDesktopProfile()
-// returns the desktop's stored preference, or null when unset (legacy launch
-// that defers to active_profile / default).
+function pidLooksAlive(pid): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false
+  }
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function detachRecordInputs(): DetachRecordInput[] {
+  const records: DetachRecordInput[] = []
+  const expiresAt = Date.now() + DESKTOP_DETACH_LEASE_TTL_MS
+  const primaryProcess = backendConnectionState.getProcess()
+  if (
+    primaryProcess &&
+    Number.isInteger(primaryProcess.pid) &&
+    lastPrimaryConnection?.mode === 'local' &&
+    lastPrimaryConnection?.detachLeaseVersion >= 1 &&
+    primaryDetachNonce
+  ) {
+    records.push({
+      role: 'primary',
+      pid: primaryProcess.pid,
+      baseUrl: lastPrimaryConnection.baseUrl,
+      token: lastPrimaryConnection.token,
+      nonce: primaryDetachNonce,
+      expiresAt,
+      profile: primaryProfileKey()
+    })
+  }
+
+  for (const [profile, entry] of backendPool.entries()) {
+    if (
+      entry?.process &&
+      Number.isInteger(entry.process.pid) &&
+      entry.port &&
+      entry.token &&
+      entry.detachNonce &&
+      entry.detachLeaseVersion >= 1
+    ) {
+      records.push({
+        role: 'pool',
+        pid: entry.process.pid,
+        baseUrl: `http://127.0.0.1:${entry.port}`,
+        token: entry.token,
+        nonce: entry.detachNonce,
+        expiresAt,
+        profile
+      })
+    }
+  }
+
+  return records
+}
+
+function desktopOwnedBackendChildCount(): number {
+  let count = backendConnectionState.getProcess() ? 1 : 0
+  for (const entry of backendPool.values()) {
+    if (entry?.process) {
+      count += 1
+    }
+  }
+  return count
+}
+
+function canDetachActiveWork(): boolean {
+  const childCount = desktopOwnedBackendChildCount()
+  const recordCount = buildDetachRecords(detachRecordInputs()).length
+  const persistentPrimary =
+    lastPrimaryConnection?.mode === 'remote' || lastPrimaryConnection?.source === 'local-service'
+  const hasLiveDetached =
+    readDetachState(DESKTOP_DETACH_STATE_PATH)?.records.some(record => pidLooksAlive(record.pid)) === true
+
+  return canDetachBackendTopology({ childCount, recordCount, persistentPrimary, hasLiveDetached })
+}
+
+function persistDetachStateForQuit(): boolean {
+  const records = buildDetachRecords(detachRecordInputs())
+  const childCount = desktopOwnedBackendChildCount()
+  if (!hasCompleteDetachCoverage(childCount, records.length)) {
+    return false
+  }
+  if (records.length > 0) {
+    writeDetachState(DESKTOP_DETACH_STATE_PATH, records)
+    rememberLog(`[detach] persisted ${records.length} backend lease(s) before UI quit`)
+    return true
+  }
+  if (lastPrimaryConnection?.mode === 'remote' || lastPrimaryConnection?.source === 'local-service') {
+    return true
+  }
+  const existing = readDetachState(DESKTOP_DETACH_STATE_PATH)
+  if (existing?.records.some(record => pidLooksAlive(record.pid))) {
+    return true
+  }
+  return false
+}
+
+function readPersistentServeToken(): string | null {
+  try {
+    const token = fs.readFileSync(DESKTOP_SERVE_TOKEN_PATH, 'utf8').trim()
+    return token || null
+  } catch {
+    return null
+  }
+}
+
+async function tryConnectPersistentLocalBackend() {
+  if (!DESKTOP_SERVE_BASE_URL || !shouldUsePersistentLocalBackend(primaryProfileKey())) {
+    return null
+  }
+  const token = readPersistentServeToken()
+  if (!token) {
+    return null
+  }
+  try {
+    await advanceBootProgress('backend.service', 'Connecting to always-on Hermes backend', 68)
+    await waitForHermes(DESKTOP_SERVE_BASE_URL, token, undefined, 'token', {
+      healthProbeTimeoutMs: 1_000,
+      pollMs: 250,
+      timeoutMs: 2_000
+    })
+    const url = new URL(DESKTOP_SERVE_BASE_URL)
+    const protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${protocol}//${url.host}/api/ws?token=${encodeURIComponent(token)}`
+    const wsProbe = await probeGatewayWebSocket(wsUrl, { WebSocketImpl: globalThis.WebSocket })
+    if (!wsProbe.ok) {
+      rememberLog(`[service] always-on backend WebSocket rejected token: ${wsProbe.reason}`)
+      return null
+    }
+    rememberLog(`[service] using always-on local Hermes backend at ${DESKTOP_SERVE_BASE_URL}`)
+    updateBootProgress({
+      phase: 'backend.ready',
+      message: 'Always-on Hermes backend is ready. Finalizing desktop startup',
+      progress: 94,
+      running: true,
+      error: null
+    })
+    return {
+      baseUrl: DESKTOP_SERVE_BASE_URL,
+      mode: 'local',
+      source: 'local-service',
+      authMode: 'token',
+      token,
+      wsUrl,
+      logs: hermesLog.slice(-80),
+      ...getWindowState()
+    }
+  } catch (error) {
+    rememberLog(`[service] always-on local backend unavailable: ${error?.message || error}`)
+    return null
+  }
+}
+
+async function tryResumeDetachedPrimaryBackend() {
+  const state = readDetachState(DESKTOP_DETACH_STATE_PATH)
+  if (!state) {
+    return null
+  }
+  const profile = primaryProfileKey()
+  for (const record of state.records) {
+    if (record.role !== 'primary') {
+      continue
+    }
+    if (record.profile && record.profile !== profile) {
+      continue
+    }
+    if (!pidLooksAlive(record.pid)) {
+      continue
+    }
+    try {
+      await advanceBootProgress('backend.detached', 'Reconnecting to detached Hermes backend', 70)
+      await waitForHermes(record.baseUrl, record.token)
+      const backendStatus = await fetchJson(`${record.baseUrl}/api/status`, record.token)
+      const detachLeaseVersion = supportsBackendDetachLease(backendStatus) ? 1 : 0
+      const wsUrl = `ws://127.0.0.1:${new URL(record.baseUrl).port}/api/ws?token=${encodeURIComponent(record.token)}`
+      const wsProbe = await probeGatewayWebSocket(wsUrl, { WebSocketImpl: globalThis.WebSocket })
+      if (!wsProbe.ok) {
+        rememberLog(`[detach] detached backend WebSocket rejected lease token: ${wsProbe.reason}`)
+        continue
+      }
+      rememberLog(`[detach] reusing detached backend pid=${record.pid} url=${record.baseUrl}`)
+      updateBootProgress({
+        phase: 'backend.ready',
+        message: 'Detached Hermes backend is ready. Finalizing desktop startup',
+        progress: 94,
+        running: true,
+        error: null
+      })
+      return {
+        baseUrl: record.baseUrl,
+        mode: 'local',
+        source: 'local-detached',
+        authMode: 'token',
+        token: record.token,
+        detachLeaseVersion,
+        wsUrl,
+        logs: hermesLog.slice(-80),
+        ...getWindowState()
+      }
+    } catch (error) {
+      rememberLog(`[detach] failed to reuse detached backend pid=${record.pid}: ${error?.message || error}`)
+    }
+  }
+  return null
+}
+
+function readStickyActiveProfile(): string | null {
+  try {
+    const profile = fs.readFileSync(path.join(HERMES_HOME, 'active_profile'), 'utf8').trim()
+    return PROFILE_NAME_RE.test(profile) ? profile : null
+  } catch {
+    return null
+  }
+}
+
+// The effective profile the primary (window) backend runs as. An explicit
+// Desktop choice wins; otherwise mirror the CLI's sticky active_profile lookup.
 function primaryProfileKey() {
-  return readActiveDesktopProfile() || 'default'
+  return resolveEffectiveLocalProfile(readActiveDesktopProfile(), readStickyActiveProfile())
 }
 
 // Options describing the current connection setup for `resolveProfileBackendRoute`.
@@ -8184,6 +8428,8 @@ async function ensureBackend(profile) {
     process: null,
     port: null,
     token: null,
+    detachNonce: null,
+    detachLeaseVersion: 0,
     connectionPromise: null,
     lastActiveAt: Date.now(),
     remoteBaseUrl: null
@@ -8270,6 +8516,43 @@ function startPoolIdleReaper() {
   }
 }
 
+async function tryResumeDetachedPoolBackend(profile: string, entry) {
+  const state = readDetachState(DESKTOP_DETACH_STATE_PATH)
+  const record = state?.records.find(candidate => candidate.role === 'pool' && candidate.profile === profile && pidLooksAlive(candidate.pid))
+  if (!record) {
+    return null
+  }
+  try {
+    await waitForHermes(record.baseUrl, record.token)
+    const url = new URL(record.baseUrl)
+    const wsUrl = `ws://127.0.0.1:${url.port}/api/ws?token=${encodeURIComponent(record.token)}`
+    const wsProbe = await probeGatewayWebSocket(wsUrl, { WebSocketImpl: globalThis.WebSocket })
+    if (!wsProbe.ok) {
+      rememberLog(`[detach] detached pool backend for profile "${profile}" rejected lease token: ${wsProbe.reason}`)
+      return null
+    }
+    entry.process = null
+    entry.port = Number(url.port)
+    entry.token = record.token
+    entry.lastActiveAt = Date.now()
+    rememberLog(`[detach] reusing detached backend for profile "${profile}" pid=${record.pid} url=${record.baseUrl}`)
+    return {
+      baseUrl: record.baseUrl,
+      mode: 'local',
+      source: 'local-detached',
+      authMode: 'token',
+      token: record.token,
+      profile,
+      wsUrl,
+      logs: hermesLog.slice(-80),
+      ...getWindowState()
+    }
+  } catch (error) {
+    rememberLog(`[detach] failed to reuse detached backend for profile "${profile}": ${error?.message || error}`)
+    return null
+  }
+}
+
 // Spawn an additional dashboard backend pinned to a named profile. Mirrors the
 // local-spawn portion of startHermes() but without the boot-progress UI,
 // bootstrap, or remote handling (those belong to the primary backend only).
@@ -8297,7 +8580,14 @@ async function spawnPoolBackend(profile, entry) {
     }
   }
 
+  const detached = await tryResumeDetachedPoolBackend(profile, entry)
+  if (detached) {
+    return detached
+  }
+
   const token = crypto.randomBytes(32).toString('base64url')
+  const detachNonce = crypto.randomBytes(32).toString('base64url')
+  entry.detachNonce = detachNonce
 
   // Same update mutual exclusion as the primary window's waitForLocalStart
   // (#73822): pool backends spawn from the same venv, so an ungated respawn
@@ -8354,6 +8644,8 @@ async function spawnPoolBackend(profile, entry) {
         // serving backend + its MCP child subtree. See web_server.py
         // _start_parent_death_watchdog.
         HERMES_PARENT_PID: String(process.pid),
+        HERMES_DESKTOP_DETACH_FILE: DESKTOP_DETACH_STATE_PATH,
+        HERMES_DESKTOP_DETACH_NONCE: detachNonce,
         HERMES_WEB_DIST: webDist,
         ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
       },
@@ -8411,6 +8703,8 @@ async function spawnPoolBackend(profile, entry) {
   })
 
   entry.token = authToken
+  const backendStatus = await fetchJson(`${baseUrl}/api/status`, authToken)
+  entry.detachLeaseVersion = supportsBackendDetachLease(backendStatus) ? 1 : 0
 
   // Verify the WebSocket session token before declaring backend ready.
   // HTTP /api/status can pass while WS auth fails (separate transport, separate guards).
@@ -8574,9 +8868,21 @@ async function startHermes() {
     }
 
     await advanceBootProgress('backend.resolve', 'Resolving Hermes backend', 8)
+    if (!primaryBackendIsRemote()) {
+      const detached = await tryResumeDetachedPrimaryBackend()
+      if (detached) {
+        return detached
+      }
+      const service = await tryConnectPersistentLocalBackend()
+      if (service) {
+        return service
+      }
+    }
     // Resolve for the desktop's primary profile so a per-profile remote
     // override on the active profile is honored (falls back to env / global).
     const token = crypto.randomBytes(32).toString('base64url')
+    const detachNonce = crypto.randomBytes(32).toString('base64url')
+    primaryDetachNonce = detachNonce
     // --port 0: the OS assigns an ephemeral port; the child announces it on stdout.
     const backendArgs = ['serve', '--host', '127.0.0.1', '--port', '0']
     // Pin the desktop's chosen profile via the global --profile flag. This is
@@ -8652,6 +8958,8 @@ async function startHermes() {
           // serving backend + its MCP child subtree. See web_server.py
           // _start_parent_death_watchdog.
           HERMES_PARENT_PID: String(process.pid),
+          HERMES_DESKTOP_DETACH_FILE: DESKTOP_DETACH_STATE_PATH,
+          HERMES_DESKTOP_DETACH_NONCE: detachNonce,
           HERMES_WEB_DIST: webDist,
           ...(readyFile ? { HERMES_DESKTOP_READY_FILE: readyFile } : {})
         },
@@ -8752,6 +9060,8 @@ async function startHermes() {
       childAlive: () => hermesProcess.exitCode === null && !hermesProcess.killed,
       rememberLog
     })
+    const backendStatus = await fetchJson(`${baseUrl}/api/status`, authToken)
+    const detachLeaseVersion = supportsBackendDetachLease(backendStatus) ? 1 : 0
 
     // Verify the WebSocket session token before declaring backend ready.
     const wsUrl = `ws://127.0.0.1:${port}/api/ws?token=${encodeURIComponent(authToken)}`
@@ -8784,6 +9094,7 @@ async function startHermes() {
       source: 'local',
       authMode: 'token',
       token: authToken,
+      detachLeaseVersion,
       wsUrl,
       logs: hermesLog.slice(-80),
       ...getWindowState()
@@ -8827,6 +9138,12 @@ async function startHermes() {
   })
 
   backendConnectionState.setPromise(connectionAttempt, connectionPromise)
+  connectionPromise
+    .then(connection => {
+      lastPrimaryConnection = connection
+      return connection
+    })
+    .catch(() => {})
 
   return connectionPromise
 }
@@ -10615,6 +10932,31 @@ ipcMain.handle('hermes:bootstrap:get', async () => getBootstrapState())
 ipcMain.handle('hermes:connection-config:get', async (_event, profile) =>
   sanitizeDesktopConnectionConfig(readDesktopConnectionConfig(), profile)
 )
+function resolveHermesServiceCommand() {
+  const override = process.env.HERMES_DESKTOP_HERMES
+  if (override) {
+    return findOnPath(override) || override
+  }
+  const onPath = findOnPath('hermes')
+  if (onPath && !looksLikeDesktopAppBinary(onPath)) {
+    return onPath
+  }
+  const active = process.platform === 'win32' ? path.join(VENV_ROOT, 'Scripts', 'hermes.exe') : path.join(VENV_ROOT, 'bin', 'hermes')
+  return active
+}
+
+ipcMain.handle('hermes:local-services:status', async () => ({
+  descriptor: localBackendServiceDescriptor(),
+  service: await localBackendServiceStatus()
+}))
+ipcMain.handle('hermes:local-services:install-backend', async () =>
+  installLocalBackendService({
+    hermesHome: HERMES_HOME,
+    hermesPath: resolveHermesServiceCommand()
+  })
+)
+ipcMain.handle('hermes:local-services:restart-backend', async () => restartLocalBackendService())
+ipcMain.handle('hermes:local-services:restart-gateway', async () => restartGatewayService(resolveHermesServiceCommand()))
 ipcMain.handle('hermes:ssh-config:hosts', async () => ({ hosts: collectSshConfigHosts() }))
 ipcMain.handle('hermes:ssh-config:resolve', async (_event, host) => {
   const value = String(host || '').trim()
@@ -12799,15 +13141,33 @@ function configureSpellChecker() {
   }
 }
 
-// Ask before a quit kills a turn in flight. True when the quit was intercepted
-// and the confirmation is on screen; "Quit Anyway" re-enters before-quit with
-// the latch set and falls straight through to the teardown below.
+// Active work should survive a normal UI quit whenever the current backend can
+// outlive Desktop. Only fall back to a destructive confirmation when Hermes
+// cannot prove a safe detach path for this connection.
 function heldQuitForActiveWork(event: Electron.Event): boolean {
   if (SKIP_QUIT_CONFIRM || quitConfirmedWithActiveWork || quitPromptOpen) {
     return false
   }
 
-  const prompt = quitPromptFor(mergeActiveWork(activeWorkByWebContents.values()), isQuittingForHandoff)
+  const activeWork = mergeActiveWork(activeWorkByWebContents.values())
+
+  if (!isQuittingForHandoff && activeWork.count > 0 && canDetachActiveWork()) {
+    if (persistDetachStateForQuit()) {
+      quitDetachedWithActiveWork = true
+      quitConfirmedWithActiveWork = true
+      rememberLog('[detach] auto-detaching active Desktop work before UI quit')
+      return false
+    }
+
+    event.preventDefault()
+    dialog.showErrorBox(
+      'Hermes could not detach safely',
+      'The local backend was not ready to survive the Desktop UI quit, so Hermes stayed open to avoid losing the running work.'
+    )
+    return true
+  }
+
+  const prompt = quitPromptFor(activeWork, isQuittingForHandoff, { canDetach: false })
   const parent = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
 
   if (!prompt || !parent || parent.isDestroyed()) {
@@ -12819,9 +13179,9 @@ function heldQuitForActiveWork(event: Electron.Event): boolean {
 
   void dialog
     .showMessageBox(parent, {
-      buttons: ['Keep Running', 'Quit Anyway'],
+      buttons: prompt.buttons,
       cancelId: 0,
-      defaultId: 0,
+      defaultId: prompt.detachButtonIndex ?? 0,
       detail: prompt.detail,
       message: prompt.message,
       type: 'question'
@@ -12829,7 +13189,22 @@ function heldQuitForActiveWork(event: Electron.Event): boolean {
     .then(({ response }) => {
       quitPromptOpen = false
 
-      if (response === 1) {
+      if (prompt.detachButtonIndex !== null && response === prompt.detachButtonIndex) {
+        if (!persistDetachStateForQuit()) {
+          dialog.showErrorBox(
+            'Hermes could not detach safely',
+            'The local backend was not ready to survive the Desktop UI quit, so Hermes stayed open to avoid losing the running work.'
+          )
+          return
+        }
+        quitDetachedWithActiveWork = true
+        quitConfirmedWithActiveWork = true
+        app.quit()
+        return
+      }
+
+      if (response === prompt.destructiveButtonIndex) {
+        quitDetachedWithActiveWork = false
         quitConfirmedWithActiveWork = true
         app.quit()
       }
@@ -12925,8 +13300,12 @@ app.on('before-quit', event => {
     disposeTerminalSession(id)
   }
 
-  stopBackendChild(backendConnectionState.getProcess())
-  stopAllPoolBackends()
+  if (!quitDetachedWithActiveWork) {
+    stopBackendChild(backendConnectionState.getProcess())
+    stopAllPoolBackends()
+  } else {
+    rememberLog('[detach] Desktop UI quit detached from live backend work; backend children left running')
+  }
 })
 
 app.on('window-all-closed', () => {

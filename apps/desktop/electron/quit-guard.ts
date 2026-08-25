@@ -54,8 +54,15 @@ export function mergeActiveWork(reports: Iterable<ActiveWork>): ActiveWork {
 }
 
 export interface QuitPrompt {
+  buttons: string[]
+  destructiveButtonIndex: number
+  detachButtonIndex: number | null
   detail: string
   message: string
+}
+
+export interface QuitPromptOptions {
+  canDetach?: boolean
 }
 
 /**
@@ -65,7 +72,11 @@ export interface QuitPrompt {
  * are the app replacing itself, not the user walking away, and a modal there
  * would strand the detached script waiting on a PID that never exits.
  */
-export function quitPromptFor(work: ActiveWork, quittingForHandoff: boolean): null | QuitPrompt {
+export function quitPromptFor(
+  work: ActiveWork,
+  quittingForHandoff: boolean,
+  options: QuitPromptOptions = {}
+): null | QuitPrompt {
   if (quittingForHandoff || work.count < 1) {
     return null
   }
@@ -78,11 +89,19 @@ export function quitPromptFor(work: ActiveWork, quittingForHandoff: boolean): nu
     lines.push(remaining === 1 ? '• 1 more' : `• ${remaining} more`)
   }
 
+  const canDetach = options.canDetach === true
+  const tail = canDetach
+    ? 'You can quit the Desktop UI and keep this work running in the local backend. Reopen Hermes later to reconnect and check progress. “Stop Work and Quit” still stops it mid-turn.'
+    : 'Quitting stops the agent mid-turn. Any work it has not finished writing is lost.'
+
   return {
+    buttons: canDetach ? ['Keep Open', 'Quit UI, Keep Work Running', 'Stop Work and Quit'] : ['Keep Running', 'Quit Anyway'],
+    destructiveButtonIndex: canDetach ? 2 : 1,
+    detachButtonIndex: canDetach ? 1 : null,
     detail: [
       lines.join('\n'),
       lines.length > 0 ? '' : null,
-      'Quitting stops the agent mid-turn. Any work it has not finished writing is lost.'
+      tail
     ]
       .filter(line => line !== null)
       .join('\n')

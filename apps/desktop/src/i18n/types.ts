@@ -535,6 +535,16 @@ export interface Translations {
       modeTitle: string
       localTitle: string
       localDesc: string
+      localServicesTitle: string
+      localServicesDesc: (manager: string, serviceName: string) => string
+      localServicesUnknownManager: string
+      installAlwaysOnBackend: string
+      restartBackend: string
+      restartGateway: string
+      localServicesUpdatedTitle: string
+      localServicesFailed: string
+      localServicesUnavailableTitle: string
+      localServicesUnavailableDesc: string
       inheritTitle: string
       inheritDesc: string
       remoteTitle: string

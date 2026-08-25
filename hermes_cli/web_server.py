@@ -3083,6 +3083,10 @@ async def get_health():
     }
 
 
+def _desktop_detach_capability_status() -> dict[str, int]:
+    return {"desktop_detach_lease_version": 1}
+
+
 @app.get("/api/status")
 async def get_status(profile: Optional[str] = None):
     status_scope = None
@@ -3290,6 +3294,7 @@ async def get_status(profile: Optional[str] = None):
         # ``PUBLIC_API_PATHS`` documents this endpoint as serving.
         status = {
             "version": __version__,
+            **_desktop_detach_capability_status(),
             "release_date": __release_date__,
             "config_version": current_ver,
             "latest_config_version": latest_ver,
@@ -17945,6 +17950,75 @@ def _is_serve_orphaned(desktop_pid: int, pid_exists=None) -> bool:
         return False
 
 
+def _detached_desktop_backend_lease_expiry_ms(
+    lease_path: str | None,
+    current_pid: int | None = None,
+    *,
+    expected_token: str | None = None,
+    expected_nonce: str | None = None,
+    now_ms: int | None = None,
+) -> int | None:
+    """Return a bounded detach lease expiry for this exact backend process."""
+    if not lease_path or not expected_token or not expected_nonce:
+        return None
+    try:
+        pid = int(current_pid if current_pid is not None else os.getpid())
+        data = json.loads(Path(lease_path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return None
+        records = data.get("records")
+        if not isinstance(records, list):
+            return None
+        current_time_ms = int(time.time() * 1000) if now_ms is None else int(now_ms)
+        for record in records:
+            if not isinstance(record, dict) or record.get("pid") != pid:
+                continue
+            base_url = str(record.get("baseUrl") or "")
+            token = str(record.get("token") or "")
+            nonce = str(record.get("nonce") or "")
+            expires_at = int(record.get("expiresAt") or 0)
+            role = record.get("role")
+            if (
+                role not in {"primary", "pool"}
+                or token != expected_token
+                or nonce != expected_nonce
+                or expires_at <= current_time_ms
+            ):
+                continue
+            parsed = urllib.parse.urlparse(base_url)
+            if parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+                return expires_at
+    except Exception:
+        return None
+    return None
+
+
+def _detached_desktop_backend_lease_allows_survival(
+    lease_path: str | None,
+    current_pid: int | None = None,
+    *,
+    expected_token: str | None = None,
+    expected_nonce: str | None = None,
+    now_ms: int | None = None,
+) -> bool:
+    """True when Desktop deliberately detached this exact backend process."""
+    return (
+        _detached_desktop_backend_lease_expiry_ms(
+            lease_path,
+            current_pid,
+            expected_token=expected_token,
+            expected_nonce=expected_nonce,
+            now_ms=now_ms,
+        )
+        is not None
+    )
+
+
+def _desktop_detach_expected_token() -> str:
+    """Return the token the running backend actually serves, not its spawn hint."""
+    return _SESSION_TOKEN
+
+
 def _start_parent_death_watchdog() -> None:
     """Exit when the desktop parent that spawned this backend dies.
 
@@ -17967,10 +18041,25 @@ def _start_parent_death_watchdog() -> None:
         poll = max(0.5, float(os.environ.get("HERMES_SERVE_WATCHDOG_POLL_S", "2.0")))
     except (TypeError, ValueError):
         poll = 2.0
+    detach_lease_path = os.environ.get("HERMES_DESKTOP_DETACH_FILE")
+    detach_nonce = os.environ.get("HERMES_DESKTOP_DETACH_NONCE")
+    session_token = _desktop_detach_expected_token()
 
     def _loop() -> None:
         while not _is_serve_orphaned(desktop_pid):
             time.sleep(poll)
+        expires_at = _detached_desktop_backend_lease_expiry_ms(
+            detach_lease_path,
+            expected_token=session_token,
+            expected_nonce=detach_nonce,
+        )
+        if expires_at is not None:
+            remaining = max(0.0, (expires_at - int(time.time() * 1000)) / 1000.0)
+            _log.info(
+                "Desktop parent exited after detach; keeping serve backend alive for up to %.0f seconds",
+                remaining,
+            )
+            time.sleep(remaining)
         os._exit(0)
 
     threading.Thread(target=_loop, daemon=True, name="serve-parent-watchdog").start()

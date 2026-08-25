@@ -32,6 +32,28 @@ type DesktopCodexUsage = {
   used_percent: null | number
 }
 
+type DesktopLocalServiceResult = {
+  action: string
+  error?: string
+  manager?: string
+  message: string
+  ok: boolean
+  serviceName?: string
+  stderr?: string
+  stdout?: string
+}
+
+type DesktopLocalServicesStatus = {
+  descriptor: {
+    installLabel: string
+    manager: string
+    restartLabel: string
+    serviceName: string
+    supported: boolean
+  }
+  service: DesktopLocalServiceResult
+}
+
 declare global {
   interface Window {
     hermesDesktop: {
@@ -138,6 +160,12 @@ declare global {
       saveConnectionConfig: (payload: DesktopConnectionConfigInput) => Promise<DesktopConnectionConfig>
       applyConnectionConfig: (payload: DesktopConnectionConfigInput) => Promise<DesktopConnectionConfig>
       testConnectionConfig: (payload: DesktopConnectionConfigInput) => Promise<DesktopConnectionTestResult>
+      localServices?: {
+        status: () => Promise<DesktopLocalServicesStatus>
+        installBackend: () => Promise<DesktopLocalServiceResult>
+        restartBackend: () => Promise<DesktopLocalServiceResult>
+        restartGateway: () => Promise<DesktopLocalServiceResult>
+      }
       sshConfigHosts: () => Promise<DesktopSshHostsResult>
       sshResolveHost: (host: string) => Promise<DesktopSshResolveResult>
       probeConnectionConfig: (remoteUrl: string) => Promise<DesktopConnectionProbeResult>

@@ -35,6 +35,8 @@ import { enrichSelectedSshHost, selectSshHost } from './ssh-host-selection'
 type Mode = 'local' | 'remote' | 'cloud' | 'ssh'
 type AuthMode = 'oauth' | 'token'
 type ProbeStatus = 'idle' | 'probing' | 'done' | 'error'
+type LocalServicesStatus = Awaited<ReturnType<NonNullable<Window['hermesDesktop']['localServices']>['status']>>
+type LocalServiceAction = 'install-backend' | 'restart-backend' | 'restart-gateway'
 // Hermes Cloud discovery lifecycle for the cloud-mode panel.
 type CloudDiscoverStatus = 'idle' | 'loading' | 'done' | 'error'
 
@@ -175,6 +177,8 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   const cloudConnectSeq = useRef(0)
   const contextSeq = useRef(0)
   const [connectedCloudUrl, setConnectedCloudUrl] = useState('')
+  const [localServices, setLocalServices] = useState<LocalServicesStatus | null>(null)
+  const [localServiceBusy, setLocalServiceBusy] = useState<LocalServiceAction | null>(null)
 
   const acceptSavedConfig = (config: GatewaySettingsState) => {
     setState(config)
@@ -221,6 +225,64 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   useEffect(() => {
     void refreshActiveProfile()
   }, [])
+
+  const showLocalServices = !embedded && scope === null && state.mode === 'local' && Boolean(window.hermesDesktop?.localServices)
+
+  useEffect(() => {
+    let cancelled = false
+    const desktop = window.hermesDesktop?.localServices
+
+    if (!showLocalServices || !desktop?.status) {
+      setLocalServices(null)
+      return () => void (cancelled = true)
+    }
+
+    desktop
+      .status()
+      .then(status => {
+        if (!cancelled) {
+          setLocalServices(status)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalServices(null)
+        }
+      })
+
+    return () => void (cancelled = true)
+  }, [showLocalServices])
+
+  const runLocalServiceAction = async (action: LocalServiceAction) => {
+    const desktop = window.hermesDesktop?.localServices
+    if (!desktop) {
+      notify({ kind: 'warning', title: g.localServicesUnavailableTitle, message: g.localServicesUnavailableDesc })
+      return
+    }
+
+    setLocalServiceBusy(action)
+    try {
+      const result =
+        action === 'install-backend'
+          ? await desktop.installBackend()
+          : action === 'restart-backend'
+            ? await desktop.restartBackend()
+            : await desktop.restartGateway()
+
+      if (!result.ok) {
+        throw new Error(result.error || result.message || g.localServicesFailed)
+      }
+
+      notify({ kind: 'success', title: g.localServicesUpdatedTitle, message: result.message })
+      if (desktop.status) {
+        setLocalServices(await desktop.status())
+      }
+    } catch (err) {
+      notifyError(err, g.localServicesFailed)
+    } finally {
+      setLocalServiceBusy(null)
+    }
+  }
 
   // Auth-mode probe: as the user types a remote URL we ask the gateway (via
   // its public /api/status) whether it gates with OAuth or a static session
@@ -1061,14 +1123,40 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     <SettingsContent bare={embedded}>
       {embedded ? null : (
         <div className="mb-5">
-          <div className="flex items-center gap-2 text-[length:var(--conversation-text-font-size)] font-medium">
-            <Globe className="size-4 text-muted-foreground" />
-            {g.title}
-            {state.envOverride ? <Pill tone="primary">{g.envOverride}</Pill> : null}
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[length:var(--conversation-text-font-size)] font-medium">
+                <Globe className="size-4 text-muted-foreground" />
+                {g.title}
+                {state.envOverride ? <Pill tone="primary">{g.envOverride}</Pill> : null}
+              </div>
+              <p className="mt-2 max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
+                {g.intro}
+              </p>
+            </div>
+            {showLocalServices ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Button
+                  disabled={localServiceBusy !== null}
+                  onClick={() => void runLocalServiceAction('restart-backend')}
+                  size="sm"
+                  variant="outline"
+                >
+                  {localServiceBusy === 'restart-backend' ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  {g.restartBackend}
+                </Button>
+                <Button
+                  disabled={localServiceBusy !== null}
+                  onClick={() => void runLocalServiceAction('restart-gateway')}
+                  size="sm"
+                  variant="outline"
+                >
+                  {localServiceBusy === 'restart-gateway' ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                  {g.restartGateway}
+                </Button>
+              </div>
+            ) : null}
           </div>
-          <p className="mt-2 max-w-2xl text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
-            {g.intro}
-          </p>
         </div>
       )}
 
@@ -1145,6 +1233,29 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
           />
         </div>
       </div>
+
+      {showLocalServices ? (
+        <div className="mb-5 grid gap-1 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
+          <ListRow
+            action={
+              <Button
+                disabled={localServiceBusy !== null || localServices?.descriptor.supported === false}
+                onClick={() => void runLocalServiceAction('install-backend')}
+                size="sm"
+                variant="outline"
+              >
+                {localServiceBusy === 'install-backend' ? <Loader2 className="animate-spin" /> : null}
+                {g.installAlwaysOnBackend}
+              </Button>
+            }
+            description={g.localServicesDesc(
+              localServices?.descriptor.manager || g.localServicesUnknownManager,
+              localServices?.descriptor.serviceName || 'ai.hermes.serve'
+            )}
+            title={g.localServicesTitle}
+          />
+        </div>
+      ) : null}
 
       {/* Hermes Cloud panel: one portal sign-in, then a discovered-agent picker
           whose selection drives the silent per-agent cascade + a cloud
