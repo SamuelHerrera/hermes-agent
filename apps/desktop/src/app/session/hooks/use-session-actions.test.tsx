@@ -7,6 +7,7 @@ import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/stor
 import { revealTreePane } from '@/components/pane-shell/tree/store'
 import { getAllSessionMessages, getLatestSessionMessages, getSession, type SessionInfo } from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
+import { $clarifyRequests, clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
 import { $projectScope, $projectTree, ALL_PROJECTS } from '@/store/projects'
@@ -653,6 +654,7 @@ function ResumeHarness({
 describe('resumeSession failure recovery', () => {
   afterEach(() => {
     cleanup()
+    clearClarifyRequest()
     setActiveSessionId(null)
     setResumeFailedSessionId(null)
     setMessages([])
@@ -819,6 +821,66 @@ describe('resumeSession failure recovery', () => {
     expect(renderedMessages).toContain('current prompt')
     expect(renderedMessages).toContain('partial answer')
     expect(renderedMessages).toContain('newest prompt')
+  })
+
+  it('restores a pending clarify question from the backend resume payload', async () => {
+    const storedMessages = [
+      { content: 'earlier question', role: 'user', timestamp: 1 },
+      { content: 'hi there', role: 'assistant', timestamp: 2 }
+    ]
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: storedMessages, session_id: 'stored-1' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          session_id: 'runtime-1',
+          session_key: 'stored-1',
+          resumed: 'stored-1',
+          message_count: storedMessages.length,
+          messages: [],
+          messages_omitted: true,
+          running: true,
+          inflight: {
+            user: 'deploy the app',
+            assistant: '',
+            streaming: true
+          },
+          pending_prompt: {
+            event: 'clarify.request',
+            payload: {
+              request_id: 'clarify-1',
+              question: 'Which deployment target?',
+              choices: ['staging', 'production']
+            }
+          },
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, state) => (resumedState = state)}
+        requestGateway={requestGateway}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect($clarifyRequests.get()['runtime-1']).toMatchObject({
+      choices: ['staging', 'production'],
+      question: 'Which deployment target?',
+      requestId: 'clarify-1',
+      sessionId: 'runtime-1'
+    })
+    expect(resumedState?.needsInput).toBe(true)
+    expect(JSON.stringify(resumedState?.messages)).toContain('Which deployment target?')
   })
 
   it('uses the continuation projection when resume rotates an equal-length stored transcript', async () => {
@@ -1363,6 +1425,7 @@ const clientState = (storedSessionId: string | null): ClientSessionState => crea
 describe('resumeSession warm-cache mapping integrity', () => {
   afterEach(() => {
     cleanup()
+    clearClarifyRequest()
     setActiveSessionId(null)
     setResumeFailedSessionId(null)
     setMessages([])
@@ -1470,6 +1533,216 @@ describe('resumeSession warm-cache mapping integrity', () => {
       expect.objectContaining({ omit_messages: true, session_id: 'rt-A' })
     )
     expect(runtimeIdByStoredSessionIdRef.current.get('stored-A')).toBe('rt-A')
+  })
+
+  it('does not hydrate a prompt returned for a different warm-cache session', async () => {
+    const runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>> = {
+      current: new Map([['stored-A', 'rt-A']])
+    }
+
+    const sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>> = {
+      current: new Map([['rt-A', clientState('stored-A')]])
+    }
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: 'stored-A' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        return {
+          session_id: 'rt-A',
+          session_key: 'stored-B',
+          resumed: 'stored-B',
+          message_count: 0,
+          messages: [],
+          messages_omitted: true,
+          running: true,
+          pending_prompt: {
+            event: 'clarify.request',
+            payload: {
+              request_id: 'wrong-session-request',
+              question: 'Question from stored B?',
+              choices: ['yes', 'no']
+            }
+          },
+          info: {}
+        } as never
+      }
+
+      if (method === 'session.resume') {
+        return {
+          session_id: 'rt-A-fresh',
+          session_key: 'stored-A',
+          resumed: 'stored-A',
+          message_count: 0,
+          messages: [],
+          running: false,
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-A', true)
+
+    expect(requestGateway.mock.calls.map(([method]) => method)).toEqual(
+      expect.arrayContaining(['session.activate', 'session.resume'])
+    )
+    expect($clarifyRequests.get()['rt-A']).toBeUndefined()
+    expect($clarifyRequests.get()['rt-A-fresh']).toBeUndefined()
+    expect($activeSessionId.get()).toBe('rt-A-fresh')
+  })
+
+  it('restores a pending clarify question through the warm session.activate path', async () => {
+    const runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>> = {
+      current: new Map([['stored-A', 'rt-A']])
+    }
+
+    const state = clientState('stored-A')
+    state.messages = [
+      {
+        id: 'current-user',
+        role: 'user',
+        parts: [{ type: 'text', text: 'deploy the app' }]
+      }
+    ]
+
+    const sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>> = {
+      current: new Map([['rt-A', state]])
+    }
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
+      messages: [{ content: 'deploy the app', role: 'user', timestamp: 1 }],
+      session_id: 'stored-A'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        return {
+          session_id: 'rt-A',
+          session_key: 'stored-A',
+          resumed: 'stored-A',
+          message_count: 1,
+          messages: [],
+          messages_omitted: true,
+          running: true,
+          pending_prompt: {
+            event: 'clarify.request',
+            payload: {
+              request_id: 'clarify-warm',
+              question: 'Which deployment target?',
+              choices: ['staging', 'production']
+            }
+          },
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, next) => (resumedState = next)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-A', true)
+
+    expect(requestGateway.mock.calls.map(([method]) => method)).toContain('session.activate')
+    expect(requestGateway.mock.calls.map(([method]) => method)).not.toContain('session.resume')
+    expect($clarifyRequests.get()['rt-A']).toMatchObject({
+      choices: ['staging', 'production'],
+      question: 'Which deployment target?',
+      requestId: 'clarify-warm',
+      sessionId: 'rt-A'
+    })
+    expect(resumedState?.needsInput).toBe(true)
+    expect(JSON.stringify(resumedState?.messages)).toContain('Which deployment target?')
+  })
+
+  it('clears a stale warm clarify request when activation reports no pending prompt', async () => {
+    const runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>> = {
+      current: new Map([['stored-A', 'rt-A']])
+    }
+
+    const state = clientState('stored-A')
+
+    state.needsInput = true
+    state.messages = [
+      { id: 'user', role: 'user', parts: [{ type: 'text', text: 'deploy the app' }] },
+      { id: 'assistant', role: 'assistant', parts: [{ type: 'text', text: 'done' }] }
+    ]
+    setClarifyRequest({
+      choices: ['staging', 'production'],
+      question: 'Which deployment target?',
+      requestId: 'stale-request',
+      sessionId: 'rt-A'
+    })
+
+    const sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>> = {
+      current: new Map([['rt-A', state]])
+    }
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
+      messages: [
+        { content: 'deploy the app', role: 'user', timestamp: 1 },
+        { content: 'done', role: 'assistant', timestamp: 2 }
+      ],
+      session_id: 'stored-A'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        return {
+          session_id: 'rt-A',
+          session_key: 'stored-A',
+          resumed: 'stored-A',
+          message_count: 2,
+          messages: [],
+          messages_omitted: true,
+          running: false,
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, next) => (resumedState = next)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-A', true)
+
+    expect($clarifyRequests.get()['rt-A']).toBeUndefined()
+    expect(resumedState?.needsInput).toBe(false)
   })
 
   it('preserves cached image attachments through an idle persisted transcript refresh', async () => {

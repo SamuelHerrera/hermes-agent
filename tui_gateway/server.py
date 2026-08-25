@@ -8085,6 +8085,25 @@ def _session_pending_kind(sid: str) -> str:
     return ""
 
 
+def _session_pending_prompt_snapshot(sid: str) -> dict | None:
+    """Return the pending blocking prompt payload for a reattaching client.
+
+    ``clarify.request`` and sibling prompt events are one-shot WebSocket frames.
+    If Desktop detaches while the backend is blocked in _block(), a new renderer
+    can see that the session is ``waiting`` from _session_live_status() but has no
+    request id/question to answer. Replay the saved payload in resume/activate
+    responses so the client can rebuild the inline prompt without waiting for a
+    timeout or interrupting the turn.
+    """
+    with _prompt_lock:
+        for rid, (owner_sid, _ev) in list(_pending.items()):
+            if owner_sid != sid:
+                continue
+            event, payload = _pending_prompt_payloads.get(rid, ("input.request", {}))
+            return {"event": str(event), "payload": dict(payload)}
+    return None
+
+
 def _session_live_status(sid: str, session: dict) -> str:
     if _session_pending_kind(sid):
         return "waiting"
@@ -8287,6 +8306,7 @@ def _live_session_payload(
         inflight = _inflight_snapshot(session)
         queued = _queued_prompt_snapshot(session)
         running = bool(session.get("running"))
+    pending_prompt = _session_pending_prompt_snapshot(sid)
     # Prefer the persisted display lineage (candidate-inclusive) so this payload
     # matches the eager session.resume + REST transcript; the DB has its own
     # lock, so read it outside the session history lock.
@@ -8310,6 +8330,8 @@ def _live_session_payload(
         payload["inflight"] = inflight
     if queued:
         payload["queued"] = queued
+    if pending_prompt:
+        payload["pending_prompt"] = pending_prompt
     return payload
 
 

@@ -1286,4 +1286,98 @@ describe('appendLiveSessionProjection', () => {
       pending: true
     })
   })
+
+  it('does not append a blocking assistant row without a current user boundary', () => {
+    const stored = [msg('old-user', 'user', 'earlier task'), msg('old-assistant', 'assistant', 'earlier answer')]
+
+    const restored = appendLiveSessionProjection(stored, {
+      session_id: 'runtime-1',
+      pending_prompt: {
+        event: 'clarify.request',
+        payload: {
+          request_id: 'orphan-request',
+          question: 'Which target?',
+          choices: ['staging', 'production']
+        }
+      }
+    })
+
+    expect(restored).toEqual(stored)
+    expect(restored.map(message => message.role)).toEqual(['user', 'assistant'])
+  })
+
+  it('reattaches a repeated clarify question to the newest pending turn', () => {
+    const clarifyPart = (toolCallId: string) => ({
+      type: 'tool-call' as const,
+      toolCallId,
+      toolName: 'clarify',
+      args: { question: 'Which target?', choices: ['staging', 'production'] }
+    })
+
+    const stored: ChatMessage[] = [
+      msg('old-user', 'user', 'first deployment'),
+      { id: 'old-assistant', role: 'assistant', pending: true, parts: [clarifyPart('old-request')] },
+      msg('new-user', 'user', 'second deployment'),
+      { id: 'new-assistant', role: 'assistant', pending: true, parts: [clarifyPart('current-tool-call')] }
+    ]
+
+    const restored = appendLiveSessionProjection(stored, {
+      session_id: 'runtime-1',
+      pending_prompt: {
+        event: 'clarify.request',
+        payload: {
+          request_id: 'replayed-request',
+          question: 'Which target?',
+          choices: ['staging', 'production']
+        }
+      },
+      queued: { user: 'deploy the next service' }
+    })
+
+    const oldTool = restored[1].parts.find(part => part.type === 'tool-call')
+    const currentTool = restored[3].parts.find(part => part.type === 'tool-call')
+
+    expect(oldTool).toMatchObject({ toolCallId: 'old-request' })
+    expect(currentTool).toMatchObject({ toolCallId: 'replayed-request' })
+    expect(restored.at(-1)).toMatchObject({ id: 'user-queued-runtime-1', role: 'user' })
+  })
+
+  it('does not reuse an older matching prompt outside the current turn', () => {
+    const stored: ChatMessage[] = [
+      msg('old-user', 'user', 'first deployment'),
+      {
+        id: 'old-assistant',
+        role: 'assistant',
+        pending: true,
+        parts: [
+          {
+            type: 'tool-call',
+            toolCallId: 'old-request',
+            toolName: 'clarify',
+            args: { question: 'Which target?', choices: ['staging', 'production'] }
+          }
+        ]
+      },
+      msg('new-user', 'user', 'second deployment')
+    ]
+
+    const restored = appendLiveSessionProjection(stored, {
+      session_id: 'runtime-1',
+      pending_prompt: {
+        event: 'clarify.request',
+        payload: {
+          request_id: 'replayed-request',
+          question: 'Which target?',
+          choices: ['staging', 'production']
+        }
+      }
+    })
+
+    const oldTool = restored[1].parts.find(part => part.type === 'tool-call')
+    const currentTool = restored.at(-1)?.parts.find(part => part.type === 'tool-call')
+
+    expect(oldTool).toMatchObject({ toolCallId: 'old-request' })
+    expect(restored.at(-1)?.role).toBe('assistant')
+    expect(currentTool).toMatchObject({ toolCallId: 'replayed-request' })
+  })
 })

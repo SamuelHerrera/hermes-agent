@@ -1,6 +1,6 @@
 import { textWithoutReferenceLines } from '@/components/assistant-ui/reference-kinds'
 import { getSession } from '@/hermes'
-import { assistantTextPart, type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages'
+import { assistantTextPart, type ChatMessage, chatMessageText, textPart, upsertToolPart } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
@@ -612,6 +612,89 @@ export function preserveLocalPendingTurnMessages(
   return preserved.length ? [...withReplacements, ...preserved] : withReplacements
 }
 
+function pendingPromptToolPayload(
+  projection: Pick<SessionResumeResponse, 'pending_prompt'>
+): Parameters<typeof upsertToolPart>[1] | null {
+  const event = projection.pending_prompt?.event
+  const payload = projection.pending_prompt?.payload
+
+  if (!event || !payload) {
+    return null
+  }
+
+  const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
+
+  if (event === 'clarify.request') {
+    const question = typeof payload.question === 'string' ? payload.question : ''
+
+    if (!requestId || !question) {
+      return null
+    }
+
+    return {
+      args: {
+        choices: Array.isArray(payload.choices) ? payload.choices.filter(choice => typeof choice === 'string') : [],
+        question
+      },
+      name: 'clarify',
+      tool_id: requestId
+    }
+  }
+
+  if (event === 'mcp.setup.request') {
+    const server = typeof payload.server === 'string' ? payload.server : ''
+
+    if (!requestId || !server) {
+      return null
+    }
+
+    return {
+      args: {
+        action: typeof payload.action === 'string' ? payload.action : 'install',
+        reason: typeof payload.reason === 'string' ? payload.reason : '',
+        server
+      },
+      name: 'setup_mcp',
+      tool_id: requestId
+    }
+  }
+
+  return null
+}
+
+function toolArgString(part: ChatMessage['parts'][number], key: string): string {
+  if (part.type !== 'tool-call' || !part.args || typeof part.args !== 'object') {
+    return ''
+  }
+
+  const value = (part.args as Record<string, unknown>)[key]
+
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function messageHasMatchingPendingTool(message: ChatMessage, payload: Parameters<typeof upsertToolPart>[1]): boolean {
+  const name = payload?.name || 'tool'
+  const payloadArgs = payload?.args && typeof payload.args === 'object' ? (payload.args as Record<string, unknown>) : {}
+  const question = typeof payloadArgs.question === 'string' ? payloadArgs.question.trim() : ''
+  const server = typeof payloadArgs.server === 'string' ? payloadArgs.server.trim() : ''
+
+  return message.parts.some(part => {
+    if (part.type !== 'tool-call' || part.toolName !== name || part.result !== undefined) {
+      return false
+    }
+
+    if (question) {
+      return toolArgString(part, 'question') === question
+    }
+
+    if (server) {
+      return toolArgString(part, 'server') === server
+    }
+
+    return part.toolCallId === payload?.tool_id
+  })
+}
+
 /**
  * Append the backend-only tail of a live turn to a stored transcript.
  *
@@ -623,7 +706,7 @@ export function preserveLocalPendingTurnMessages(
  */
 export function appendLiveSessionProjection(
   messages: ChatMessage[],
-  projection: Pick<SessionResumeResponse, 'inflight' | 'queued' | 'session_id'>
+  projection: Pick<SessionResumeResponse, 'inflight' | 'queued' | 'pending_prompt' | 'session_id'>
 ): ChatMessage[] {
   const inflightUser = projection.inflight?.user?.trim() ?? ''
   const inflightAssistant = projection.inflight?.assistant ?? ''
@@ -640,6 +723,7 @@ export function appendLiveSessionProjection(
   // failure on the projected row instead of rendering the partial as healthy.
   const inflightError = projection.inflight?.error?.trim() ?? ''
   const queuedUser = projection.queued?.user?.trim() ?? ''
+  const pendingToolPayload = pendingPromptToolPayload(projection)
 
   if (
     !inflightUser &&
@@ -647,7 +731,8 @@ export function appendLiveSessionProjection(
     !inflightStreaming &&
     !inflightError &&
     !queuedUser &&
-    !inflightCorrections.length
+    !inflightCorrections.length &&
+    !pendingToolPayload
   ) {
     return messages
   }
@@ -760,7 +845,56 @@ export function appendLiveSessionProjection(
     })
   }
 
-  return projected.length ? [...messages, ...projected] : messages
+  const withProjected = projected.length ? [...messages, ...projected] : messages
+
+  if (!pendingToolPayload) {
+    return withProjected
+  }
+
+  // Semantic matching is only safe inside the current live turn. An older
+  // unresolved clarify row can legitimately have the same question; replaying
+  // a new request must not move it backward across the latest user boundary.
+  const queuedUserId = `user-queued-${sessionId}`
+
+  const currentTurnStart = withProjected.findLastIndex(
+    message => message.role === 'user' && message.id !== queuedUserId
+  )
+
+  const matchingIndex =
+    currentTurnStart < 0
+      ? -1
+      : withProjected.findLastIndex(
+          (message, index) => index > currentTurnStart && messageHasMatchingPendingTool(message, pendingToolPayload)
+        )
+
+  const targetIndex = matchingIndex >= 0 ? matchingIndex : withProjected.findIndex(message => message.id === liveStreamId)
+
+  if (targetIndex >= 0) {
+    return withProjected.map((message, index) =>
+      index === targetIndex
+        ? { ...message, parts: upsertToolPart(message.parts, pendingToolPayload, 'running'), pending: true }
+        : message
+    )
+  }
+
+  // A blocking tool belongs to an assistant reply after the current user
+  // boundary. If that boundary is absent, the projection is incomplete. Do not
+  // create an assistant-after-assistant row and violate transcript alternation;
+  // the session-scoped request store still retains the prompt for a subsequent
+  // complete projection or live event.
+  if (withProjected.at(-1)?.role !== 'user') {
+    return withProjected
+  }
+
+  return [
+    ...withProjected,
+    {
+      id: liveStreamId,
+      role: 'assistant',
+      parts: upsertToolPart([], pendingToolPayload, 'running'),
+      pending: true
+    }
+  ]
 }
 
 export interface BranchMessage {

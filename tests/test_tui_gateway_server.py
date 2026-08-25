@@ -56,6 +56,50 @@ def _neuter_agent_prewarm_timer(request, monkeypatch):
     yield
 
 
+def test_pending_prompt_snapshot_replays_blocking_clarify_payload(monkeypatch):
+    with server._prompt_lock:
+        server._pending["req1"] = ("sid-waiting", threading.Event())
+        server._pending_prompt_payloads["req1"] = (
+            "clarify.request",
+            {
+                "request_id": "req1",
+                "question": "Which target?",
+                "choices": ["staging", "prod"],
+            },
+        )
+
+    try:
+        expected = {
+            "event": "clarify.request",
+            "payload": {
+                "request_id": "req1",
+                "question": "Which target?",
+                "choices": ["staging", "prod"],
+            },
+        }
+        assert server._session_pending_prompt_snapshot("sid-waiting") == expected
+        assert server._session_pending_prompt_snapshot("other") is None
+
+        monkeypatch.setattr(server, "_fallback_session_info", lambda _session: {})
+        payload = server._live_session_payload(
+            "sid-waiting",
+            {
+                "created_at": 1,
+                "history": [],
+                "history_lock": threading.Lock(),
+                "running": True,
+                "session_key": "stored-waiting",
+            },
+            omit_messages=True,
+        )
+        assert payload["pending_prompt"] == expected
+        assert payload["status"] == "waiting"
+    finally:
+        with server._prompt_lock:
+            server._pending.pop("req1", None)
+            server._pending_prompt_payloads.pop("req1", None)
+
+
 def test_session_slot_is_claimed_on_first_turn_not_on_create(monkeypatch, tmp_path):
     home = tmp_path / ".hermes"
     home.mkdir()

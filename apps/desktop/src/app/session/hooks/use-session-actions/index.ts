@@ -9,6 +9,13 @@ import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
 import { setSessionYolo } from '@/lib/yolo-session'
+import {
+  $clarifyRequests,
+  clearClarifyRequest,
+  normalizeChoices,
+  setClarifyRequest,
+  warnDroppedChoices
+} from '@/store/clarify'
 import { migrateSessionDraft } from '@/store/composer'
 import { clearQueuedPrompts, migrateQueuedPrompts } from '@/store/composer-queue'
 import { $pinnedSessionIds } from '@/store/layout'
@@ -148,6 +155,86 @@ function reconcileAuthoritativeMessages(
   const withPendingTurn = preserveLocalPendingTurnMessages(reconciled, previousMessages)
 
   return preserveLocalAssistantErrors(withPendingTurn, previousMessages)
+}
+
+interface ClarifyResumeBaseline {
+  requestId: string
+  sessionId: string
+}
+
+function hydratePendingPromptFromResume(
+  resumed: SessionResumeResponse,
+  baseline: ClarifyResumeBaseline | null = null
+): boolean {
+  const event = resumed.pending_prompt?.event
+  const payload = resumed.pending_prompt?.payload
+  const currentRequest = $clarifyRequests.get()[resumed.session_id]
+
+  const clearBaseline = () => {
+    if (baseline) {
+      clearClarifyRequest(baseline.requestId, baseline.sessionId)
+    }
+  }
+
+  if (!event || !payload) {
+    clearBaseline()
+
+    // A newer live event can race the activation response. Targeted clearing
+    // removes only the request that existed when resume began and preserves the
+    // newer request if one arrived meanwhile.
+    return Boolean($clarifyRequests.get()[resumed.session_id])
+  }
+
+  if (event === 'clarify.request') {
+    const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
+    const question = typeof payload.question === 'string' ? payload.question : ''
+    const rawChoices = payload.choices
+    const choices = normalizeChoices(rawChoices)
+
+    if (!requestId || !question) {
+      clearBaseline()
+
+      return Boolean($clarifyRequests.get()[resumed.session_id])
+    }
+
+    // Preserve a newer request delivered live after the backend took its resume
+    // snapshot. Conversely, if the baseline request disappeared during the RPC,
+    // its answer/expiry event is newer than the snapshot; do not resurrect it.
+    if (currentRequest && currentRequest.requestId !== requestId && currentRequest.requestId !== baseline?.requestId) {
+      return true
+    }
+
+    if (
+      baseline?.sessionId === resumed.session_id &&
+      baseline.requestId === requestId &&
+      !currentRequest
+    ) {
+      return false
+    }
+
+    if (baseline && (baseline.sessionId !== resumed.session_id || baseline.requestId !== requestId)) {
+      clearBaseline()
+    }
+
+    if (rawChoices != null && choices.length === 0) {
+      warnDroppedChoices('gateway', question, rawChoices)
+    }
+
+    setClarifyRequest({
+      choices: choices.length > 0 ? choices : null,
+      question,
+      requestId,
+      sessionId: resumed.session_id
+    })
+
+    return true
+  }
+
+  clearBaseline()
+
+  // Other blocking prompt kinds still make the session input-bound even when
+  // clarify-specific hydration has nothing to rebuild.
+  return true
 }
 
 // `session.create` params from the current profile + sticky-UI model/effort/fast,
@@ -637,6 +724,8 @@ export function useSessionActions({
       // under the current route (the "open chat A, chat B loads" bug). On a
       // mismatch the mapping is cross-wired: purge both sides and report a miss
       // so the caller falls through to a full resume that rebinds a correct id.
+      let clarifyBaseline: ClarifyResumeBaseline | null = null
+
       const takeWarmCache = (): { runtimeId: string; state: ClientSessionState } | null => {
         const runtimeId = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
         const state = runtimeId ? sessionStateByRuntimeIdRef.current.get(runtimeId) : undefined
@@ -686,6 +775,14 @@ export function useSessionActions({
       if (warmHit) {
         const cachedRuntimeId = warmHit.runtimeId
         const cachedState = warmHit.state
+        const cachedClarifyRequest = $clarifyRequests.get()[cachedRuntimeId]
+
+        if (cachedClarifyRequest) {
+          clarifyBaseline = {
+            requestId: cachedClarifyRequest.requestId,
+            sessionId: cachedRuntimeId
+          }
+        }
 
         const stored =
           $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId)) ?? storedForProfile
@@ -783,6 +880,7 @@ export function useSessionActions({
               sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
               dropSessionState(cachedRuntimeId)
             } else {
+              const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, clarifyBaseline)
               const runtimeInfo = applyRuntimeInfo(activated.info)
 
               // `omit_messages` means the response carries NO transcript, not
@@ -800,13 +898,14 @@ export function useSessionActions({
                   : cachedViewState.messages
 
               const running = Boolean(activated.running ?? cachedViewState.busy)
+              const activatedHasLiveProjection = Boolean(activated.inflight || activated.queued || activated.pending_prompt)
 
               // While idle, the persisted REST transcript is the display
               // authority: session.activate returns the runtime's compressed
               // context projection, not necessarily the complete conversation.
               // During a live turn, keep the runtime/cache projection so an
               // accepted but not-yet-persisted prompt or stream is never lost.
-              if (!running && persistedTranscriptPromise) {
+              if (!running && !activatedHasLiveProjection && persistedTranscriptPromise) {
                 const persisted = await persistedTranscriptPromise
 
                 if (!isCurrentResume()) {
@@ -833,6 +932,7 @@ export function useSessionActions({
                   messages: activatedMessages,
                   busy: running,
                   awaitingResponse: running,
+                  needsInput: pendingPromptNeedsInput,
                   // Adopting someone else's turn: we'll stream its reply
                   // without ever having received its prompt, so the settle
                   // path must not take the "I saw it all" shortcut.
@@ -964,6 +1064,8 @@ export function useSessionActions({
           return
         }
 
+        const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, clarifyBaseline)
+
         if (prefetchedResult) {
           const previousMessages = resumedSameSelectedSession
             ? preserveLocalPendingTurnMessages($messages.get(), resumeStartMessages)
@@ -986,7 +1088,7 @@ export function useSessionActions({
         const prefetchMatchesResumedSession =
           !prefetchedStoredSessionId || !resumedStoredSessionId || prefetchedStoredSessionId === resumedStoredSessionId
 
-        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued)
+        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || resumed.pending_prompt)
 
         const preferredMessages =
           prefetchApplied && prefetchMatchesResumedSession && !hasLiveProjection
@@ -1061,6 +1163,7 @@ export function useSessionActions({
             messages: messagesForView,
             busy: resumedRunning,
             awaitingResponse: resumedRunning && !recoveredInFlightTail,
+            needsInput: pendingPromptNeedsInput,
             adoptedRunningTurn: state.adoptedRunningTurn || resumedRunning,
             ...(inFlightRecovery.applied
               ? {

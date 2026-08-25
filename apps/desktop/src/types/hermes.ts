@@ -599,6 +599,11 @@ export interface SessionMessagesResponse {
   session_id: string
 }
 
+export interface SessionPendingPrompt {
+  event?: string
+  payload?: Record<string, unknown>
+}
+
 export interface SessionResumeResponse {
   /** Present when the backend found a fresh crash-interrupted turn and
    *  scheduled its automatic continuation; the turn arrives as a normal
@@ -623,6 +628,8 @@ export interface SessionResumeResponse {
   queued?: null | {
     user?: string
   }
+  /** Pending user-interaction request that existed before this renderer attached. */
+  pending_prompt?: null | SessionPendingPrompt
   info?: SessionRuntimeInfo
   message_count: number
   messages: SessionMessage[]
