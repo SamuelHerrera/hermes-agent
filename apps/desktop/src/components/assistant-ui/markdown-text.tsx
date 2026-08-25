@@ -7,21 +7,35 @@ import {
   type SyntaxHighlighterProps,
   tailBoundedRemend
 } from '@assistant-ui/react-streamdown'
+import { useStore } from '@nanostores/react'
 import type { code as streamdownCode } from '@streamdown/code'
-import { type ComponentProps, memo, useEffect, useMemo, useState } from 'react'
+import { type ComponentProps, memo, type ReactNode, useEffect, useMemo, useState } from 'react'
 
+import { useSessionView } from '@/app/chat/session-view'
 import { ExpandableBlock } from '@/components/chat/expandable-block'
 import { PreviewAttachment } from '@/components/chat/preview-attachment'
 import { chunkByLines, SyntaxHighlighter } from '@/components/chat/shiki-highlighter'
 import { ZoomableImage } from '@/components/chat/zoomable-image'
 import { ErrorBoundary } from '@/components/error-boundary'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger
+} from '@/components/ui/context-menu'
+import { useI18n } from '@/i18n'
 import { detectArtifact } from '@/lib/artifact-detect'
+import { chatFileTargetFromMarkdownHref, isLikelyChatFilePath } from '@/lib/chat-file-links'
+import { copyTextToClipboard, isDesktopFsRemoteMode, openDesktopPath } from '@/lib/desktop-fs'
 import { normalizeExternalUrl, openExternalLink, PrettyLink } from '@/lib/external-link'
 import { createMemoizedMathPlugin } from '@/lib/katex-memo'
+import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { parseMarkdownIntoBlocksCached } from '@/lib/markdown-blocks'
 import { preprocessMarkdown } from '@/lib/markdown-preprocess'
 import {
   downloadGatewayMediaFile,
+  filePathFromMediaPath,
   isInlineMediaSrc,
   isRemoteGateway,
   mediaExternalUrl,
@@ -34,6 +48,10 @@ import {
 import { previewTargetFromMarkdownHref } from '@/lib/preview-targets'
 import { sessionRefFromMarkdownHref } from '@/lib/session-refs'
 import { cn } from '@/lib/utils'
+import { copyFilePath, revealFile, toRelativePath } from '@/store/file-actions'
+import { revealFileInTree } from '@/store/layout'
+import { notify, notifyError } from '@/store/notifications'
+import { openPreview } from '@/store/preview'
 
 import { ArtifactCard } from './artifact-card'
 import { SessionRefLink } from './directive-text'
@@ -222,6 +240,14 @@ function MediaAttachment({ path }: { path: string }) {
     )
   }
 
+  if (kind === 'file' && !isRemoteGateway()) {
+    return (
+      <span className="wrap-anywhere">
+        <ChatFileLink target={filePathFromMediaPath(path)}>Open {name}</ChatFileLink>
+      </span>
+    )
+  }
+
   return (
     <span className="wrap-anywhere">
       <a
@@ -251,11 +277,159 @@ function childrenToText(children: unknown): string {
   return ''
 }
 
+function isAbsolutePath(path: string): boolean {
+  return /^(?:[a-zA-Z]:[\\/]|\\\\|\/)/.test(path)
+}
+
+function resolveChatFilePath(filePath: string, cwd: null | string): string {
+  if (isAbsolutePath(filePath) || !cwd || filePath.startsWith('~/')) {
+    return filePath
+  }
+
+  return `${cwd.replace(/[\\/]+$/, '')}/${filePath.replace(/^\.?[\\/]/, '')}`
+}
+
+function ChatFileLink({
+  children,
+  className,
+  target
+}: {
+  children: ReactNode
+  className?: string
+  target: string
+}) {
+  const { t } = useI18n()
+  const cwd = useStore(useSessionView().$cwd) || null
+  const actionPath = resolveChatFilePath(target, cwd)
+  const localFs = !isDesktopFsRemoteMode()
+  const m = t.fileMenu
+  const c = t.statusStack.coding
+
+  const openFile = () => {
+    void (async () => {
+      try {
+        const preview = await normalizeOrLocalPreviewTarget(target, cwd)
+
+        if (!preview) {
+          throw new Error(`Could not open file: ${target}`)
+        }
+
+        if (localFs && (preview.binary || preview.previewKind === 'binary')) {
+          await openDesktopPath(actionPath)
+        } else {
+          openPreview(preview, 'file-browser')
+        }
+      } catch (error) {
+        notifyError(error, t.rightSidebar.previewUnavailable)
+      }
+    })()
+  }
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <a
+          className={cn('ref wrap-anywhere cursor-pointer', className)}
+          href="#"
+          onClick={event => {
+            event.preventDefault()
+            openFile()
+          }}
+          title={actionPath}
+        >
+          {children}
+        </a>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={openFile}>{c.openFile}</ContextMenuItem>
+        {localFs && <ContextMenuItem onSelect={() => void openDesktopPath(actionPath)}>{m.openOutside}</ContextMenuItem>}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => revealFileInTree(actionPath)}>{m.revealInSidebar}</ContextMenuItem>
+        {localFs && <ContextMenuItem onSelect={() => void revealFile(actionPath)}>{m.revealFileManager}</ContextMenuItem>}
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => void copyFilePath(actionPath)}>{m.copyPath}</ContextMenuItem>
+        {cwd && (
+          <ContextMenuItem onSelect={() => void copyFilePath(toRelativePath(actionPath, cwd))}>
+            {m.copyRelativePath}
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
+function InlineFileCode({ children, className, ...props }: ComponentProps<'code'>) {
+  const value = childrenToText(children)
+
+  if (!isLikelyChatFilePath(value)) {
+    return (
+      <code className={className} dir="ltr" {...props}>
+        {children}
+      </code>
+    )
+  }
+
+  return (
+    <ChatFileLink className="no-underline" target={value}>
+      <code className={className} dir="ltr" {...props}>
+        {children}
+      </code>
+    </ChatFileLink>
+  )
+}
+
+function MarkdownExternalLink({
+  children,
+  className,
+  fallbackLabel,
+  url,
+  ...props
+}: Omit<ComponentProps<typeof PrettyLink>, 'href'> & { url: string }) {
+  const { t } = useI18n()
+
+  const copyLink = () => {
+    void copyTextToClipboard(url)
+      .then(() => notify({ durationMs: 1500, kind: 'info', message: t.fileMenu.linkCopied }))
+      .catch(error => notifyError(error, t.common.copyFailed))
+  }
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <span className="contents">
+          <PrettyLink
+            className={cn('wrap-anywhere', className)}
+            fallbackLabel={fallbackLabel}
+            href={url}
+            {...props}
+          >
+            {children}
+          </PrettyLink>
+        </span>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem onSelect={() => openExternalLink(url)}>{t.fileMenu.openLink}</ContextMenuItem>
+        <ContextMenuItem onSelect={copyLink}>{t.fileMenu.copyLink}</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+}
+
 function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a'>) {
   const mediaPath = mediaPathFromMarkdownHref(href)
 
   if (mediaPath) {
     return <MediaAttachment path={mediaPath} />
+  }
+
+  const fileTarget = chatFileTargetFromMarkdownHref(href)
+
+  if (fileTarget) {
+    return (
+      <ChatFileLink className={className} target={fileTarget}>
+        {children}
+      </ChatFileLink>
+    )
   }
 
   const previewTarget = previewTargetFromMarkdownHref(href)
@@ -301,7 +475,9 @@ function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a
   const fallbackLabel = text && normalizeExternalUrl(text) !== target ? text : undefined
 
   return (
-    <PrettyLink className={cn('wrap-anywhere', className)} fallbackLabel={fallbackLabel} href={target} {...props} />
+    <MarkdownExternalLink className={className} fallbackLabel={fallbackLabel} url={target} {...props}>
+      {children}
+    </MarkdownExternalLink>
   )
 }
 
@@ -506,9 +682,7 @@ function MarkdownTextSurface({
         // mirroring the CSS isolate that already keeps it out of the
         // plaintext scan. Fenced code never reaches this override; it goes
         // through the code plugin's CodeCard path.
-        inlineCode: ({ className, ...props }: ComponentProps<'code'>) => (
-          <code className={className} dir="ltr" {...props} />
-        ),
+        inlineCode: InlineFileCode,
         // `---` as quiet spacing, not a heavy full-width rule.
         hr: (_props: ComponentProps<'hr'>) => <div aria-hidden className="my-3" />,
         // Lists and blockquotes have chrome that sits *beside* the text

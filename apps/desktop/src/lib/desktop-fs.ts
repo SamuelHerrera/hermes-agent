@@ -57,6 +57,22 @@ function bridge() {
   return desktop
 }
 
+function pathToFileUrl(path: string): string {
+  const isWindowsUnc = path.startsWith('\\\\')
+  const normalized = isWindowsUnc || /^[a-z]:[\\/]/i.test(path) ? path.replace(/\\/g, '/') : path
+
+  const encoded = normalized
+    .split('/')
+    .map(part => encodeURIComponent(part))
+    .join('/')
+
+  if (isWindowsUnc) {
+    return `file://${encoded.slice(2)}`
+  }
+
+  return `file://${encoded.startsWith('/') ? encoded : `/${encoded}`}`
+}
+
 function remoteFsApi<T>(path: string, body?: Record<string, unknown>): Promise<T> {
   return bridge().api<T>(
     body ? { body, method: 'POST', path, profile: desktopFsProfile() } : { path, profile: desktopFsProfile() }
@@ -130,6 +146,16 @@ export async function desktopDefaultCwd(): Promise<{ branch: string; cwd: string
 // Reveal a path in the OS file manager (Finder / Explorer / Files). Local only.
 export async function revealDesktopPath(path: string): Promise<void> {
   await bridge().revealPath?.(path)
+}
+
+// Open a local file with the OS default application. Remote backend paths are
+// not valid on the Desktop machine, so callers should gate this to local mode.
+export async function openDesktopPath(path: string): Promise<void> {
+  if (isDesktopFsRemoteMode()) {
+    throw new Error('Opening files outside Hermes is only available for local files')
+  }
+
+  await bridge().openExternal(pathToFileUrl(path))
 }
 
 // Rename a file/folder in place; returns the new absolute path. Local only.

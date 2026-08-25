@@ -96,6 +96,10 @@ export interface Translations {
     revealExplorer: string
     revealFileManager: string
     revealInSidebar: string
+    openOutside: string
+    openLink: string
+    copyLink: string
+    linkCopied: string
     copyPath: string
     copyRelativePath: string
     rename: string

@@ -1,5 +1,6 @@
 import { normalizeMathDelimiters } from '@assistant-ui/react-streamdown'
 
+import { rewriteChatMarkdownLinks } from '@/lib/chat-file-links'
 import { isLikelyProseFence, sanitizeLanguageTag } from '@/lib/markdown-code'
 import { clampHtmlNestingDepth } from '@/lib/markdown-html-depth'
 import { stripPreviewTargets } from '@/lib/preview-targets'
@@ -151,9 +152,11 @@ function normalizeVisibleProse(text: string): string {
     .map(part =>
       part.startsWith('`')
         ? part
-        : linkifySessionRefs(
-            autoLinkRawUrls(
-              part.replace(/`{3,}/g, '').replace(LOCAL_PREVIEW_URL_RE, '$1').replace(CITATION_MARKER_RE, '')
+        : rewriteChatMarkdownLinks(
+            linkifySessionRefs(
+              autoLinkRawUrls(
+                part.replace(/`{3,}/g, '').replace(LOCAL_PREVIEW_URL_RE, '$1').replace(CITATION_MARKER_RE, '')
+              )
             )
           )
     )
