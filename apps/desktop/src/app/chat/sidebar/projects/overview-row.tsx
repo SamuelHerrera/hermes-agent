@@ -21,7 +21,7 @@ import {
   SidebarRowShell
 } from '../chrome'
 
-import { latestProjectSessions, PROJECT_PREVIEW_COUNT, useWorkspaceNodeOpen } from './model'
+import { latestProjectSessions, PROJECT_OVERVIEW_SESSION_LIMIT, useWorkspaceNodeOpen } from './model'
 import { ProjectContextMenu, ProjectMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
 import { WorkspaceAddButton } from './workspace-header'
@@ -96,8 +96,14 @@ export function ProjectOverviewRow({
   // The appearance popover anchors here (the full row) so it opens flush with
   // the sidebar's content edge regardless of which side the sidebar is on.
   const rowRef = useRef<HTMLDivElement>(null)
-  const fetched = (previewSessions ?? []).slice(0, PROJECT_PREVIEW_COUNT)
-  const preview = renderRows ? (fetched.length ? fetched : latestProjectSessions(project, PROJECT_PREVIEW_COUNT)) : []
+  const fetched = previewSessions ?? []
+
+  const preview = renderRows
+    ? fetched.length
+      ? fetched
+      : latestProjectSessions(project, PROJECT_OVERVIEW_SESSION_LIMIT)
+    : []
+
   const dotStates = useStore($sessionDotStateById)
 
   // In the overview/base view, keep active work visible even when the project is

@@ -25,7 +25,7 @@ vi.mock('@/i18n', () => ({
 }))
 
 vi.mock('./model', () => ({
-  PROJECT_PREVIEW_COUNT: 3,
+  PROJECT_OVERVIEW_SESSION_LIMIT: 5_000,
   latestProjectSessions: () => [],
   useWorkspaceNodeOpen: () => [false, vi.fn()]
 }))
@@ -65,17 +65,24 @@ describe('ProjectOverviewRow', () => {
     expect(tipTrigger(button)).toBeTruthy()
   })
 
-  it('keeps running preview rows visible in the collapsed base project view', () => {
+  it('does not cap overview rows before rendering the project body', () => {
     render(
       <ProjectOverviewRow
-        previewSessions={[{ id: 'running', running: true }, { id: 'idle' }] as unknown as SessionInfo[]}
+        previewSessions={[
+          { id: 'one', running: true },
+          { id: 'two', running: true },
+          { id: 'three', running: true },
+          { id: 'four', running: true }
+        ] as unknown as SessionInfo[]}
         project={project}
         renderRows={sessions => sessions.map(session => <div key={session.id}>{session.id}</div>)}
       />
     )
 
-    expect(screen.getByText('running')).toBeTruthy()
-    expect(screen.queryByText('idle')).toBeNull()
+    expect(screen.getByText('one')).toBeTruthy()
+    expect(screen.getByText('two')).toBeTruthy()
+    expect(screen.getByText('three')).toBeTruthy()
+    expect(screen.getByText('four')).toBeTruthy()
   })
 
   it('does not render the disclosure toggle when there is nothing to preview', () => {

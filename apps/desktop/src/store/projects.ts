@@ -392,7 +392,11 @@ interface ProjectTreePayload {
   scoped_session_ids: string[]
 }
 
-const PROJECT_TREE_PREVIEW_LIMIT = 3
+// The Projects overview is the main place Samuel reads project chats. Ask the
+// backend for every practical row so the sidebar does not force a project
+// drill-in just to reveal rows beyond the old three-item preview.
+const PROJECT_TREE_PREVIEW_LIMIT = 5_000
+const PROJECT_TREE_SESSION_LIMIT = PROJECT_TREE_PREVIEW_LIMIT
 // The all-profiles fan-out reads one database per profile, so it is allowed the
 // same headroom as the cross-profile session list rather than the interactive
 // default.
@@ -428,7 +432,8 @@ async function refreshProjectTreeOn(gateway: HermesGateway): Promise<void> {
 
   try {
     const res = await gatewayRequestOn<ProjectTreePayload>(gateway, 'projects.tree', {
-      preview_limit: PROJECT_TREE_PREVIEW_LIMIT
+      preview_limit: PROJECT_TREE_PREVIEW_LIMIT,
+      session_limit: PROJECT_TREE_SESSION_LIMIT
     })
 
     if (generation !== projectTreeRefreshGeneration || activeGateway() !== gateway) {
@@ -476,7 +481,7 @@ async function refreshProjectTreeAcrossProfiles(): Promise<void> {
 
   try {
     const res = await window.hermesDesktop.api<ProjectTreePayload>({
-      path: `/api/profiles/projects/tree?preview_limit=${PROJECT_TREE_PREVIEW_LIMIT}`,
+      path: `/api/profiles/projects/tree?preview_limit=${PROJECT_TREE_PREVIEW_LIMIT}&session_limit=${PROJECT_TREE_SESSION_LIMIT}`,
       timeoutMs: PROJECT_TREE_REQUEST_TIMEOUT_MS
     })
 

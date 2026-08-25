@@ -13,8 +13,11 @@ import { sessionRecency, type SidebarProjectTree } from './workspace-groups'
 // Page size when revealing more already-loaded rows within a workspace group.
 export const SIDEBAR_GROUP_PAGE = 5
 
-// Recent sessions previewed under each project in the overview.
+// Profile lanes still show a small preview because clicking the profile scopes
+// the sidebar. Project overview rows, however, are now the main project view:
+// they should expose every loaded chat without requiring project drill-in.
 export const PROJECT_PREVIEW_COUNT = 3
+export const PROJECT_OVERVIEW_SESSION_LIMIT = 5_000
 
 // Max concurrent `git worktree list` probes when a project spans many repos.
 const WORKTREE_PROBE_CONCURRENCY = 4
