@@ -316,6 +316,50 @@ def _subagent_session_links(child_agent: Any, parent_agent: Any) -> Dict[str, Op
     }
 
 
+_PUBLIC_SUBAGENT_STATUS_FIELDS = frozenset(
+    {
+        "subagent_id",
+        "parent_id",
+        "depth",
+        "goal",
+        "model",
+        "started_at",
+        "status",
+        "tool_count",
+        "task_index",
+        "task_count",
+        "duration_seconds",
+        "cost_usd",
+        "input_tokens",
+        "output_tokens",
+        "files_read",
+        "files_written",
+        "summary",
+        "last_tool",
+        "current_tool",
+    }
+)
+
+
+def _public_subagent_status(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize one registry row using current durable links and an allowlist."""
+    public = {
+        key: value
+        for key, value in record.items()
+        if key in _PUBLIC_SUBAGENT_STATUS_FIELDS
+    }
+    current_links = _subagent_session_links(
+        record.get("agent"), record.get("parent_agent")
+    )
+    public["child_session_id"] = (
+        current_links["child_session_id"] or record.get("child_session_id")
+    )
+    public["parent_session_id"] = (
+        current_links["parent_session_id"] or record.get("parent_session_id")
+    )
+    return public
+
+
 def list_active_subagents() -> List[Dict[str, Any]]:
     """Snapshot of the currently running subagent tree.
 
@@ -325,21 +369,7 @@ def list_active_subagents() -> List[Dict[str, Any]]:
     — returns a copy.
     """
     with _active_subagents_lock:
-        return [
-            {
-                k: v
-                for k, v in r.items()
-                if k
-                not in {
-                    "agent",
-                    "owner_session_id",
-                    "owner_transport",
-                    "owner_session_record",
-                    "accepting_steer",
-                }
-            }
-            for r in _active_subagents.values()
-        ]
+        return [_public_subagent_status(record) for record in _active_subagents.values()]
 
 
 def _is_descendant_of(child_agent: Any, parent_agent: Any, max_hops: int = 8) -> bool:
@@ -1300,11 +1330,18 @@ def _build_child_progress_callback(
             kw["model"] = model
         if toolsets is not None:
             kw["toolsets"] = list(toolsets)
+        parent_session_id = getattr(parent_agent, "session_id", None)
+        if isinstance(parent_session_id, str) and parent_session_id.strip():
+            kw["parent_session_id"] = parent_session_id.strip()
         # The child's own session id — filled into the shared ref once the
         # child agent exists (the callback is built first), so every relayed
         # event lets UIs open/inspect the subagent's session directly.
-        if session_ref and session_ref.get("session_id"):
-            kw["child_session_id"] = str(session_ref["session_id"])
+        child_agent = session_ref.get("agent") if session_ref else None
+        child_session_id = getattr(child_agent, "session_id", None)
+        if not isinstance(child_session_id, str) or not child_session_id.strip():
+            child_session_id = session_ref.get("session_id") if session_ref else None
+        if isinstance(child_session_id, str) and child_session_id.strip():
+            kw["child_session_id"] = child_session_id.strip()
         kw["tool_count"] = _tool_count[0]
         return kw
 
@@ -1392,11 +1429,11 @@ def _build_child_progress_callback(
                     spinner.print_above(f" {prefix}├─ 🔀 {summary_text}")
                 except Exception as e:
                     logger.debug("Spinner print_above failed: %s", e)
-            if parent_cb:
-                try:
-                    parent_cb("subagent_progress", f"{prefix}{summary_text}")
-                except Exception as e:
-                    logger.debug("Parent callback relay failed: %s", e)
+            _relay(
+                "subagent_progress",
+                tool_name=f"{prefix}{summary_text}",
+                **kwargs,
+            )
             return
 
         # TASK_TOOL_STARTED — display and batch for parent relay
@@ -1838,6 +1875,7 @@ def _build_child_agent(
     # Now the child exists, its session id can ride on every relayed event
     # (including the spawn_requested below — first emit happens after this).
     child_session_ref["session_id"] = getattr(child, "session_id", "") or ""
+    child_session_ref["agent"] = child
     # Set delegation depth so children can't spawn grandchildren
     child._delegate_depth = child_depth
     # Stash the post-degrade role for introspection (leaf if the
@@ -2450,6 +2488,7 @@ def _run_single_child(
                 "status": "running",
                 "tool_count": 0,
                 "agent": child,
+                "parent_agent": parent_agent,
                 **_subagent_session_links(child, parent_agent),
                 # Immutable live gateway/TUI session that commissioned this
                 # child. Empty outside those hosts; RPC authority fails closed.

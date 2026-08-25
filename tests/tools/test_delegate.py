@@ -1273,6 +1273,41 @@ class TestDelegateEventEnum(unittest.TestCase):
         cb("tool.started", tool_name="terminal", preview="ls")
         parent._delegate_spinner.print_above.assert_called()
 
+    def test_progress_callback_uses_current_immediate_parent_and_child_session_ids(self):
+        parent = _make_mock_parent()
+        parent.session_id = "nested-parent-before"
+        parent._delegate_spinner = MagicMock()
+        parent.tool_progress_callback = MagicMock()
+        child = MagicMock()
+        child.session_id = "nested-child-before"
+        session_ref = {"agent": child}
+
+        cb = _build_child_progress_callback(
+            0,
+            "nested goal",
+            parent,
+            task_count=1,
+            session_ref=session_ref,
+        )
+        assert cb is not None
+        parent.session_id = "nested-parent-after"
+        child.session_id = "nested-child-after"
+        cb("subagent.start")
+
+        kwargs = parent.tool_progress_callback.call_args.kwargs
+        self.assertEqual(kwargs["parent_session_id"], "nested-parent-after")
+        self.assertEqual(kwargs["child_session_id"], "nested-child-after")
+
+        parent.tool_progress_callback.reset_mock()
+        cb(
+            "subagent.start",
+            parent_session_id="incoming-immediate-parent",
+            child_session_id="incoming-nested-child",
+        )
+        nested_kwargs = parent.tool_progress_callback.call_args.kwargs
+        self.assertEqual(nested_kwargs["parent_session_id"], "incoming-immediate-parent")
+        self.assertEqual(nested_kwargs["child_session_id"], "incoming-nested-child")
+
 
     def test_progress_callback_ignores_unknown_events(self):
         """Unknown event types are silently ignored."""
@@ -1301,7 +1336,13 @@ class TestDelegateEventEnum(unittest.TestCase):
         parent.tool_progress_callback = MagicMock()
 
         cb = _build_child_progress_callback(0, "test goal", parent, task_count=1)
-        cb("subagent_progress", tool_name="🔀 [1] terminal, file")
+        self.assertIsNotNone(cb)
+        cb(
+            "subagent_progress",
+            tool_name="🔀 [1] terminal, file",
+            parent_session_id="nested-parent-session",
+            child_session_id="grandchild-session",
+        )
 
         # Spinner gets a distinct 🔀-prefixed line, NOT a tool emoji
         # followed by the summary string as if it were a tool name.
@@ -1309,6 +1350,9 @@ class TestDelegateEventEnum(unittest.TestCase):
         self.assertTrue(any("🔀 🔀 [1] terminal, file" in str(c) for c in calls))
         # Parent callback receives the relay (pass-through, no re-batching).
         parent.tool_progress_callback.assert_called_once()
+        relay_kwargs = parent.tool_progress_callback.call_args.kwargs
+        self.assertEqual(relay_kwargs["parent_session_id"], "nested-parent-session")
+        self.assertEqual(relay_kwargs["child_session_id"], "grandchild-session")
         # No '⚡' tool-start emoji should appear — that's the pre-fix bug.
         self.assertFalse(any("⚡" in str(c) for c in calls))
 

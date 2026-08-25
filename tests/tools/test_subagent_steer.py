@@ -178,6 +178,42 @@ def test_status_snapshot_never_leaks_owner_or_lifecycle_metadata():
         _unregister_subagent("sid-private-metadata", agent=agent)
 
 
+def test_status_snapshot_resolves_current_links_after_session_rotation():
+    from tools.delegate_tool import list_active_subagents
+
+    child = _StubAgent()
+    child.session_id = "child-before-compression"
+    parent = _StubAgent()
+    parent.session_id = "parent-before-compression"
+    _register_subagent(
+        {
+            "subagent_id": "sid-rotated-links",
+            "goal": "survive compression",
+            "last_tool": "terminal",
+            "status": "running",
+            "agent": child,
+            "parent_agent": parent,
+            "child_session_id": child.session_id,
+            "parent_session_id": parent.session_id,
+        }
+    )
+    child.session_id = "child-after-compression"
+    parent.session_id = "parent-after-compression"
+
+    try:
+        snapshot = next(
+            item
+            for item in list_active_subagents()
+            if item["subagent_id"] == "sid-rotated-links"
+        )
+        assert snapshot["child_session_id"] == "child-after-compression"
+        assert snapshot["parent_session_id"] == "parent-after-compression"
+        assert snapshot["last_tool"] == "terminal"
+        assert "parent_agent" not in snapshot
+    finally:
+        _unregister_subagent("sid-rotated-links", agent=child)
+
+
 class TestMissedSteerRetention:
     """The final-answer race: a steer with no boundary left is NAMED, not lost."""
 
