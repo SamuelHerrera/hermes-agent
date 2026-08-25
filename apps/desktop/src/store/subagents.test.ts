@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { SessionInfo } from '@/types/hermes'
+
 import {
   $subagentsBySession,
   activeSubagentCount,
+  activeSubagentSessionRows,
   allSubagents,
   buildSubagentTree,
   clearSessionSubagents,
   failedSubagentCount,
   pruneDelegateFallbackSubagents,
   pruneFinishedSessionSubagents,
+  reconcileActiveSubagents,
   upsertSubagent
 } from './subagents'
 
@@ -121,6 +125,90 @@ describe('subagent store', () => {
     expect(indicatorFailed).toBe(2)
     expect(tree).toHaveLength(4)
     expect(indicatorRunning + indicatorFailed).toBe(tree.length)
+  })
+
+  it('rehydrates active subagents after a renderer restart and rekeys them to the live parent runtime', () => {
+    upsertSubagent('old-runtime', {
+      child_session_id: 'stale-child',
+      goal: 'stale row',
+      parent_session_id: 'parent-stored',
+      status: 'running',
+      subagent_id: 'stale',
+      task_index: 0
+    })
+
+    reconcileActiveSubagents(
+      [
+        {
+          child_session_id: 'child-stored',
+          goal: 'keep working after restart',
+          model: 'gpt-test',
+          parent_session_id: 'parent-stored',
+          started_at: 1_234,
+          status: 'running',
+          subagent_id: 'live',
+          task_index: 0,
+          tool_count: 3
+        }
+      ],
+      (parentId: string) => (parentId === 'parent-stored' ? 'parent-runtime' : parentId)
+    )
+
+    expect($subagentsBySession.get()['old-runtime']).toBeUndefined()
+    expect(listFor('parent-runtime')).toEqual([
+      expect.objectContaining({
+        id: 'live',
+        goal: 'keep working after restart',
+        model: 'gpt-test',
+        parentSessionId: 'parent-stored',
+        sessionId: 'child-stored',
+        startedAt: 1_234_000,
+        status: 'running',
+        toolCount: 3
+      })
+    ])
+  })
+
+  it('projects a newly spawned child into the sidebar immediately with a running indicator', () => {
+    const parent = {
+      cwd: '/work/app',
+      ended_at: null,
+      id: 'parent-stored',
+      input_tokens: 42,
+      is_active: true,
+      last_active: 100,
+      message_count: 7,
+      model: 'parent-model',
+      output_tokens: 10,
+      preview: 'parent preview',
+      profile: 'default',
+      source: 'desktop',
+      started_at: 90,
+      title: 'Parent',
+      tool_call_count: 2
+    } satisfies SessionInfo
+
+    upsertSubagent('parent-runtime', {
+      child_session_id: 'child-stored',
+      goal: 'Implement the fix',
+      model: 'child-model',
+      parent_session_id: 'parent-stored',
+      status: 'running',
+      subagent_id: 'child-1',
+      task_index: 0
+    })
+
+    expect(activeSubagentSessionRows($subagentsBySession.get(), [parent])).toEqual([
+      expect.objectContaining({
+        cwd: '/work/app',
+        delegate_parent_session_id: 'parent-stored',
+        id: 'child-stored',
+        model: 'child-model',
+        running: true,
+        source: 'subagent',
+        title: 'Implement the fix'
+      })
+    ])
   })
 
   it('clears one session without touching another', () => {

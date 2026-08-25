@@ -125,6 +125,7 @@ import { $sessionDotStateById, sessionStatusBucket } from '@/store/session-dot-s
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive'
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
+import { $subagentsBySession, activeSubagentSessionRows } from '@/store/subagents'
 
 import { jobTitle } from '../../cron/job-state'
 import {
@@ -335,6 +336,7 @@ export function ChatSidebar({
   const projectOrderIds = useStore($sidebarProjectOrderIds)
   const projects = useStore($projects)
   const projectTree = useStore($projectTree)
+  const subagentsBySession = useStore($subagentsBySession)
   const projectTreeLoading = useStore($projectTreeLoading)
   const removedSessionIds = useStore($removedSessionIds)
   const reposScanning = useStore($reposScanning)
@@ -613,6 +615,19 @@ export function ChatSidebar({
   // into the list here, so a drag ranks a row among its own day's chats
   // instead of flattening the whole sidebar into an undated manual mode.
   const agentSessions = unpinnedAgentSessions
+
+  const projectSnapshotSessions = useMemo(
+    () => projectTree.flatMap(project => project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))),
+    [projectTree]
+  )
+
+  const liveProjectSessions = useMemo(
+    () => [
+      ...agentSessions,
+      ...activeSubagentSessionRows(subagentsBySession, [...agentSessions, ...projectSnapshotSessions])
+    ],
+    [agentSessions, projectSnapshotSessions, subagentsBySession]
+  )
 
   // Recents are local-only: messaging-platform sessions are fetched as their
   // own slice ($messagingSessions) and rendered in self-managed per-platform
@@ -917,8 +932,8 @@ export function ChatSidebar({
   // backend now seeds each project folder as an (empty) repo, so the overlay
   // always has a lane to place a new in-project session into.
   const enteredProjectContent = useMemo(
-    () => (enteredProject ? overlayLiveLanes(enteredProject, agentSessions, removedSessionIds) : undefined),
-    [enteredProject, agentSessions, removedSessionIds]
+    () => (enteredProject ? overlayLiveLanes(enteredProject, liveProjectSessions, removedSessionIds) : undefined),
+    [enteredProject, liveProjectSessions, removedSessionIds]
   )
 
   const scopedRepoPaths = useMemo(
@@ -1021,13 +1036,13 @@ export function ChatSidebar({
   // matching the flat Recents list. Keyed by project id for the rows.
   const overviewPreviews = useMemo<Record<string, SessionInfo[]>>(
     () =>
-      overlayLivePreviews(projectOverview ?? [], agentSessions, projects, PROJECT_OVERVIEW_SESSION_LIMIT, {
+      overlayLivePreviews(projectOverview ?? [], liveProjectSessions, projects, PROJECT_OVERVIEW_SESSION_LIMIT, {
         removed: removedSessionIds,
         // Rank before the trim, so "3 priciest in this project" isn't "3 most
         // recent, priciest first".
         rankIds: sortOrderIds
       }),
-    [projectOverview, agentSessions, projects, removedSessionIds, sortOrderIds]
+    [projectOverview, liveProjectSessions, projects, removedSessionIds, sortOrderIds]
   )
 
   const onEnterProject = useCallback(
@@ -1783,7 +1798,7 @@ export function ChatSidebar({
                     ) : undefined
                   ) : undefined
                 }
-                liveSessions={inProject ? agentSessions : undefined}
+                liveSessions={inProject ? liveProjectSessions : undefined}
                 manualOrderIds={agentOrderManual ? agentOrderIds : sortOrderIds}
                 onArchiveSession={onArchiveSession}
                 onBranchSession={onBranchSession}

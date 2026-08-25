@@ -923,9 +923,18 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           }
 
           nativeSubagentSessionsRef.current.add(sessionId)
+          const parentSessionId = sessionStateByRuntimeIdRef.current.get(sessionId)?.storedSessionId
+          const subagentPayload = payload as Record<string, unknown>
+
+          const linkedPayload = {
+            ...subagentPayload,
+            ...(parentSessionId && !subagentPayload.parent_session_id ? { parent_session_id: parentSessionId } : {}),
+            profile: subagentPayload.profile ?? normalizeProfileKey(event.profile ?? $activeGatewayProfile.get())
+          }
+
           upsertSubagent(
             sessionId,
-            payload as Record<string, unknown>,
+            linkedPayload,
             event.type === 'subagent.spawn_requested' || event.type === 'subagent.start',
             event.type
           )

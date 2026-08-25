@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 
 from tools.delegate_tool import (
     _register_subagent,
+    _subagent_session_links,
     _unregister_subagent,
     steer_subagent,
 )
@@ -22,6 +23,7 @@ class _StubAgent:
     def __init__(self, accept: bool = True, boom: bool = False):
         self.accept = accept
         self.boom = boom
+        self.session_id: str | None = None
         self.steered: list[str] = []
 
     def steer(self, text: str) -> bool:
@@ -35,9 +37,11 @@ def _with_registered(
     sid: str,
     agent,
     *,
+    child_session_id: str | None = None,
     owner_session_id: str | None = None,
     owner_transport=None,
     owner_session_record=None,
+    parent_session_id: str | None = None,
 ) -> None:
     _register_subagent(
         {
@@ -47,11 +51,25 @@ def _with_registered(
             "goal": "test goal",
             "status": "running",
             "agent": agent,
+            "child_session_id": child_session_id,
             "owner_session_id": owner_session_id,
             "owner_transport": owner_transport,
             "owner_session_record": owner_session_record,
+            "parent_session_id": parent_session_id,
         }
     )
+
+
+def test_active_subagent_snapshot_links_to_durable_parent_and_child_sessions():
+    child = _StubAgent()
+    child.session_id = 'child-stored'
+    parent = _StubAgent()
+    parent.session_id = 'parent-stored'
+
+    assert _subagent_session_links(child, parent) == {
+        'child_session_id': 'child-stored',
+        'parent_session_id': 'parent-stored',
+    }
 
 
 def test_steer_reaches_the_live_child():
@@ -133,9 +151,11 @@ def test_status_snapshot_never_leaks_owner_or_lifecycle_metadata():
     _with_registered(
         "sid-private-metadata",
         agent,
+        child_session_id="child-stored",
         owner_session_id="private-owner",
         owner_transport=owner_transport,
         owner_session_record=owner_session_record,
+        parent_session_id="parent-stored",
     )
     try:
         snapshot = next(
@@ -144,6 +164,8 @@ def test_status_snapshot_never_leaks_owner_or_lifecycle_metadata():
             if item["subagent_id"] == "sid-private-metadata"
         )
         assert snapshot["status"] == "running"
+        assert snapshot["child_session_id"] == "child-stored"
+        assert snapshot["parent_session_id"] == "parent-stored"
         assert "agent" not in snapshot
         assert "owner_session_id" not in snapshot
         assert "owner_transport" not in snapshot

@@ -300,11 +300,29 @@ def _capture_gateway_steer_authority(
         return None, None
 
 
+def _subagent_session_links(child_agent: Any, parent_agent: Any) -> Dict[str, Optional[str]]:
+    """Public, durable session ids used to rehydrate Desktop agent chrome.
+
+    These are deliberately separate from the private live owner capability
+    (`owner_session_id` + transport/record identity), which must never leave the
+    process through `delegation.status`.
+    """
+    child_id = getattr(child_agent, "session_id", None)
+    parent_id = getattr(parent_agent, "session_id", None)
+
+    return {
+        "child_session_id": child_id.strip() if isinstance(child_id, str) and child_id.strip() else None,
+        "parent_session_id": parent_id.strip() if isinstance(parent_id, str) and parent_id.strip() else None,
+    }
+
+
 def list_active_subagents() -> List[Dict[str, Any]]:
     """Snapshot of the currently running subagent tree.
 
-    Each record: {subagent_id, parent_id, depth, goal, model, started_at,
-    tool_count, status}.  Safe to call from any thread — returns a copy.
+    Each record contains display metadata plus durable
+    ``parent_session_id`` / ``child_session_id`` links. Private owner transport
+    and lifecycle capability fields are stripped. Safe to call from any thread
+    — returns a copy.
     """
     with _active_subagents_lock:
         return [
@@ -2432,6 +2450,7 @@ def _run_single_child(
                 "status": "running",
                 "tool_count": 0,
                 "agent": child,
+                **_subagent_session_links(child, parent_agent),
                 # Immutable live gateway/TUI session that commissioned this
                 # child. Empty outside those hosts; RPC authority fails closed.
                 "owner_session_id": owner_session_id,

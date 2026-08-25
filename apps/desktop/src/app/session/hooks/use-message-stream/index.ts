@@ -459,10 +459,16 @@ export function useMessageStream({
       }
 
       if (!nativeSubagentSessionsRef.current.has(sessionId)) {
+        const parentSessionId = sessionStateByRuntimeIdRef.current.get(sessionId)?.storedSessionId
+
         for (const subagentPayload of delegateTaskPayloads(payload, phase, sourceEventType)) {
           upsertSubagent(
             sessionId,
-            subagentPayload,
+            {
+              ...subagentPayload,
+              ...(parentSessionId && !subagentPayload.parent_session_id ? { parent_session_id: parentSessionId } : {}),
+              profile: subagentPayload.profile ?? activeGatewayProfile
+            },
             true,
             phase === 'complete' ? 'delegate.complete' : 'delegate.running'
           )
@@ -476,7 +482,7 @@ export function useMessageStream({
         { pending: m => phase !== 'complete' || (m.pending ?? false) }
       )
     },
-    [flushQueuedDeltas, mutateStream, sessionInterrupted]
+    [activeGatewayProfile, flushQueuedDeltas, mutateStream, sessionInterrupted, sessionStateByRuntimeIdRef]
   )
 
   const finalizeInterimAssistantMessage = useCallback(

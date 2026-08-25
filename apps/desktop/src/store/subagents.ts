@@ -1,6 +1,7 @@
 import { atom, computed } from 'nanostores'
 
 import { capitalize } from '@/lib/text'
+import type { SessionInfo } from '@/types/hermes'
 
 export type SubagentStatus = 'completed' | 'failed' | 'interrupted' | 'queued' | 'running'
 export type SubagentStreamKind = 'progress' | 'summary' | 'thinking' | 'tool'
@@ -15,10 +16,13 @@ export interface SubagentStreamEntry {
 export interface SubagentProgress {
   id: string
   parentId: null | string
+  /** Durable parent conversation id. The map key remains the live runtime id. */
+  parentSessionId?: string
   goal: string
   /** The child's own stored session id — lets UIs open its session window. */
   sessionId?: string
   model?: string
+  profile?: string
   status: SubagentStatus
   taskCount: number
   taskIndex: number
@@ -49,6 +53,16 @@ const PREVIEW_MAX = 220
 const TOOL_PREVIEW_MAX = 96
 
 export const $subagentsBySession = atom<Record<string, SubagentProgress[]>>({})
+let revision = 0
+
+const commitSubagents = (next: Record<string, SubagentProgress[]>) => {
+  revision += 1
+  $subagentsBySession.set(next)
+}
+
+/** Monotonic renderer-side mutation counter used to reject stale async
+ * delegation snapshots that raced a newer stream event. */
+export const subagentStoreRevision = () => revision
 
 export const $runningSubagentSessionIds = computed($subagentsBySession, groups => {
   const ids = new Set<string>()
@@ -163,6 +177,7 @@ function streamFromPayload(
 function toProgress(payload: SubagentPayload, prev: SubagentProgress | undefined, eventType = ''): SubagentProgress {
   const at = Date.now()
   const status = asStatus(payload.status)
+  const startedAtSeconds = num(payload.started_at)
   const tool = str(payload.tool_name)
   const stream = streamFromPayload(payload, status, eventType, at).reduce(appendStream, prev?.stream ?? [])
   const filesRead = strList(payload.files_read)
@@ -171,13 +186,15 @@ function toProgress(payload: SubagentPayload, prev: SubagentProgress | undefined
   return {
     id: prev?.id ?? idOf(payload),
     parentId: str(payload.parent_id) || prev?.parentId || null,
+    parentSessionId: str(payload.parent_session_id) || prev?.parentSessionId,
     goal: str(payload.goal) || prev?.goal || 'Subagent',
     sessionId: str(payload.child_session_id) || prev?.sessionId,
     model: str(payload.model) || prev?.model,
+    profile: str(payload.profile) || prev?.profile,
     status,
     taskCount: num(payload.task_count) ?? prev?.taskCount ?? 1,
     taskIndex: num(payload.task_index) ?? prev?.taskIndex ?? 0,
-    startedAt: prev?.startedAt ?? at,
+    startedAt: prev?.startedAt ?? (startedAtSeconds ? startedAtSeconds * 1000 : at),
     updatedAt: at,
     durationSeconds: num(payload.duration_seconds) ?? prev?.durationSeconds,
     costUsd: num(payload.cost_usd) ?? prev?.costUsd,
@@ -200,7 +217,7 @@ export function clearSessionSubagents(sid: string) {
   }
 
   const { [sid]: _drop, ...rest } = map
-  $subagentsBySession.set(rest)
+  commitSubagents(rest)
 }
 
 /**
@@ -229,7 +246,7 @@ export function pruneFinishedSessionSubagents(sid: string) {
     return
   }
 
-  $subagentsBySession.set({ ...map, [sid]: next })
+  commitSubagents({ ...map, [sid]: next })
 }
 
 export function pruneDelegateFallbackSubagents(sid: string) {
@@ -246,7 +263,7 @@ export function pruneDelegateFallbackSubagents(sid: string) {
     return
   }
 
-  $subagentsBySession.set({ ...map, [sid]: next })
+  commitSubagents({ ...map, [sid]: next })
 }
 
 export function upsertSubagent(sid: string, payload: SubagentPayload, createIfMissing = true, eventType?: string) {
@@ -268,7 +285,44 @@ export function upsertSubagent(sid: string, payload: SubagentPayload, createIfMi
   const next = toProgress(payload, prev, eventType)
   const nextList = idx >= 0 ? list.map(item => (item.id === id ? next : item)) : [...list, next]
 
-  $subagentsBySession.set({ ...map, [sid]: nextList })
+  commitSubagents({ ...map, [sid]: nextList })
+}
+
+/** Rebuild the renderer's active-agent cache from `delegation.status` after a
+ * reconnect/restart. The snapshot is authoritative for active rows: stale
+ * running placeholders disappear, while terminal rows already rendered in the
+ * current renderer are retained. */
+export function reconcileActiveSubagents(
+  active: readonly SubagentPayload[],
+  runtimeIdForParent: (parentSessionId: string) => string = parentSessionId => parentSessionId,
+  shouldReconcile: (sid: string, item: SubagentProgress) => boolean = () => true
+) {
+  const current = $subagentsBySession.get()
+  const previousById = new Map(Object.values(current).flat().map(item => [item.id, item]))
+  const next: Record<string, SubagentProgress[]> = {}
+
+  for (const [sid, items] of Object.entries(current)) {
+    const terminal = items.filter(item => TERMINAL.has(item.status) || !shouldReconcile(sid, item))
+
+    if (terminal.length > 0) {
+      next[sid] = terminal
+    }
+  }
+
+  for (const payload of active) {
+    const parentSessionId = str(payload.parent_session_id)
+    const id = idOf(payload)
+
+    if (!parentSessionId || !id) {
+      continue
+    }
+
+    const sid = runtimeIdForParent(parentSessionId) || parentSessionId
+    const item = toProgress({ ...payload, status: 'running' }, previousById.get(id), 'subagent.start')
+    next[sid] = [...(next[sid] ?? []).filter(existing => existing.id !== item.id), item]
+  }
+
+  commitSubagents(next)
 }
 
 export function buildSubagentTree(items: readonly SubagentProgress[]): SubagentNode[] {
@@ -308,3 +362,71 @@ export const failedSubagentCount = (items: readonly SubagentProgress[]) =>
 /** Flatten every session's subagents — the scope the Spawn-tree panel and the
  *  status-bar indicator must agree on. */
 export const allSubagents = (bySession: Record<string, SubagentProgress[]>) => Object.values(bySession).flat()
+
+/** Optimistic child-session rows for the project tree. Delegate events arrive
+ * before the child has necessarily flushed its DB session, so waiting for the
+ * next full project-tree reload made the sidebar appear stale. These rows use
+ * the spawning parent's workspace metadata and are naturally replaced (same
+ * durable id) when the backend snapshot catches up. */
+export function activeSubagentSessionRows(
+  groups: Record<string, SubagentProgress[]>,
+  parentSessions: readonly SessionInfo[]
+): SessionInfo[] {
+  const parentById = new Map<string, SessionInfo>()
+
+  for (const parent of parentSessions) {
+    parentById.set(parent.id, parent)
+
+    if (parent._lineage_root_id) {
+      parentById.set(parent._lineage_root_id, parent)
+    }
+  }
+
+  const rows: SessionInfo[] = []
+  const seen = new Set<string>()
+
+  const active = allSubagents(groups)
+    .filter(item => (item.status === 'queued' || item.status === 'running') && item.sessionId && item.parentSessionId)
+    .sort((a, b) => a.startedAt - b.startedAt)
+
+  for (const item of active) {
+    const childSessionId = item.sessionId as string
+    const parentSessionId = item.parentSessionId as string
+    const parent = parentById.get(parentSessionId)
+
+    if (!parent || seen.has(childSessionId)) {
+      continue
+    }
+
+    const row: SessionInfo = {
+      ...parent,
+      _lineage_root_id: childSessionId,
+      actual_cost_usd: null,
+      archived: false,
+      delegate_parent_session_id: parentSessionId,
+      ended_at: null,
+      estimated_cost_usd: null,
+      id: childSessionId,
+      input_tokens: 0,
+      is_active: true,
+      last_active: Math.floor(item.updatedAt / 1000),
+      message_count: 0,
+      model: item.model ?? parent.model,
+      output_tokens: 0,
+      parent_session_id: null,
+      pinned: false,
+      preview: item.goal,
+      running: true,
+      source: 'subagent',
+      started_at: Math.floor(item.startedAt / 1000),
+      title: item.goal,
+      tool_call_count: item.toolCount ?? 0
+    }
+
+    seen.add(childSessionId)
+    rows.push(row)
+    parentById.set(childSessionId, row)
+  }
+
+  return rows
+}

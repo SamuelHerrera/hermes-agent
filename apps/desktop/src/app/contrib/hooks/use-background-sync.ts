@@ -4,14 +4,19 @@ import { useEffect } from 'react'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { $changeEventsAvailable, $cronChangeTick, $sessionsChangeTick } from '@/store/live-sync'
 import { $onBattery, batteryPollInterval } from '@/store/power'
-import { refreshActiveProfile } from '@/store/profile'
-import { $activeSessionId, $currentCwd, setCurrentCwd } from '@/store/session'
+import { normalizeProfileKey, refreshActiveProfile } from '@/store/profile'
+import { $activeSessionId, $currentCwd, $sessions, setCurrentCwd } from '@/store/session'
 import {
   $sessionStates,
   publishSessionState,
   SESSION_WATCHDOG_TIMEOUT_MS,
   setSessionStalled
 } from '@/store/session-states'
+import {
+  reconcileActiveSubagents,
+  type SubagentPayload,
+  subagentStoreRevision
+} from '@/store/subagents'
 
 import type { GatewayRequester } from '../types'
 
@@ -52,6 +57,10 @@ interface LiveSessionStatusItem {
 
 interface LiveSessionStatusResponse {
   sessions?: LiveSessionStatusItem[]
+}
+
+interface ActiveSubagentStatusResponse {
+  active?: SubagentPayload[]
 }
 
 // Runtime ids this poll has seen live, per gateway profile. A profile only
@@ -164,6 +173,51 @@ export function rehydrateLiveSessionStatuses(
   }
 
   liveRuntimeIdsByProfile.set(profileKey, seen)
+}
+
+/** Restore renderer-only agent cards from the delegation registry after the
+ * parent runtime ids have been rehydrated by `session.active_list`. */
+export function rehydrateActiveSubagentStatuses(
+  response: ActiveSubagentStatusResponse,
+  activeProfile = 'default',
+  expectedRevision = subagentStoreRevision()
+): boolean {
+  if (subagentStoreRevision() !== expectedRevision) {
+    return false
+  }
+
+  const profile = normalizeProfileKey(activeProfile)
+  const runtimeByStored = new Map<string, string>()
+
+  const profileStoredIds = new Set(
+    $sessions
+      .get()
+      .filter(session => normalizeProfileKey(session.profile) === profile)
+      .flatMap(session => [session.id, session._lineage_root_id].filter((id): id is string => Boolean(id)))
+  )
+
+  const profileRuntimeIds = new Set<string>()
+
+  for (const [runtimeSessionId, state] of Object.entries($sessionStates.get())) {
+    if (state.storedSessionId) {
+      runtimeByStored.set(state.storedSessionId, runtimeSessionId)
+
+      if (profileStoredIds.has(state.storedSessionId)) {
+        profileRuntimeIds.add(runtimeSessionId)
+      }
+    }
+  }
+
+  reconcileActiveSubagents(
+    (response.active ?? []).map(item => ({ ...item, profile })),
+    parentSessionId => runtimeByStored.get(parentSessionId) ?? parentSessionId,
+    (sid, item) =>
+      item.profile
+        ? normalizeProfileKey(item.profile) === profile
+        : profileRuntimeIds.has(sid) || profileStoredIds.has(sid)
+  )
+
+  return true
 }
 
 /** Forget every profile's live-runtime bookkeeping. A gateway wipe already
@@ -295,6 +349,18 @@ export function useBackgroundSync({
       } catch {
         // Older gateways may not expose session.active_list. Live stream events
         // still work as before; leave the current sidebar state untouched.
+      }
+
+      try {
+        const snapshotRevision = subagentStoreRevision()
+        const response = await requestGateway<ActiveSubagentStatusResponse>('delegation.status', {})
+
+        if (!cancelled) {
+          rehydrateActiveSubagentStatuses(response, activeGatewayProfile, snapshotRevision)
+        }
+      } catch {
+        // Legacy gateways may not expose delegation.status. Live subagent
+        // stream events continue to populate the toolbar as before.
       } finally {
         inFlight = false
       }
