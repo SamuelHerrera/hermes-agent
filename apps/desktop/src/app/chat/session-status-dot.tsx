@@ -238,36 +238,20 @@ export function SessionAttentionDot({ className, storedSessionId }: SessionAtten
     return null
   }
 
-  const variant = DOT_VARIANTS[dotState]
-
-  if (variant.icon === 'loading') {
-    return (
-      <span
-        aria-label={variant.ariaLabel?.(r)}
-        className={cn('grid size-4 shrink-0 place-items-center', variant.className, className)}
-        data-session-attention-dot
-        data-session-status={dotState}
-        role={variant.role}
-        title={variant.title?.(r)}
-      >
-        <Codicon className="block leading-none" name="loading" size="0.625rem" spinning />
-      </span>
-    )
-  }
+  const variant = STATUS_ICON_VARIANTS[dotState]
+  const label = variant.label(r)
 
   return (
     <span
-      aria-label={variant.ariaLabel?.(r)}
-      className={cn(
-        variant.className,
-        'shrink-0 shadow-[0_0_0_2px_var(--tab-bg),0_1px_3px_rgba(0,0,0,0.45)]',
-        className
-      )}
+      aria-label={label}
+      className={cn('grid size-4 shrink-0 place-items-center', variant.className, className)}
       data-session-attention-dot
       data-session-status={dotState}
-      role={variant.role}
-      title={variant.title?.(r)}
-    />
+      role="status"
+      title={label}
+    >
+      <Codicon className="block leading-none" name={variant.icon} size="0.625rem" spinning={variant.spinning} />
+    </span>
   )
 }
 

@@ -29,6 +29,7 @@ import {
   $sidebarOpen,
   toggleSidebarOpen
 } from '@/store/layout'
+import { notify, notifyError } from '@/store/notifications'
 import {
   $activeGatewayProfile,
   $profileColors,
@@ -43,6 +44,7 @@ import {
   sortByProfileOrder
 } from '@/store/profile'
 import { openRouteTile } from '@/store/route-tiles'
+import { $connection } from '@/store/session'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
 import type { ProfileInfo } from '@/types/hermes'
 
@@ -272,6 +274,33 @@ export function TitlebarControls({
   const hapticsMuted = useStore($hapticsMuted)
   const sidebarOpen = useStore($sidebarOpen)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
+  const connection = useStore($connection)
+  const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
+  const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
+
+  const runServiceAction = async (kind: 'backend' | 'gateway') => {
+    const services = window.hermesDesktop?.localServices
+
+    if (!services) {
+      return
+    }
+
+    setServiceBusy(kind)
+
+    try {
+      const response = kind === 'backend' ? await services.restartBackend() : await services.restartGateway()
+
+      if (!response.ok) {
+        throw new Error(response.error || response.message || 'Service operation failed')
+      }
+
+      notify({ kind: 'success', title: t.settings.gateway.localServicesUpdatedTitle, message: response.message })
+    } catch (error) {
+      notifyError(error, t.settings.gateway.localServicesFailed)
+    } finally {
+      setServiceBusy(null)
+    }
+  }
 
   const toggleHaptics = () => {
     if (!hapticsMuted) {
@@ -330,6 +359,27 @@ export function TitlebarControls({
       onSelect: () => openRouteTile(ARTIFACTS_ROUTE, 'center')
     }
   ]
+
+  const localServiceTools: TitlebarTool[] = canManageLocalServices
+    ? [
+        {
+          disabled: serviceBusy !== null,
+          icon: <TitlebarIcon name="server-process" spinning={serviceBusy === 'backend'} />,
+          id: 'restart-backend',
+          label: t.settings.gateway.restartBackend,
+          onSelect: () => void runServiceAction('backend'),
+          title: t.settings.gateway.restartBackend
+        },
+        {
+          disabled: serviceBusy !== null,
+          icon: <TitlebarIcon name="refresh" spinning={serviceBusy === 'gateway'} />,
+          id: 'restart-gateway',
+          label: t.settings.gateway.restartGateway,
+          onSelect: () => void runServiceAction('gateway'),
+          title: t.settings.gateway.restartGateway
+        }
+      ]
+    : []
 
   // Static system tools — always pinned to the screen's right edge.
   const systemTools: TitlebarTool[] = [
@@ -416,7 +466,6 @@ export function TitlebarControls({
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
-        <TitlebarProfileMenu />
       </div>
 
       {/*
@@ -452,6 +501,10 @@ export function TitlebarControls({
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
+        {localServiceTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
+        <TitlebarProfileMenu />
         {visibleSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}

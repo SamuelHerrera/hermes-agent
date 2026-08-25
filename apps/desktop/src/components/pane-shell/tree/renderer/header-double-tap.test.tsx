@@ -134,4 +134,32 @@ describe('pane tab/header double tap', () => {
 
     expect(findGroup($layoutTree.get()!, 'grp-main')?.headerHidden).not.toBe(true)
   })
+
+  it('does not minimize a split pane from empty tab-strip taps', () => {
+    const node = group(['session-tile:one'], { active: 'session-tile:one', id: 'grp-secondary' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} parentAxis="row" />)
+
+    const strip = container.querySelector<HTMLElement>('[data-zone-tabstrip="grp-secondary"]')
+    expect(strip).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /minimize/i })).toBeNull()
+
+    tap(strip!, 3)
+
+    expect(findGroup($layoutTree.get()!, 'grp-secondary')?.minimized).not.toBe(true)
+  })
+
+  it('ignores stale minimized state for ordinary split panes', () => {
+    const node = group(['session-tile:one'], {
+      active: 'session-tile:one',
+      id: 'grp-secondary',
+      minimized: true
+    })
+
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} parentAxis="row" />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-secondary"]')).toBeTruthy()
+    expect(container.querySelector('[data-tree-tab="session-tile:one"]')).toBeTruthy()
+  })
 })

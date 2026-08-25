@@ -66,7 +66,7 @@ describe('SessionStatusDot running icon', () => {
 })
 
 describe('session tab attention treatment', () => {
-  it('keeps the identity dot in the lead slot and renders unread attention separately', () => {
+  it('keeps the identity dot in the lead slot and renders unread completion as a trailing check icon', () => {
     $unreadFinishedSessionIds.set(['s1'])
 
     const lead = render(<SessionTabLead session={{ id: 's1' } as never} storedSessionId="s1" />)
@@ -77,5 +77,15 @@ describe('session tab attention treatment', () => {
     const attention = render(<SessionTabAttentionDot storedSessionId="s1" />)
 
     expect(attention.container.querySelector('[data-session-attention-dot][data-session-status="unread"]')).toBeTruthy()
+    expect(attention.container.querySelector('.codicon-check')).toBeTruthy()
+  })
+
+  it('renders needs-input attention as a trailing question icon', () => {
+    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true, needsInput: true })
+
+    const attention = render(<SessionTabAttentionDot storedSessionId="s1" />)
+
+    expect(attention.container.querySelector('[data-session-attention-dot][data-session-status="needs-input"]')).toBeTruthy()
+    expect(attention.container.querySelector('.codicon-question')).toBeTruthy()
   })
 })

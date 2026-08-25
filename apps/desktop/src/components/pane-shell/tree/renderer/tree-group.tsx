@@ -49,14 +49,13 @@ import {
   closeOtherTreeTabs,
   closeTabPane,
   closeTreeTabsToRight,
-  collapseTreePane,
+  isCollapsePane,
   isMainStripPane,
   isSessionStripPane,
   noteActiveTreeGroup,
   reloadTreePane,
   restoreTreePane,
   SESSION_TILE_DRAG,
-  setTreeGroupMinimized,
   treeTabCloseTargets
 } from '../store'
 import {
@@ -80,20 +79,12 @@ import { paneChrome } from './track-model'
 function ZoneMenu({
   children,
   closable,
-  minimizable = true,
-  minimized,
-  nodeId,
   targetPane
 }: {
   children: ReactNode
   /** The pane the menu closes (the right-clicked chip / the active pane);
    *  undefined = not closable (the main zone). */
   closable?: () => string | undefined
-  /** False for the zone hosting the uncloseable workspace — collapsing the
-   *  MAIN pane strands the app behind a strip. */
-  minimizable?: boolean
-  minimized?: boolean
-  nodeId: string
   /** The right-clicked chip (else the active pane) — what the close-others /
    *  to-the-right / all verbs measure from. Called when the menu RENDERS, not
    *  on every zone re-render: resolving the siblings reads the layout tree,
@@ -125,13 +116,6 @@ function ZoneMenu({
           onCloseOthers: () => closeOtherTreeTabs(targetId),
           onCloseToRight: () => closeTreeTabsToRight(targetId)
         })}
-        <kit.Separator />
-        {minimizable &&
-          renderActionItem(kit, {
-            icon: minimized ? 'chevron-down' : 'chevron-up',
-            label: minimized ? t.zones.restore : t.zones.minimize,
-            onSelect: () => setTreeGroupMinimized(nodeId, !minimized)
-          })}
       </>
     )
   }
@@ -254,8 +238,10 @@ export function TreeGroup({
   // empty column, so the minimized form is a narrow vertical rail instead
   // (tabs reading top-to-bottom). In a column (stacked zones) the horizontal
   // header IS the collapsed form, exactly as before.
-  const verticalCollapse = Boolean(node.minimized) && parentAxis === 'row' && !isEmpty
-  const headerVisible = !isEmpty && !verticalCollapse && (Boolean(node.minimized) || !headerHidden)
+  const collapsePaneZone = shown.some(isCollapsePane)
+  const minimized = collapsePaneZone && Boolean(node.minimized)
+  const verticalCollapse = minimized && parentAxis === 'row' && !isEmpty
+  const headerVisible = !isEmpty && !verticalCollapse && (minimized || !headerHidden)
 
   // Keep the activated tab — and, on the last one, the trailing "+" — inside
   // the strip's scroll window. Opening a tab past the right edge otherwise
@@ -289,10 +275,6 @@ export function TreeGroup({
     return closeableTab(paneId) ? paneId : undefined
   }
 
-  // The zone hosting the uncloseable workspace never minimizes — collapsing
-  // MAIN strands the whole app behind a strip.
-  const minimizable = !shown.some(id => paneChrome(paneFor(id)).uncloseable)
-
   // Middle-click / ⌘-click on a tab: one routing for every tab kind, the same
   // one the zone menu's Close and ⌘W use.
   const closeTab = (paneId: string) => closeTabPane(paneId)
@@ -301,16 +283,9 @@ export function TreeGroup({
   // A pane's own live label when it has one, else its registered string.
   const tabLabel = (paneId: string) => paneChrome(paneFor(paneId)).tabTitle?.() ?? paneFor(paneId)?.title ?? paneId
 
-  // Collapse/restore a tool panel (or plain minimize elsewhere) — the header
-  // chevron + tap gesture, routed so ⌃`/the titlebar toggle stay truthful.
-  const toggleCollapse = () => (node.minimized ? restoreTreePane(activeId) : collapseTreePane(activeId))
-
   // Same menu on the header strip and the edit veil — one prop bag.
   const zoneMenu = {
     closable,
-    minimizable,
-    minimized: node.minimized,
-    nodeId: node.id,
     targetPane
   }
 
@@ -345,9 +320,9 @@ export function TreeGroup({
         />
       )}
 
-      {/* Minimized in a ROW: a narrow vertical rail — same PaneTab shell as
-          the horizontal strip, just `vertical`. Click a tab to restore +
-          activate; click anywhere else on the rail to restore. */}
+      {/* Store-collapsed tool panes in a ROW: a narrow vertical rail — same
+          PaneTab shell as the horizontal strip, just `vertical`. Click a tab
+          to restore + activate; click anywhere else on the rail to restore. */}
       {verticalCollapse && (
         <ZoneMenu {...zoneMenu}>
           <div
@@ -399,15 +374,12 @@ export function TreeGroup({
             data-zone-tabstrip={node.id}
             listRef={tabsRef}
             onPointerDown={e =>
-              // Tap the header to collapse to it / expand back — the DetailPane
-              // / sidebar-section gesture (never for the main zone). Double-tap
-              // Drag still moves the pane. The old double-click-to-hide-header
-              // shortcut is intentionally gone; header visibility now changes
-              // only through the explicit context-menu command.
+              // Drag empty header space like a pane. A plain click is inert:
+              // split zones are equal work surfaces, not collapsible panels.
               startPaneDrag(
                 activeId,
                 e,
-                () => minimizable && toggleCollapse(),
+                undefined,
                 undefined,
                 undefined,
                 active?.title ?? activeId
@@ -417,23 +389,12 @@ export function TreeGroup({
             style={{ cursor: 'grab' }}
             trailing={
               <>
-                {minimizable && (
-                  <button
-                    aria-label={node.minimized ? t.zones.restore : t.zones.minimize}
-                    className="mx-1 grid size-5 shrink-0 place-items-center self-center rounded-md text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/pane-header:opacity-100"
-                    onClick={toggleCollapse}
-                    onPointerDown={e => e.stopPropagation()}
-                    type="button"
-                  >
-                    <Codicon name={node.minimized ? 'chevron-down' : 'chevron-up'} size="0.75rem" />
-                  </button>
-                )}
                 <StripDropCaret groupId={node.id} stripRef={stripRef} />
               </>
             }
           >
             {tabbedShown.map(paneId => {
-              const isActive = paneId === activeId && !node.minimized
+              const isActive = paneId === activeId && !minimized
               const chrome = paneChrome(paneFor(paneId))
               const closeable = closeableTab(paneId)
               const title = paneFor(paneId)?.title ?? paneId
@@ -478,7 +439,7 @@ export function TreeGroup({
                     const onTap = () => {
                       clearTabSelection()
 
-                      if (node.minimized) {
+                      if (minimized) {
                         restoreTreePane(paneId)
                       }
 
@@ -556,7 +517,7 @@ export function TreeGroup({
                 contributes (a preview's console / DevTools), then the "+".
                 All of them are PaneStripGlyph — same size, colour and hover,
                 because they're the same button. */}
-            {!node.minimized &&
+            {!minimized &&
               paneChrome(active)
                 .stripTools?.()
                 .map(tool => <PaneStripGlyph key={tool.id} {...tool} />)}
@@ -566,7 +527,7 @@ export function TreeGroup({
                 a new session tab (mirrors ⌘T) via the app-registered action;
                 the pointerdown focuses this zone first, so the tab lands in
                 THIS strip. Hidden when unwired or the zone is minimized. */}
-            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholder) && newSessionTabAction && !node.minimized && (
+            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholder) && newSessionTabAction && !minimized && (
               <span
                 // The action docks into the FOCUSED chat zone; clicking a
                 // background strip's "+" must make THAT zone the focused one
@@ -592,7 +553,7 @@ export function TreeGroup({
           scroll positions and measurements survive the round-trip — which also
           makes a hidden layer's rect identical to the visible one's, hence the
           marker document-wide lookups filter on (see pane-visibility.ts). */}
-      {!node.minimized && (
+      {!minimized && (
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           {isEmpty ? (
             <div className="grid h-full place-items-center">
@@ -643,7 +604,7 @@ export function TreeGroup({
       {/* Edit-mode veil: the BODY is a drag handle for the active pane. It
           starts below the header so tabs/headers stay directly interactive
           (drag any tab, right-click for the zone menu). */}
-      {editMode && !dragging && !isEmpty && !node.minimized && (
+      {editMode && !dragging && !isEmpty && !minimized && (
         <ZoneMenu {...zoneMenu}>
           <div
             // z-50: pane CONTENT may carry its own stacked chrome (the
