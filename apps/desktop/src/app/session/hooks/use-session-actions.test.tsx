@@ -5,12 +5,24 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { revealTreePane } from '@/components/pane-shell/tree/store'
-import { getAllSessionMessages, getLatestSessionMessages, getSession, type SessionInfo } from '@/hermes'
+import {
+  getAllSessionMessages,
+  getLatestSessionMessages,
+  getSession,
+  type SessionInfo,
+  setSessionArchived
+} from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { $clarifyRequests, clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
-import { $projectScope, $projectTree, ALL_PROJECTS } from '@/store/projects'
+import {
+  $projectScope,
+  $projectTree,
+  $removedSessionIds,
+  $sessionMutationsInFlight,
+  ALL_PROJECTS
+} from '@/store/projects'
 import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionId,
@@ -24,6 +36,7 @@ import {
   $newChatWorkspaceTarget,
   $resumeFailedSessionId,
   $selectedStoredSessionId,
+  $sessions,
   $workspaceEmptyPlaceholder,
   setActiveSessionId,
   setActiveSessionStoredIdRotation,
@@ -85,7 +98,11 @@ function deferred<T>() {
 
 type HarnessHandle = Pick<
   ReturnType<typeof useSessionActions>,
-  'createBackendSessionForSend' | 'openNewSessionTile' | 'selectSidebarItem' | 'startFreshSessionDraft'
+  | 'archiveSession'
+  | 'createBackendSessionForSend'
+  | 'openNewSessionTile'
+  | 'selectSidebarItem'
+  | 'startFreshSessionDraft'
 >
 
 function storedSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
@@ -1931,6 +1948,61 @@ describe('resumeSession warm-cache mapping integrity', () => {
     expect(requestGateway.mock.calls.map(([method]) => method)).not.toContain('session.resume')
     expect(runtimeIdByStoredSessionIdRef.current.get('stored-A')).toBe('rt-A')
     expect(sessionStateByRuntimeIdRef.current.get('rt-A')?.messages[0]?.id).toBe('user-optimistic')
+  })
+})
+
+describe('archiveSession delegate visibility', () => {
+  afterEach(() => {
+    cleanup()
+    setSessions([])
+    $projectTree.set([])
+    $removedSessionIds.set(new Set())
+    $sessionMutationsInFlight.set(new Set())
+    vi.restoreAllMocks()
+  })
+
+  it('optimistically hides every nested delegate child with its archived parent', async () => {
+    const parent = storedSession({ id: 'parent', title: 'Parent chat' })
+
+    const child = storedSession({
+      delegate_parent_session_id: 'parent',
+      id: 'child',
+      source: 'subagent',
+      title: 'Child review'
+    })
+
+    const grandchild = storedSession({
+      delegate_parent_session_id: 'child',
+      id: 'grandchild',
+      source: 'subagent',
+      title: 'Nested review'
+    })
+
+    const unrelated = storedSession({ id: 'unrelated', title: 'Keep me' })
+
+    setSessions([parent, unrelated])
+    $projectTree.set([
+      {
+        id: '/repo',
+        label: 'repo',
+        path: '/repo',
+        previewSessions: [parent, child, grandchild, unrelated],
+        repos: [],
+        sessionCount: 4
+      }
+    ])
+    vi.mocked(setSessionArchived).mockResolvedValue({ ok: true })
+
+    let handle: HarnessHandle | null = null
+    render(<Harness onReady={value => (handle = value)} requestGateway={async () => ({}) as never} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.archiveSession('parent')
+    })
+
+    expect($sessions.get().map(session => session.id)).toEqual(['unrelated'])
+    expect([...$removedSessionIds.get()].sort()).toEqual(['child', 'grandchild', 'parent'])
   })
 })
 

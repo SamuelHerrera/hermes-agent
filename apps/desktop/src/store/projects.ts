@@ -105,6 +105,48 @@ export function untombstoneSessions(ids: Array<null | string | undefined>): void
   }
 }
 
+/**
+ * The visible session family that disappears when a parent conversation is
+ * archived. The backend project tree only shows delegate children while their
+ * ancestor is visible, so the optimistic renderer update must hide the same
+ * recursive family instead of leaving orphan robot rows until the next fetch.
+ */
+export function sessionAndDelegateDescendantIds(storedSessionId: string): string[] {
+  const treeRows = $projectTree
+    .get()
+    .flatMap(project => [
+      ...(project.previewSessions ?? []),
+      ...project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))
+    ])
+
+  const rows = [...$sessions.get(), ...treeRows]
+  const family = new Set([storedSessionId])
+  let changed = true
+
+  while (changed) {
+    changed = false
+
+    for (const session of rows) {
+      const aliases = [session.id, session._lineage_root_id].filter((id): id is string => Boolean(id?.trim()))
+      const parentId = session.delegate_parent_session_id?.trim()
+      const belongs = aliases.some(id => family.has(id)) || Boolean(parentId && family.has(parentId))
+
+      if (!belongs) {
+        continue
+      }
+
+      for (const id of aliases) {
+        if (!family.has(id)) {
+          family.add(id)
+          changed = true
+        }
+      }
+    }
+  }
+
+  return [...family]
+}
+
 // Ids whose delete/archive RPC is still in flight. Their tombstones are pinned
 // against the projects.tree prune below: a refresh whose snapshot predates the
 // mutation completing must NOT drop the tombstone, or the row flashes back until

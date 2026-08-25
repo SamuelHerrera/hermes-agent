@@ -25,6 +25,7 @@ import {
   beginSessionMutation,
   endSessionMutation,
   resolveNewSessionCwd,
+  sessionAndDelegateDescendantIds,
   tombstoneSessions,
   untombstoneSessions
 } from '@/store/projects'
@@ -1585,16 +1586,23 @@ export function useSessionActions({
     async (storedSessionId: string) => {
       clearNotifications()
 
-      const archived = $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))
+      const archivedFamilyIds = sessionAndDelegateDescendantIds(storedSessionId)
+
+      const archivedFamily = $sessions
+        .get()
+        .filter(session => archivedFamilyIds.some(id => sessionMatchesStoredId(session, id)))
+
+      const archived = archivedFamily.find(session => sessionMatchesStoredId(session, storedSessionId))
       const wasSelected = selectedStoredSessionId === storedSessionId
       const previousPinned = $pinnedSessionIds.get()
       // Pins are keyed on the durable lineage-root id; the stored id may be the
       // live tip after compression. Drop both so the pin can't linger.
       const archivedPinId = archived ? sessionPinId(archived) : storedSessionId
-      const archivedIds = [storedSessionId, archived?.id, archived?._lineage_root_id]
+      const archivedIds = [...archivedFamilyIds, archived?.id, archived?._lineage_root_id]
 
-      // Soft-hide: drop from the sidebar immediately, keep the data.
-      setSessions(prev => prev.filter(session => !sessionMatchesStoredId(session, storedSessionId)))
+      // Soft-hide the same visible family the backend will omit after refresh:
+      // the parent plus every recursively nested delegate child.
+      setSessions(prev => prev.filter(session => !archivedIds.some(id => id && sessionMatchesStoredId(session, id))))
       tombstoneSessions(archivedIds)
       beginSessionMutation(archivedIds)
       $pinnedSessionIds.set(previousPinned.filter(id => id !== storedSessionId && id !== archivedPinId))
@@ -1617,8 +1625,11 @@ export function useSessionActions({
 
         notify({ durationMs: 2_000, kind: 'success', message: copy.archived })
       } catch (err) {
-        if (archived) {
-          setSessions(prev => [archived, ...prev.filter(session => !sessionMatchesStoredId(session, storedSessionId))])
+        if (archivedFamily.length) {
+          setSessions(prev => [
+            ...archivedFamily,
+            ...prev.filter(session => !archivedIds.some(id => id && sessionMatchesStoredId(session, id)))
+          ])
         }
 
         untombstoneSessions(archivedIds)
