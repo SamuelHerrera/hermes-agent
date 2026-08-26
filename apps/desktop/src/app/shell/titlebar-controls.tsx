@@ -14,6 +14,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { ProfileGlyph } from '@/components/ui/profile-glyph'
@@ -81,6 +84,14 @@ export interface TitlebarTool {
   actionId?: string
   title?: string
   to?: string
+}
+
+const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
+const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
+const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
+
+export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): boolean {
+  return PINNED_TITLEBAR_STATUSBAR_IDS.has(item.id)
 }
 
 export type TitlebarToolSide = 'left' | 'right'
@@ -454,13 +465,23 @@ export function TitlebarControls({
     return null
   }
 
-  const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
   const visibleWorkspacePageTools = workspacePageTools.filter(tool => !tool.hidden)
+  const pinnedWorkspacePageTools = visibleWorkspacePageTools.filter(tool => PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id))
+  const overflowWorkspacePageTools = visibleWorkspacePageTools.filter(tool => !PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id))
   const visiblePaneTools = tools.filter(tool => !tool.hidden)
+  const visibleLocalServiceTools = localServiceTools.filter(tool => !tool.hidden)
+  const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
+  const pinnedSystemTools = visibleSystemTools.filter(tool => PINNED_TITLEBAR_SYSTEM_TOOL_IDS.has(tool.id))
+  const overflowSystemTools = visibleSystemTools.filter(tool => !PINNED_TITLEBAR_SYSTEM_TOOL_IDS.has(tool.id))
 
   const visibleStatusbarItems = [...statusbarLeftItems, ...statusbarItems].filter(
-    item => !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+    item =>
+      !item.hidden &&
+      (item.lockedVisible || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
   )
+
+  const pinnedStatusbarItems = visibleStatusbarItems.filter(isPinnedTitlebarStatusbarItem)
+  const overflowStatusbarItems = visibleStatusbarItems.filter(item => !isPinnedTitlebarStatusbarItem(item))
 
   return (
     <>
@@ -504,22 +525,173 @@ export function TitlebarControls({
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
-        {visibleStatusbarItems.map(item => (
+        {pinnedStatusbarItems.map(item => (
           <TitlebarStatusbarItemButton item={item} key={`status:${item.id}`} navigate={navigate} />
         ))}
-        {visibleWorkspacePageTools.map(tool => (
+        {pinnedWorkspacePageTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
+        <TitlebarOverflowMenu
+          navigate={navigate}
+          statusbarItems={overflowStatusbarItems}
+          tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
+        />
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-        {localServiceTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
         <TitlebarProfileMenu />
-        {visibleSystemTools.map(tool => (
+        {pinnedSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
       </div>
     </>
+  )
+}
+
+function menuStatusbarLabel(item: StatusbarItem): ReactNode {
+  return item.toggleLabel ?? item.title ?? item.label ?? item.id
+}
+
+function menuToolLabel(tool: TitlebarTool): ReactNode {
+  return tool.title ?? tool.label
+}
+
+function MenuRow({ icon, label }: { icon?: ReactNode; label: ReactNode }) {
+  return (
+    <>
+      {icon ? <span className="grid size-4 shrink-0 place-items-center">{icon}</span> : null}
+      <span className="min-w-0 truncate">{label}</span>
+    </>
+  )
+}
+
+function TitlebarOverflowMenu({
+  navigate,
+  statusbarItems,
+  tools
+}: {
+  navigate: ReturnType<typeof useNavigate>
+  statusbarItems: readonly StatusbarItem[]
+  tools: readonly TitlebarTool[]
+}) {
+  const [open, setOpen] = useState(false)
+  const close = () => setOpen(false)
+
+  if (statusbarItems.length === 0 && tools.length === 0) {
+    return null
+  }
+
+  return (
+    <DropdownMenu onOpenChange={setOpen} open={open}>
+      <Tip label="More app actions">
+        <DropdownMenuTrigger asChild>
+          <Button
+            aria-label="More app actions"
+            className={cn(
+              titlebarButtonClass,
+              'bg-transparent select-none data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground'
+            )}
+            onPointerDown={event => event.stopPropagation()}
+            size="icon-titlebar"
+            type="button"
+            variant="ghost"
+          >
+            <Codicon name="ellipsis" size="0.8125rem" />
+          </Button>
+        </DropdownMenuTrigger>
+      </Tip>
+      <DropdownMenuContent align="end" className="w-56">
+        {statusbarItems.map(item => (
+          <TitlebarOverflowStatusbarItem item={item} key={`status:${item.id}`} navigate={navigate} onClose={close} />
+        ))}
+        {statusbarItems.length > 0 && tools.length > 0 ? <DropdownMenuSeparator /> : null}
+        {tools.map(tool => (
+          <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function TitlebarOverflowStatusbarItem({
+  item,
+  navigate,
+  onClose
+}: {
+  item: StatusbarItem
+  navigate: ReturnType<typeof useNavigate>
+  onClose: () => void
+}) {
+  const content = typeof item.menuContent === 'function' ? item.menuContent(onClose) : item.menuContent
+  const hasMenu = item.variant === 'menu' || Boolean(content) || Boolean(item.menuItems?.length)
+  const label = menuStatusbarLabel(item)
+
+  const run = (shiftKey = false) => {
+    if (item.to) {
+      navigate(item.to)
+    }
+
+    item.onSelect?.({ shiftKey })
+    onClose()
+  }
+
+  if (hasMenu) {
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger disabled={item.disabled}>
+          <MenuRow icon={item.icon} label={label} />
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className={item.menuClassName}>
+          {content}
+          {item.menuItems?.map(entry => (
+            <DropdownMenuItem
+              disabled={entry.disabled}
+              key={entry.id}
+              onSelect={() => {
+                if (entry.to) {
+                  navigate(entry.to)
+                }
+
+                entry.onSelect?.()
+                onClose()
+              }}
+            >
+              <MenuRow icon={entry.icon} label={entry.label} />
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    )
+  }
+
+  return (
+    <DropdownMenuItem disabled={item.disabled} onSelect={event => run(Boolean((event as Event & { shiftKey?: boolean }).shiftKey))}>
+      <MenuRow icon={item.icon} label={label} />
+    </DropdownMenuItem>
+  )
+}
+
+function TitlebarOverflowToolItem({
+  navigate,
+  onClose,
+  tool
+}: {
+  navigate: ReturnType<typeof useNavigate>
+  onClose: () => void
+  tool: TitlebarTool
+}) {
+  return (
+    <DropdownMenuItem
+      disabled={tool.disabled}
+      onSelect={() => {
+        if (tool.to) {
+          navigate(tool.to)
+        }
+
+        tool.onSelect?.()
+        onClose()
+      }}
+    >
+      <MenuRow icon={tool.icon} label={menuToolLabel(tool)} />
+    </DropdownMenuItem>
   )
 }
 

@@ -72,7 +72,7 @@ import {
   setMessages,
   setWorkspaceEmptyPlaceholder
 } from '@/store/session'
-import { $statusbarHiddenIds, $statusbarVisible } from '@/store/statusbar-prefs'
+import { $statusbarVisible } from '@/store/statusbar-prefs'
 import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { armWakeWord, stopClientCapture } from '@/store/wake-word'
 import { isAuxiliaryWindow, isHudWindow } from '@/store/windows'
@@ -129,7 +129,7 @@ import {
   titlebarToolsRightCss,
   titlebarToolsWidthCss
 } from '../shell/titlebar'
-import { TitlebarControls } from '../shell/titlebar-controls'
+import { isPinnedTitlebarStatusbarItem, TitlebarControls } from '../shell/titlebar-controls'
 import { useCodexUsage } from '../shell/use-codex-usage'
 import { UpdatesOverlay } from '../updates-overlay'
 
@@ -277,7 +277,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const { connectionRef, gateway, gatewayRef, requestGateway } = useGatewayRequest()
 
   const statusbarVisible = useStore($statusbarVisible)
-  const hiddenStatusbarIds = useStore($statusbarHiddenIds)
   const { inferenceStatus, statusSnapshot } = useStatusSnapshot(gatewayState, requestGateway, statusbarVisible)
   const extraLeftStatusbarItems = useStatusbarContributions('left')
   const extraRightStatusbarItems = useStatusbarContributions('right')
@@ -332,15 +331,15 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     toggleCommandCenter
   })
 
-  const titlebarStatusbarItemCount = useMemo(() => {
+  const titlebarPinnedStatusbarItemCount = useMemo(() => {
     if (!statusbarVisible) {
       return 0
     }
 
     return [...leftStatusbarItems, ...statusbarItems].filter(
-      item => !item.hidden && (item.lockedVisible || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+      item => isPinnedTitlebarStatusbarItem(item) && !item.hidden
     ).length
-  }, [hiddenStatusbarIds, leftStatusbarItems, statusbarItems, statusbarVisible])
+  }, [leftStatusbarItems, statusbarItems, statusbarVisible])
 
   const openProviderSettings = useCallback(() => navigate(`${SETTINGS_ROUTE}?tab=providers`), [navigate])
 
@@ -1048,7 +1047,11 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
   // against the static app-control cluster — in the tree layout the titlebar
   // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  const APP_CONTROL_TOOL_COUNT = 9 + titlebarStatusbarItemCount
+  // Match TitlebarControls' visible app cluster: approval/terminal status items,
+  // New Project, overflow dots, Codex usage, profile switcher, and haptics. Keep
+  // this intentionally conservative so Electron's drag strip never covers the
+  // leftmost clickable app action again.
+  const APP_CONTROL_TOOL_COUNT = 6 + titlebarPinnedStatusbarItemCount
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
