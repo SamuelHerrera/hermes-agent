@@ -136,8 +136,8 @@ function UsageBattery({
 
   return (
     <span aria-hidden="true" className="inline-flex flex-col items-center gap-px text-(--ui-text-tertiary)" title={`${formatPercent(percentLeft)} left`}>
-      <span className="h-0.5 w-1.5 rounded-t-[0.125rem] bg-current/60" />
-      <span className="relative h-[1.125rem] w-2.5 overflow-hidden rounded-[0.1875rem] border border-current/60 p-px">
+      <span className="h-px w-1.5 rounded-t-[0.125rem] bg-current/60" />
+      <span className="relative h-3.5 w-2 overflow-hidden rounded-[0.1875rem] border border-current/60 p-px">
         <span
           className={cn('absolute inset-x-px bottom-px block rounded-[0.125rem] transition-[height] duration-200', fillClass)}
           data-testid="codex-usage-fill"
