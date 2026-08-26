@@ -25,7 +25,7 @@ describe('CodexUsageTitlebarControl', () => {
     expect(codexUsageRemainingPercent({ remainingPercent: 42, usedPercent: 90 })).toBe(42)
   })
 
-  it('renders a compact battery trigger whose fill is remaining usage', () => {
+  it('renders a compact usage icon trigger whose fill is remaining usage', () => {
     render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
     expect(screen.getByRole('button', { name: 'Codex subscription usage' })).toBeTruthy()

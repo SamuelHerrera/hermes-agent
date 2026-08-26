@@ -100,7 +100,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
             type="button"
             variant="ghost"
           >
-            <UsageBattery disabled={disabled} percentLeft={percentLeft} unavailable={unavailable} />
+            <UsageGaugeIcon disabled={disabled} percentLeft={percentLeft} unavailable={unavailable} />
           </Button>
         </PopoverAnchor>
         <PopoverContent
@@ -123,7 +123,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
   )
 }
 
-function UsageBattery({
+function UsageGaugeIcon({
   disabled,
   percentLeft,
   unavailable
@@ -135,14 +135,14 @@ function UsageBattery({
   const fillClass = unavailable || disabled ? 'bg-(--ui-text-quaternary)' : percentLeft <= 10 ? 'bg-(--ui-warm)' : 'bg-(--ui-accent)'
 
   return (
-    <span aria-hidden="true" className="inline-flex flex-col items-center gap-px text-(--ui-text-tertiary)" title={`${formatPercent(percentLeft)} left`}>
-      <span className="h-px w-1.5 rounded-t-[0.125rem] bg-current/60" />
-      <span className="relative h-3.5 w-2 overflow-hidden rounded-[0.1875rem] border border-current/60 p-px">
+    <span aria-hidden="true" className="inline-flex items-center justify-center text-(--ui-text-tertiary)" title={`${formatPercent(percentLeft)} left`}>
+      <span className="relative size-3.5 overflow-hidden rounded-full border border-current/60 bg-current/10">
         <span
-          className={cn('absolute inset-x-px bottom-px block rounded-[0.125rem] transition-[height] duration-200', fillClass)}
+          className={cn('absolute inset-x-0 bottom-0 block transition-[height] duration-200', fillClass)}
           data-testid="codex-usage-fill"
           style={{ height: `${percentLeft}%` }}
         />
+        <span className="absolute inset-[0.1875rem] rounded-full border border-(--ui-sidebar-surface-background)/70" />
       </span>
     </span>
   )
@@ -208,7 +208,7 @@ function UsageHeader({ tone, value }: { tone: 'ok' | 'muted' | 'warn'; value: st
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-1.5 font-medium text-(--ui-text-primary)">
-        <UsageBattery disabled={false} percentLeft={tone === 'muted' ? 0 : Number.parseInt(value, 10)} unavailable={tone === 'muted'} />
+        <UsageGaugeIcon disabled={false} percentLeft={tone === 'muted' ? 0 : Number.parseInt(value, 10)} unavailable={tone === 'muted'} />
         Codex usage
       </div>
       <span
