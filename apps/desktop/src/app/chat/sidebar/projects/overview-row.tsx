@@ -6,7 +6,9 @@ import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { compactNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { $sidebarRowMeta } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $homeProjectAppearances, homeProjectAppearanceForProfile } from '@/store/projects'
 
@@ -68,31 +70,36 @@ function ProjectSummaryCount({
   dataAttr,
   icon,
   label,
+  shortLabel,
   spinning = false
 }: {
-  count: number
-  dataAttr: 'archived' | 'chats' | 'children' | 'running'
-  icon: string
+  count: number | string
+  dataAttr: 'archived' | 'chats' | 'children' | 'cost' | 'running' | 'tokens'
+  icon?: string
   label: string
+  shortLabel: string
   spinning?: boolean
 }) {
   const countAttrs = {
     ...(dataAttr === 'archived' ? { 'data-project-archived-count': true } : {}),
     ...(dataAttr === 'chats' ? { 'data-project-chat-count': true, 'data-project-open-count': true } : {}),
     ...(dataAttr === 'children' ? { 'data-project-child-count': true } : {}),
-    ...(dataAttr === 'running' ? { 'data-project-running-count': true } : {})
+    ...(dataAttr === 'cost' ? { 'data-project-cost-count': true } : {}),
+    ...(dataAttr === 'running' ? { 'data-project-running-count': true } : {}),
+    ...(dataAttr === 'tokens' ? { 'data-project-token-count': true } : {})
   }
 
   return (
     <Tip label={label}>
       <span
         aria-label={label}
-        className="flex items-center gap-1 tabular-nums"
+        className="inline-flex shrink-0 items-center gap-0.5 whitespace-nowrap tabular-nums"
         data-project-summary-count
         data-project-summary-kind={dataAttr}
         {...countAttrs}
       >
-        <Codicon name={icon} size="0.75rem" spinning={spinning} />
+        {icon ? <Codicon name={icon} size="0.7rem" spinning={spinning} /> : null}
+        <span className="text-(--ui-text-quaternary)">{shortLabel}</span>
         <span>{count}</span>
       </span>
     </Tip>
@@ -112,39 +119,58 @@ function projectCounts(project: SidebarProjectTree) {
 }
 
 function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
+  const rowMeta = useStore($sidebarRowMeta)
   const { archivedCount, chatCount, childCount, runningCount } = projectCounts(project)
+  const tokenCount = project.totalTokens ?? 0
+  const costUsd = project.totalCostUsd ?? 0
 
   return (
-    <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
-      {runningCount > 0 && (
-        <ProjectSummaryCount
-          count={runningCount}
-          dataAttr="running"
-          icon="sync"
-          label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
-          spinning
-        />
-      )}
+    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
+      <ProjectSummaryCount
+        count={runningCount}
+        dataAttr="running"
+        icon="sync"
+        label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
+        shortLabel="Run"
+        spinning={runningCount > 0}
+      />
       <ProjectSummaryCount
         count={chatCount}
         dataAttr="chats"
         icon="comment-discussion"
-        label={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}
+        label={`${chatCount} top-level chat${chatCount === 1 ? '' : 's'}`}
+        shortLabel="Chats"
       />
-      {childCount > 0 && (
-        <ProjectSummaryCount
-          count={childCount}
-          dataAttr="children"
-          icon="robot"
-          label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
-        />
-      )}
+      <ProjectSummaryCount
+        count={childCount}
+        dataAttr="children"
+        icon="robot"
+        label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
+        shortLabel="Sub"
+      />
       <ProjectSummaryCount
         count={archivedCount}
         dataAttr="archived"
         icon="archive"
         label={`${archivedCount} archived chat${archivedCount === 1 ? '' : 's'}`}
+        shortLabel="Arch"
       />
+      {rowMeta.includes('tokens') && tokenCount > 0 ? (
+        <ProjectSummaryCount
+          count={compactNumber(tokenCount)}
+          dataAttr="tokens"
+          label={`${compactNumber(tokenCount)} tokens`}
+          shortLabel="Tok"
+        />
+      ) : null}
+      {rowMeta.includes('cost') && costUsd >= 0.01 ? (
+        <ProjectSummaryCount
+          count={`$${costUsd.toFixed(2)}`}
+          dataAttr="cost"
+          label={`$${costUsd.toFixed(2)} cost`}
+          shortLabel="Cost"
+        />
+      ) : null}
     </span>
   )
 }
@@ -203,7 +229,6 @@ export function ProjectDetailHeaderRow({
           lead={<SidebarRowLead className="size-4">{projectIcon(appearanceProject)}</SidebarRowLead>}
           ref={rowRef}
           secondaryMeta={<ProjectSummaryMeta project={project} />}
-          totals={{ costUsd: project.totalCostUsd ?? 0, tokens: project.totalTokens ?? 0 }}
         />
       </ProjectContextMenu>
     </div>
@@ -308,7 +333,6 @@ export function ProjectOverviewRow({
           ? { ariaLabel: s.projects.toggle(project.label, !open), onToggle: toggleOpen, open }
           : undefined
       }
-      totals={{ costUsd: project.totalCostUsd ?? 0, tokens: project.totalTokens ?? 0 }}
     />
   )
 
