@@ -90,6 +90,11 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
+const SIDEBAR_TOOLBAR_FALLBACK_BUDGET = 213
+const SIDEBAR_TOOLBAR_BREATHING_ROOM = 24
+const TITLEBAR_TOOL_WIDTH = 24
+const PROFILE_TOOL_WIDTH = 37
+const TERMINAL_TOOL_WIDTH = 27
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
@@ -101,6 +106,49 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
+
+function useSidebarToolbarBudget(): number {
+  const [budget, setBudget] = useState(SIDEBAR_TOOLBAR_FALLBACK_BUDGET)
+
+  useEffect(() => {
+    let frame = 0
+    let observer: ResizeObserver | null = null
+
+    const sync = () => {
+      const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
+
+      if (!container) {
+        return
+      }
+
+      const next = Math.max(0, container.getBoundingClientRect().width - SIDEBAR_TOOLBAR_BREATHING_ROOM)
+      setBudget(current => (Math.abs(current - next) < 1 ? current : next))
+    }
+
+    const schedule = () => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(sync)
+    }
+
+    const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
+
+    if (container && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(schedule)
+      observer.observe(container)
+    }
+
+    window.addEventListener('resize', schedule)
+    sync()
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', schedule)
+      observer?.disconnect()
+    }
+  }, [])
+
+  return budget
+}
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
   codexUsage?: CodexUsageData | null
@@ -293,6 +341,7 @@ export function TitlebarControls({
   const hapticsMuted = useStore($hapticsMuted)
   const sidebarOpen = useStore($sidebarOpen)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
+  const toolbarBudget = useSidebarToolbarBudget()
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
@@ -511,6 +560,38 @@ export function TitlebarControls({
     item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
   )
 
+  const requiredToolbarWidth =
+    leftToolbarTools.filter(tool => !tool.hidden).length * TITLEBAR_TOOL_WIDTH +
+    TITLEBAR_TOOL_WIDTH +
+    PROFILE_TOOL_WIDTH +
+    TITLEBAR_TOOL_WIDTH +
+    (approvalStatusbarItem ? TITLEBAR_TOOL_WIDTH : 0) +
+    (terminalStatusbarItem ? TERMINAL_TOOL_WIDTH : 0)
+
+  const optionalToolbarTools = [
+    ...pinnedSystemTools,
+    ...[...pinnedWorkspacePageTools].reverse(),
+    ...(newChatTool ? [newChatTool] : [])
+  ]
+
+  const visibleOptionalToolbarIds = new Set<string>()
+  let remainingToolbarWidth = toolbarBudget - requiredToolbarWidth
+
+  for (const tool of [...optionalToolbarTools].reverse()) {
+    if (remainingToolbarWidth >= TITLEBAR_TOOL_WIDTH) {
+      visibleOptionalToolbarIds.add(tool.id)
+      remainingToolbarWidth -= TITLEBAR_TOOL_WIDTH
+    }
+  }
+
+  const overflowOptionalToolbarTools = optionalToolbarTools.filter(tool => !visibleOptionalToolbarIds.has(tool.id))
+  const visibleOptionalSystemTools = pinnedSystemTools.filter(tool => visibleOptionalToolbarIds.has(tool.id))
+
+  const visibleOptionalWorkspaceTools = [
+    ...[...pinnedWorkspacePageTools].reverse(),
+    ...(newChatTool ? [newChatTool] : [])
+  ].filter(tool => visibleOptionalToolbarIds.has(tool.id))
+
   return (
     <>
       {/*
@@ -542,7 +623,7 @@ export function TitlebarControls({
           // This toolbar belongs to the sidebar's first content row, not the
           // draggable titlebar. Use a fallback because auxiliary/installed
           // smoke windows can render before the shell var is visible here.
-          'left-2.5 top-[calc(var(--titlebar-height,34px)+1.75rem)] rounded-md bg-(--ui-sidebar-surface-background) shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-stroke-tertiary)_55%,transparent)]'
+          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] rounded-md bg-(--ui-sidebar-surface-background)'
         )}
       >
         {leftToolbarTools
@@ -555,11 +636,16 @@ export function TitlebarControls({
             <TitlebarOverflowMenu
               navigate={navigate}
               statusbarItems={overflowStatusbarItems}
-              tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
+              tools={[
+                ...overflowOptionalToolbarTools,
+                ...overflowWorkspacePageTools,
+                ...visibleLocalServiceTools,
+                ...overflowSystemTools
+              ]}
             />
             <TitlebarProfileMenu />
             <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-            {pinnedSystemTools.map(tool => (
+            {visibleOptionalSystemTools.map(tool => (
               <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
             ))}
             {approvalStatusbarItem && (
@@ -568,10 +654,9 @@ export function TitlebarControls({
             {terminalStatusbarItem && (
               <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
             )}
-            {[...pinnedWorkspacePageTools].reverse().map(tool => (
+            {visibleOptionalWorkspaceTools.map(tool => (
               <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
             ))}
-            {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
           </>
         )}
       </div>

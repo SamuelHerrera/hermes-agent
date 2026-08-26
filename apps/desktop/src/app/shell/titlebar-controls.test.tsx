@@ -92,7 +92,6 @@ describe('TitlebarControls', () => {
       'More app actions',
       'Profiles',
       'Codex subscription usage',
-      'Mute haptics',
       'Approval mode: Off',
       'Show terminal',
       'New project',
@@ -109,6 +108,7 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Open settings' })).toBeTruthy()
