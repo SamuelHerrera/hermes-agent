@@ -539,7 +539,10 @@ export function TitlebarControls({
         aria-label={t.shell.appControls}
         className={cn(
           titlebarToolClusterClass,
-          'left-2.5 top-[calc(var(--titlebar-height)+0.375rem)]'
+          // This toolbar belongs to the sidebar's first content row, not the
+          // draggable titlebar. Use a fallback because auxiliary/installed
+          // smoke windows can render before the shell var is visible here.
+          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.375rem)]'
         )}
       >
         {leftToolbarTools
