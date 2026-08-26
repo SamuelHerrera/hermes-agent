@@ -1,3 +1,4 @@
+import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useRef } from 'react'
 
@@ -6,6 +7,8 @@ import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+import { $activeGatewayProfile } from '@/store/profile'
+import { $homeProjectAppearances, homeProjectAppearanceForProfile } from '@/store/projects'
 
 import {
   SIDEBAR_LEAD_ICON_SIZE,
@@ -21,24 +24,23 @@ import {
 } from '../chrome'
 
 import { latestProjectSessions, PROJECT_OVERVIEW_SESSION_LIMIT, useWorkspaceNodeOpen } from './model'
+import { ProjectIconGlyph } from './project-appearance'
 import { ProjectContextMenu, ProjectMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
 import { WorkspaceAddButton } from './workspace-header'
 
-// A bare color dot (no icon) or an icon glyph — tinted by `color` when set, else
-// the lead's default tertiary. The glyph wrapper centers + caps size either way.
-export function projectIcon({ color, icon, isNoProject }: SidebarProjectTree) {
-  if (color && !icon) {
-    return (
-      <SidebarRowLeadGlyph>
-        <span aria-hidden="true" className="size-1 rounded-full" style={{ backgroundColor: color }} />
-      </SidebarRowLeadGlyph>
-    )
-  }
-
+// A bare color dot, image/icon glyph, or auto-discovered project favicon. User
+// picks are stored in `icon`; null means "fall back to favicon/default".
+export function projectIcon({ color, icon, isNoProject, path }: SidebarProjectTree) {
   return (
-    <SidebarRowLeadGlyph style={color ? { color } : undefined}>
-      <Codicon name={icon || (isNoProject ? 'home' : 'folder-library')} size={SIDEBAR_LEAD_ICON_SIZE} />
+    <SidebarRowLeadGlyph style={color && icon ? { color } : undefined}>
+      <ProjectIconGlyph
+        color={color}
+        icon={icon}
+        isNoProject={isNoProject}
+        path={path}
+        size={SIDEBAR_LEAD_ICON_SIZE}
+      />
     </SidebarRowLeadGlyph>
   )
 }
@@ -92,6 +94,13 @@ export function ProjectOverviewRow({
   const s = t.sidebar
   const isActive = project.id === activeProjectId
   const [open, toggleOpen] = useWorkspaceNodeOpen(project.id)
+  const homeAppearances = useStore($homeProjectAppearances)
+  const activeGatewayProfile = useStore($activeGatewayProfile)
+
+  const appearanceProject = project.isNoProject
+    ? { ...project, ...homeProjectAppearanceForProfile(activeGatewayProfile, homeAppearances) }
+    : project
+
   // The appearance popover anchors here (the full row) so it opens flush with
   // the sidebar's content edge regardless of which side the sidebar is on.
   const rowRef = useRef<HTMLDivElement>(null)
@@ -115,24 +124,22 @@ export function ProjectOverviewRow({
       dragHandleProps={dragHandleProps}
       leadClassName="overflow-visible"
     >
-      {projectIcon(project)}
+      {projectIcon(appearanceProject)}
     </SidebarRowGrab>
   ) : (
-    <SidebarRowLead>{projectIcon(project)}</SidebarRowLead>
+    <SidebarRowLead>{projectIcon(appearanceProject)}</SidebarRowLead>
   )
 
   const shell = (
     <SidebarGroupRow
       actions={
         <>
-          {/* Home is a bucket, not a record, so there's nothing to rename or
-              delete — but it still starts sessions: a null path is the "no
-              folder" chat. New session sits outermost: it's the one you reach
-              for. */}
+          {/* Home is a bucket, not a record, so its menu omits rename/delete,
+              but it can still start sessions and carry local appearance. */}
           {onNewSession && (
             <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(project.path)} />
           )}
-          {!project.isNoProject && <ProjectMenu anchorRef={rowRef} isActive={isActive} project={project} />}
+          <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} />
         </>
       }
       className={cn(dragging && 'cursor-grabbing bg-(--ui-sidebar-surface-background)')}
@@ -200,14 +207,9 @@ export function ProjectOverviewRow({
     // `data-sessions-project` (index.tsx), which only fires once you've drilled
     // in. Here it's present on every row of the list.
     <div className={cn(dragging && 'relative z-10')} data-sessions-project={project.id} ref={ref} style={style}>
-      {/* Home has no per-project actions, so it gets no right-click menu. */}
-      {project.isNoProject ? (
-        shell
-      ) : (
-        <ProjectContextMenu isActive={isActive} project={project}>
-          {shell}
-        </ProjectContextMenu>
-      )}
+      <ProjectContextMenu isActive={isActive} project={appearanceProject}>
+        {shell}
+      </ProjectContextMenu>
       {visiblePreview.length > 0 && <SidebarRowNest>{renderRows?.(visiblePreview)}</SidebarRowNest>}
     </div>
   )

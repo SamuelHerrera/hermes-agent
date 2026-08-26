@@ -28,8 +28,10 @@ import {
   openProjectRename,
   revealPath,
   setActiveProject,
+  setHomeProjectAppearance,
   setProjectAppearance
 } from '@/store/projects'
+import { workspaceCwdForNewSession } from '@/store/session'
 
 import { ProjectAppearancePicker } from './project-appearance'
 import type { SidebarProjectTree } from './workspace-groups'
@@ -73,9 +75,8 @@ function useProjectActions({
   }
 
   // Rename / add folder / set active — explicit projects only (auto ones lack a
-  // materialized record). Appearance is handled per-surface (popover vs submenu)
-  // by the caller since its picker chrome differs.
-  const identityItems: ActionItemSpec[] = project.isAuto
+  // materialized record; Home is a local bucket, not a projects.db row).
+  const identityItems: ActionItemSpec[] = project.isAuto || project.isNoProject
     ? []
     : [
         { icon: 'edit', key: 'rename', label: p.menuRename, onSelect: () => openProjectRename(target) },
@@ -94,32 +95,36 @@ function useProjectActions({
         }
       ]
 
+  const actionPath = project.isNoProject ? workspaceCwdForNewSession() : project.path
+
   const pathItems: ActionItemSpec[] = [
     {
-      disabled: !project.path,
+      disabled: !actionPath,
       icon: 'folder-opened',
       key: 'reveal',
       label: p.reveal,
-      onSelect: () => void revealPath(project.path)
+      onSelect: () => void revealPath(actionPath)
     },
     {
-      disabled: !project.path,
+      disabled: !actionPath,
       icon: 'copy',
       key: 'copy',
       label: p.copyPath,
-      onSelect: () => void copyPath(project.path)
+      onSelect: () => void copyPath(actionPath)
     }
   ]
 
-  const dangerItem: ActionItemSpec = project.isAuto
-    ? { icon: 'trash', key: 'remove', label: p.removeFromSidebar, onSelect: removeAuto, variant: 'destructive' }
-    : {
-        icon: 'trash',
-        key: 'delete',
-        label: `${p.menuDelete}…`,
-        onSelect: () => setConfirmDeleteOpen(true),
-        variant: 'destructive'
-      }
+  const dangerItem: ActionItemSpec | null = project.isNoProject
+    ? null
+    : project.isAuto
+      ? { icon: 'trash', key: 'remove', label: p.removeFromSidebar, onSelect: removeAuto, variant: 'destructive' }
+      : {
+          icon: 'trash',
+          key: 'delete',
+          label: `${p.menuDelete}…`,
+          onSelect: () => setConfirmDeleteOpen(true),
+          variant: 'destructive'
+        }
 
   const confirmDialog = (
     <ConfirmDialog
@@ -177,6 +182,12 @@ export function ProjectMenu({
   // materialized on its first change (its id then changes), so close the picker
   // on adopt to stop a second write double-creating from a now-stale node.
   const applyAppearance = async (patch: { color?: null | string; icon?: null | string }) => {
+    if (project.isNoProject) {
+      setHomeProjectAppearance(patch)
+
+      return
+    }
+
     if (await setProjectAppearance(project, patch)) {
       setAppearanceOpen(false)
     }
@@ -244,8 +255,8 @@ export function ProjectMenu({
             </>
           )}
           {pathItems.map(item => renderActionItem(DROPDOWN_KIT, item))}
-          <DropdownMenuSeparator />
-          {renderActionItem(DROPDOWN_KIT, dangerItem)}
+          {dangerItem && <DropdownMenuSeparator />}
+          {dangerItem && renderActionItem(DROPDOWN_KIT, dangerItem)}
         </DropdownMenuContent>
       </DropdownMenu>
       <PopoverContent
@@ -261,6 +272,7 @@ export function ProjectMenu({
           noColorLabel={p.noColor}
           onColor={color => void applyAppearance({ color })}
           onIcon={icon => void applyAppearance({ icon })}
+          projectPath={project.path}
         />
       </PopoverContent>
       {confirmDialog}
@@ -296,9 +308,15 @@ export function ProjectContextMenu({
     scoped
   })
 
-  const canTheme = !project.isAuto || Boolean(project.path)
+  const canTheme = project.isNoProject || !project.isAuto || Boolean(project.path)
 
   const applyAppearance = (patch: { color?: null | string; icon?: null | string }) => {
+    if (project.isNoProject) {
+      setHomeProjectAppearance(patch)
+
+      return
+    }
+
     void setProjectAppearance(project, patch)
   }
 
@@ -318,14 +336,15 @@ export function ProjectContextMenu({
               noColorLabel={p.noColor}
               onColor={color => applyAppearance({ color })}
               onIcon={icon => applyAppearance({ icon })}
+              projectPath={project.path}
             />
           </kit.SubContent>
         </kit.Sub>
       )}
       {(identityItems.length > 0 || canTheme) && <kit.Separator />}
       {pathItems.map(item => renderActionItem(kit, item))}
-      <kit.Separator />
-      {renderActionItem(kit, dangerItem)}
+      {dangerItem && <kit.Separator />}
+      {dangerItem && renderActionItem(kit, dangerItem)}
     </>
   )
 

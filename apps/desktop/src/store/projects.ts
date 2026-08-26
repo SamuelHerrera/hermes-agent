@@ -16,7 +16,13 @@ import { persistentAtom } from '@/lib/persisted'
 import { $gateway, activeGateway, ensureActiveGatewayOpen } from '@/store/gateway'
 import { setSidebarAgentsGrouped } from '@/store/layout'
 import { notify } from '@/store/notifications'
-import { $activeGatewayProfile, $profileScope, ALL_PROFILES, requestFreshSession } from '@/store/profile'
+import {
+  $activeGatewayProfile,
+  $profileScope,
+  ALL_PROFILES,
+  normalizeProfileKey,
+  requestFreshSession
+} from '@/store/profile'
 import {
   $selectedStoredSessionId,
   $sessions,
@@ -33,6 +39,73 @@ import type { ProjectInfo, ProjectsPayload } from '@/types/hermes'
 
 export const $projects = atom<ProjectInfo[]>([])
 export const $activeProjectId = atom<null | string>(null)
+
+interface HomeProjectAppearance {
+  color: null | string
+  icon: null | string
+}
+
+export type HomeProjectAppearanceMap = Record<string, HomeProjectAppearance>
+
+function sanitizeHomeAppearanceMap(value: unknown): HomeProjectAppearanceMap {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  const next: HomeProjectAppearanceMap = {}
+
+  for (const [profile, rawAppearance] of Object.entries(value)) {
+    if (!rawAppearance || typeof rawAppearance !== 'object' || Array.isArray(rawAppearance)) {
+      continue
+    }
+
+    const appearance = rawAppearance as Record<string, unknown>
+    const color = typeof appearance.color === 'string' && appearance.color.trim() ? appearance.color : null
+    const icon = typeof appearance.icon === 'string' && appearance.icon.trim() ? appearance.icon : null
+
+    if (color || icon) {
+      next[normalizeProfileKey(profile)] = { color, icon }
+    }
+  }
+
+  return next
+}
+
+export const $homeProjectAppearances = persistentAtom<HomeProjectAppearanceMap>(
+  'hermes.desktop.homeProjectAppearance',
+  {},
+  {
+    decode: raw => sanitizeHomeAppearanceMap(JSON.parse(raw)),
+    encode: value => JSON.stringify(sanitizeHomeAppearanceMap(value))
+  }
+)
+
+export function homeProjectAppearanceForProfile(
+  profile = $activeGatewayProfile.get(),
+  appearances = $homeProjectAppearances.get()
+): HomeProjectAppearance {
+  return appearances[normalizeProfileKey(profile)] ?? { color: null, icon: null }
+}
+
+export function setHomeProjectAppearance(patch: { color?: null | string; icon?: null | string }): void {
+  const profile = normalizeProfileKey($activeGatewayProfile.get())
+  const previous = homeProjectAppearanceForProfile(profile)
+
+  const nextAppearance = {
+    color: patch.color === undefined ? previous.color : patch.color,
+    icon: patch.icon === undefined ? previous.icon : patch.icon
+  }
+
+  const next = { ...$homeProjectAppearances.get() }
+
+  if (nextAppearance.color || nextAppearance.icon) {
+    next[profile] = nextAppearance
+  } else {
+    delete next[profile]
+  }
+
+  $homeProjectAppearances.set(next)
+}
 
 // The authoritative project -> repo -> lane tree (overview), served by
 // `projects.tree`. Lanes carry counts + structure; per-project session rows are

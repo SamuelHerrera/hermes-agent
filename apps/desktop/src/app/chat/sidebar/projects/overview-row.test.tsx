@@ -31,6 +31,24 @@ vi.mock('@/i18n', () => ({
   })
 }))
 
+vi.mock('@/store/projects', async importOriginal => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+
+  return {
+    ...actual,
+    $homeProjectAppearances: {
+      get: () => ({}),
+      listen: () => () => {},
+      subscribe: (fn: (v: Record<string, unknown>) => void) => {
+        fn({})
+
+        return () => {}
+      }
+    },
+    homeProjectAppearanceForProfile: () => ({ color: null, icon: null })
+  }
+})
+
 vi.mock('./model', () => ({
   PROJECT_OVERVIEW_SESSION_LIMIT: 5_000,
   latestProjectSessions: () => [],

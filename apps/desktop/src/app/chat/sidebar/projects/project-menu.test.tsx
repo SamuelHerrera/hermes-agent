@@ -1,10 +1,15 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { copyPath, setHomeProjectAppearance } from '@/store/projects'
+
 import { ProjectMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 // jsdom doesn't implement ResizeObserver; Radix's PopoverContent/Arrow use it
 // (via @radix-ui/react-use-size) to measure the arrow once the popover is
@@ -64,7 +69,12 @@ vi.mock('@/store/projects', () => ({
   openProjectRename: vi.fn(),
   revealPath: vi.fn(),
   setActiveProject: vi.fn(),
+  setHomeProjectAppearance: vi.fn(),
   setProjectAppearance: vi.fn().mockResolvedValue(false)
+}))
+
+vi.mock('@/store/session', () => ({
+  workspaceCwdForNewSession: vi.fn(() => '/home/default')
 }))
 
 const project = {
@@ -123,5 +133,51 @@ describe('ProjectMenu', () => {
     // real button through the full Tip > PopoverAnchor > DropdownMenuTrigger
     // chain rather than getting silently dropped on an intermediate wrapper.
     expect(await screen.findByRole('button', { name: 'No color' })).toBeTruthy()
+  }, 15000)
+
+  it('scopes the Home menu to appearance plus path actions, not project identity/destructive actions', async () => {
+    const home = {
+      ...project,
+      color: '#e85555',
+      id: '__no_project__',
+      icon: null,
+      isNoProject: true,
+      label: 'Home',
+      path: null
+    } as unknown as SidebarProjectTree
+
+    render(<ProjectMenu isActive={false} project={home} />)
+
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+
+    expect(await screen.findByRole('menuitem', { name: 'Appearance' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Reveal in file manager' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Set active' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: /Delete/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Remove from sidebar' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy path' }))
+    expect(copyPath).toHaveBeenCalledWith('/home/default')
+  })
+
+  it('stores Home appearance locally instead of adopting it as a projects.db row', async () => {
+    const home = {
+      ...project,
+      id: '__no_project__',
+      isNoProject: true,
+      label: 'Home',
+      path: null
+    } as unknown as SidebarProjectTree
+
+    render(<ProjectMenu isActive={false} project={home} />)
+
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Appearance' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'rocket' }))
+
+    expect(setHomeProjectAppearance).toHaveBeenCalledWith({ icon: 'rocket' })
   }, 15000)
 })
