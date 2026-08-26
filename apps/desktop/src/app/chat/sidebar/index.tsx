@@ -140,7 +140,6 @@ import {
 } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
-import { SidebarFilterMenu } from './filter-menu'
 import { SidebarLoadMoreRow } from './load-more-row'
 import { contributedNavItems } from './nav-contributions'
 import { orderByIds, reconcileOrderIds, resolveManualSessionOrderIds, sameIds } from './order'
@@ -168,6 +167,10 @@ import { SidebarBlankState, SidebarSessionSkeletons } from './section-states'
 import { buildSessionByAnyId } from './session-index'
 import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section'
 import { CONTEXT_SPLIT_KIT, SplitSubmenu } from './split-submenu'
+
+// Search remains wired internally for an eventual resurfacing, but the sidebar
+// chrome no longer shows the input section by default.
+const SIDEBAR_SEARCH_VISIBLE = false
 
 // Non-session groups (messaging platforms) stay compact: show a few rows up
 // front, reveal more in larger steps on demand. Keeps a busy platform from
@@ -208,12 +211,6 @@ const SCROLL_GUTTER = '[scrollbar-gutter:stable]'
 
 // A non-session group's scroll body: own scroller when tall, flattened when compact.
 const GROUP_BODY = cn(SCROLL_Y, COMPACT_FLAT)
-
-// Section-header action icons stay hidden until the whole header row is hovered
-// (group/section lives on SidebarSectionHeader), mirroring the artifacts/file
-// browser header affordances. focus-visible keeps them keyboard-reachable.
-const HEADER_ACTION_BTN =
-  'text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground group-hover/section:opacity-100 focus-visible:opacity-100'
 
 // The view toggle (overview group toggle / in-project back) is the one control
 // that stays visible at all times — it's the stable navigation affordance, not
@@ -1601,7 +1598,7 @@ export function ChatSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {showSessionSections && (
+        {SIDEBAR_SEARCH_VISIBLE && showSessionSections && (
           <div className="shrink-0 px-2 pb-1 pt-1">
             <SearchField
               aria-label={s.searchAria}
@@ -1763,34 +1760,38 @@ export function ChatSidebar({
                     </div>
                   ) : (
                     <div className="flex shrink-0 items-center gap-0.5">
-                      {!showAllProfiles ? (
-                        <Tip label={agentsGrouped ? s.projects.newButton : s.nav['new-session']}>
+                      <div className="grid size-6 place-items-center">
+                        <Tip label={agentsOpen ? `Collapse ${sessionsLabel}` : `Expand ${sessionsLabel}`}>
                           <Button
-                            aria-label={agentsGrouped ? s.projects.newButton : s.nav['new-session']}
-                            className={HEADER_ACTION_BTN}
+                            aria-expanded={agentsOpen}
+                            aria-label={agentsOpen ? `Collapse ${sessionsLabel}` : `Expand ${sessionsLabel}`}
+                            className={HEADER_NAV_BTN}
                             onClick={event => {
                               event.stopPropagation()
-
-                              if (agentsGrouped) {
-                                openProjectCreate()
-                              } else {
-                                onNewSessionInWorkspace(null)
-                              }
+                              setSidebarRecentsOpen(!agentsOpen)
                             }}
                             size="icon-xs"
+                            type="button"
                             variant="ghost"
                           >
-                            <Codicon name="add" size="0.75rem" />
+                            <Codicon name={agentsOpen ? 'chevron-down' : 'chevron-right'} size="0.75rem" />
                           </Button>
                         </Tip>
-                      ) : null}
-                      <div className="grid size-6 place-items-center">
-                        <SidebarFilterMenu className={HEADER_NAV_BTN} />
                       </div>
                     </div>
                   )
                 }
+                headerInlineCaret={worktreeGroupingActive ? false : undefined}
+                headerVariant={worktreeGroupingActive ? 'nav' : 'section'}
                 label={sessionsLabel}
+                labelIcon={
+                  worktreeGroupingActive ? (
+                    <Codicon
+                      className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]"
+                      name={inProject && enteredProject?.icon ? enteredProject.icon : 'root-folder'}
+                    />
+                  ) : undefined
+                }
                 labelMeta={
                   worktreeGroupingActive ? (
                     reposScanning && !projectsSkeletonVisible ? (

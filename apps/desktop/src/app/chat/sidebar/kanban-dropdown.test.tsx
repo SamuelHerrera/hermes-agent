@@ -7,6 +7,8 @@ import { SidebarProvider } from '@/components/ui/sidebar'
 import type { Contribution } from '@/contrib/types'
 import { $boardSlug } from '@/plugins/kanban/api'
 import { setCronJobs } from '@/store/cron'
+import { setSidebarAgentsGrouped, setSidebarOrdering, setSidebarRecentsOpen } from '@/store/layout'
+import { $projectScope, $projectTree, $projectTreeLoading, ALL_PROJECTS } from '@/store/projects'
 import { $routeTiles, openRouteTile } from '@/store/route-tiles'
 
 import type { SidebarNavChildrenProps } from '../../routes'
@@ -127,11 +129,63 @@ afterEach(() => {
   cleanup()
   mockNavContributions.length = 0
   $boardSlug.set('')
+  $projectScope.set(ALL_PROJECTS)
+  $projectTree.set([])
+  $projectTreeLoading.set(false)
   $routeTiles.set([])
   setCronJobs([])
+  setSidebarAgentsGrouped(true)
+  setSidebarOrdering('updated')
+  setSidebarRecentsOpen(true)
   localStorage.clear()
   vi.clearAllMocks()
   vi.restoreAllMocks()
+})
+
+describe('Sidebar project chrome', () => {
+  it('defaults to the project view with a nav-like collapse control and no search or filter menu', () => {
+    $projectScope.set(ALL_PROJECTS)
+    $projectTreeLoading.set(false)
+    setSidebarRecentsOpen(true)
+    $projectTree.set([
+      {
+        id: 'p1',
+        label: 'Alpha',
+        path: '/repo/alpha',
+        repos: [
+          {
+            groups: [
+              {
+                id: '/repo/alpha::branch::main',
+                label: 'main',
+                path: '/repo/alpha',
+                sessions: [{ id: 'alpha-session', started_at: 1, last_active: 1 } as never]
+              }
+            ],
+            id: '/repo/alpha',
+            label: 'alpha',
+            path: '/repo/alpha',
+            sessionCount: 1
+          }
+        ],
+        sessionCount: 1
+      }
+    ])
+
+    renderSidebar()
+
+    expect(screen.getByText('Projects')).toBeTruthy()
+    expect(screen.getByText('Projects').closest('button')?.querySelector('.codicon-root-folder')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Filters' })).toBeNull()
+    expect(screen.queryByPlaceholderText(/search sessions/i)).toBeNull()
+
+    const collapse = screen.getByRole('button', { name: 'Collapse Projects' })
+    expect(collapse.querySelector('.codicon-chevron-down')).toBeTruthy()
+
+    fireEvent.click(collapse)
+
+    expect(screen.getByRole('button', { name: 'Expand Projects' }).querySelector('.codicon-chevron-right')).toBeTruthy()
+  })
 })
 
 describe('Kanban sidebar dropdown behavior', () => {

@@ -43,6 +43,7 @@ import {
   setShowAllProfiles,
   sortByProfileOrder
 } from '@/store/profile'
+import { openProjectCreate } from '@/store/projects'
 import { openRouteTile } from '@/store/route-tiles'
 import { $connection } from '@/store/session'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
@@ -334,6 +335,15 @@ export function TitlebarControls({
   // Workspace pages live in the main pane but are global app destinations, so
   // keep their affordances in the app header instead of the sessions sidebar.
   const workspacePageTools: TitlebarTool[] = [
+    {
+      icon: <TitlebarIcon name="new-folder" />,
+      id: 'new-project',
+      label: t.sidebar.projects.newButton,
+      onSelect: () => {
+        triggerHaptic('open')
+        openProjectCreate()
+      }
+    },
     {
       actionId: 'nav.skills',
       active: appViewForPath(location.pathname) === 'skills',

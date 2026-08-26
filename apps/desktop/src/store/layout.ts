@@ -221,7 +221,11 @@ const $sidebarAllProfilesAgentsGrouped = persistentAtom(
  *  flag, so each workspace and the all-profiles view remember it separately). */
 export const $sidebarAgentsGrouped: ReadableAtom<boolean> = computed(
   [$showAllProfiles, $sidebarFlatAgentsGrouped, $sidebarAllProfilesAgentsGrouped],
-  (showAll, flat, allProfiles) => (showAll ? allProfiles : flat)
+  // Projects are now the sidebar's only shipped session view. Keep the legacy
+  // per-scope atoms writable for compatibility with old persisted state and
+  // command/palette code, but do not let them switch the visible sidebar back to
+  // flat/date/status while the filter menu is hidden.
+  () => true
 )
 
 /** How the recents list is divided. `date` is the sidebar's long-standing
@@ -278,7 +282,7 @@ const $sidebarAllProfilesGrouping = persistentAtom<SidebarGrouping>(
 // The sidebar as it ships. Declared once so the atoms below, "Reset to
 // defaults" and the "has this view been customized?" check can't drift apart —
 // they used to inline the same literals in three places.
-const SIDEBAR_DEFAULT_GROUPING: SidebarGrouping = 'date'
+const SIDEBAR_DEFAULT_GROUPING: SidebarGrouping = 'project'
 const SIDEBAR_DEFAULT_ORDERING: SidebarOrdering = 'updated'
 const SIDEBAR_DEFAULT_ROW_META: SidebarRowMeta[] = ['preview', 'updated']
 
@@ -652,13 +656,14 @@ function clearSidebarFilters() {
  *  goes through its setter so a hand-dragged sequence is dropped along with it. */
 export function resetSidebarView() {
   setSidebarGrouping(SIDEBAR_DEFAULT_GROUPING)
-  // Both scopes, not just the one on screen: each keeps its own grouping (and
-  // its own Project flag), so a reset that left the other customized would
-  // hand it back on the next flip.
-  $sidebarFlatGrouping.set(SIDEBAR_DEFAULT_GROUPING)
-  $sidebarAllProfilesGrouping.set(SIDEBAR_DEFAULT_GROUPING)
-  $sidebarFlatAgentsGrouped.set(false)
-  $sidebarAllProfilesAgentsGrouped.set(false)
+  // The shipped view is Projects. Keep the dormant flat/all-profile grouping
+  // atoms on their safest fallbacks in case a future menu resurfaces them, but
+  // reset both project-view flags to on so legacy persisted state cannot leave
+  // the sidebar in the hidden flat view.
+  $sidebarFlatGrouping.set('date')
+  $sidebarAllProfilesGrouping.set('date')
+  $sidebarFlatAgentsGrouped.set(true)
+  $sidebarAllProfilesAgentsGrouped.set(true)
   setSidebarOrdering(SIDEBAR_DEFAULT_ORDERING)
   $sidebarRowMeta.set(SIDEBAR_DEFAULT_ROW_META)
   $sidebarCardRows.set(false)

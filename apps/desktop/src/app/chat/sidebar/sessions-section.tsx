@@ -43,6 +43,7 @@ export const VIRTUALIZE_THRESHOLD = 25
 function seedSessionForOpen(session: SessionInfo): void {
   setSessions(prev => {
     const existing = prev.find(row => sessionMatchesStoredId(row, session.id))
+
     const next: SessionInfo = {
       ...existing,
       ...session,
@@ -67,6 +68,8 @@ interface SidebarSectionHeaderProps {
   // toggle, no caret) and the section is always open. Used for the single-
   // project view, where collapsing one project makes no sense.
   collapsible?: boolean
+  inlineCaret?: boolean
+  variant?: 'section' | 'nav'
 }
 
 function SidebarSectionHeader({
@@ -76,9 +79,21 @@ function SidebarSectionHeader({
   action,
   meta,
   icon,
-  collapsible = true
+  collapsible = true,
+  inlineCaret = true,
+  variant = 'section'
 }: SidebarSectionHeaderProps) {
-  const labelBody = (
+  const navLike = variant === 'nav'
+
+  const labelBody = navLike ? (
+    <>
+      {icon}
+      <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium leading-none text-(--ui-text-secondary)">
+        {label}
+      </span>
+      {meta && <SidebarSectionMeta>{meta}</SidebarSectionMeta>}
+    </>
+  ) : (
     <>
       {icon}
       <SidebarPanelLabel>{label}</SidebarPanelLabel>
@@ -92,18 +107,32 @@ function SidebarSectionHeader({
         <button
           // min-w-0 lets the label truncate at narrow sidebar widths instead of
           // pushing the header's trailing action icons out of view.
-          className="group/section-label flex w-fit min-w-0 items-center gap-1 bg-transparent text-left leading-none"
+          className={cn(
+            'group/section-label flex min-w-0 items-center bg-transparent text-left leading-none',
+            navLike
+              ? 'h-7 flex-1 gap-2 rounded-md px-2 hover:bg-(--ui-control-hover-background) hover:text-foreground'
+              : 'w-fit gap-1'
+          )}
           onClick={onToggle}
           type="button"
         >
           {labelBody}
-          <DisclosureCaret
-            className="text-(--ui-text-tertiary) opacity-0 transition group-hover/section-label:opacity-100"
-            open={open}
-          />
+          {inlineCaret && (
+            <DisclosureCaret
+              className="text-(--ui-text-tertiary) opacity-0 transition group-hover/section-label:opacity-100"
+              open={open}
+            />
+          )}
         </button>
       ) : (
-        <div className="flex w-fit min-w-0 items-center gap-1 leading-none">{labelBody}</div>
+        <div
+          className={cn(
+            'flex w-fit min-w-0 items-center leading-none',
+            navLike ? 'h-7 gap-2 rounded-md px-2' : 'gap-1'
+          )}
+        >
+          {labelBody}
+        </div>
       )}
       {action}
     </div>
@@ -154,6 +183,8 @@ interface SidebarSessionsSectionProps {
   activeProjectId?: null | string
   labelMeta?: React.ReactNode
   labelIcon?: React.ReactNode
+  headerInlineCaret?: boolean
+  headerVariant?: 'section' | 'nav'
   // When false the section header is static (no caret/toggle) and always open.
   collapsible?: boolean
   sortable?: boolean
@@ -218,6 +249,8 @@ export function SidebarSessionsSection({
   activeProjectId,
   labelMeta,
   labelIcon,
+  headerInlineCaret,
+  headerVariant = 'section',
   collapsible = true,
   sortable = false,
   manualOrderIds,
@@ -555,10 +588,12 @@ export function SidebarSessionsSection({
         action={headerAction}
         collapsible={collapsible}
         icon={labelIcon}
+        inlineCaret={headerInlineCaret}
         label={label}
         meta={labelMeta}
         onToggle={onToggle}
         open={sectionOpen}
+        variant={headerVariant}
       />
       {sectionOpen && (
         <SidebarGroupContent className={resolvedContentClassName}>

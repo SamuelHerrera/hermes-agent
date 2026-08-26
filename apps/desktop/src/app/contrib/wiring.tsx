@@ -1048,7 +1048,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
   // against the static app-control cluster — in the tree layout the titlebar
   // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  const APP_CONTROL_TOOL_COUNT = 8 + titlebarStatusbarItemCount
+  const APP_CONTROL_TOOL_COUNT = 9 + titlebarStatusbarItemCount
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
