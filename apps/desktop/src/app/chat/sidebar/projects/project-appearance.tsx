@@ -2,8 +2,6 @@ import { Icon as IconifyIcon } from '@iconify/react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
-import { ColorSwatches } from '@/components/ui/color-swatches'
-import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { readDesktopFileDataUrl, selectDesktopPaths } from '@/lib/desktop-fs'
 import { PROFILE_SWATCHES } from '@/lib/profile-color'
@@ -210,8 +208,8 @@ function IconPreview({
       <button
         aria-label={name}
         className={cn(
-          'grid aspect-square place-items-center rounded-md text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background)',
-          selected && 'bg-(--ui-control-active-background) text-foreground'
+          'grid size-7 shrink-0 place-items-center rounded-md text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground',
+          selected && 'bg-(--ui-control-active-background) text-foreground ring-1 ring-current'
         )}
         onClick={onSelect}
         style={selected && color ? { color } : undefined}
@@ -224,6 +222,47 @@ function IconPreview({
         )}
       </button>
     </Tip>
+  )
+}
+
+function CompactColorSwatches({
+  clearLabel,
+  onChange,
+  swatches,
+  value
+}: {
+  clearLabel: string
+  onChange: (color: null | string) => void
+  swatches: readonly string[]
+  value: null | string
+}) {
+  return (
+    <div className="grid grid-cols-[repeat(13,minmax(0,1fr))] items-center gap-1">
+      {swatches.map(swatch => (
+        <Tip key={swatch} label={swatch}>
+          <button
+            aria-label={swatch}
+            className={cn(
+              'size-4 rounded-full transition hover:scale-110',
+              swatch === value && 'ring-2 ring-current ring-offset-1 ring-offset-(--ui-bg-elevated)'
+            )}
+            onClick={() => onChange(swatch)}
+            style={{ backgroundColor: swatch, color: swatch }}
+            type="button"
+          />
+        </Tip>
+      ))}
+      <Tip label={clearLabel}>
+        <button
+          aria-label={clearLabel}
+          className="grid size-5 place-items-center rounded-md text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground"
+          onClick={() => onChange(null)}
+          type="button"
+        >
+          <Codicon name="circle-slash" size="0.75rem" />
+        </button>
+      </Tip>
+    </div>
   )
 }
 
@@ -328,48 +367,48 @@ export function ProjectAppearancePicker({
   }
 
   return (
-    <div className="w-72">
-      <ColorSwatches
-        clearIcon="circle-slash"
-        clearLabel={noColorLabel}
-        onChange={onColor}
-        swatches={PROFILE_SWATCHES}
-        value={color ?? null}
-      />
-      <div className="mt-2 flex items-center gap-1.5">
+    <div className="w-64 space-y-2" data-project-icon-picker>
+      <CompactColorSwatches clearLabel={noColorLabel} onChange={onColor} swatches={PROFILE_SWATCHES} value={color ?? null} />
+      <div className="grid grid-cols-2 gap-1.5">
         <button
-          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground"
+          className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary)/35 px-2 text-[0.6875rem] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground"
           onClick={() => onIcon(null)}
           title={projectPath ? 'Reset to favicon/default' : 'Reset to default icon'}
           type="button"
         >
-          <Codicon name="refresh" size="0.75rem" />
-          <span>{projectPath ? 'Use default' : 'Reset icon'}</span>
+          <Codicon name="refresh" size="0.72rem" />
+          <span>{projectPath ? 'Use default' : 'Reset'}</span>
         </button>
         <button
-          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md px-2 text-xs text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground"
+          className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary)/35 px-2 text-[0.6875rem] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground"
           onClick={() => void chooseImageFile()}
           type="button"
         >
-          <Codicon name="file-media" size="0.75rem" />
-          <span>Choose file…</span>
+          <Codicon name="file-media" size="0.72rem" />
+          <span>File…</span>
         </button>
       </div>
-      {fileError && <div className="mt-1 px-1 text-[0.625rem] text-(--ui-danger)">{fileError}</div>}
-      <Input
-        className="mt-2 h-7 text-xs"
-        onChange={event => setQuery(event.target.value)}
-        placeholder="Search Iconify…"
-        prefix={<Codicon name="search" size="0.75rem" />}
-        value={query}
-      />
+      {fileError && <div className="px-1 text-[0.625rem] text-(--ui-danger)">{fileError}</div>}
+      <label className="flex h-8 items-center gap-1.5 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-tertiary)/35 px-2 text-(--ui-text-tertiary) focus-within:border-(--ui-accent) focus-within:text-foreground">
+        <Codicon name="search" size="0.75rem" />
+        <input
+          autoCapitalize="off"
+          autoComplete="off"
+          autoCorrect="off"
+          className="min-w-0 flex-1 bg-transparent text-xs leading-none text-foreground outline-none placeholder:text-(--ui-text-quaternary)"
+          onChange={event => setQuery(event.target.value)}
+          placeholder="Search Iconify…"
+          spellCheck={false}
+          value={query}
+        />
+      </label>
       {trimmedQuery.length >= 2 && (
-        <div className="mt-2 text-[0.625rem] text-(--ui-text-tertiary)">
+        <div className="text-[0.625rem] text-(--ui-text-tertiary)">
           {iconifyBusy ? 'Searching Iconify…' : iconifyResults.length ? 'Iconify results' : 'No Iconify results'}
         </div>
       )}
       {iconifyResults.length > 0 && (
-        <div className="mt-1 grid max-h-40 grid-cols-6 gap-1.5 overflow-y-auto pr-1">
+        <div className="grid max-h-36 grid-cols-8 gap-1 overflow-y-auto pr-1">
           {iconifyResults.map(name => {
             const value = iconifyValue(name)
 
@@ -386,7 +425,7 @@ export function ProjectAppearancePicker({
           })}
         </div>
       )}
-      <div className="mt-2 grid grid-cols-6 gap-1.5">
+      <div className="grid grid-cols-8 gap-1">
         {visibleCodicons.map(name => (
           <IconPreview
             color={color}
