@@ -56,11 +56,21 @@ describe('TitlebarControls', () => {
       variant: 'action'
     }
 
+    const kanbanApprovalBridge: StatusbarItem = {
+      id: 'kanban:approval-bridge',
+      render: () => <span>Kanban approval bridge</span>
+    }
+
+    const kanbanCount: StatusbarItem = {
+      id: 'kanban:count',
+      render: () => <span>Kanban count</span>
+    }
+
     render(
       <MemoryRouter>
         <TitlebarControls
           onOpenSettings={vi.fn()}
-          statusbarItems={[approval, terminal]}
+          statusbarItems={[approval, terminal, kanbanApprovalBridge, kanbanCount]}
           statusbarLeftItems={[commandCenter]}
         />
       </MemoryRouter>
@@ -75,6 +85,10 @@ describe('TitlebarControls', () => {
     expect(screen.getByRole('button', { name: /haptics/i })).toBeTruthy()
 
     const more = screen.getByRole('button', { name: 'More app actions' })
+    const appControls = screen.getByLabelText('App controls')
+
+    expect(appControls.lastElementChild).toBe(more)
+
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
     fireEvent.click(more)
@@ -86,5 +100,7 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Open settings' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'kanban:approval-bridge' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'kanban:count' })).toBeNull()
   })
 })

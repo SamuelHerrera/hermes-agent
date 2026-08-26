@@ -90,6 +90,10 @@ const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
 
+function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
+  return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
+}
+
 export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): boolean {
   return PINNED_TITLEBAR_STATUSBAR_IDS.has(item.id)
 }
@@ -481,7 +485,10 @@ export function TitlebarControls({
   )
 
   const pinnedStatusbarItems = visibleStatusbarItems.filter(isPinnedTitlebarStatusbarItem)
-  const overflowStatusbarItems = visibleStatusbarItems.filter(item => !isPinnedTitlebarStatusbarItem(item))
+
+  const overflowStatusbarItems = visibleStatusbarItems.filter(
+    item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
+  )
 
   return (
     <>
@@ -531,16 +538,16 @@ export function TitlebarControls({
         {pinnedWorkspacePageTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
-        <TitlebarOverflowMenu
-          navigate={navigate}
-          statusbarItems={overflowStatusbarItems}
-          tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
-        />
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         <TitlebarProfileMenu />
         {pinnedSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
+        <TitlebarOverflowMenu
+          navigate={navigate}
+          statusbarItems={overflowStatusbarItems}
+          tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
+        />
       </div>
     </>
   )
