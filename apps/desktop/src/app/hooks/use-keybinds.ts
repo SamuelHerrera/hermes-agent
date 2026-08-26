@@ -81,9 +81,7 @@ import {
 export interface KeybindRuntimeDeps {
   /** Open/front the command center tab (sessions / system / usage). */
   toggleCommandCenter: () => void
-  /** Drop to a fresh new-session draft. */
-  startFreshSession: () => void
-  /** Open a fresh session as a tab in the main zone (⌘T), leaving the primary. */
+  /** Open a fresh session as a tab in the main zone, leaving the current chat intact. */
   openNewSessionTab: () => void
   /** Pin/unpin the active session. */
   toggleSelectedPin: () => void
@@ -197,11 +195,11 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'nav.agents': () => navigate(AGENTS_ROUTE),
 
     'session.new': () => {
-      // Match the sidebar New Session button. A plain keyboard new chat should
-      // target the current live profile, not a stale per-profile quick-create
-      // selection from a prior action.
+      // Match the sidebar New Session button and tab-strip "+": a new chat is
+      // additive and must not replace the currently open chat tab. It targets
+      // the current live profile, not a stale per-profile quick-create choice.
       $newChatProfile.set(null)
-      deps.startFreshSession()
+      deps.openNewSessionTab()
       window.dispatchEvent(new CustomEvent('hermes:new-session-shortcut'))
     },
     'session.newTab': () => deps.openNewSessionTab(),

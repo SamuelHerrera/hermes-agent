@@ -560,27 +560,6 @@ export function useSessionActions({
     ]
   )
 
-  const selectSidebarItem = useCallback(
-    (item: SidebarNavItem) => {
-      if (item.action === 'new-session') {
-        startFreshSessionDraft()
-
-        return
-      }
-
-      if (item.route) {
-        if (item.openAsTile || isWorkspacePageRoute(item.route)) {
-          openRouteTile(item.route, 'center')
-
-          return
-        }
-
-        navigateToWorkspacePage(navigate, item.route)
-      }
-    },
-    [navigate, startFreshSessionDraft]
-  )
-
   /** Create a fresh session and open it as a tile — leaves the primary chat alone.
    *  Used by the New session row's "Open in split" menu and the tab-strip "+".
    *
@@ -653,6 +632,31 @@ export function useSessionActions({
       }
     },
     [copy, requestGateway, startFreshSessionDraft, updateSessionState]
+  )
+
+  const selectSidebarItem = useCallback(
+    (item: SidebarNavItem) => {
+      if (item.action === 'new-session') {
+        // New Session is additive: preserve the chat already open in the main
+        // tab and stack a fresh draft beside it, matching the tab-strip "+".
+        // The close-all placeholder is still reused by openNewSessionTile.
+        $newChatProfile.set(null)
+        void openNewSessionTile('center', { listed: false })
+
+        return
+      }
+
+      if (item.route) {
+        if (item.openAsTile || isWorkspacePageRoute(item.route)) {
+          openRouteTile(item.route, 'center')
+
+          return
+        }
+
+        navigateToWorkspacePage(navigate, item.route)
+      }
+    },
+    [navigate, openNewSessionTile]
   )
 
   const openSettings = useCallback(() => {

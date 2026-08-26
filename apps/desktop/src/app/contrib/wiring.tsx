@@ -888,8 +888,9 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  // The tab-strip "+" and ⌘T share one action: open a new session as its own
-  // tab (stacked into the workspace zone) WITHOUT polluting the session list.
+  // New Session (sidebar / ⌘N), the tab-strip "+", and ⌘T share one action:
+  // open a new session as its own tab (stacked into the workspace zone)
+  // WITHOUT polluting the session list.
   // Created `listed: false`, so each new tab's in-memory session stays out of
   // the sidebar until its first message persists a turn and a refresh surfaces
   // it — Cursor-style. Every click opens a fresh "New session" tab (multiple
@@ -902,7 +903,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // keybind editor's capture mode (same as DesktopController).
   useKeybinds({
     openNewSessionTab,
-    startFreshSession: startFreshSessionDraft,
     toggleCommandCenter,
     toggleSelectedPin
   })

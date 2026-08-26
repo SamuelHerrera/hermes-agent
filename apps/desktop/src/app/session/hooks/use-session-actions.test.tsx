@@ -2076,6 +2076,58 @@ describe('createBackendSessionForSend workspace target', () => {
   })
 })
 describe('selectSidebarItem', () => {
+  afterEach(() => {
+    cleanup()
+    setActiveSessionId(null)
+    setSelectedStoredSessionId(null)
+    setMessages([])
+    $sessionTiles.set([])
+    $newChatProfile.set(null)
+    vi.restoreAllMocks()
+  })
+
+  it('opens New Session as another tab without replacing the open chat', async () => {
+    const navigate = vi.fn()
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.create') {
+        return {
+          info: { cwd: '/new-chat' },
+          session_id: 'runtime-new',
+          stored_session_id: 'stored-new'
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let handle: HarnessHandle | null = null
+
+    render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+    setActiveSessionId('runtime-open')
+    setSelectedStoredSessionId('stored-open')
+
+    act(() => {
+      handle!.selectSidebarItem({
+        action: 'new-session',
+        icon: (() => null) as never,
+        id: 'new-session',
+        label: 'New Session'
+      })
+    })
+
+    await waitFor(() =>
+      expect($sessionTiles.get()).toEqual([
+        expect.objectContaining({ runtimeId: 'runtime-new', storedSessionId: 'stored-new' })
+      ])
+    )
+    expect(requestGateway).toHaveBeenCalledWith('session.create', expect.any(Object))
+    expect($activeSessionId.get()).toBe('runtime-open')
+    expect($selectedStoredSessionId.get()).toBe('stored-open')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it('opens built-in workspace routes as tabs instead of assigning the page to the main workspace', async () => {
     const navigate = vi.fn()
     const requestGateway = vi.fn(async () => ({}) as never)
