@@ -142,7 +142,7 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
   })
 
-  it('shows explicit chat, child/subagent, running, archived, and token labels on the project metadata row', () => {
+  it('shows compact icon/count metrics for chats, child/subagent, running, archived, and token total', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 
     const { container } = render(
@@ -169,29 +169,30 @@ describe('ProjectOverviewRow', () => {
     expect(secondary?.contains(chatCount)).toBe(true)
     expect(secondary?.contains(childCount)).toBe(true)
     expect(secondary?.contains(archivedCount)).toBe(true)
-    expect(runningCount?.textContent).toContain('Run')
-    expect(runningCount?.textContent).toContain('2')
+    expect(runningCount?.textContent).toBe('2')
     expect(runningCount?.querySelector('.codicon-sync')).toBeTruthy()
-    expect(chatCount?.textContent).toContain('Chats')
-    expect(chatCount?.textContent).toContain('7')
+    expect(chatCount?.textContent).toBe('7')
     expect(chatCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
-    expect(childCount?.textContent).toContain('Sub')
-    expect(childCount?.textContent).toContain('6')
+    expect(childCount?.textContent).toBe('6')
     expect(childCount?.querySelector('.codicon-robot')).toBeTruthy()
-    expect(archivedCount?.textContent).toContain('Arch')
-    expect(archivedCount?.textContent).toContain('4')
+    expect(archivedCount?.textContent).toBe('4')
     expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
-    expect(secondary?.querySelector('[data-project-token-count]')?.textContent).toContain('Tok')
-    expect(secondary?.querySelector('[data-project-token-count]')?.textContent).toContain('1.3k')
+    expect(secondary?.textContent).toContain('1.3k')
+    expect(secondary?.textContent).not.toContain('Run')
+    expect(secondary?.textContent).not.toContain('Chats')
+    expect(secondary?.textContent).not.toContain('Sub')
+    expect(secondary?.textContent).not.toContain('Arch')
+    expect(secondary?.textContent).not.toContain('Tok')
   })
 
-  it('keeps zero running and child/subagent categories visible instead of hiding the split', () => {
+  it('hides zero-only running and child/subagent metrics to keep compact icon/count display', () => {
     const { container } = render(
       <ProjectOverviewRow project={{ ...project, archivedSessionCount: 0, chatSessionCount: 2, childSessionCount: 0, runningSessionCount: 0 }} />
     )
 
-    expect(container.querySelector('[data-project-running-count]')?.textContent).toContain('Run0')
-    expect(container.querySelector('[data-project-child-count]')?.textContent).toContain('Sub0')
+    expect(container.querySelector('[data-project-running-count]')).toBeNull()
+    expect(container.querySelector('[data-project-child-count]')).toBeNull()
+    expect(container.querySelector('[data-project-chat-count]')?.textContent).toBe('2')
   })
 
   it('does not cap overview rows before rendering the project body', () => {
@@ -276,14 +277,14 @@ describe('ProjectOverviewRow', () => {
 
     expect(container.querySelector('[data-sessions-project-detail-header] img')).toBeTruthy()
     expect(primary?.textContent).toContain('Test D')
-    expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toContain('Run')
-    expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toContain('1')
-    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toContain('Chats')
-    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toContain('2')
-    expect(secondary?.querySelector('[data-project-child-count]')?.textContent).toContain('Sub')
-    expect(secondary?.querySelector('[data-project-child-count]')?.textContent).toContain('3')
-    expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toContain('Arch')
-    expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toContain('1')
+    expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toBe('1')
+    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toBe('2')
+    expect(secondary?.querySelector('[data-project-child-count]')?.textContent).toBe('3')
+    expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toBe('1')
+    expect(secondary?.textContent).not.toContain('Run')
+    expect(secondary?.textContent).not.toContain('Chats')
+    expect(secondary?.textContent).not.toContain('Sub')
+    expect(secondary?.textContent).not.toContain('Arch')
   })
 
   it('keeps detail header actions visible in worktree, new-session, menu order without show-projects', () => {
