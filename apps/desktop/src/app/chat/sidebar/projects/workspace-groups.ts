@@ -145,13 +145,18 @@ export const sessionRecency = (session: SessionInfo): number => session.last_act
 const isChildSession = (session: SessionInfo): boolean =>
   Boolean(session.parent_session_id || session.delegate_parent_session_id)
 
-const projectCountFields = (sessions: SessionInfo[]) => {
+type LiveTurnPredicate = (session: SessionInfo) => boolean
+
+const sessionIsRunning = (session: SessionInfo, isLiveTurn?: LiveTurnPredicate): boolean =>
+  Boolean(session.running || session.is_active || isLiveTurn?.(session))
+
+const projectCountFields = (sessions: SessionInfo[], isLiveTurn?: LiveTurnPredicate) => {
   const childSessionCount = sessions.filter(isChildSession).length
 
   return {
     chatSessionCount: Math.max(0, sessions.length - childSessionCount),
     childSessionCount,
-    runningSessionCount: sessions.filter(session => session.running || session.is_active).length,
+    runningSessionCount: sessions.filter(session => sessionIsRunning(session, isLiveTurn)).length,
     sessionCount: sessions.length
   }
 }
@@ -646,7 +651,8 @@ export function overlayRepoLanes(
 function overlayHomeLane(
   project: SidebarProjectTree,
   live: SessionInfo[],
-  removed: ReadonlySet<string>
+  removed: ReadonlySet<string>,
+  isLiveTurn?: LiveTurnPredicate
 ): SidebarProjectTree {
   const lane = project.repos[0]?.groups[0]
   const detached = live.filter(session => isDetachedSession(session) && !removed.has(session.id))
@@ -661,7 +667,7 @@ function overlayHomeLane(
 
   return {
     ...project,
-    ...projectCountFields(sessions),
+    ...projectCountFields(sessions, isLiveTurn),
     repos: [{ id: NO_PROJECT_ID, label: project.label, path: null, groups: [nextLane], sessionCount: sessions.length }]
   }
 }
@@ -729,10 +735,11 @@ export function excludeProjectSessions(
 export function overlayLiveLanes(
   project: SidebarProjectTree,
   live: SessionInfo[],
-  removed: ReadonlySet<string> = NO_REMOVED
+  removed: ReadonlySet<string> = NO_REMOVED,
+  isLiveTurn?: LiveTurnPredicate
 ): SidebarProjectTree {
   if (project.isNoProject) {
-    return overlayHomeLane(project, live, removed)
+    return overlayHomeLane(project, live, removed, isLiveTurn)
   }
 
   let changed = false
@@ -749,7 +756,57 @@ export function overlayLiveLanes(
     return project
   }
 
-  return { ...project, ...projectCountFields(projectSessions({ ...project, repos })), repos }
+  return { ...project, ...projectCountFields(projectSessions({ ...project, repos }), isLiveTurn), repos }
+}
+
+/**
+ * Overlay renderer-owned live-turn status onto project summary counts. The
+ * backend can count cross-surface `running` hints, but the visible sidebar arc
+ * for this window comes from `$sessionDotStateById`; overview rows carry no
+ * hydrated lane sessions, so they need this narrow live-count pass.
+ */
+export function overlayProjectRunningCounts(
+  projects: SidebarProjectTree[],
+  live: SessionInfo[],
+  explicitProjects: ProjectInfo[],
+  isLiveTurn: LiveTurnPredicate,
+  removed: ReadonlySet<string> = NO_REMOVED
+): SidebarProjectTree[] {
+  const counts = new Map<string, number>()
+
+  for (const session of live) {
+    if (removed.has(session.id) || !sessionIsRunning(session, isLiveTurn)) {
+      continue
+    }
+
+    const projectId = liveSessionProjectId(session, explicitProjects) ?? (isDetachedSession(session) ? NO_PROJECT_ID : null)
+
+    if (!projectId) {
+      continue
+    }
+
+    counts.set(projectId, (counts.get(projectId) ?? 0) + 1)
+  }
+
+  if (!counts.size) {
+    return projects
+  }
+
+  let changed = false
+
+  const next = projects.map(project => {
+    const runningSessionCount = Math.max(project.runningSessionCount ?? 0, counts.get(project.id) ?? 0)
+
+    if (runningSessionCount === (project.runningSessionCount ?? 0)) {
+      return project
+    }
+
+    changed = true
+
+    return { ...project, runningSessionCount }
+  })
+
+  return changed ? next : projects
 }
 
 interface PreviewOverlayOptions {

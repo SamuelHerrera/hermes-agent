@@ -12,6 +12,7 @@ import {
   NO_PROJECT_ID,
   overlayLiveLanes,
   overlayLivePreviews,
+  overlayProjectRunningCounts,
   sessionProjectColor,
   type SidebarProjectTree,
   type SidebarSessionGroup,
@@ -639,6 +640,20 @@ describe('overlayLiveLanes', () => {
     expect(overlaid.sessionCount).toBe(1)
   })
 
+  it('recounts entered-project running sessions from the renderer live-turn predicate', () => {
+    const project = projectNode({
+      id: '/www/app',
+      isAuto: true,
+      repos: [{ id: '/www/app', label: 'app', path: '/www/app', sessionCount: 0, groups: [] }]
+    })
+
+    const live = [makeSession('/www/app', { id: 'fresh', git_branch: 'main', running: false })]
+
+    const overlaid = overlayLiveLanes(project, live, new Set(), session => session.id === 'fresh')
+
+    expect(overlaid.runningSessionCount).toBe(1)
+  })
+
   it('injects a session created in a fresh worktree into that worktree lane (no git_repo_root yet)', () => {
     // The brand-new session row has only a cwd — no git_repo_root. The entered
     // project knows its repo root, so the worktree session still lands in its
@@ -706,6 +721,7 @@ describe('overlayLiveLanes', () => {
       preview: 'Review the staged patch',
       title: null
     })
+
     const live = makeSession('/www/app', { id: 'child', git_branch: 'main', preview: null, title: null })
 
     const project = projectNode({
@@ -912,6 +928,38 @@ describe('overlayLivePreviews', () => {
     const previews = overlayLivePreviews([homeNode([])], [makeSession(null, { id: 'fresh' })], [], 3)
 
     expect(previews[NO_PROJECT_ID].map(s => s.id)).toEqual(['fresh'])
+  })
+})
+
+
+describe('overlayProjectRunningCounts', () => {
+  it('counts renderer-live working sessions for overview rows even when backend running is false', () => {
+    const projects = [
+      projectNode({ id: NO_PROJECT_ID, isNoProject: true, label: 'Home', path: null, runningSessionCount: 0 }),
+      projectNode({ id: 'p_app', path: '/www/app', runningSessionCount: 0 })
+    ]
+
+    const live = [
+      makeSession(null, { id: 'home-working', running: false }),
+      makeSession('/www/app/src', { id: 'project-working', git_repo_root: '/www/app', running: false }),
+      makeSession('/www/app/src', { id: 'idle', git_repo_root: '/www/app', running: false })
+    ]
+
+    const overlaid = overlayProjectRunningCounts(
+      projects,
+      live,
+      [makeProject('p_app', ['/www/app'])],
+      session => session.id.endsWith('working')
+    )
+
+    expect(overlaid.find(project => project.id === NO_PROJECT_ID)?.runningSessionCount).toBe(1)
+    expect(overlaid.find(project => project.id === 'p_app')?.runningSessionCount).toBe(1)
+  })
+
+  it('preserves backend running counts for sessions outside this renderer', () => {
+    const project = projectNode({ id: 'p_app', runningSessionCount: 2 })
+
+    expect(overlayProjectRunningCounts([project], [], [], () => false)[0]).toBe(project)
   })
 })
 

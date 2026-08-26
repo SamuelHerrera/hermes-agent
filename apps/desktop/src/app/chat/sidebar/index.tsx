@@ -121,7 +121,7 @@ import {
   sessionPinId,
   setCurrentCwd
 } from '@/store/session'
-import { $sessionDotStateById, sessionStatusBucket } from '@/store/session-dot-state'
+import { $sessionDotStateById, hasLiveTurn, sessionStatusBucket } from '@/store/session-dot-state'
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive'
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
@@ -150,6 +150,7 @@ import {
   orderProjectsByIds,
   overlayLiveLanes,
   overlayLivePreviews,
+  overlayProjectRunningCounts,
   PROJECT_OVERVIEW_SESSION_LIMIT,
   ProjectBackRow,
   ProjectDetailHeaderRow,
@@ -817,7 +818,7 @@ export function ChatSidebar({
   // state on top: dismissed auto-projects, persisted repo/lane order, and the
   // overview sort. Membership is the backend tree's — never re-derived here.
   const projectModel = useMemo<SidebarProjectTree[]>(() => {
-    const sorted = sortProjectsForOverview(
+    const visibleProjects = overlayProjectRunningCounts(
       filterVisibleProjects(projectTree, dismissedAutoProjects)
         // A filtered-out project drops its whole lane, header included — hiding
         // only its rows would leave a row of empty folders behind.
@@ -834,8 +835,13 @@ export function ChatSidebar({
             isHiddenFromProjects
           )
         ),
-      activeProjectId
+      liveProjectSessions,
+      projects,
+      session => hasLiveTurn(dotStates[session.id] ?? 'idle'),
+      removedSessionIds
     )
+
+    const sorted = sortProjectsForOverview(visibleProjects, activeProjectId)
 
     // Layer the user's manual drag-order on top of the deterministic sort. Empty
     // (default) returns `sorted` untouched; projects the user hasn't ordered yet
@@ -849,6 +855,10 @@ export function ChatSidebar({
     projectFilter,
     projectOrderIds,
     isHiddenFromProjects,
+    liveProjectSessions,
+    projects,
+    dotStates,
+    removedSessionIds,
     s
   ])
 
@@ -928,8 +938,16 @@ export function ChatSidebar({
   // backend now seeds each project folder as an (empty) repo, so the overlay
   // always has a lane to place a new in-project session into.
   const enteredProjectContent = useMemo(
-    () => (enteredProject ? overlayLiveLanes(enteredProject, liveProjectSessions, removedSessionIds) : undefined),
-    [enteredProject, liveProjectSessions, removedSessionIds]
+    () =>
+      enteredProject
+        ? overlayLiveLanes(
+            enteredProject,
+            liveProjectSessions,
+            removedSessionIds,
+            session => hasLiveTurn(dotStates[session.id] ?? 'idle')
+          )
+        : undefined,
+    [enteredProject, liveProjectSessions, removedSessionIds, dotStates]
   )
 
   const scopedRepoPaths = useMemo(
