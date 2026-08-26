@@ -31,13 +31,14 @@ function LaneLabel({ label, title }: { label: string; title?: string }) {
   )
 }
 
-// "+" affordance shared by repo and worktree headers — reveals on header hover.
+// "+" affordance shared by repo and worktree headers — always visible so the
+// available action is discoverable without probing each row with the pointer.
 export function WorkspaceAddButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <Tip label={label}>
       <button
         aria-label={label}
-        className="grid size-4 shrink-0 place-items-center rounded-sm bg-transparent text-(--ui-text-quaternary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground group-hover/workspace:opacity-100"
+        className="grid size-4 shrink-0 place-items-center rounded-sm bg-transparent text-(--ui-text-quaternary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-foreground"
         onClick={onClick}
         type="button"
       >
@@ -119,7 +120,7 @@ export function WorkspaceMenu({ path, onRemove }: { path: null | string; onRemov
     <ActionsMenu ariaLabel={p.menu} contentClassName="w-48" items={items}>
       <button
         aria-label={p.menu}
-        className="grid size-4 shrink-0 place-items-center rounded-sm bg-transparent text-(--ui-text-quaternary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground group-hover/workspace:opacity-100 data-[state=open]:opacity-100"
+        className="grid size-4 shrink-0 place-items-center rounded-sm bg-transparent text-(--ui-text-quaternary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-foreground"
         onClick={event => event.stopPropagation()}
         type="button"
       >

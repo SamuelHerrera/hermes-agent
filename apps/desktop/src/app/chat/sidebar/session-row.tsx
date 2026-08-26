@@ -226,6 +226,24 @@ function SidebarSessionRowImpl({
     })
   }
 
+  if (hasBranchChildren) {
+    metadata.push({
+      key: 'child-count',
+      node: (
+        <Tip label={`${branchChildCount} child chat${branchChildCount === 1 ? '' : 's'}`} side="top">
+          <span
+            aria-label={`${branchChildCount} child chat${branchChildCount === 1 ? '' : 's'}`}
+            className="pointer-events-auto flex items-center gap-1 whitespace-nowrap tabular-nums"
+            data-session-child-count
+          >
+            <Codicon name="robot" size="0.75rem" />
+            <span>{branchChildCount}</span>
+          </span>
+        </Tip>
+      )
+    })
+  }
+
   const metadataNode =
     metadata.length > 0 ? (
       <span
@@ -283,10 +301,10 @@ function SidebarSessionRowImpl({
   ) : null
 
   const branchToggleNode = hasBranchChildren ? (
-    <Tip label={`${branchChildCount} child chat${branchChildCount === 1 ? '' : 's'}`} side="top">
+    <Tip label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'} side="top">
       <button
         aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
-        className="flex h-5 shrink-0 items-center gap-1 rounded-[4px] px-1 text-[0.625rem] tabular-nums text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
+        className="flex size-5 shrink-0 items-center justify-center rounded-[4px] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
         data-row-actions
         data-session-branch-toggle
         onClick={event => {
@@ -297,23 +315,20 @@ function SidebarSessionRowImpl({
         }}
         type="button"
       >
-        <Codicon name="robot" size="0.75rem" />
-        <span>{branchChildCount}</span>
         <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
       </button>
     </Tip>
   ) : null
 
   // The action cluster is an explicit control row. Compact rows position it on
-  // the second line so the title line owns the full width; cards still render it
-  // in their header line where that variant already keeps the title separate.
+  // the second line; cards keep only controls in their header while metadata
+  // sits beside the title on the card's second row.
   const actionsNode = (
     <div
-      className={cn('relative z-2 flex shrink-0 items-center justify-end gap-1', card && hasBranchChildren && 'mr-12')}
+      className={cn('relative z-2 flex shrink-0 items-center justify-end gap-1', card && hasBranchChildren && 'mr-7')}
       data-row-actions
     >
       {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
-      {card && metadataNode ? <span className="min-w-0 max-w-24">{metadataNode}</span> : null}
       {!session.archived ? (
         <Button
           aria-label={r.archive}
@@ -502,7 +517,7 @@ function SidebarSessionRowImpl({
               return (
                 <>
                   <div
-                    className={cn('flex min-w-0 items-center gap-1.5', hasBranchChildren && 'pr-12')}
+                    className={cn('flex min-w-0 items-center gap-1.5', hasBranchChildren && 'pr-7')}
                     data-session-row-primary
                   >
                     {leadNode}
@@ -543,17 +558,18 @@ function SidebarSessionRowImpl({
                 {/* Title + preview: ONE grouped cell with its own tight
                     internal gap — it does not inherit the card's rhythm. */}
                 <div className="-mt-[0.2em] flex min-w-0 flex-col gap-[0.3rem]">
-                  <div className="flex min-w-0 items-center gap-1.5">
+                  <div className="flex min-w-0 items-center gap-1.5" data-session-card-secondary>
                     <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
                     <OverflowTip label={title}>
                     <SidebarRowLabel
-                      className="hover-marquee text-[0.8125rem] leading-none font-medium text-(--ui-text-primary) group-data-[working=true]:text-foreground"
+                      className="hover-marquee flex-1 text-[0.8125rem] leading-none font-medium text-(--ui-text-primary) group-data-[working=true]:text-foreground"
                       onPointerEnter={armMarquee}
                       onPointerLeave={disarmMarquee}
                     >
                       <span className="hover-marquee-inner">{title}</span>
                     </SidebarRowLabel>
                     </OverflowTip>
+                    {metadataNode ? <span className="min-w-0 max-w-24 shrink-0">{metadataNode}</span> : null}
                   </div>
                   {session.preview && rowMeta.includes('preview') ? (
                     <span className="min-w-0 truncate text-[0.625rem] leading-none text-(--ui-text-quaternary)">

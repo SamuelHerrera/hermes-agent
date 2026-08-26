@@ -343,7 +343,7 @@ describe('SidebarSessionRow', () => {
     expect(tipTrigger(kebab)).toBeNull()
   })
 
-  it('puts the child-chat icon, count, and disclosure on the primary row while keeping other actions secondary', () => {
+  it('keeps the disclosure on the primary row and puts the child-chat icon and count beside age metadata', () => {
     const onResume = vi.fn()
     const onToggleBranch = vi.fn()
 
@@ -365,6 +365,8 @@ describe('SidebarSessionRow', () => {
     const primaryLine = screen.getByText('Parent chat').closest('[data-session-row-primary]')
     const rowBody = screen.getByText('Parent chat').closest('button')
     const toggle = screen.getByRole('button', { name: 'Collapse child chats' })
+    const age = screen.getByText('5m')
+    const childCount = container.querySelector('[data-session-child-count]')
     const primaryActions = container.querySelector('[data-session-row-primary-actions]')
     const secondaryActions = container.querySelector('[data-session-row-secondary-actions]')
 
@@ -372,8 +374,12 @@ describe('SidebarSessionRow', () => {
     expect(rowBody?.contains(toggle)).toBe(false)
     expect(primaryActions?.contains(toggle)).toBe(true)
     expect(secondaryActions?.contains(toggle)).toBe(false)
-    expect(toggle.textContent).toContain('3')
-    expect(toggle.querySelector('.codicon-robot')).toBeTruthy()
+    expect(toggle.textContent).not.toContain('3')
+    expect(toggle.querySelector('.codicon-robot')).toBeNull()
+    expect(childCount?.textContent).toContain('3')
+    expect(childCount?.querySelector('.codicon-robot')).toBeTruthy()
+    expect(age.closest('[data-session-row-meta]')?.contains(childCount)).toBe(true)
+    expect(age.parentElement?.nextElementSibling?.contains(childCount)).toBe(true)
     expect(secondaryActions?.contains(screen.getByRole('button', { name: 'Archive' }))).toBe(true)
     fireEvent.click(toggle)
     expect(onToggleBranch).toHaveBeenCalledOnce()
@@ -402,6 +408,33 @@ describe('SidebarSessionRow', () => {
 
     expect(rowBody?.contains(toggle)).toBe(false)
     expect(container.querySelector('[data-session-row-primary-actions]')?.contains(toggle)).toBe(true)
+  })
+
+  it('places card age and child count beside the title on the second row', () => {
+    const { container } = render(
+      <SidebarSessionRow
+        branchChildCount={2}
+        card
+        hasBranchChildren
+        isPinned={false}
+        isSelected={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        onToggleBranch={noop}
+        session={makeSession({ title: 'Card metadata parent' })}
+      />
+    )
+
+    const secondRow = container.querySelector('[data-session-card-secondary]')
+    const age = screen.getByText('5m')
+    const childCount = container.querySelector('[data-session-child-count]')
+
+    expect(secondRow).toBeTruthy()
+    expect(secondRow?.contains(screen.getByText('Card metadata parent'))).toBe(true)
+    expect(secondRow?.contains(age)).toBe(true)
+    expect(secondRow?.contains(childCount)).toBe(true)
   })
 
   // Full-title tooltip on hover (#83000-class ask): the label is a tooltip

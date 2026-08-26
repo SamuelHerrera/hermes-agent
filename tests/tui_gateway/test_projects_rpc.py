@@ -7,6 +7,7 @@ import subprocess
 
 import pytest
 
+import tui_gateway.project_tree as project_tree
 import tui_gateway.server as server
 
 
@@ -203,6 +204,49 @@ def test_tree_build_warms_every_path_it_will_resolve(monkeypatch, tmp_path):
     )
 
     assert str(repo) in warmed
+
+
+def test_tree_build_loads_archived_rows_for_per_project_counts():
+    calls = []
+
+    class RecordingDB:
+        def list_sessions_rich(self, **kwargs):
+            calls.append(kwargs)
+            return []
+
+    server._build_project_tree(
+        RecordingDB(), preview_limit=3, hydrate=False, session_limit=5, include_discovered=False
+    )
+
+    assert any(call.get("archived_only") is True for call in calls)
+
+
+def test_tree_build_pages_past_the_hydration_window_for_exact_chat_counts():
+    calls = []
+
+    class PagedDB:
+        def list_sessions_rich(self, **kwargs):
+            calls.append(kwargs)
+            offset = kwargs.get("offset", 0)
+            archived = kwargs.get("archived_only") is True
+            if offset == 0:
+                prefix = "archived" if archived else "active"
+                return [{"id": f"{prefix}-{index}", "source": "cli"} for index in range(5)]
+            if offset == 5:
+                return [{"id": "last-archived" if archived else "last-active", "source": "cli"}]
+            return []
+
+    tree, _ = server._build_project_tree(
+        PagedDB(), preview_limit=3, hydrate=False, session_limit=5, include_discovered=False
+    )
+
+    active_offsets = [call["offset"] for call in calls if not call.get("archived_only")]
+    archived_offsets = [call["offset"] for call in calls if call.get("archived_only")]
+    assert active_offsets == [0, 5]
+    assert archived_offsets == [0, 5]
+    home = next(project for project in tree["projects"] if project["id"] == project_tree.NO_PROJECT_ID)
+    assert home["sessionCount"] == 6
+    assert home["archivedSessionCount"] == 6
 
 
 def test_create_list_roundtrip(tmp_path):

@@ -51,6 +51,15 @@ describe('WorkspaceAddButton', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New session in Test D' }))
     expect(onClick).toHaveBeenCalledOnce()
   })
+
+  it('keeps the add button visible without waiting for row hover', () => {
+    render(<WorkspaceAddButton label="New session in Test D" onClick={vi.fn()} />)
+
+    const button = screen.getByRole('button', { name: 'New session in Test D' })
+
+    expect(button.className).not.toContain('opacity-0')
+    expect(button.className).not.toContain('group-hover/workspace:opacity-100')
+  })
 })
 
 describe('WorkspaceShowMoreButton', () => {
@@ -68,6 +77,15 @@ describe('WorkspaceMenu', () => {
 
     const button = screen.getByRole('button', { name: 'Actions' })
     expect(tipTrigger(button)).toBeNull()
+  })
+
+  it('keeps the worktree menu visible without waiting for row hover', () => {
+    render(<WorkspaceMenu onRemove={vi.fn()} path="/repo/lane" />)
+
+    const button = screen.getByRole('button', { name: 'Actions' })
+
+    expect(button.className).not.toContain('opacity-0')
+    expect(button.className).not.toContain('group-hover/workspace:opacity-100')
   })
 })
 

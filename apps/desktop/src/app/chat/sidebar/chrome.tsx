@@ -144,6 +144,7 @@ export function SidebarGroupRow({
   className,
   label,
   lead,
+  secondaryMeta,
   toggle,
   totals,
   ...props
@@ -151,6 +152,7 @@ export function SidebarGroupRow({
   actions?: React.ReactNode
   label: React.ReactNode
   lead: React.ReactNode
+  secondaryMeta?: React.ReactNode
   toggle?: { ariaLabel: string; onToggle: () => void; open: boolean }
   totals?: SidebarGroupTotals
 }) {
@@ -163,7 +165,7 @@ export function SidebarGroupRow({
     totals && rowMeta.includes('cost') && totals.costUsd >= 0.01 ? `$${totals.costUsd.toFixed(2)}` : null
   ].filter(Boolean) as string[]
 
-  const hasSecondary = facts.length > 0 || Boolean(actions)
+  const hasSecondary = Boolean(secondaryMeta) || facts.length > 0 || Boolean(actions)
 
   return (
     <SidebarRowShell className={cn('group/workspace', className)} {...props}>
@@ -187,9 +189,10 @@ export function SidebarGroupRow({
         </div>
         {hasSecondary ? (
           <div className="flex min-h-5 min-w-0 items-center pl-5" data-sidebar-group-secondary>
+            {secondaryMeta}
             {facts.length ? (
               <span
-                className="min-w-0 truncate whitespace-nowrap text-[0.625rem] leading-none text-(--ui-text-tertiary)"
+                className="ml-2 min-w-0 truncate whitespace-nowrap text-[0.625rem] leading-none text-(--ui-text-tertiary)"
                 data-sidebar-group-meta
               >
                 {facts.join(' · ')}

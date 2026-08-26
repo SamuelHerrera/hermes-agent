@@ -98,6 +98,42 @@ def test_main_checkout_groups_by_recorded_branch_with_stable_lane_ids():
     assert all(g["isMain"] for repo in project["repos"] for g in repo["groups"])
 
 
+def test_project_nodes_report_active_and_archived_session_counts_separately():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    projects = [_project("p1", "Repo", ["/repo"])]
+    active = [_session("/repo", branch="main")]
+    archived = [_session("/repo", branch="main"), _session("/repo", branch="feature")]
+
+    tree = pt.build_tree(projects, active, [], resolve, archived_sessions=archived)
+    project = next(p for p in tree["projects"] if p["id"] == "p1")
+
+    assert project["sessionCount"] == 1
+    assert project["archivedSessionCount"] == 2
+
+
+def test_project_counts_can_cover_rows_beyond_the_hydrated_session_window():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    projects = [_project("p1", "Repo", ["/repo"])]
+    loaded = [_session("/repo", branch="main")]
+    all_active = [*loaded, _session("/repo", branch="feature"), _session("/repo", branch="other")]
+
+    tree = pt.build_tree(projects, loaded, [], resolve, count_sessions=all_active)
+    project = next(p for p in tree["projects"] if p["id"] == "p1")
+
+    assert project["sessionCount"] == 3
+
+
+def test_archived_only_home_bucket_remains_visible_with_zero_open_chats():
+    archived = [_session(None)]
+
+    tree = pt.build_tree([], [], [], archived_sessions=archived, count_sessions=[])
+    home = _home(tree)
+
+    assert home is not None
+    assert home["sessionCount"] == 0
+    assert home["archivedSessionCount"] == 1
+
+
 def test_linked_worktrees_fold_under_their_common_repo_root():
     # The linked worktree's own toplevel is /elsewhere/wt, but its COMMON root is
     # /repo, so it must group under /repo (not as a separate project).

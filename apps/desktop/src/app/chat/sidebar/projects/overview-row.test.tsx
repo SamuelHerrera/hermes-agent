@@ -40,7 +40,7 @@ vi.mock('./model', () => ({
 // right-click wrapper) is stubbed as a pass-through so the row still renders.
 vi.mock('./project-menu', () => ({
   ProjectContextMenu: ({ children }: { children: ReactNode }) => children,
-  ProjectMenu: () => null
+  ProjectMenu: () => <button aria-label="Actions" type="button" />
 }))
 
 const project = { id: 'p1', label: 'Test D' } as unknown as SidebarProjectTree
@@ -91,6 +91,34 @@ describe('ProjectOverviewRow', () => {
     expect(primary?.contains(tokens)).toBe(false)
     expect(secondary?.contains(tokens)).toBe(true)
     expect(secondary?.contains(add)).toBe(true)
+  })
+
+  it('keeps project actions visible in plus-then-menu order', () => {
+    const { container } = render(<ProjectOverviewRow onNewSession={vi.fn()} project={project} />)
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+
+    const actionLabels = Array.from(secondary?.querySelectorAll('button') ?? []).map(button =>
+      button.getAttribute('aria-label')
+    )
+
+    expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
+  })
+
+  it('shows open and archived chat icon counts on the project metadata row', () => {
+    const { container } = render(
+      <ProjectOverviewRow project={{ ...project, archivedSessionCount: 4, sessionCount: 7 }} />
+    )
+
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+    const openCount = container.querySelector('[data-project-open-count]')
+    const archivedCount = container.querySelector('[data-project-archived-count]')
+
+    expect(secondary?.contains(openCount)).toBe(true)
+    expect(secondary?.contains(archivedCount)).toBe(true)
+    expect(openCount?.textContent).toContain('7')
+    expect(openCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
+    expect(archivedCount?.textContent).toContain('4')
+    expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
   })
 
   it('does not cap overview rows before rendering the project body', () => {

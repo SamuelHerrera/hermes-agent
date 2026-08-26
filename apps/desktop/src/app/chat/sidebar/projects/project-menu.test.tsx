@@ -95,6 +95,15 @@ describe('ProjectMenu', () => {
     expect(tipTrigger(button)).toBeNull()
   })
 
+  it('keeps the project menu visible without waiting for row hover', () => {
+    render(<ProjectMenu isActive={false} project={project} />)
+
+    const button = screen.getByRole('button', { name: 'Actions' })
+
+    expect(button.className).not.toContain('opacity-0')
+    expect(button.className).not.toContain('group-hover/workspace:opacity-100')
+  })
+
   // When anchorRef is absent, PopoverAnchor wraps the dropdown trigger so the
   // appearance popover positions against the kebab. asChild must still reach
   // the real button (no non-forwarding wrappers inside the chain — #67500).

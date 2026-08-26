@@ -52,7 +52,7 @@ def client(monkeypatch, profiles_on_disk):
     return c
 
 
-def _seed_session(home, session_id, *, source, cwd=None, tokens=None, cost=None):
+def _seed_session(home, session_id, *, source, cwd=None, tokens=None, cost=None, archived=False):
     """One session with a message, so it clears the sidebar's min_messages=1.
 
     ``cwd`` is what attaches it to a project — without one it lands in Home.
@@ -67,6 +67,8 @@ def _seed_session(home, session_id, *, source, cwd=None, tokens=None, cost=None)
     try:
         db.create_session(session_id, source=source, cwd=str(cwd) if cwd else None)
         db.append_message(session_id=session_id, role="user", content="hi")
+        if archived:
+            db.set_session_archived(session_id, True)
     finally:
         db.close()
 
@@ -168,6 +170,23 @@ class TestCrossProfileProjectTree:
         assert project["sessionCount"] == 2
         assert project["totalTokens"] == 240
         assert project["totalCostUsd"] == pytest.approx(0.5)
+
+    def test_project_chat_counts_add_up_active_and_archived_sessions_across_profiles(
+        self, client, profiles_on_disk, tmp_path
+    ):
+        shared = tmp_path / "repos" / "shared"
+        shared.mkdir(parents=True)
+
+        for name, home in profiles_on_disk.items():
+            _seed_session(home, f"{name}-active", source="cli", cwd=shared)
+            _seed_session(home, f"{name}-archived", source="cli", cwd=shared, archived=True)
+            _seed_project(home, "Shared", shared)
+
+        payload = client.get("/api/profiles/projects/tree").json()
+        project = next(p for p in payload["projects"] if not p["isNoProject"])
+
+        assert project["sessionCount"] == 2
+        assert project["archivedSessionCount"] == 2
 
     def test_profile_usage_covers_sessions_past_the_window(self, client, profiles_on_disk):
         # The whole point of aggregating in SQL: the total must not be a sum of

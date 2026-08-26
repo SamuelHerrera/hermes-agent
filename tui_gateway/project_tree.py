@@ -633,6 +633,8 @@ def build_tree(
     discovered_repos: list[dict],
     resolve: Optional[Resolve] = None,
     *,
+    archived_sessions: Optional[list[dict]] = None,
+    count_sessions: Optional[list[dict]] = None,
     preview_limit: int = 3,
     hydrate: bool = False,
     is_junk_root: Optional[Callable[[str], bool]] = None,
@@ -642,8 +644,13 @@ def build_tree(
     """Build the authoritative project tree.
 
     ``projects`` are ``projects_db.Project.to_dict()`` shapes (non-archived).
-    ``sessions`` are projected session-row dicts (must carry ``id``, ``cwd``,
+    ``sessions`` are active projected session-row dicts (must carry ``id``, ``cwd``,
     ``git_branch``, ``git_repo_root``, ``started_at``, ``last_active``).
+    ``archived_sessions`` are grouped by the same rules solely to add each
+    project's separate ``archivedSessionCount``; they never enter lanes,
+    previews, activity, token totals, or ``scoped_session_ids``.
+    ``count_sessions`` may carry the complete active set when ``sessions`` is a
+    paged hydration window; it only overrides project-level ``sessionCount``.
     ``discovered_repos`` are ``{"root", "label", "sessions", "last_active"}``.
     ``is_junk_root`` flags git roots that must never become an AUTO project (the
     bare home dir, the HERMES_HOME subtree). ``is_junk_cwd`` is the narrower
@@ -861,5 +868,70 @@ def build_tree(
                 is_no_project=True,
             ),
         )
+
+    if count_sessions is not None or archived_sessions is not None:
+        # Reuse the exact same ownership/auto/Home rules instead of maintaining
+        # separate path matchers for complete active counts and archived rows.
+        # The recursive calls omit count inputs, so they each perform one
+        # ordinary build and terminate here.
+        count_tree = build_tree(
+            projects,
+            count_sessions if count_sessions is not None else sessions,
+            discovered_repos,
+            resolve,
+            preview_limit=0,
+            hydrate=False,
+            is_junk_root=is_junk_root,
+            is_junk_cwd=is_junk_cwd,
+            exists=exists,
+        )
+        archived_tree = build_tree(
+            projects,
+            archived_sessions or [],
+            [],
+            resolve,
+            preview_limit=0,
+            hydrate=False,
+            is_junk_root=is_junk_root,
+            is_junk_cwd=is_junk_cwd,
+            exists=exists,
+        )
+        active_sources = {project["id"]: project for project in count_tree["projects"]}
+        archived_sources = {project["id"]: project for project in archived_tree["projects"]}
+        active_counts = {pid: int(project.get("sessionCount") or 0) for pid, project in active_sources.items()}
+        archived_counts = {
+            pid: int(project.get("sessionCount") or 0) for pid, project in archived_sources.items()
+        }
+        for project in result:
+            project["sessionCount"] = active_counts.get(project["id"], project["sessionCount"])
+            project["archivedSessionCount"] = archived_counts.get(project["id"], 0)
+
+        # A Home/auto project can exist only in archived history, or only beyond
+        # the hydrated active window. Keep that project visible as a count-only
+        # overview node instead of silently dropping its archived total. Lanes
+        # stay empty because archived rows are never rendered as open sessions.
+        existing_ids = {project["id"] for project in result}
+        for pid in dict.fromkeys([*active_sources, *archived_sources]):
+            if pid in existing_ids:
+                continue
+            active_count = active_counts.get(pid, 0)
+            archived_count = archived_counts.get(pid, 0)
+            if active_count <= 0 and archived_count <= 0:
+                continue
+            source = active_sources.get(pid) or archived_sources[pid]
+            count_only = {
+                **source,
+                "archivedSessionCount": archived_count,
+                "previewSessions": [],
+                "repos": [],
+                "sessionCount": active_count,
+                "totalCostUsd": source.get("totalCostUsd", 0) if active_count else 0,
+                "totalTokens": source.get("totalTokens", 0) if active_count else 0,
+            }
+            if pid == NO_PROJECT_ID:
+                result.insert(0, count_only)
+            else:
+                result.append(count_only)
+            existing_ids.add(pid)
 
     return {"projects": result, "scoped_session_ids": scoped_ids}

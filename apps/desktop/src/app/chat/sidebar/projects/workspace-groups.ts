@@ -58,6 +58,7 @@ export interface SidebarProjectTree {
   isNoProject?: boolean
   repos: SidebarWorkspaceTree[]
   sessionCount: number
+  archivedSessionCount?: number
   // Tokens and spend over the same sessions `sessionCount` counts, summed by
   // the backend — the tree only carries a preview of the rows themselves.
   totalTokens?: number

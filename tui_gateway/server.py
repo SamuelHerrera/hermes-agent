@@ -12307,6 +12307,41 @@ def _build_project_tree(
     sessions, projects, discovered, active_id = _project_tree_inputs(
         db, session_limit, include_discovered=include_discovered
     )
+
+    # The hydrated tree stays bounded by session_limit, but the two chat counts
+    # must describe the whole database. Page compact rows past that display
+    # window instead of silently turning the UI counters into page counters.
+    batch_size = max(1, session_limit)
+
+    def _count_rows(*, archived_only: bool, initial: list[dict] | None = None) -> list[dict]:
+        collected = list(initial or [])
+        if initial is not None and len(initial) < batch_size:
+            return collected
+        offset = len(collected)
+        while True:
+            kwargs = {
+                "limit": batch_size,
+                "offset": offset,
+                "order_by_last_active": True,
+                "min_message_count": 1,
+                "include_children": True,
+                "exclude_sources": _PROJECT_TREE_EXCLUDED_SOURCES,
+                "compact_rows": True,
+            }
+            if archived_only:
+                kwargs["archived_only"] = True
+            rows = db.list_sessions_rich(**kwargs)
+            collected.extend(_project_tree_row(row) for row in rows)
+            if len(rows) < batch_size:
+                break
+            offset += len(rows)
+        return collected
+
+    count_sessions = _count_rows(archived_only=False, initial=sessions)
+    archived_sessions = _count_rows(archived_only=True)
+    git_probe.warm_roots(
+        s["cwd"] for s in [*count_sessions, *archived_sessions] if s.get("cwd")
+    )
     # build_tree resolves every declared project folder and every discovered
     # repo root too, and those paths are not session cwds — without this they
     # are the one part of the build still probing git one directory at a time.
@@ -12319,6 +12354,8 @@ def _build_project_tree(
         sessions,
         discovered,
         _resolve_cwd_git,
+        archived_sessions=archived_sessions,
+        count_sessions=count_sessions,
         preview_limit=preview_limit,
         hydrate=hydrate,
         is_junk_root=_is_repo_junk,

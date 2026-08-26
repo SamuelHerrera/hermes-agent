@@ -3,6 +3,7 @@ import type * as React from 'react'
 import { useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
+import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -134,10 +135,10 @@ export function ProjectOverviewRow({
               delete — but it still starts sessions: a null path is the "no
               folder" chat. New session sits outermost: it's the one you reach
               for. */}
-          {!project.isNoProject && <ProjectMenu anchorRef={rowRef} isActive={isActive} project={project} />}
           {onNewSession && (
             <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(project.path)} />
           )}
+          {!project.isNoProject && <ProjectMenu anchorRef={rowRef} isActive={isActive} project={project} />}
         </>
       }
       className={cn(dragging && 'cursor-grabbing bg-(--ui-sidebar-surface-background)')}
@@ -151,6 +152,32 @@ export function ProjectOverviewRow({
         </SidebarRowLink>
       }
       lead={lead}
+      secondaryMeta={
+        <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
+          <Tip label={`${project.sessionCount} open chat${project.sessionCount === 1 ? '' : 's'}`}>
+            <span
+              aria-label={`${project.sessionCount} open chat${project.sessionCount === 1 ? '' : 's'}`}
+              className="flex items-center gap-1 tabular-nums"
+              data-project-open-count
+            >
+              <Codicon name="comment-discussion" size="0.75rem" />
+              <span>{project.sessionCount}</span>
+            </span>
+          </Tip>
+          <Tip
+            label={`${project.archivedSessionCount ?? 0} archived chat${project.archivedSessionCount === 1 ? '' : 's'}`}
+          >
+            <span
+              aria-label={`${project.archivedSessionCount ?? 0} archived chat${project.archivedSessionCount === 1 ? '' : 's'}`}
+              className="flex items-center gap-1 tabular-nums"
+              data-project-archived-count
+            >
+              <Codicon name="archive" size="0.75rem" />
+              <span>{project.archivedSessionCount ?? 0}</span>
+            </span>
+          </Tip>
+        </span>
+      }
       // The label is grab surface too, not just the lead's grabber — same
       // listeners, minus the controls that keep their own gestures. A project
       // row has no rival drag (its title navigates on CLICK), so the sortable
