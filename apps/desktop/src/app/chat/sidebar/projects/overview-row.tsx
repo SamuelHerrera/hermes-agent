@@ -33,13 +33,13 @@ import { WorkspaceAddButton } from './workspace-header'
 // picks are stored in `icon`; null means "fall back to favicon/default".
 export function projectIcon({ color, icon, isNoProject, path }: SidebarProjectTree) {
   return (
-    <SidebarRowLeadGlyph style={color && icon ? { color } : undefined}>
+    <SidebarRowLeadGlyph className="group-hover/workspace:text-foreground" style={color && icon ? { color } : undefined}>
       <ProjectIconGlyph
         color={color}
         icon={icon}
         isNoProject={isNoProject}
         path={path}
-        size={SIDEBAR_LEAD_ICON_SIZE}
+        size="1rem"
       />
     </SidebarRowLeadGlyph>
   )
@@ -122,12 +122,12 @@ export function ProjectOverviewRow({
       ariaLabel={s.projects.reorder(project.label)}
       dragging={dragging}
       dragHandleProps={dragHandleProps}
-      leadClassName="overflow-visible"
+      leadClassName="size-4 overflow-visible"
     >
       {projectIcon(appearanceProject)}
     </SidebarRowGrab>
   ) : (
-    <SidebarRowLead>{projectIcon(appearanceProject)}</SidebarRowLead>
+    <SidebarRowLead className="size-4">{projectIcon(appearanceProject)}</SidebarRowLead>
   )
 
   const shell = (
@@ -142,11 +142,14 @@ export function ProjectOverviewRow({
           <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} />
         </>
       }
-      className={cn(dragging && 'cursor-grabbing bg-(--ui-sidebar-surface-background)')}
+      className={cn(
+        'hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none',
+        dragging && 'cursor-grabbing bg-(--ui-sidebar-surface-background)'
+      )}
       label={
         <SidebarRowLink
           aria-label={s.projects.enter(project.label)}
-          labelClassName={cn('hover:text-foreground hover:underline', isActive && 'text-foreground')}
+          labelClassName={cn('group-hover/workspace:text-foreground', isActive && 'text-foreground')}
           onClick={() => onEnter?.(project.id)}
         >
           {project.label}

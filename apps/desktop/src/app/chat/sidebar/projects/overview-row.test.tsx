@@ -114,6 +114,18 @@ describe('ProjectOverviewRow', () => {
     expect(secondary?.contains(add)).toBe(true)
   })
 
+  it('uses full-row hover chrome and nav-sized lead icons in the flattened project list', () => {
+    const { container } = render(<ProjectOverviewRow project={project} reorderable />)
+    const row = container.querySelector('[data-sessions-project="p1"] > div')
+    const lead = container.querySelector('[data-sessions-project="p1"] [data-sidebar-group-primary] > span')
+    const label = screen.getByText('Test D')
+
+    expect(row?.className).toContain('hover:bg-')
+    expect(lead?.className).toContain('size-4')
+    expect(label.className).toContain('group-hover/workspace:text-foreground')
+    expect(label.className).not.toContain('underline')
+  })
+
   it('keeps project actions visible in plus-then-menu order', () => {
     const { container } = render(<ProjectOverviewRow onNewSession={vi.fn()} project={project} />)
     const secondary = container.querySelector('[data-sidebar-group-secondary]')
