@@ -46,6 +46,7 @@ import {
   $activeGatewayProfile,
   $emptyWorkspaceRequest,
   $freshSessionRequest,
+  $newChatProfile,
   $profileScope,
   ensureGatewayProfile,
   newSessionInProfile,
@@ -1048,10 +1049,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // against the static app-control cluster — in the tree layout the titlebar
   // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
   // Match TitlebarControls' visible app cluster: approval/terminal status items,
-  // New Project, overflow dots, Codex usage, profile switcher, and haptics. Keep
-  // this intentionally conservative so Electron's drag strip never covers the
-  // leftmost clickable app action again.
-  const APP_CONTROL_TOOL_COUNT = 6 + titlebarPinnedStatusbarItemCount
+  // New chat, New Project, overflow dots, Codex usage, profile switcher, and
+  // haptics, plus a little slack. Keep this intentionally conservative so
+  // Electron's drag strip never covers the leftmost clickable app action again.
+  const APP_CONTROL_TOOL_COUNT = 7 + titlebarPinnedStatusbarItemCount
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
 
@@ -1081,6 +1082,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             codexUsage={codexUsage.usage}
             codexUsageState={codexUsage.state}
             leftTools={leftTitlebarTools}
+            onNewSession={() => {
+              $newChatProfile.set(null)
+              openNewSessionTab()
+            }}
             onOpenSettings={() => navigate(SETTINGS_ROUTE)}
             statusbarItems={statusbarVisible ? statusbarItems : []}
             statusbarLeftItems={statusbarVisible ? leftStatusbarItems : []}

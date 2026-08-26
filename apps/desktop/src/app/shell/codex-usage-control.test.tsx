@@ -25,11 +25,11 @@ describe('CodexUsageTitlebarControl', () => {
     expect(codexUsageRemainingPercent({ remainingPercent: 42, usedPercent: 90 })).toBe(42)
   })
 
-  it('renders a compact titlebar trigger whose bar fill is remaining usage', () => {
+  it('renders a compact battery trigger whose fill is remaining usage', () => {
     render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
     expect(screen.getByRole('button', { name: 'Codex subscription usage' })).toBeTruthy()
-    expect(screen.getByTestId('codex-usage-fill').style.transform).toBe('scaleX(0.75)')
+    expect(screen.getByTestId('codex-usage-fill').style.width).toBe('75%')
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {

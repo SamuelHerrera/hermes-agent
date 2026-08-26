@@ -73,6 +73,23 @@ describe('approval mode statusbar item', () => {
     })
   })
 
+  it('does not highlight off mode and shows strike-fill icons for every option', async () => {
+    const response = new Promise<never>(() => undefined)
+    $approvalModes.set({ default: 'off' })
+
+    render(<Harness requestGateway={vi.fn(() => response)} />)
+
+    const trigger = screen.getByRole('button', { name: /off/i })
+    expect(trigger.className.split(/\s+/)).not.toContain('bg-(--chrome-action-hover)')
+    expect(screen.getByTestId('approval-strike-off')).toBeTruthy()
+
+    fireEvent.pointerDown(trigger, { button: 0 })
+
+    expect(await screen.findByTestId('approval-strike-manual')).toBeTruthy()
+    expect(screen.getAllByTestId('approval-strike-smart').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByTestId('approval-strike-off').length).toBeGreaterThanOrEqual(2)
+  })
+
   it('renders the shared trigger and menu in the active locale', async () => {
     const response = new Promise<never>(() => undefined)
     render(

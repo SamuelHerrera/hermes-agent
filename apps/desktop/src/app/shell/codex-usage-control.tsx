@@ -5,7 +5,6 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 
 import { titlebarButtonClass } from './titlebar'
-import { TitlebarIcon } from './titlebar-icon'
 
 export type CodexUsageControlState = 'available' | 'unavailable' | 'disabled' | 'hidden'
 
@@ -101,22 +100,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
             type="button"
             variant="ghost"
           >
-            <span className="relative inline-grid place-items-center">
-              <TitlebarIcon name="rocket" />
-              <span
-                aria-hidden="true"
-                className="absolute -bottom-1.5 left-1/2 h-0.5 w-3.5 -translate-x-1/2 overflow-hidden rounded-full bg-(--ui-stroke-secondary)"
-              >
-                <span
-                  className={cn(
-                    'block h-full origin-left rounded-full transition-transform duration-200',
-                    unavailable || disabled ? 'bg-(--ui-text-quaternary)' : 'bg-(--ui-accent)'
-                  )}
-                  data-testid="codex-usage-fill"
-                  style={{ transform: `scaleX(${percentLeft / 100})` }}
-                />
-              </span>
-            </span>
+            <UsageBattery disabled={disabled} percentLeft={percentLeft} unavailable={unavailable} />
           </Button>
         </PopoverAnchor>
         <PopoverContent
@@ -136,6 +120,31 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
         </PopoverContent>
       </Popover>
     </div>
+  )
+}
+
+function UsageBattery({
+  disabled,
+  percentLeft,
+  unavailable
+}: {
+  disabled: boolean
+  percentLeft: number
+  unavailable: boolean
+}) {
+  const fillClass = unavailable || disabled ? 'bg-(--ui-text-quaternary)' : percentLeft <= 10 ? 'bg-(--ui-warm)' : 'bg-(--ui-accent)'
+
+  return (
+    <span aria-hidden="true" className="inline-flex items-center gap-px text-(--ui-text-tertiary)" title={`${formatPercent(percentLeft)} left`}>
+      <span className="relative h-2.5 w-[1.125rem] overflow-hidden rounded-[0.1875rem] border border-current/60 p-px">
+        <span
+          className={cn('block h-full rounded-[0.125rem] transition-[width] duration-200', fillClass)}
+          data-testid="codex-usage-fill"
+          style={{ width: `${percentLeft}%` }}
+        />
+      </span>
+      <span className="h-1.5 w-0.5 rounded-r-[0.125rem] bg-current/60" />
+    </span>
   )
 }
 
@@ -199,7 +208,7 @@ function UsageHeader({ tone, value }: { tone: 'ok' | 'muted' | 'warn'; value: st
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-1.5 font-medium text-(--ui-text-primary)">
-        <TitlebarIcon className={tone === 'warn' ? 'text-(--ui-warm)' : undefined} name="rocket" />
+        <UsageBattery disabled={false} percentLeft={tone === 'muted' ? 0 : Number.parseInt(value, 10)} unavailable={tone === 'muted'} />
         Codex usage
       </div>
       <span

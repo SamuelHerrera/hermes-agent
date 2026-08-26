@@ -24,6 +24,7 @@ import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { ContribRender } from '@/contrib/react/boundary'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
+import { MoreVertical } from '@/lib/icons'
 import { resolveProfileColor } from '@/lib/profile-color'
 import { cn } from '@/lib/utils'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
@@ -109,6 +110,7 @@ interface TitlebarControlsProps extends ComponentProps<'div'> {
   statusbarItems?: readonly StatusbarItem[]
   tools?: readonly TitlebarTool[]
   onOpenSettings: () => void
+  onNewSession?: () => void
 }
 
 /**
@@ -281,7 +283,8 @@ export function TitlebarControls({
   statusbarLeftItems = [],
   statusbarItems = [],
   tools = [],
-  onOpenSettings
+  onOpenSettings,
+  onNewSession
 }: TitlebarControlsProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -346,6 +349,19 @@ export function TitlebarControls({
     },
     ...leftTools
   ]
+
+  const newChatTool: TitlebarTool | null = onNewSession
+    ? {
+        actionId: 'session.new',
+        icon: <TitlebarIcon name="add" />,
+        id: 'new-chat',
+        label: t.sidebar.nav['new-session'],
+        onSelect: () => {
+          triggerHaptic('open')
+          onNewSession()
+        }
+      }
+    : null
 
   // Workspace pages live in the main pane but are global app destinations, so
   // keep their affordances in the app header instead of the sessions sidebar.
@@ -484,7 +500,12 @@ export function TitlebarControls({
       (item.lockedVisible || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
   )
 
-  const pinnedStatusbarItems = visibleStatusbarItems.filter(isPinnedTitlebarStatusbarItem)
+  const pinnedStatusbarItemsById = new Map(
+    visibleStatusbarItems.filter(isPinnedTitlebarStatusbarItem).map(item => [item.id, item])
+  )
+
+  const terminalStatusbarItem = pinnedStatusbarItemsById.get('terminal')
+  const approvalStatusbarItem = pinnedStatusbarItemsById.get('approval-mode')
 
   const overflowStatusbarItems = visibleStatusbarItems.filter(
     item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
@@ -532,17 +553,21 @@ export function TitlebarControls({
         aria-label={t.shell.appControls}
         className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
       >
-        {pinnedStatusbarItems.map(item => (
-          <TitlebarStatusbarItemButton item={item} key={`status:${item.id}`} navigate={navigate} />
-        ))}
+        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
         {pinnedWorkspacePageTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
+        {terminalStatusbarItem && (
+          <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
+        )}
+        {approvalStatusbarItem && (
+          <TitlebarStatusbarItemButton item={approvalStatusbarItem} key="status:approval-mode" navigate={navigate} />
+        )}
+        {pinnedSystemTools.map(tool => (
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         <TitlebarProfileMenu />
-        {pinnedSystemTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
         <TitlebarOverflowMenu
           navigate={navigate}
           statusbarItems={overflowStatusbarItems}
@@ -601,7 +626,7 @@ function TitlebarOverflowMenu({
             type="button"
             variant="ghost"
           >
-            <Codicon name="ellipsis" size="0.8125rem" />
+            <MoreVertical className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
       </Tip>

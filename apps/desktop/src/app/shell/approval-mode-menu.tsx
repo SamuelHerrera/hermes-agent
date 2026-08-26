@@ -43,8 +43,7 @@ export function useApprovalModeStatusbarItem(profile: string, requestGateway: Ap
   }, [profile, requestGateway])
 
   return {
-    className: mode === 'off' ? 'bg-(--chrome-action-hover) text-foreground' : undefined,
-    icon: mode === 'off' ? <ZapFilled className="size-3.5" /> : <Zap className="size-3.5 opacity-70" />,
+    icon: <ApprovalStrikeIcon mode={mode} />,
     id: 'approval-mode',
     label: labels[mode],
     menuAlign: 'end',
@@ -61,6 +60,7 @@ export function useApprovalModeStatusbarItem(profile: string, requestGateway: Ap
         >
           {(['manual', 'smart', 'off'] as const).map(value => (
             <DropdownMenuRadioItem className="items-start gap-2" key={value} value={value}>
+              <ApprovalStrikeIcon className="mt-0.5" mode={value} />
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="text-xs text-foreground">{labels[value]}</span>
                 <span className="text-[0.6875rem] leading-snug text-(--ui-text-tertiary)">{descriptions[value]}</span>
@@ -73,4 +73,29 @@ export function useApprovalModeStatusbarItem(profile: string, requestGateway: Ap
     title: copy.ariaLabel(labels[mode]),
     variant: 'menu'
   }
+}
+
+function ApprovalStrikeIcon({ className, mode }: { className?: string; mode: ApprovalMode }) {
+  const filled = mode === 'manual' ? 'full' : mode === 'smart' ? 'half' : 'empty'
+
+  return (
+    <span
+      aria-hidden="true"
+      className={[
+        'relative inline-grid size-3.5 shrink-0 place-items-center text-(--ui-text-tertiary)',
+        mode !== 'off' ? 'text-foreground' : '',
+        className ?? ''
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      data-testid={`approval-strike-${mode}`}
+    >
+      <Zap className={filled === 'empty' ? 'size-3.5 opacity-65' : 'size-3.5 opacity-30'} />
+      {filled !== 'empty' && (
+        <span className={filled === 'half' ? 'absolute inset-y-0 left-0 overflow-hidden w-1/2' : 'absolute inset-0'}>
+          <ZapFilled className="size-3.5" />
+        </span>
+      )}
+    </span>
+  )
 }

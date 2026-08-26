@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -23,7 +23,7 @@ describe('TitlebarControls', () => {
   it('surfaces New project in the main titlebar app controls', () => {
     render(
       <MemoryRouter>
-        <TitlebarControls onOpenSettings={vi.fn()} />
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
       </MemoryRouter>
     )
 
@@ -69,6 +69,7 @@ describe('TitlebarControls', () => {
     render(
       <MemoryRouter>
         <TitlebarControls
+          onNewSession={vi.fn()}
           onOpenSettings={vi.fn()}
           statusbarItems={[approval, terminal, kanbanApprovalBridge, kanbanCount]}
           statusbarLeftItems={[commandCenter]}
@@ -78,16 +79,26 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: 'Open Command Center' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Open settings' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Approval mode: Off' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Show terminal' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'New project' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Profiles' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /haptics/i })).toBeTruthy()
 
     const more = screen.getByRole('button', { name: 'More app actions' })
     const appControls = screen.getByLabelText('App controls')
 
+    const buttonNames = within(appControls)
+      .getAllByRole('button')
+      .map(button => button.getAttribute('aria-label'))
+
+    expect(buttonNames).toEqual([
+      'New session',
+      'New project',
+      'Show terminal',
+      'Approval mode: Off',
+      'Mute haptics',
+      'Codex subscription usage',
+      'Profiles',
+      'More app actions'
+    ])
     expect(appControls.lastElementChild).toBe(more)
+    expect(more.querySelector('svg')).toBeTruthy()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
