@@ -121,7 +121,7 @@ import {
   sessionPinId,
   setCurrentCwd
 } from '@/store/session'
-import { $sessionDotStateById, hasLiveTurn, sessionStatusBucket } from '@/store/session-dot-state'
+import { $sessionDotStateById, sessionStatusBucket, showsRunningArc } from '@/store/session-dot-state'
 import { $focusedStoredSessionId, $workingSessionIds, type SplitDir } from '@/store/session-states'
 import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive'
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
@@ -837,7 +837,7 @@ export function ChatSidebar({
         ),
       liveProjectSessions,
       projects,
-      session => hasLiveTurn(dotStates[session.id] ?? 'idle'),
+      session => showsRunningArc(dotStates[session.id] ?? 'idle'),
       removedSessionIds
     )
 
@@ -944,7 +944,7 @@ export function ChatSidebar({
             enteredProject,
             liveProjectSessions,
             removedSessionIds,
-            session => hasLiveTurn(dotStates[session.id] ?? 'idle')
+            session => showsRunningArc(dotStates[session.id] ?? 'idle')
           )
         : undefined,
     [enteredProject, liveProjectSessions, removedSessionIds, dotStates]
