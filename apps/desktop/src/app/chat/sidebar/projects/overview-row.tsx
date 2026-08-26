@@ -27,7 +27,7 @@ import { latestProjectSessions, PROJECT_OVERVIEW_SESSION_LIMIT, useWorkspaceNode
 import { ProjectIconGlyph } from './project-appearance'
 import { ProjectContextMenu, ProjectMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
-import { WorkspaceAddButton } from './workspace-header'
+import { StartWorkButton, WorkspaceAddButton } from './workspace-header'
 
 // A bare color dot, image/icon glyph, or auto-discovered project favicon. User
 // picks are stored in `icon`; null means "fall back to favicon/default".
@@ -99,6 +99,56 @@ function ProjectSummaryCount({
   )
 }
 
+function projectCounts(project: SidebarProjectTree) {
+  const totalActiveCount = project.sessionCount ?? 0
+  const childCount = project.childSessionCount ?? 0
+
+  return {
+    archivedCount: project.archivedSessionCount ?? 0,
+    chatCount: project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount),
+    childCount,
+    runningCount: project.runningSessionCount ?? 0
+  }
+}
+
+function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
+  const { archivedCount, chatCount, childCount, runningCount } = projectCounts(project)
+
+  return (
+    <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
+      {runningCount > 0 && (
+        <ProjectSummaryCount
+          count={runningCount}
+          dataAttr="running"
+          icon="sync"
+          label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
+          spinning
+        />
+      )}
+      <ProjectSummaryCount
+        count={chatCount}
+        dataAttr="chats"
+        icon="comment-discussion"
+        label={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}
+      />
+      {childCount > 0 && (
+        <ProjectSummaryCount
+          count={childCount}
+          dataAttr="children"
+          icon="robot"
+          label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
+        />
+      )}
+      <ProjectSummaryCount
+        count={archivedCount}
+        dataAttr="archived"
+        icon="archive"
+        label={`${archivedCount} archived chat${archivedCount === 1 ? '' : 's'}`}
+      />
+    </span>
+  )
+}
+
 interface ProjectOverviewRowProps {
   project: SidebarProjectTree
   onEnter?: (id: string) => void
@@ -111,6 +161,53 @@ interface ProjectOverviewRowProps {
   dragHandleProps?: React.HTMLAttributes<HTMLElement>
   ref?: React.Ref<HTMLDivElement>
   style?: React.CSSProperties
+}
+
+export function ProjectDetailHeaderRow({
+  activeProjectId,
+  onNewSession,
+  project
+}: {
+  activeProjectId?: null | string
+  onNewSession?: (path: null | string) => void
+  project: SidebarProjectTree
+}) {
+  const { t } = useI18n()
+  const s = t.sidebar
+  const isActive = project.id === activeProjectId
+  const homeAppearances = useStore($homeProjectAppearances)
+  const activeGatewayProfile = useStore($activeGatewayProfile)
+
+  const appearanceProject = project.isNoProject
+    ? { ...project, ...homeProjectAppearanceForProfile(activeGatewayProfile, homeAppearances) }
+    : project
+
+  const projectPath = project.path ?? project.repos.find(repo => repo.path)?.path ?? null
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  return (
+    <div data-sessions-project={project.id} data-sessions-project-detail-header>
+      <ProjectContextMenu isActive={isActive} project={appearanceProject}>
+        <SidebarGroupRow
+          actions={
+            <>
+              {projectPath && <StartWorkButton repoPath={projectPath} />}
+              {onNewSession && (
+                <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(projectPath)} />
+              )}
+              {!project.isNoProject && <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} scoped />}
+            </>
+          }
+          className="hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none"
+          label={<SidebarRowLabel className="text-[0.8125rem] text-foreground">{project.label}</SidebarRowLabel>}
+          lead={<SidebarRowLead className="size-4">{projectIcon(appearanceProject)}</SidebarRowLead>}
+          ref={rowRef}
+          secondaryMeta={<ProjectSummaryMeta project={project} />}
+          totals={{ costUsd: project.totalCostUsd ?? 0, tokens: project.totalTokens ?? 0 }}
+        />
+      </ProjectContextMenu>
+    </div>
+  )
 }
 
 export function ProjectOverviewRow({
@@ -147,12 +244,6 @@ export function ProjectOverviewRow({
       ? fetched
       : latestProjectSessions(project, PROJECT_OVERVIEW_SESSION_LIMIT)
     : []
-
-  const totalActiveCount = project.sessionCount ?? 0
-  const childCount = project.childSessionCount ?? 0
-  const chatCount = project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount)
-  const runningCount = project.runningSessionCount ?? 0
-  const archivedCount = project.archivedSessionCount ?? 0
 
   // A collapsed project means hidden content, even for active work. The global
   // sidebar/session status surfaces still show running state elsewhere; this
@@ -198,39 +289,7 @@ export function ProjectOverviewRow({
         </SidebarRowLink>
       }
       lead={lead}
-      secondaryMeta={
-        <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
-          {runningCount > 0 && (
-            <ProjectSummaryCount
-              count={runningCount}
-              dataAttr="running"
-              icon="sync"
-              label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
-              spinning
-            />
-          )}
-          <ProjectSummaryCount
-            count={chatCount}
-            dataAttr="chats"
-            icon="comment-discussion"
-            label={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}
-          />
-          {childCount > 0 && (
-            <ProjectSummaryCount
-              count={childCount}
-              dataAttr="children"
-              icon="robot"
-              label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
-            />
-          )}
-          <ProjectSummaryCount
-            count={archivedCount}
-            dataAttr="archived"
-            icon="archive"
-            label={`${archivedCount} archived chat${archivedCount === 1 ? '' : 's'}`}
-          />
-        </span>
-      }
+      secondaryMeta={<ProjectSummaryMeta project={project} />}
       // The label is grab surface too, not just the lead's grabber — same
       // listeners, minus the controls that keep their own gestures. A project
       // row has no rival drag (its title navigates on CLICK), so the sortable

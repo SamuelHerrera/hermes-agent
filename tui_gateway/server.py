@@ -12308,10 +12308,9 @@ def _build_project_tree(
         db, session_limit, include_discovered=include_discovered
     )
 
-    # The hydrated tree stays bounded by session_limit, but the two chat counts
-    # must describe the whole database. Page compact rows past that display
-    # window instead of silently turning the UI counters into page counters.
-    batch_size = max(1, session_limit)
+    # The hydrated tree can request all rows with session_limit <= 0. Counts still
+    # page archived rows in bounded chunks instead of one-row loops.
+    batch_size = session_limit if session_limit > 0 else 5000
 
     def _count_rows(*, archived_only: bool, initial: list[dict] | None = None) -> list[dict]:
         collected = list(initial or [])

@@ -414,20 +414,6 @@ export function SidebarSessionsSection({
     [collapsedBranchIds, renderRow]
   )
 
-  // Same as `renderRows`, but with date dividers folded in — used for
-  // entered-project lanes so a lane spanning multiple days reads
-  // chronologically, matching the flat recents list.
-  const renderRowsDated = useCallback(
-    (items: SessionInfo[]) => {
-      const entries = flattenSessionsWithBranches(items, { collapsedSessionIds: collapsedBranchIds })
-
-      return (grouping === 'date' ? groupEntriesByRecency(entries) : toSessionRows(entries)).map(row =>
-        renderListRow(row, false)
-      )
-    },
-    [collapsedBranchIds, grouping, renderListRow]
-  )
-
   // Flat recents as list rows: grouped by recency when enabled, plain otherwise.
   // The hand-picked order is then applied INSIDE each date group, so dragging a
   // row ranks it among its own day's chats instead of freezing the whole list
@@ -488,7 +474,7 @@ export function SidebarSessionsSection({
             onNewSession={onNewSessionInWorkspace}
             project={projectContent}
             removedSessionIds={removedSessionIds}
-            renderRows={renderRowsDated}
+            renderRows={renderRows}
             repoWorktrees={projectRepoWorktrees}
           />
         ) : (

@@ -152,14 +152,13 @@ import {
   overlayLivePreviews,
   PROJECT_OVERVIEW_SESSION_LIMIT,
   ProjectBackRow,
-  ProjectMenu,
+  ProjectDetailHeaderRow,
   projectTreeCwd,
   sessionRecency as sessionTime,
   type SidebarProjectTree,
   type SidebarSessionGroup,
   type SidebarWorkspaceTree,
   sortProjectsForOverview,
-  StartWorkButton,
   useRepoWorktreeMap
 } from './projects'
 import { WorktreeDialog } from './projects/worktree-dialog'
@@ -1729,36 +1728,7 @@ export function ChatSidebar({
                 grouping={showArchived || rankedGlobally ? 'none' : grouping === 'status' ? 'status' : 'date'}
                 groups={displayAgentGroups}
                 headerAction={
-                  inProject && enteredProject ? (
-                    <div className="group/workspace flex shrink-0 items-center gap-0.5">
-                      {enteredProject.path && <StartWorkButton repoPath={enteredProject.path} />}
-                      {/* Home has no folder and no record to rename, theme, or delete. */}
-                      {!enteredProject.isNoProject && (
-                        <ProjectMenu
-                          isActive={enteredProject.id === activeProjectId}
-                          onExitScope={exitProjectScope}
-                          project={enteredProject}
-                          scoped
-                        />
-                      )}
-                      <div className="grid size-6 place-items-center">
-                        <Tip label={s.showProjects}>
-                          <Button
-                            aria-label={s.showProjects}
-                            className={HEADER_NAV_BTN}
-                            onClick={event => {
-                              event.stopPropagation()
-                              exitProjectScope()
-                            }}
-                            size="icon-xs"
-                            variant="ghost"
-                          >
-                            <Codicon name="list-unordered" size="0.75rem" />
-                          </Button>
-                        </Tip>
-                      </div>
-                    </div>
-                  ) : (
+                  inProject && enteredProject ? undefined : (
                     <div className="flex shrink-0 items-center gap-0.5">
                       <div className="grid size-6 place-items-center">
                         <Tip label={agentsOpen ? `Collapse ${sessionsLabel}` : `Expand ${sessionsLabel}`}>
@@ -1783,7 +1753,7 @@ export function ChatSidebar({
                 }
                 headerInlineCaret={worktreeGroupingActive ? false : undefined}
                 headerVariant={worktreeGroupingActive ? 'nav' : 'section'}
-                hideHeader={worktreeGroupingActive && !inProject}
+                hideHeader={worktreeGroupingActive}
                 label={sessionsLabel}
                 labelIcon={
                   worktreeGroupingActive ? (
@@ -1819,7 +1789,16 @@ export function ChatSidebar({
                 open={agentsOpen}
                 pinned={false}
                 projectBackRow={
-                  inProject ? <ProjectBackRow label={s.projects.back} onClick={exitProjectScope} /> : undefined
+                  inProject && enteredProject ? (
+                    <>
+                      <ProjectDetailHeaderRow
+                        activeProjectId={activeProjectId}
+                        onNewSession={onNewSessionInWorkspace}
+                        project={enteredProject}
+                      />
+                      <ProjectBackRow label={s.projects.back} onClick={exitProjectScope} />
+                    </>
+                  ) : undefined
                 }
                 projectContent={inProject ? enteredProjectContent : undefined}
                 projectOverview={projectOverview}

@@ -1,6 +1,5 @@
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useState } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { ProfileGlyph } from '@/components/ui/profile-glyph'
@@ -18,14 +17,13 @@ import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
 import { SidebarGroupRow, SidebarRowLead, SidebarRowLink, SidebarRowStack } from '../chrome'
 import { rankSessions } from '../order'
 
-import { PROJECT_PREVIEW_COUNT, SIDEBAR_GROUP_PAGE, useWorkspaceNodeOpen } from './model'
+import { PROJECT_PREVIEW_COUNT, useWorkspaceNodeOpen } from './model'
 import type { SidebarSessionGroup } from './workspace-groups'
 import {
   WorkspaceAddButton,
   WorkspaceContextMenu,
   WorkspaceHeader,
-  WorkspaceMenu,
-  WorkspaceShowMoreButton
+  WorkspaceMenu
 } from './workspace-header'
 
 interface SidebarWorkspaceGroupProps {
@@ -50,16 +48,12 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
   // lanes that already hold sessions default open.
   const defaultOpen = isProfileGroup || group.sessions.length > 0
   const [open, toggleOpen] = useWorkspaceNodeOpen(group.id, defaultOpen)
-  const [visibleCount, setVisibleCount] = useState(SIDEBAR_GROUP_PAGE)
 
-  // A lane ranks by whatever the sort key says before it trims itself, so the
-  // rows it hides are the ones the sort ranked last.
+  // A lane ranks by whatever the sort key says before rendering. Project detail
+  // lanes render every loaded chat; profile groups keep a compact preview because
+  // clicking the profile scopes the sidebar to that full profile.
   const sessions = rankSessions(group.sessions, rankIds)
-  // A profile previews the same handful a project does, and clicking its label
-  // is how you see the rest. Workspace groups page within what's loaded.
-  const visibleSessions = sessions.slice(0, isProfileGroup ? PROJECT_PREVIEW_COUNT : visibleCount)
-  const hiddenCount = isProfileGroup ? 0 : sessions.length - visibleSessions.length
-  const nextCount = Math.min(SIDEBAR_GROUP_PAGE, hiddenCount)
+  const visibleSessions = isProfileGroup ? sessions.slice(0, PROJECT_PREVIEW_COUNT) : sessions
 
   // Leading glyph: a home mark for the repo's primary checkout (labeled by its
   // live branch), a branch/kanban mark otherwise.
@@ -170,13 +164,6 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
             <div className="min-h-7 pl-2 text-[0.75rem] leading-7 text-(--ui-text-quaternary)">{s.noSessions}</div>
           ) : (
             renderRows(visibleSessions)
-          )}
-          {hiddenCount > 0 && (
-            <WorkspaceShowMoreButton
-              count={nextCount}
-              label={group.label}
-              onClick={() => setVisibleCount(count => count + SIDEBAR_GROUP_PAGE)}
-            />
           )}
         </>
       )}

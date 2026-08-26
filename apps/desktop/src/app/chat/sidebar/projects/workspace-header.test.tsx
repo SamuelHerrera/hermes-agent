@@ -96,4 +96,13 @@ describe('StartWorkButton', () => {
     const button = screen.getByRole('button', { name: 'New worktree' })
     expect(tipTrigger(button)).toBeTruthy()
   })
+
+  it('keeps the new-worktree button visible without waiting for row hover', () => {
+    render(<StartWorkButton repoPath="/repo" />)
+
+    const button = screen.getByRole('button', { name: 'New worktree' })
+
+    expect(button.className).not.toContain('opacity-0')
+    expect(button.className).not.toContain('group-hover/section:opacity-100')
+  })
 })

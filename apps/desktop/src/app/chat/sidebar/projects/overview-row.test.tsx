@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@/hermes'
 import { $sidebarRowMeta } from '@/store/layout'
 
-import { ProjectOverviewRow } from './overview-row'
+import { ProjectDetailHeaderRow, ProjectOverviewRow } from './overview-row'
 import type { SidebarProjectTree } from './workspace-groups'
 
 const workspaceNodeOpen = vi.hoisted(() => ({ value: false }))
@@ -23,12 +23,17 @@ vi.mock('@/i18n', () => ({
         newSessionIn: (label: string) => `New session in ${label}`,
         projects: {
           enter: (label: string) => `Enter ${label}`,
+          startWork: 'New worktree',
           reorder: (label: string) => `Reorder ${label}`,
           toggle: (label: string, open: boolean) => `${open ? 'Show' : 'Hide'} ${label} sessions`
         }
       }
     }
   })
+}))
+
+vi.mock('@/store/coding-status', () => ({
+  openWorktreeDialog: vi.fn()
 }))
 
 vi.mock('@/store/projects', async importOriginal => {
@@ -227,9 +232,50 @@ describe('ProjectOverviewRow', () => {
     expect(onNewSession).toHaveBeenCalledWith(null)
   })
 
-  it('tags the row with data-sessions-project so a skin can target one project', () => {
-    const { container } = render(<ProjectOverviewRow project={project} />)
+  it('renders the project detail header with the chosen project image/icon and two-row metadata', () => {
+    const imageIcon = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" />'
 
-    expect(container.querySelector('[data-sessions-project="p1"]')).toBeTruthy()
+    const { container } = render(
+      <ProjectDetailHeaderRow
+        activeProjectId="p1"
+        onNewSession={vi.fn()}
+        project={{
+          ...project,
+          archivedSessionCount: 1,
+          chatSessionCount: 2,
+          childSessionCount: 3,
+          icon: imageIcon,
+          path: '/repo',
+          runningSessionCount: 1,
+          sessionCount: 5,
+          totalTokens: 900
+        }}
+      />
+    )
+
+    const primary = container.querySelector('[data-sidebar-group-primary]')
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+
+    expect(container.querySelector('[data-sessions-project-detail-header] img')).toBeTruthy()
+    expect(primary?.textContent).toContain('Test D')
+    expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toContain('1')
+    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toContain('2')
+    expect(secondary?.querySelector('[data-project-child-count]')?.textContent).toContain('3')
+    expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toContain('1')
+  })
+
+  it('keeps detail header actions visible in worktree, new-session, menu order without show-projects', () => {
+    const { container } = render(
+      <ProjectDetailHeaderRow onNewSession={vi.fn()} project={{ ...project, path: '/repo', sessionCount: 0 }} />
+    )
+
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+
+    const actionLabels = Array.from(secondary?.querySelectorAll('button') ?? []).map(button =>
+      button.getAttribute('aria-label')
+    )
+
+    expect(actionLabels).toEqual(['New worktree', 'New session in Test D', 'Actions'])
+    expect(container.querySelector('.codicon-list-unordered')).toBeNull()
   })
 })
