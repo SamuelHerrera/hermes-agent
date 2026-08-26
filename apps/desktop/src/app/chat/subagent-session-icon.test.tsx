@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 describe('SessionTabLead subagent indicator', () => {
-  it('uses one robot at rest and swaps it for exactly one spinner while running', () => {
+  it('keeps the robot identity glyph while running', () => {
     const session = { delegate_parent_session_id: 'parent', source: 'delegate' } as SessionInfo
     const { container } = render(<SessionTabLead session={session} storedSessionId="s1" />)
 
@@ -25,8 +25,8 @@ describe('SessionTabLead subagent indicator', () => {
       publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
     })
 
-    expect(container.querySelectorAll('.codicon-robot')).toHaveLength(0)
-    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
+    expect(container.querySelectorAll('.codicon-robot')).toHaveLength(1)
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(0)
 
     act(() => {
       clearAllSessionStates()
@@ -36,7 +36,7 @@ describe('SessionTabLead subagent indicator', () => {
     expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(0)
   })
 
-  it('shows the loading spinner from a hydrated active-subagent snapshot', () => {
+  it('keeps the robot glyph from a hydrated active-subagent snapshot', () => {
     const session = { delegate_parent_session_id: 'parent', source: 'subagent' } as SessionInfo
 
     act(() => {
@@ -50,7 +50,7 @@ describe('SessionTabLead subagent indicator', () => {
 
     const { container } = render(<SessionTabLead session={session} storedSessionId="child-stored" />)
 
-    expect(container.querySelectorAll('.codicon-robot')).toHaveLength(0)
-    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
+    expect(container.querySelectorAll('.codicon-robot')).toHaveLength(1)
+    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(0)
   })
 })

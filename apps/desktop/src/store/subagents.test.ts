@@ -169,7 +169,7 @@ describe('subagent store', () => {
     ])
   })
 
-  it('projects a newly spawned child into the sidebar immediately with a running indicator', () => {
+  it('projects a newly spawned child into the sidebar nested under its parent', () => {
     const parent = {
       cwd: '/work/app',
       ended_at: null,
@@ -204,6 +204,7 @@ describe('subagent store', () => {
         delegate_parent_session_id: 'parent-stored',
         id: 'child-stored',
         model: 'child-model',
+        parent_session_id: 'parent-stored',
         running: true,
         source: 'subagent',
         title: 'Implement the fix'

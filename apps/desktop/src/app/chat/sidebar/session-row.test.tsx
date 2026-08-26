@@ -279,15 +279,15 @@ describe('SidebarSessionRow running indicator', () => {
     expect(container.querySelector('[data-session-status]')).toBeNull()
   })
 
-  it('swaps the subagent robot glyph to the loading glyph while its turn is running', () => {
+  it('keeps the subagent robot glyph while its turn is running', () => {
     act(() => {
       publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
     })
 
     const { container } = renderRow(makeSession({ delegate_parent_session_id: 'parent', title: 'Review diff' }))
 
-    expect(container.querySelector('.codicon-robot')).toBeNull()
-    expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(1)
+    expect(container.querySelector('.codicon-robot')).toBeTruthy()
+    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeNull()
   })
 
   // The row owns its status subscription so a turn starting repaints that row

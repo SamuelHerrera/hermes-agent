@@ -413,7 +413,7 @@ export function activeSubagentSessionRows(
       message_count: 0,
       model: item.model ?? parent.model,
       output_tokens: 0,
-      parent_session_id: null,
+      parent_session_id: parent.id,
       pinned: false,
       preview: item.goal,
       running: true,
