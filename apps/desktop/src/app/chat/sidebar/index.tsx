@@ -1812,7 +1812,7 @@ export function ChatSidebar({
                       <ProjectDetailHeaderRow
                         activeProjectId={activeProjectId}
                         onNewSession={onNewSessionInWorkspace}
-                        project={enteredProject}
+                        project={enteredProjectContent ?? enteredProject}
                       />
                       <ProjectBackRow label={s.projects.back} onClick={exitProjectScope} />
                     </>
