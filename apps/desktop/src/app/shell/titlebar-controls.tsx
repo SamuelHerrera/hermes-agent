@@ -542,7 +542,7 @@ export function TitlebarControls({
           // This toolbar belongs to the sidebar's first content row, not the
           // draggable titlebar. Use a fallback because auxiliary/installed
           // smoke windows can render before the shell var is visible here.
-          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] rounded-md bg-(--ui-sidebar-surface-background)/95 shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-stroke-tertiary)_55%,transparent)] backdrop-blur-sm'
+          'left-2.5 top-[calc(var(--titlebar-height,34px)+1.75rem)] rounded-md bg-(--ui-sidebar-surface-background) shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-stroke-tertiary)_55%,transparent)]'
         )}
       >
         {leftToolbarTools
