@@ -1414,7 +1414,7 @@ export function ChatSidebar({
       collapsible="none"
     >
       <SidebarContent className="gap-0 overflow-hidden bg-transparent px-2.5">
-        <SidebarGroup className="shrink-0 p-0 pb-1 pt-[calc(var(--titlebar-height)+0.375rem)]">
+        <SidebarGroup className="shrink-0 p-0 pb-0 pt-[calc(var(--titlebar-height)+0.375rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
               {navItems.map(item => {
@@ -1787,8 +1787,9 @@ export function ChatSidebar({
                 labelIcon={
                   worktreeGroupingActive ? (
                     <Codicon
-                      className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]"
+                      className="size-4 shrink-0 translate-y-[0.5px] leading-none text-[color-mix(in_srgb,currentColor_72%,transparent)]"
                       name={inProject && enteredProject?.icon ? enteredProject.icon : 'root-folder'}
+                      size="1em"
                     />
                   ) : undefined
                 }

@@ -105,9 +105,7 @@ function SidebarSectionHeader({
     <div
       className={cn(
         'group/section flex shrink-0 items-center justify-between gap-1',
-        navLike
-          ? 'h-7 w-full rounded-md hover:bg-(--ui-control-hover-background) hover:text-foreground'
-          : 'pb-1 pt-1.5'
+        navLike ? 'h-7 w-full rounded-md' : 'pb-1 pt-1.5'
       )}
     >
       {collapsible ? (
@@ -117,7 +115,7 @@ function SidebarSectionHeader({
           className={cn(
             'group/section-label flex min-w-0 items-center bg-transparent text-left leading-none',
             navLike
-              ? 'h-full flex-1 gap-2 rounded-md px-2 hover:text-foreground'
+              ? 'h-full flex-1 gap-2 rounded-md px-2 text-(--ui-text-secondary)'
               : 'w-fit gap-1'
           )}
           onClick={onToggle}

@@ -175,11 +175,17 @@ describe('Sidebar project chrome', () => {
     renderSidebar()
 
     expect(screen.getByText('Projects')).toBeTruthy()
-    expect(screen.getByText('Projects').closest('button')?.querySelector('.codicon-root-folder')).toBeTruthy()
+    const projectLabelButton = screen.getByText('Projects').closest('button')
+    const projectIcon = projectLabelButton?.querySelector('.codicon-root-folder')
+    expect(projectIcon).toBeTruthy()
+    expect(projectIcon?.className).toContain('leading-none')
+    expect(projectLabelButton?.className).not.toContain('hover:bg-')
+    expect(projectLabelButton?.parentElement?.className).not.toContain('hover:bg-')
     expect(screen.queryByRole('button', { name: 'Filters' })).toBeNull()
     expect(screen.queryByPlaceholderText(/search sessions/i)).toBeNull()
 
     const collapse = screen.getByRole('button', { name: 'Collapse Projects' })
+    expect(collapse.className).toContain('hover:bg-')
     expect(collapse.querySelector('.codicon-chevron-down')).toBeTruthy()
 
     fireEvent.click(collapse)
