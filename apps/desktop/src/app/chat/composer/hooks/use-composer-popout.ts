@@ -13,7 +13,6 @@ import {
   readPopoutBounds,
   setComposerPoppedOut
 } from '@/store/composer-popout'
-import { isSecondaryWindow } from '@/store/windows'
 
 import { useComposerPopoutGestures } from './use-popout-drag'
 
@@ -117,14 +116,19 @@ function usePopoutPlacement(
  * it, while a split zone beside them keeps its own — popping out on the left
  * doesn't fling a composer out of the right.
  *
- * Secondary windows (the tiny Ctrl+Shift+N window, subagent watch windows) stay
- * docked: a floating composer makes no sense in a scratch window.
+ * The historical floating composer remains wired behind the hook, but currently
+ * stays disabled: the hidden gesture affordance made the main composer look
+ * broken when it was accidentally peeled out and persisted.
  */
 export function useComposerPopout({ composerRef }: UseComposerPopoutOptions) {
-  const popoutAllowed = !isSecondaryWindow()
+  // Keep the primary chat composer docked. The gesture-only pop-out affordance
+  // was too easy to trigger accidentally and persisted as a small floating input,
+  // which reads like the main chat textarea shrank. Disable the floating state
+  // here so any previously persisted pop-out zones are ignored.
+  const popoutAllowed = false
   const groupId = usePaneGroup()
   const zone = useStore(useMemo(() => $composerPopoutZone(groupId), [groupId]))
-  const poppedOut = zone.poppedOut && popoutAllowed
+  const poppedOut = false
 
   const handleComposerPopOut = useCallback(() => {
     triggerHaptic('open')

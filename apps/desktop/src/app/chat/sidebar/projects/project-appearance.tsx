@@ -208,7 +208,7 @@ function IconPreview({
       <button
         aria-label={name}
         className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-md text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground',
+          'grid size-8 shrink-0 place-items-center rounded-md text-(--ui-text-tertiary) transition hover:bg-(--ui-control-hover-background) hover:text-foreground',
           selected && 'bg-(--ui-control-active-background) text-foreground ring-1 ring-current'
         )}
         onClick={onSelect}
@@ -367,7 +367,7 @@ export function ProjectAppearancePicker({
   }
 
   return (
-    <div className="w-64 space-y-2" data-project-icon-picker>
+    <div className="w-72 max-h-[min(70vh,30rem)] space-y-3 overflow-y-auto pr-1" data-project-icon-picker>
       <CompactColorSwatches clearLabel={noColorLabel} onChange={onColor} swatches={PROFILE_SWATCHES} value={color ?? null} />
       <div className="grid grid-cols-2 gap-1.5">
         <button
@@ -408,7 +408,7 @@ export function ProjectAppearancePicker({
         </div>
       )}
       {iconifyResults.length > 0 && (
-        <div className="grid max-h-36 grid-cols-8 gap-1 overflow-y-auto pr-1">
+        <div className="grid max-h-40 grid-cols-6 gap-1 overflow-y-auto pr-1">
           {iconifyResults.map(name => {
             const value = iconifyValue(name)
 
@@ -425,17 +425,20 @@ export function ProjectAppearancePicker({
           })}
         </div>
       )}
-      <div className="grid grid-cols-8 gap-1">
-        {visibleCodicons.map(name => (
-          <IconPreview
-            color={color}
-            icon={name}
-            key={name}
-            name={name}
-            onSelect={() => onIcon(icon === name ? null : name)}
-            selected={icon === name}
-          />
-        ))}
+      <div className="space-y-1">
+        <div className="px-1 text-[0.625rem] font-medium uppercase tracking-wide text-(--ui-text-quaternary)">Icons</div>
+        <div className="grid grid-cols-6 gap-1">
+          {visibleCodicons.map(name => (
+            <IconPreview
+              color={color}
+              icon={name}
+              key={name}
+              name={name}
+              onSelect={() => onIcon(icon === name ? null : name)}
+              selected={icon === name}
+            />
+          ))}
+        </div>
       </div>
     </div>
   )

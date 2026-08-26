@@ -134,7 +134,8 @@ describe('ProjectMenu', () => {
     // chain rather than getting silently dropped on an intermediate wrapper.
     expect(await screen.findByRole('button', { name: 'No color' })).toBeTruthy()
     expect(screen.getByPlaceholderText('Search Iconify…').tagName).toBe('INPUT')
-    expect(screen.getByPlaceholderText('Search Iconify…').closest('[data-project-icon-picker]')?.className).toContain('w-64')
+    expect(screen.getByText('Icons')).toBeTruthy()
+    expect(screen.getByPlaceholderText('Search Iconify…').closest('[data-project-icon-picker]')?.className).toContain('w-72')
   }, 15000)
 
   it('scopes the Home menu to appearance plus path actions, not project identity/destructive actions', async () => {
