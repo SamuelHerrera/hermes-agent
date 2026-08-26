@@ -88,7 +88,7 @@ function SidebarSectionHeader({
   const labelBody = navLike ? (
     <>
       {icon}
-      <span className="min-w-0 flex-1 truncate text-[0.8125rem] font-medium leading-none text-(--ui-text-secondary)">
+      <span className="min-w-0 flex-1 truncate leading-none">
         {label}
       </span>
       {meta && <SidebarSectionMeta>{meta}</SidebarSectionMeta>}
@@ -105,7 +105,7 @@ function SidebarSectionHeader({
     <div
       className={cn(
         'group/section flex shrink-0 items-center justify-between gap-1',
-        navLike ? 'h-7 w-full rounded-md' : 'pb-1 pt-1.5'
+        navLike ? 'relative h-7 w-full rounded-md' : 'pb-1 pt-1.5'
       )}
     >
       {collapsible ? (
@@ -115,7 +115,7 @@ function SidebarSectionHeader({
           className={cn(
             'group/section-label flex min-w-0 items-center bg-transparent text-left leading-none',
             navLike
-              ? 'h-full flex-1 gap-2 rounded-md px-2 text-(--ui-text-secondary)'
+              ? 'h-full w-full gap-2 rounded-md border border-transparent px-2 pr-7 text-[0.8125rem] font-medium text-(--ui-text-secondary) transition-colors duration-100 ease-out hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none'
               : 'w-fit gap-1'
           )}
           onClick={onToggle}
@@ -139,7 +139,7 @@ function SidebarSectionHeader({
           {labelBody}
         </div>
       )}
-      {action}
+      {navLike && action ? <div className="absolute inset-y-0 right-0 flex items-center">{action}</div> : action}
     </div>
   )
 }

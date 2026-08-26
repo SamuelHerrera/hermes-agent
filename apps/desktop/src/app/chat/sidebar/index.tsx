@@ -1787,7 +1787,7 @@ export function ChatSidebar({
                 labelIcon={
                   worktreeGroupingActive ? (
                     <Codicon
-                      className="size-4 shrink-0 translate-y-[0.5px] leading-none text-[color-mix(in_srgb,currentColor_72%,transparent)]"
+                      className="size-4 shrink-0 leading-none text-[color-mix(in_srgb,currentColor_72%,transparent)]"
                       name={inProject && enteredProject?.icon ? enteredProject.icon : 'root-folder'}
                       size="1em"
                     />
