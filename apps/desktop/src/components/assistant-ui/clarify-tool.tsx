@@ -224,9 +224,22 @@ export const ClarifyTool = (props: ToolCallMessagePartProps) => {
 
 function ClarifyToolLive(props: ToolCallMessagePartProps) {
   const messageRunning = useAuiState(selectMessageRunning)
+  const sessionId = useStore(useSessionView().$runtimeId)
+  const $request = useMemo(() => sessionClarifyRequest(sessionId), [sessionId])
+  const request = useStore($request)
+  const fromArgs = useMemo(() => readClarifyArgs(props.args), [props.args])
 
-  // Stopped mid-prompt with no result — don't leave a dead interactive panel.
-  if (!messageRunning) {
+  const hasHydratedPendingRequest = Boolean(
+    request?.requestId && (!fromArgs.question || !request.question || fromArgs.question === request.question)
+  )
+
+  // Stopped mid-prompt with no live backend request — don't leave a dead
+  // interactive panel. On cold reattach, however, assistant-ui can briefly (or
+  // permanently, when the backend reports "waiting" instead of "streaming") miss
+  // the thread-running bit while session.resume has already replayed the saved
+  // clarify.request into the session-scoped store. In that case the request store
+  // is the authority that the prompt is answerable, so keep rendering the card.
+  if (!messageRunning && !hasHydratedPendingRequest) {
     return <ToolFallback {...props} />
   }
 

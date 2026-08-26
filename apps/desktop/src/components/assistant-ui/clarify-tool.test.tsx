@@ -11,10 +11,13 @@ import { $activeSessionId } from '@/store/session'
 
 import { ClarifyTool, readClarifyResult } from './clarify-tool'
 
-// The live pending card only renders while its message is running. Force that so
-// keyboard-navigation tests can exercise ClarifyToolPending directly.
+let mockMessageRunning = true
+
+// Most tests exercise the normal live path. Individual regression tests can
+// flip this to simulate a cold reattach where assistant-ui has not marked the
+// thread running yet.
 vi.mock('@assistant-ui/react', () => ({
-  useAuiState: () => true
+  useAuiState: () => mockMessageRunning
 }))
 
 afterEach(() => {
@@ -22,6 +25,7 @@ afterEach(() => {
   clearClarifyRequest()
   $activeSessionId.set(null)
   $gateway.set(null)
+  mockMessageRunning = true
   vi.clearAllMocks()
 })
 
@@ -331,6 +335,24 @@ describe('ClarifyTool recommended option', () => {
 })
 
 describe('ClarifyTool pending marker', () => {
+  it('renders a rehydrated pending request even before assistant-ui marks the thread running', () => {
+    mockMessageRunning = false
+    $activeSessionId.set('session-1')
+    $gateway.set({ request: vi.fn().mockResolvedValue({ ok: true }) } as never)
+    setClarifyRequest({
+      choices: ['staging', 'production'],
+      question: 'Which deployment target?',
+      requestId: 'request-1',
+      sessionId: 'session-1'
+    })
+
+    renderClarify(<ClarifyTool {...liveClarifyProps()} />)
+
+    expect(screen.getByText('Which deployment target?')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /staging/ })).toBeTruthy()
+    expect(screen.getByPlaceholderText(/Other/).closest('form')?.getAttribute('data-clarify-choices')).toBe('2')
+  })
+
   it('marks a live choices card with its row count so type-to-focus yields exactly its keys', () => {
     renderLiveClarify()
 
