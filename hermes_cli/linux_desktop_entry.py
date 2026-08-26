@@ -68,10 +68,24 @@ def resolve_exec_command() -> str:
 
     bin_path = resolve_hermes_bin()
     if bin_path:
-        argv = [str(Path(bin_path).resolve()), "desktop"]
+        resolved = Path(bin_path).resolve()
+        if _is_checked_in_entrypoint(resolved):
+            argv = [str(Path(sys.executable).absolute()), str(resolved), "desktop", "--skip-build"]
+        else:
+            argv = [str(resolved), "desktop", "--skip-build"]
     else:
-        argv = [str(Path(sys.executable).resolve()), "-m", "hermes_cli.main", "desktop"]
+        argv = [str(Path(sys.executable).absolute()), "-m", "hermes_cli.main", "desktop", "--skip-build"]
     return " ".join(_quote_exec_arg(a) for a in argv)
+
+
+def _is_checked_in_entrypoint(path: Path) -> bool:
+    """Return True for the repo's checked-in ``hermes`` script.
+
+    The source-tree entrypoint is executable but not self-contained: running it
+    directly from a desktop launcher misses the venv dependencies. Pair it with
+    the current interpreter so the XDG entry works outside an activated shell.
+    """
+    return path.name == "hermes" and (path.parent / "hermes_cli").is_dir()
 
 
 def _quote_exec_arg(arg: str) -> str:

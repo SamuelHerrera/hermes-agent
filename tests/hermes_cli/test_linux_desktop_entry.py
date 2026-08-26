@@ -51,8 +51,10 @@ def test_install_writes_entry_with_absolute_exec_and_icon(tmp_path, xdg_home, mo
     values = _parse(entry.read_text(encoding="utf-8"))
 
     # Exec must be the absolute path of the resolved binary. The launcher
-    # runs with a minimal PATH, so a bare `hermes` would not resolve.
-    assert values["Exec"] == f"{hermes_bin} desktop"
+    # runs with a minimal PATH, so a bare `hermes` would not resolve. Menu
+    # launches should use the already-packaged app rather than trying to
+    # rebuild from a GUI shell with no sudo/TTY.
+    assert values["Exec"] == f"{hermes_bin} desktop --skip-build"
     assert Path(values["Exec"].split(" ")[0]).is_absolute()
 
     # Icon must be an absolute path to the real icon in the checkout.
@@ -84,8 +86,32 @@ def test_exec_falls_back_to_interpreter_module(tmp_path, xdg_home, monkeypatch):
     entry = lde.install_desktop_entry(root)
     exec_line = _parse(entry.read_text(encoding="utf-8"))["Exec"]
 
-    assert exec_line.endswith("-m hermes_cli.main desktop")
+    assert exec_line.endswith("-m hermes_cli.main desktop --skip-build")
     assert Path(exec_line.split(" ")[0]).is_absolute()
+
+
+def test_exec_wraps_checked_in_entrypoint_with_current_interpreter(tmp_path, xdg_home, monkeypatch):
+    root = _make_project(tmp_path)
+    source_entry = root / "hermes"
+    source_entry.write_text("#!/usr/bin/env python\n", encoding="utf-8")
+    source_entry.chmod(0o755)
+    (root / "hermes_cli").mkdir()
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    real_python = tmp_path / "python-install" / "bin" / "python3.11"
+    real_python.parent.mkdir(parents=True)
+    venv_python.parent.mkdir(parents=True)
+    real_python.write_text("", encoding="utf-8")
+    venv_python.symlink_to(real_python)
+    monkeypatch.setattr("hermes_cli.relaunch.resolve_hermes_bin", lambda: str(source_entry))
+    monkeypatch.setattr(lde.sys, "executable", str(venv_python))
+    monkeypatch.setattr(lde, "refresh_desktop_databases", lambda _dir: [])
+
+    entry = lde.install_desktop_entry(root)
+    assert entry is not None
+    exec_line = _parse(entry.read_text(encoding="utf-8"))["Exec"]
+
+    assert exec_line == f"{venv_python} {source_entry} desktop --skip-build"
+    assert str(real_python) not in exec_line
 
 
 def test_install_is_idempotent_and_skips_cache_refresh(tmp_path, xdg_home, monkeypatch):
@@ -202,4 +228,4 @@ def test_exec_arg_quoting_handles_spaces(tmp_path, xdg_home, monkeypatch):
     entry = lde.install_desktop_entry(root)
     exec_line = _parse(entry.read_text(encoding="utf-8"))["Exec"]
 
-    assert exec_line == f'"{spaced}" desktop'
+    assert exec_line == f'"{spaced}" desktop --skip-build'
