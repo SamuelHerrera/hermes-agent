@@ -1,4 +1,3 @@
-import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useRef } from 'react'
 
@@ -7,7 +6,6 @@ import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
-import { $sessionDotStateById, showsRunningArc } from '@/store/session-dot-state'
 
 import {
   SIDEBAR_LEAD_ICON_SIZE,
@@ -105,14 +103,10 @@ export function ProjectOverviewRow({
       : latestProjectSessions(project, PROJECT_OVERVIEW_SESSION_LIMIT)
     : []
 
-  const dotStates = useStore($sessionDotStateById)
-
-  // In the overview/base view, keep active work visible even when the project is
-  // collapsed. Entering the project shows the full lane; the base view should
-  // still surface the live subagent row and its robot/loading glyph.
-  const visiblePreview = open
-    ? preview
-    : preview.filter(session => session.running || showsRunningArc(dotStates[session.id] ?? 'idle'))
+  // A collapsed project means hidden content, even for active work. The global
+  // sidebar/session status surfaces still show running state elsewhere; this
+  // disclosure only controls whether preview rows are shown under the project.
+  const visiblePreview = open ? preview : []
 
   const lead = reorderable ? (
     <SidebarRowGrab

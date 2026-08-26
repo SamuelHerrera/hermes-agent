@@ -8,9 +8,12 @@ import { $sidebarRowMeta } from '@/store/layout'
 import { ProjectOverviewRow } from './overview-row'
 import type { SidebarProjectTree } from './workspace-groups'
 
+const workspaceNodeOpen = vi.hoisted(() => ({ value: false }))
+
 afterEach(() => {
   cleanup()
   act(() => $sidebarRowMeta.set(['preview', 'updated']))
+  workspaceNodeOpen.value = false
 })
 
 vi.mock('@/i18n', () => ({
@@ -31,7 +34,7 @@ vi.mock('@/i18n', () => ({
 vi.mock('./model', () => ({
   PROJECT_OVERVIEW_SESSION_LIMIT: 5_000,
   latestProjectSessions: () => [],
-  useWorkspaceNodeOpen: () => [false, vi.fn()]
+  useWorkspaceNodeOpen: () => [workspaceNodeOpen.value, vi.fn()]
 }))
 
 // ProjectMenu (the kebab) has its own dedicated test file — stub it here so
@@ -122,6 +125,8 @@ describe('ProjectOverviewRow', () => {
   })
 
   it('does not cap overview rows before rendering the project body', () => {
+    workspaceNodeOpen.value = true
+
     render(
       <ProjectOverviewRow
         previewSessions={[
@@ -139,6 +144,18 @@ describe('ProjectOverviewRow', () => {
     expect(screen.getByText('two')).toBeTruthy()
     expect(screen.getByText('three')).toBeTruthy()
     expect(screen.getByText('four')).toBeTruthy()
+  })
+
+  it('hides running preview sessions when collapsed', () => {
+    render(
+      <ProjectOverviewRow
+        previewSessions={[{ id: 'running-chat', running: true } as unknown as SessionInfo]}
+        project={project}
+        renderRows={sessions => sessions.map(session => <div key={session.id}>{session.id}</div>)}
+      />
+    )
+
+    expect(screen.queryByText('running-chat')).toBeNull()
   })
 
   it('does not render the disclosure toggle when there is nothing to preview', () => {
