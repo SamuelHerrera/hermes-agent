@@ -513,20 +513,6 @@ export function TitlebarControls({
 
   return (
     <>
-      <div
-        aria-label={t.shell.windowControls}
-        className={cn(
-          titlebarToolClusterClass,
-          'left-(--titlebar-controls-left) top-(--titlebar-controls-top) translate-y-(--titlebar-controls-y-nudge)'
-        )}
-      >
-        {leftToolbarTools
-          .filter(tool => !tool.hidden)
-          .map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-          ))}
-      </div>
-
       {/*
         Pane-scoped tools (preview's monitor / devtools / refresh / X) render
         as their own fixed cluster. AppShell sets --shell-preview-toolbar-gap
@@ -551,28 +537,40 @@ export function TitlebarControls({
 
       <div
         aria-label={t.shell.appControls}
-        className={cn(titlebarToolClusterClass, 'right-(--titlebar-tools-right) top-(--titlebar-controls-top)')}
+        className={cn(
+          titlebarToolClusterClass,
+          'left-2.5 top-[calc(var(--titlebar-height)+0.375rem)]'
+        )}
       >
-        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
-        {pinnedWorkspacePageTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
-        {terminalStatusbarItem && (
-          <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
+        {leftToolbarTools
+          .filter(tool => !tool.hidden)
+          .map(tool => (
+            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+          ))}
+        {sidebarOpen && (
+          <>
+            <TitlebarOverflowMenu
+              navigate={navigate}
+              statusbarItems={overflowStatusbarItems}
+              tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
+            />
+            <TitlebarProfileMenu />
+            <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
+            {pinnedSystemTools.map(tool => (
+              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+            ))}
+            {approvalStatusbarItem && (
+              <TitlebarStatusbarItemButton item={approvalStatusbarItem} key="status:approval-mode" navigate={navigate} />
+            )}
+            {terminalStatusbarItem && (
+              <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
+            )}
+            {[...pinnedWorkspacePageTools].reverse().map(tool => (
+              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+            ))}
+            {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
+          </>
         )}
-        {approvalStatusbarItem && (
-          <TitlebarStatusbarItemButton item={approvalStatusbarItem} key="status:approval-mode" navigate={navigate} />
-        )}
-        {pinnedSystemTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
-        <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-        <TitlebarProfileMenu />
-        <TitlebarOverflowMenu
-          navigate={navigate}
-          statusbarItems={overflowStatusbarItems}
-          tools={[...overflowWorkspacePageTools, ...visibleLocalServiceTools, ...overflowSystemTools]}
-        />
       </div>
     </>
   )

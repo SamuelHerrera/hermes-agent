@@ -76,18 +76,19 @@ export function useApprovalModeStatusbarItem(profile: string, requestGateway: Ap
 }
 
 function ApprovalStrikeIcon({ className, mode }: { className?: string; mode: ApprovalMode }) {
-  const filled = mode === 'manual' ? 'full' : mode === 'smart' ? 'half' : 'empty'
+  const filled = mode === 'off' ? 'full' : mode === 'smart' ? 'half' : 'empty'
 
   return (
     <span
       aria-hidden="true"
       className={[
         'relative inline-grid size-3.5 shrink-0 place-items-center text-(--ui-text-tertiary)',
-        mode !== 'off' ? 'text-foreground' : '',
+        mode !== 'manual' ? 'text-foreground' : '',
         className ?? ''
       ]
         .filter(Boolean)
         .join(' ')}
+      data-fill={filled}
       data-testid={`approval-strike-${mode}`}
     >
       <Zap className={filled === 'empty' ? 'size-3.5 opacity-65' : 'size-3.5 opacity-30'} />

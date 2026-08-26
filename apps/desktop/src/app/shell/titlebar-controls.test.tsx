@@ -88,16 +88,17 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
-      'New session',
-      'New project',
-      'Show terminal',
-      'Approval mode: Off',
-      'Mute haptics',
-      'Codex subscription usage',
+      'Hide sidebar',
+      'More app actions',
       'Profiles',
-      'More app actions'
+      'Codex subscription usage',
+      'Mute haptics',
+      'Approval mode: Off',
+      'Show terminal',
+      'New project',
+      'New session'
     ])
-    expect(appControls.lastElementChild).toBe(more)
+    expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })

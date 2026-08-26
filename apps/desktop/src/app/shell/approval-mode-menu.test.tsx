@@ -81,13 +81,13 @@ describe('approval mode statusbar item', () => {
 
     const trigger = screen.getByRole('button', { name: /off/i })
     expect(trigger.className.split(/\s+/)).not.toContain('bg-(--chrome-action-hover)')
-    expect(screen.getByTestId('approval-strike-off')).toBeTruthy()
+    expect(screen.getByTestId('approval-strike-off').getAttribute('data-fill')).toBe('full')
 
     fireEvent.pointerDown(trigger, { button: 0 })
 
-    expect(await screen.findByTestId('approval-strike-manual')).toBeTruthy()
-    expect(screen.getAllByTestId('approval-strike-smart').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByTestId('approval-strike-off').length).toBeGreaterThanOrEqual(2)
+    expect((await screen.findByTestId('approval-strike-manual')).getAttribute('data-fill')).toBe('empty')
+    expect(screen.getAllByTestId('approval-strike-smart')[0]?.getAttribute('data-fill')).toBe('half')
+    expect(screen.getAllByTestId('approval-strike-off')[0]?.getAttribute('data-fill')).toBe('full')
   })
 
   it('renders the shared trigger and menu in the active locale', async () => {

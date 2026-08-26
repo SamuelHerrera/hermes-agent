@@ -29,7 +29,7 @@ describe('CodexUsageTitlebarControl', () => {
     render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
     expect(screen.getByRole('button', { name: 'Codex subscription usage' })).toBeTruthy()
-    expect(screen.getByTestId('codex-usage-fill').style.width).toBe('75%')
+    expect(screen.getByTestId('codex-usage-fill').style.height).toBe('75%')
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {

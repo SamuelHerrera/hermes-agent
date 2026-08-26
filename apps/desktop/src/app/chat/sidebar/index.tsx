@@ -1422,8 +1422,8 @@ export function ChatSidebar({
       )}
       collapsible="none"
     >
-      <SidebarContent className="gap-0 overflow-hidden bg-transparent px-2.5">
-        <SidebarGroup className="shrink-0 p-0 pb-0 pt-[calc(var(--titlebar-height)+0.375rem)]">
+      <SidebarContent className={cn("gap-0 overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent px-2.5 scrollbar-fade", SCROLL_GUTTER)}>
+        <SidebarGroup className="shrink-0 p-0 pb-0 pt-[calc(var(--titlebar-height)+2rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
               {navItems.map(item => {
@@ -1621,7 +1621,7 @@ export function ChatSidebar({
 
         {showSessionSections && (
           <div
-            className={cn('flex min-h-0 flex-1 flex-col pb-1.75', SCROLL_Y, !worktreeGroupingActive && SCROLL_GUTTER)}
+            className="flex min-h-0 flex-col pb-1.75"
             data-sessions-mode={sessionsMode}
             data-sessions-project={inProject ? (enteredProjectId ?? undefined) : undefined}
           >
@@ -1647,7 +1647,7 @@ export function ChatSidebar({
                 onTogglePin={pinSession}
                 open
                 pinned={false}
-                rootClassName="min-h-32 flex-1 overflow-hidden p-0"
+                rootClassName="min-h-32 shrink-0 overflow-hidden p-0"
                 sessions={searchResults}
                 showProfileTags={showAllProfiles}
               />
@@ -1686,18 +1686,11 @@ export function ChatSidebar({
                 card={cardRows}
                 collapsible={!inProject}
                 contentClassName={cn(
-                  'flex min-h-0 flex-1 flex-col gap-px pb-1.75',
-                  // The section is the ONE authority on whether the virtual
-                  // list owns scrolling: it neutralizes this wrapper scroller
-                  // itself (overflow-visible) when it virtualizes. Gating
-                  // SCROLL_Y here on index's own parallel guess desynced the
-                  // two — a cached project tree flipped this side but not the
-                  // section's, leaving the list with no scroller at all and
-                  // the recents pane rendering blank under Updated grouping.
-                  SCROLL_Y,
-                  // Flatten into the single scroll when compact — unless this is the
-                  // virtualized long list, which must keep its own scroller.
-                  !recentsVirtualizes && COMPACT_FLAT
+                  'flex min-h-0 flex-col gap-px pb-1.75',
+                  // The full sidebar body now owns scrolling so expanded nav
+                  // groups and projects share one rail; keep a nested scroller
+                  // only for virtualized long lists that need their own viewport.
+                  recentsVirtualizes ? SCROLL_Y : COMPACT_FLAT
                 )}
                 dndSensors={dndSensors}
                 emptyState={
@@ -1817,8 +1810,8 @@ export function ChatSidebar({
                 projectsLoading={worktreeGroupingActive ? projectTreeLoading : false}
                 removedSessionIds={inProject ? removedSessionIds : undefined}
                 rootClassName={cn(
-                  'min-h-32 flex-1 overflow-hidden p-0',
-                  !recentsVirtualizes && 'compact:min-h-0 compact:flex-none compact:overflow-visible'
+                  'min-h-32 shrink-0 overflow-hidden p-0',
+                  !recentsVirtualizes && 'compact:min-h-0 compact:overflow-visible'
                 )}
                 sessions={displayAgentSessions}
                 sortable={!showAllProfiles && agentSessions.length > 1}

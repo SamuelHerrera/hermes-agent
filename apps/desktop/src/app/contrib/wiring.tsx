@@ -130,7 +130,7 @@ import {
   titlebarToolsRightCss,
   titlebarToolsWidthCss
 } from '../shell/titlebar'
-import { isPinnedTitlebarStatusbarItem, TitlebarControls } from '../shell/titlebar-controls'
+import { TitlebarControls } from '../shell/titlebar-controls'
 import { useCodexUsage } from '../shell/use-codex-usage'
 import { UpdatesOverlay } from '../updates-overlay'
 
@@ -331,16 +331,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     statusSnapshot,
     toggleCommandCenter
   })
-
-  const titlebarPinnedStatusbarItemCount = useMemo(() => {
-    if (!statusbarVisible) {
-      return 0
-    }
-
-    return [...leftStatusbarItems, ...statusbarItems].filter(
-      item => isPinnedTitlebarStatusbarItem(item) && !item.hidden
-    ).length
-  }, [leftStatusbarItems, statusbarItems, statusbarVisible])
 
   const openProviderSettings = useCallback(() => navigate(`${SETTINGS_ROUTE}?tab=providers`), [navigate])
 
@@ -1045,19 +1035,12 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   }
 
   const titlebarToolsRight = titlebarToolsRightCss(nativeOverlayWidth, titlebarChrome)
-  // Pane-registered tools (preview's monitor/devtools cluster) anchor flush
-  // against the static app-control cluster — in the tree layout the titlebar
-  // band sits ABOVE the grid, so AppShell's pane-width anchoring doesn't apply.
-  // Match TitlebarControls' visible app cluster: approval/terminal status items,
-  // New chat, New Project, overflow dots, Codex usage, profile switcher, and
-  // haptics, plus a little slack. Keep this intentionally conservative so
-  // Electron's drag strip never covers the leftmost clickable app action again.
-  const APP_CONTROL_TOOL_COUNT = 7 + titlebarPinnedStatusbarItemCount
+  // App-level controls live in the fixed sidebar toolbar now, below the
+  // draggable titlebar. Reserve the right titlebar strip only for pane-registered
+  // tools (preview monitor/devtools/etc.) so the chat title keeps its space.
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
-  const systemToolsWidth = titlebarToolsWidthCss(APP_CONTROL_TOOL_COUNT)
-
-  const titlebarToolsWidth =
-    paneToolCount > 0 ? `calc(${systemToolsWidth} + ${titlebarToolsWidthCss(paneToolCount)})` : systemToolsWidth
+  const systemToolsWidth = '0px'
+  const titlebarToolsWidth = paneToolCount > 0 ? titlebarToolsWidthCss(paneToolCount) : systemToolsWidth
 
   return (
     <ContribWiringContext.Provider value={api}>
