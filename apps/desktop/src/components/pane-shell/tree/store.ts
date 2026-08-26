@@ -1224,7 +1224,7 @@ interface PaneDockHint {
   before?: null | string
 }
 
-const FIXED_LEFT_PANEL_PANES = new Set(['sessions', 'files'])
+const FIXED_LEFT_PANEL_PANES = new Set(['sessions'])
 
 function fixedLeftPanelOwns(group: GroupNode | null): boolean {
   return Boolean(group?.panes.some(paneId => FIXED_LEFT_PANEL_PANES.has(paneId)))
@@ -1258,23 +1258,6 @@ function redirectFromFixedLeftPanel(
 
 function enforceFixedLeftPanel(tree: LayoutNode): LayoutNode {
   let next = tree
-  const hasSessions = allPaneIds(next).includes('sessions')
-  const hasFiles = allPaneIds(next).includes('files')
-
-  if (hasSessions && hasFiles) {
-    const sessionsGroup = findGroupOfPane(next, 'sessions')
-    const filesGroup = findGroupOfPane(next, 'files')
-
-    if (sessionsGroup && filesGroup && sessionsGroup.id !== filesGroup.id) {
-      const withoutFiles = removePane(next, 'files')
-      const target = withoutFiles ? findGroupOfPane(withoutFiles, 'sessions') : null
-
-      if (withoutFiles && target) {
-        next = insertAtGroup(withoutFiles, target.id, 'files', 'center', null, false) ?? withoutFiles
-      }
-    }
-  }
-
   const leftGroup = findGroupOfPane(next, 'sessions')
   const extras = leftGroup?.panes.filter(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? []
 

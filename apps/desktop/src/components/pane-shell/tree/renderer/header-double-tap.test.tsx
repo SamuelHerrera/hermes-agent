@@ -44,6 +44,13 @@ beforeEach(() => {
       id: 'session-tile:one',
       render: () => null,
       title: 'one'
+    }),
+    registry.register({
+      area: 'panes',
+      data: { placement: 'left', collapsible: true },
+      id: 'sessions',
+      render: () => <div>Sessions body</div>,
+      title: 'sessions'
     })
   )
 })
@@ -161,5 +168,14 @@ describe('pane tab/header double tap', () => {
 
     expect(container.querySelector('[data-zone-tabstrip="grp-secondary"]')).toBeTruthy()
     expect(container.querySelector('[data-tree-tab="session-tile:one"]')).toBeTruthy()
+  })
+
+  it('hides the tab strip for the fixed sessions-only left panel', () => {
+    const node = group(['sessions'], { active: 'sessions', id: 'grp-sessions' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} parentAxis="row" railSide="left" />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-sessions"]')).toBeNull()
+    expect(screen.getByText('Sessions body')).toBeTruthy()
   })
 })

@@ -215,12 +215,12 @@ registry.registerMany([
     id: 'files',
     area: 'panes',
     title: 'files',
-    // The file tree now lives in the fixed left panel with sessions. Keep it
-    // as a tab in that panel instead of opening another side rail.
+    // The left panel is reserved for the Sessions list. Keep Files on the
+    // content side rail so it cannot create a second tab in the sessions panel.
     data: {
-      placement: 'left',
+      placement: 'right',
       collapsible: true,
-      dock: { pane: 'sessions', pos: 'center' },
+      dock: { pane: 'workspace', pos: 'right' },
       revealAliases: ['file-browser'],
       width: FILE_BROWSER_DEFAULT_WIDTH,
       minWidth: FILE_BROWSER_MIN_WIDTH,
