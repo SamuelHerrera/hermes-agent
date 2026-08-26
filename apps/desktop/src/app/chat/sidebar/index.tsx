@@ -1783,6 +1783,7 @@ export function ChatSidebar({
                 }
                 headerInlineCaret={worktreeGroupingActive ? false : undefined}
                 headerVariant={worktreeGroupingActive ? 'nav' : 'section'}
+                hideHeader={worktreeGroupingActive && !inProject}
                 label={sessionsLabel}
                 labelIcon={
                   worktreeGroupingActive ? (

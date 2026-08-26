@@ -10,6 +10,7 @@ import { setCronJobs } from '@/store/cron'
 import { setSidebarAgentsGrouped, setSidebarOrdering, setSidebarRecentsOpen } from '@/store/layout'
 import { $projectScope, $projectTree, $projectTreeLoading, ALL_PROJECTS } from '@/store/projects'
 import { $routeTiles, openRouteTile } from '@/store/route-tiles'
+import { setSessionsLoading } from '@/store/session'
 
 import type { SidebarNavChildrenProps } from '../../routes'
 
@@ -137,17 +138,27 @@ afterEach(() => {
   setSidebarAgentsGrouped(true)
   setSidebarOrdering('updated')
   setSidebarRecentsOpen(true)
+  setSessionsLoading(true)
   localStorage.clear()
   vi.clearAllMocks()
   vi.restoreAllMocks()
 })
 
 describe('Sidebar project chrome', () => {
-  it('defaults to the project view with a nav-like collapse control and no search or filter menu', () => {
+  it('renders the project overview directly without a redundant Projects header', () => {
     $projectScope.set(ALL_PROJECTS)
     $projectTreeLoading.set(false)
     setSidebarRecentsOpen(true)
+    setSessionsLoading(false)
     $projectTree.set([
+      {
+        id: '__no_project__',
+        isNoProject: true,
+        label: 'Home',
+        path: null,
+        repos: [],
+        sessionCount: 0
+      },
       {
         id: 'p1',
         label: 'Alpha',
@@ -174,24 +185,13 @@ describe('Sidebar project chrome', () => {
 
     renderSidebar()
 
-    expect(screen.getByText('Projects')).toBeTruthy()
-    const projectLabelButton = screen.getByText('Projects').closest('button')
-    const projectIcon = projectLabelButton?.querySelector('.codicon-root-folder')
-    expect(projectIcon).toBeTruthy()
-    expect(projectIcon?.className).toContain('leading-none')
-    expect(projectLabelButton?.className).toContain('text-[0.8125rem]')
-    expect(projectLabelButton?.className).toContain('hover:bg-')
-    expect(projectLabelButton?.parentElement?.className).not.toContain('hover:bg-')
+    expect(screen.queryByText('Projects')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Collapse Projects' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand Projects' })).toBeNull()
+    expect(screen.getByText('Home')).toBeTruthy()
+    expect(screen.getByText('Alpha')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Filters' })).toBeNull()
     expect(screen.queryByPlaceholderText(/search sessions/i)).toBeNull()
-
-    const collapse = screen.getByRole('button', { name: 'Collapse Projects' })
-    expect(collapse.className).toContain('hover:bg-')
-    expect(collapse.querySelector('.codicon-chevron-down')).toBeTruthy()
-
-    fireEvent.click(collapse)
-
-    expect(screen.getByRole('button', { name: 'Expand Projects' }).querySelector('.codicon-chevron-right')).toBeTruthy()
   })
 })
 

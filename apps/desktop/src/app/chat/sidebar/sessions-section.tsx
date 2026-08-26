@@ -190,6 +190,10 @@ interface SidebarSessionsSectionProps {
   labelIcon?: React.ReactNode
   headerInlineCaret?: boolean
   headerVariant?: 'section' | 'nav'
+  // When true, render the section body directly without the top-level header.
+  // Used by the project overview: projects still render as first-class rows,
+  // but the redundant "Projects" nesting/header row is suppressed.
+  hideHeader?: boolean
   // When false the section header is static (no caret/toggle) and always open.
   collapsible?: boolean
   sortable?: boolean
@@ -256,6 +260,7 @@ export function SidebarSessionsSection({
   labelIcon,
   headerInlineCaret,
   headerVariant = 'section',
+  hideHeader = false,
   collapsible = true,
   sortable = false,
   manualOrderIds,
@@ -272,7 +277,7 @@ export function SidebarSessionsSection({
   const statusDividerLabels = t.sidebar.statusDivider
   const dotStates = useStore($sessionDotStateById)
   const [collapsedBranchIds, setCollapsedBranchIds] = useState<Set<string>>(() => new Set())
-  const sectionOpen = collapsible ? open : true
+  const sectionOpen = hideHeader || !collapsible ? true : open
   const hasGroupedSessions = Boolean(groups?.some(group => group.sessions.length > 0))
   // A defined project list is itself content (even an empty project should
   // render as a drill-in row so the user can see it exists).
@@ -589,17 +594,19 @@ export function SidebarSessionsSection({
 
   return (
     <SidebarGroup className={rootClassName}>
-      <SidebarSectionHeader
-        action={headerAction}
-        collapsible={collapsible}
-        icon={labelIcon}
-        inlineCaret={headerInlineCaret}
-        label={label}
-        meta={labelMeta}
-        onToggle={onToggle}
-        open={sectionOpen}
-        variant={headerVariant}
-      />
+      {!hideHeader && (
+        <SidebarSectionHeader
+          action={headerAction}
+          collapsible={collapsible}
+          icon={labelIcon}
+          inlineCaret={headerInlineCaret}
+          label={label}
+          meta={labelMeta}
+          onToggle={onToggle}
+          open={sectionOpen}
+          variant={headerVariant}
+        />
+      )}
       {sectionOpen && (
         <SidebarGroupContent className={resolvedContentClassName}>
           {inner}
