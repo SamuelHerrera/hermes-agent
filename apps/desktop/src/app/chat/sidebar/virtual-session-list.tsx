@@ -15,7 +15,10 @@ import { SidebarDateDivider } from './chrome'
 import { SidebarSessionRow } from './session-row'
 
 interface SessionRowCommonProps {
+  branchChildCount?: number
+  branchCollapsed?: boolean
   branchStem?: string
+  hasBranchChildren?: boolean
   card?: boolean
   isPinned: boolean
   isSelected: boolean
@@ -24,6 +27,7 @@ interface SessionRowCommonProps {
   onDelete: () => void
   onPin: () => void
   onResume: () => void
+  onToggleBranch?: () => void
   reorderable?: boolean
   showProfile?: boolean
 }
@@ -40,6 +44,7 @@ export interface VirtualSessionListProps {
   onBranchSession?: (sessionId: string, profile?: string) => void
   onDeleteSession: (sessionId: string) => void
   onResumeSession: (sessionId: string) => void
+  onToggleBranch: (sessionId: string) => void
   onTogglePin: (sessionId: string) => void
   pinned: boolean
   showProfileTags?: boolean
@@ -63,6 +68,7 @@ export const VirtualSessionList: FC<VirtualSessionListProps> = ({
   onBranchSession,
   onDeleteSession,
   onResumeSession,
+  onToggleBranch,
   onTogglePin,
   pinned,
   showProfileTags = false,
@@ -111,19 +117,23 @@ export const VirtualSessionList: FC<VirtualSessionListProps> = ({
       )
     }
 
-    const { branchStem, session } = row.entry
+    const { branchChildCount, branchCollapsed, branchStem, hasBranchChildren, session } = row.entry
     const reorderable = sortable && !branchStem
 
     const commonProps: SessionRowCommonProps = {
+      branchChildCount,
+      branchCollapsed,
       branchStem,
       card,
       isPinned: pinned,
       isSelected: session.id === activeSessionId,
+      hasBranchChildren,
       onArchive: () => onArchiveSession(session.id),
       onBranch: onBranchSession ? () => onBranchSession(session.id, session.profile) : undefined,
       onDelete: () => onDeleteSession(session.id),
       onPin: () => onTogglePin(sessionPinId(session)),
       onResume: () => onResumeSession(session.id),
+      onToggleBranch: hasBranchChildren ? () => onToggleBranch(session.id) : undefined,
       reorderable,
       showProfile: showProfileTags
     }

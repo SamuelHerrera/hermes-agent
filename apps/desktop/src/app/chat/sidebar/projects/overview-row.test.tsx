@@ -1,13 +1,17 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { SessionInfo } from '@/hermes'
+import { $sidebarRowMeta } from '@/store/layout'
 
 import { ProjectOverviewRow } from './overview-row'
 import type { SidebarProjectTree } from './workspace-groups'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  act(() => $sidebarRowMeta.set(['preview', 'updated']))
+})
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -63,6 +67,30 @@ describe('ProjectOverviewRow', () => {
     // Collapsed by default, so the disclosure offers to show the sessions.
     const button = screen.getByRole('button', { name: 'Show Test D sessions' })
     expect(tipTrigger(button)).toBeTruthy()
+  })
+
+  it('puts the disclosure on the primary row and project tokens plus other actions on the second row', () => {
+    act(() => $sidebarRowMeta.set(['tokens']))
+
+    const { container } = render(
+      <ProjectOverviewRow
+        onNewSession={vi.fn()}
+        previewSessions={[{ id: 's1' } as unknown as SessionInfo]}
+        project={{ ...project, totalTokens: 1_300 }}
+        renderRows={() => null}
+      />
+    )
+
+    const primary = container.querySelector('[data-sidebar-group-primary]')
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+    const toggle = screen.getByRole('button', { name: 'Show Test D sessions' })
+    const add = screen.getByRole('button', { name: 'New session in Test D' })
+    const tokens = screen.getByText('1.3k')
+
+    expect(primary?.contains(toggle)).toBe(true)
+    expect(primary?.contains(tokens)).toBe(false)
+    expect(secondary?.contains(tokens)).toBe(true)
+    expect(secondary?.contains(add)).toBe(true)
   })
 
   it('does not cap overview rows before rendering the project body', () => {

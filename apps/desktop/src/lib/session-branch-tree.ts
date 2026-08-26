@@ -1,6 +1,7 @@
 import type { SessionInfo } from '@/types/hermes'
 
 export interface SidebarSessionEntry {
+  branchChildCount?: number
   branchCollapsed?: boolean
   branchStem?: string
   hasBranchChildren?: boolean
@@ -118,6 +119,7 @@ export function flattenSessionsWithBranches(
     const branchCollapsed = hasBranchChildren && options.collapsedSessionIds?.has(session.id) === true
 
     out.push({
+      ...(hasBranchChildren ? { branchChildCount: children.length } : {}),
       ...(branchCollapsed ? { branchCollapsed } : {}),
       ...(branchStem ? { branchStem } : {}),
       ...(hasBranchChildren ? { hasBranchChildren } : {}),

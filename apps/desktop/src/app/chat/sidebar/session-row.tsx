@@ -54,6 +54,7 @@ interface SidebarSessionRowProps extends React.ComponentProps<'div'> {
   branchStem?: string
   /** This row owns visible child rows and can be collapsed. */
   hasBranchChildren?: boolean
+  branchChildCount?: number
   branchCollapsed?: boolean
   onToggleBranch?: () => void
   isPinned: boolean
@@ -113,6 +114,7 @@ function formatAge(seconds: number, r: Translations['sidebar']['row']): string {
 function SidebarSessionRowImpl({
   session,
   branchStem,
+  branchChildCount = 0,
   hasBranchChildren = false,
   branchCollapsed = false,
   onToggleBranch,
@@ -180,6 +182,26 @@ function SidebarSessionRowImpl({
 
   if (pr) {
     metadata.push({ key: 'pr', node: <PrTag pr={pr} /> })
+  }
+
+  const fullBranch = session.git_branch?.trim() ?? ''
+  const branchName = fullBranch.split('/').filter(Boolean).at(-1) ?? ''
+
+  if (branchName) {
+    metadata.push({
+      key: 'branch',
+      node: (
+        <Tip label={fullBranch} side="top">
+          <span
+            aria-label={`Branch ${fullBranch}`}
+            className="pointer-events-auto block max-w-28 truncate"
+            data-session-branch
+          >
+            {branchName}
+          </span>
+        </Tip>
+      )
+    })
   }
 
   figures.forEach((figure, index) => {
@@ -260,26 +282,36 @@ function SidebarSessionRowImpl({
     </SidebarRowLeadGlyph>
   ) : null
 
+  const branchToggleNode = hasBranchChildren ? (
+    <Tip label={`${branchChildCount} child chat${branchChildCount === 1 ? '' : 's'}`} side="top">
+      <button
+        aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
+        className="flex h-5 shrink-0 items-center gap-1 rounded-[4px] px-1 text-[0.625rem] tabular-nums text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
+        data-row-actions
+        data-session-branch-toggle
+        onClick={event => {
+          event.preventDefault()
+          event.stopPropagation()
+          triggerHaptic('selection')
+          onToggleBranch?.()
+        }}
+        type="button"
+      >
+        <Codicon name="robot" size="0.75rem" />
+        <span>{branchChildCount}</span>
+        <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
+      </button>
+    </Tip>
+  ) : null
+
   // The action cluster is an explicit control row. Compact rows position it on
   // the second line so the title line owns the full width; cards still render it
   // in their header line where that variant already keeps the title separate.
   const actionsNode = (
-    <div className="relative z-2 flex shrink-0 items-center justify-end gap-1" data-row-actions>
-      {hasBranchChildren ? (
-        <button
-          aria-label={branchCollapsed ? 'Expand child chats' : 'Collapse child chats'}
-          className="flex size-4 shrink-0 items-center justify-center rounded-[3px] text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
-          onClick={event => {
-            event.preventDefault()
-            event.stopPropagation()
-            triggerHaptic('selection')
-            onToggleBranch?.()
-          }}
-          type="button"
-        >
-          <Codicon name={branchCollapsed ? 'chevron-right' : 'chevron-down'} size="0.75rem" />
-        </button>
-      ) : null}
+    <div
+      className={cn('relative z-2 flex shrink-0 items-center justify-end gap-1', card && hasBranchChildren && 'mr-12')}
+      data-row-actions
+    >
       {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
       {card && metadataNode ? <span className="min-w-0 max-w-24">{metadataNode}</span> : null}
       {!session.archived ? (
@@ -469,7 +501,10 @@ function SidebarSessionRowImpl({
             if (!card) {
               return (
                 <>
-                  <div className="flex min-w-0 items-center gap-1.5" data-session-row-primary>
+                  <div
+                    className={cn('flex min-w-0 items-center gap-1.5', hasBranchChildren && 'pr-12')}
+                    data-session-row-primary
+                  >
                     {leadNode}
                     {handoffBadge}
                     <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
@@ -541,6 +576,15 @@ function SidebarSessionRowImpl({
             )
           })()}
         </SidebarRowBody>
+        {branchToggleNode ? (
+          <div
+            className={cn('absolute right-1 z-3 flex items-center', card ? 'top-1.5' : 'top-0.5')}
+            data-row-actions
+            data-session-row-primary-actions
+          >
+            {branchToggleNode}
+          </div>
+        ) : null}
         {!card ? (
           <div className="absolute bottom-0.5 right-1 flex items-center" data-row-actions data-session-row-secondary-actions>
             {actionsNode}
@@ -569,6 +613,7 @@ function rowPropsEqual(a: SidebarSessionRowProps, b: SidebarSessionRowProps): bo
     a.isPinned === b.isPinned &&
     a.isSelected === b.isSelected &&
     a.branchStem === b.branchStem &&
+    a.branchChildCount === b.branchChildCount &&
     a.hasBranchChildren === b.hasBranchChildren &&
     a.branchCollapsed === b.branchCollapsed &&
     a.reorderable === b.reorderable &&

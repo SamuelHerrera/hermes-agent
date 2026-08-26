@@ -163,50 +163,46 @@ export function SidebarGroupRow({
     totals && rowMeta.includes('cost') && totals.costUsd >= 0.01 ? `$${totals.costUsd.toFixed(2)}` : null
   ].filter(Boolean) as string[]
 
+  const hasSecondary = facts.length > 0 || Boolean(actions)
+
   return (
-    <SidebarRowShell
-      actions={
-        // The controls overlay the figures rather than sitting beside them: in
-        // flow they hold their width open at all times, which reads as a gap
-        // torn between the total and the row's edge. Same trade the session row
-        // makes with its kebab and age — you read the number or you act on the
-        // group, never both at once.
-        facts.length ? (
-          <div className="relative flex items-center">
-            <span className="min-w-9 whitespace-nowrap text-right text-[0.625rem] leading-none text-(--ui-text-tertiary) transition-opacity group-hover/workspace:opacity-0">
-              {facts.join(' · ')}
-            </span>
-            {actions ? <div className="absolute right-0 flex items-center">{actions}</div> : null}
+    <SidebarRowShell className={cn('group/workspace', className)} {...props}>
+      <div className="flex min-w-0 flex-col justify-center gap-1 py-1 pl-2 pr-1">
+        <div className="flex min-w-0 items-center gap-1.5" data-sidebar-group-primary>
+          {lead}
+          <div className="min-w-0 flex-1">{label}</div>
+          {toggle ? (
+            <Tip label={toggle.ariaLabel}>
+              <button
+                aria-label={toggle.ariaLabel}
+                className="flex size-5 shrink-0 items-center justify-center rounded-[4px] bg-transparent text-(--ui-text-tertiary) transition hover:bg-(--ui-control-active-background) hover:text-foreground"
+                data-row-actions
+                onClick={toggle.onToggle}
+                type="button"
+              >
+                <DisclosureCaret className="shrink-0" open={toggle.open} />
+              </button>
+            </Tip>
+          ) : null}
+        </div>
+        {hasSecondary ? (
+          <div className="flex min-h-5 min-w-0 items-center pl-5" data-sidebar-group-secondary>
+            {facts.length ? (
+              <span
+                className="min-w-0 truncate whitespace-nowrap text-[0.625rem] leading-none text-(--ui-text-tertiary)"
+                data-sidebar-group-meta
+              >
+                {facts.join(' · ')}
+              </span>
+            ) : null}
+            {actions ? (
+              <div className="ml-auto flex shrink-0 items-center" data-row-actions>
+                {actions}
+              </div>
+            ) : null}
           </div>
-        ) : (
-          actions
-        )
-      }
-      className={cn('group/workspace', className)}
-      {...props}
-    >
-      <SidebarRowCluster className="min-w-0 flex-1">
-        {lead}
-        {label}
-        {toggle ? (
-          <Tip label={toggle.ariaLabel}>
-            <button
-              aria-label={toggle.ariaLabel}
-              className="flex flex-1 items-center self-stretch bg-transparent p-0"
-              data-row-actions
-              onClick={toggle.onToggle}
-              type="button"
-            >
-              <DisclosureCaret
-                className="shrink-0 text-(--ui-text-tertiary) opacity-0 transition group-hover/workspace:opacity-100"
-                open={toggle.open}
-              />
-            </button>
-          </Tip>
-        ) : (
-          <span className="flex-1" />
-        )}
-      </SidebarRowCluster>
+        ) : null}
+      </div>
     </SidebarRowShell>
   )
 }

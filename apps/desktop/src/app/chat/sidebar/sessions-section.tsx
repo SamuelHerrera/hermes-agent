@@ -283,10 +283,12 @@ export function SidebarSessionsSection({
       draggable: boolean,
       branchStem?: string,
       hasBranchChildren = false,
+      branchChildCount = 0,
       branchCollapsed = false
     ) => {
       const rowProps = {
         branchCollapsed,
+        branchChildCount,
         branchStem,
         hasBranchChildren,
         card,
@@ -343,6 +345,7 @@ export function SidebarSessionsSection({
           draggable,
           row.entry.branchStem,
           row.entry.hasBranchChildren,
+          row.entry.branchChildCount,
           row.entry.branchCollapsed
         )
       }
@@ -362,8 +365,8 @@ export function SidebarSessionsSection({
   const renderRows = useCallback(
     (items: SessionInfo[]) =>
       flattenSessionsWithBranches(items, { collapsedSessionIds: collapsedBranchIds }).map(
-        ({ branchCollapsed, branchStem, hasBranchChildren, session }) =>
-          renderRow(session, false, branchStem, hasBranchChildren, branchCollapsed)
+        ({ branchChildCount, branchCollapsed, branchStem, hasBranchChildren, session }) =>
+          renderRow(session, false, branchStem, hasBranchChildren, branchChildCount, branchCollapsed)
       ),
     [collapsedBranchIds, renderRow]
   )
@@ -513,6 +516,7 @@ export function SidebarSessionsSection({
         onBranchSession={onBranchSession}
         onDeleteSession={onDeleteSession}
         onResumeSession={onResumeSession}
+        onToggleBranch={toggleBranchCollapsed}
         onTogglePin={onTogglePin}
         pinned={pinned}
         rows={flatRows}

@@ -29,6 +29,7 @@ vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: {
       sidebar: {
+        projects: { home: 'Home' },
         row: {
           ageMin: 'm',
           ageNow: 'now',
@@ -199,6 +200,19 @@ describe('SidebarSessionRow compact layout', () => {
     expect(actionLine?.contains(archive)).toBe(true)
     expect(actionLine?.contains(menu)).toBe(true)
   })
+
+  it('shows only the branch leaf on the metadata row and exposes the full branch through the tooltip trigger', () => {
+    renderRow(makeSession({ git_branch: 'sam/feature/sidebar-counts', title: 'Branch chat' }))
+
+    const branch = screen.getByText('sidebar-counts')
+    const metadataLine = branch.closest('[data-session-row-meta]')
+
+    expect(metadataLine).toBeTruthy()
+    expect(tipTrigger(branch)).toBeTruthy()
+    expect(branch.getAttribute('aria-label')).toBe('Branch sam/feature/sidebar-counts')
+    expect(branch.getAttribute('tabindex')).toBeNull()
+    expect(screen.queryByText('sam/feature/sidebar-counts')).toBeNull()
+  })
 })
 
 const renderRow = (session: SessionInfo) => {
@@ -329,9 +343,48 @@ describe('SidebarSessionRow', () => {
     expect(tipTrigger(kebab)).toBeNull()
   })
 
-  it('keeps the lead icon aligned by putting the child-chat disclosure in the trailing actions', () => {
+  it('puts the child-chat icon, count, and disclosure on the primary row while keeping other actions secondary', () => {
+    const onResume = vi.fn()
+    const onToggleBranch = vi.fn()
+
     const { container } = render(
       <SidebarSessionRow
+        branchChildCount={3}
+        hasBranchChildren
+        isPinned={false}
+        isSelected={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={onResume}
+        onToggleBranch={onToggleBranch}
+        session={makeSession({ title: 'Parent chat' })}
+      />
+    )
+
+    const primaryLine = screen.getByText('Parent chat').closest('[data-session-row-primary]')
+    const rowBody = screen.getByText('Parent chat').closest('button')
+    const toggle = screen.getByRole('button', { name: 'Collapse child chats' })
+    const primaryActions = container.querySelector('[data-session-row-primary-actions]')
+    const secondaryActions = container.querySelector('[data-session-row-secondary-actions]')
+
+    expect(primaryLine?.contains(toggle)).toBe(false)
+    expect(rowBody?.contains(toggle)).toBe(false)
+    expect(primaryActions?.contains(toggle)).toBe(true)
+    expect(secondaryActions?.contains(toggle)).toBe(false)
+    expect(toggle.textContent).toContain('3')
+    expect(toggle.querySelector('.codicon-robot')).toBeTruthy()
+    expect(secondaryActions?.contains(screen.getByRole('button', { name: 'Archive' }))).toBe(true)
+    fireEvent.click(toggle)
+    expect(onToggleBranch).toHaveBeenCalledOnce()
+    expect(onResume).not.toHaveBeenCalled()
+  })
+
+  it('keeps the child-chat disclosure outside the row-wide button for card rows too', () => {
+    const { container } = render(
+      <SidebarSessionRow
+        branchChildCount={1}
+        card
         hasBranchChildren
         isPinned={false}
         isSelected={false}
@@ -340,17 +393,15 @@ describe('SidebarSessionRow', () => {
         onPin={noop}
         onResume={noop}
         onToggleBranch={noop}
-        session={makeSession({ title: 'Parent chat' })}
+        session={makeSession({ title: 'Card parent' })}
       />
     )
 
-    const rowBody = screen.getByText('Parent chat').closest('button')
     const toggle = screen.getByRole('button', { name: 'Collapse child chats' })
-    const trailingActions = toggle.closest('[data-row-actions]')
+    const rowBody = screen.getByText('Card parent').closest('button')
 
     expect(rowBody?.contains(toggle)).toBe(false)
-    expect(trailingActions).toBeTruthy()
-    expect(trailingActions).not.toBe(toggle)
+    expect(container.querySelector('[data-session-row-primary-actions]')?.contains(toggle)).toBe(true)
   })
 
   // Full-title tooltip on hover (#83000-class ask): the label is a tooltip

@@ -1,4 +1,4 @@
-import { cleanup, render } from '@testing-library/react'
+import { act, cleanup, render } from '@testing-library/react'
 import type * as React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -60,6 +60,45 @@ function generateSessions(count: number): SessionInfo[] {
 const noop = () => {}
 
 describe('SidebarSessionsSection memoization & virtualizer stability', () => {
+  it('preserves child counts and collapse behavior when the flat list virtualizes', () => {
+    mockVirtualListPropsHistory.length = 0
+    const sessions = generateSessions(VIRTUALIZE_THRESHOLD + 2)
+    const parent = sessions[0]
+    const child = sessions[1]
+
+    child.parent_session_id = parent.id
+    render(
+      <SidebarSessionsSection
+        activeSessionId={null}
+        emptyState={<div>Empty</div>}
+        grouping="none"
+        label="Sessions"
+        onArchiveSession={noop}
+        onDeleteSession={noop}
+        onResumeSession={noop}
+        onToggle={noop}
+        onTogglePin={noop}
+        open={true}
+        pinned={false}
+        sessions={sessions}
+      />
+    )
+
+    const initial = mockVirtualListPropsHistory.at(-1) as VirtualSessionListProps
+    const parentRow = initial.rows.find(row => row.kind === 'session' && row.entry.session.id === parent.id)
+
+    expect(parentRow?.kind === 'session' ? parentRow.entry.branchChildCount : undefined).toBe(1)
+    expect(initial.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(true)
+
+    act(() => initial.onToggleBranch(parent.id))
+
+    const collapsed = mockVirtualListPropsHistory.at(-1) as VirtualSessionListProps
+    const collapsedParent = collapsed.rows.find(row => row.kind === 'session' && row.entry.session.id === parent.id)
+
+    expect(collapsedParent?.kind === 'session' ? collapsedParent.entry.branchCollapsed : undefined).toBe(true)
+    expect(collapsed.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(false)
+  })
+
   it('memoizes flatRows and passes the exact same rows array reference across parent re-renders', () => {
     mockVirtualListPropsHistory.length = 0
 
