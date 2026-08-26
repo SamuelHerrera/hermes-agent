@@ -592,6 +592,34 @@ def _session_cost(session: dict) -> float:
     return 0.0
 
 
+def _is_child_session(session: dict) -> bool:
+    """Whether a row is a branch/delegate child of another visible chat."""
+    return bool((session.get("parent_session_id") or "").strip() or _delegate_parent_id(session))
+
+
+def _is_running_session(session: dict) -> bool:
+    """Gateway-visible running hint for project summary counts."""
+    return bool(session.get("running") or session.get("is_active"))
+
+
+def _project_summary_counts(sessions: Optional[list[dict]], fallback_count: int) -> dict:
+    """Split active project rows into top-level chats, child chats, and running rows."""
+    if sessions is None:
+        return {
+            "chatSessionCount": fallback_count,
+            "childSessionCount": 0,
+            "runningSessionCount": 0,
+        }
+
+    child_count = sum(1 for session in sessions if _is_child_session(session))
+
+    return {
+        "chatSessionCount": max(0, len(sessions) - child_count),
+        "childSessionCount": child_count,
+        "runningSessionCount": sum(1 for session in sessions if _is_running_session(session)),
+    }
+
+
 def _project_node(
     *,
     pid: str,
@@ -615,7 +643,10 @@ def _project_node(
         "icon": icon,
         "isAuto": is_auto,
         "isNoProject": is_no_project,
+        # Back-compat total active rows. Split counts below separate ordinary
+        # chats from branch/delegate child chats for the project header UI.
         "sessionCount": session_count,
+        **_project_summary_counts(sessions, session_count),
         "lastActive": last_active,
         # Totals over the same sessions `sessionCount` counts, so a project's
         # header can add up what its rows show. The window the caller loaded is
@@ -899,11 +930,27 @@ def build_tree(
         active_sources = {project["id"]: project for project in count_tree["projects"]}
         archived_sources = {project["id"]: project for project in archived_tree["projects"]}
         active_counts = {pid: int(project.get("sessionCount") or 0) for pid, project in active_sources.items()}
+        active_chat_counts = {
+            pid: int(project.get("chatSessionCount") or 0) for pid, project in active_sources.items()
+        }
+        active_child_counts = {
+            pid: int(project.get("childSessionCount") or 0) for pid, project in active_sources.items()
+        }
+        active_running_counts = {
+            pid: int(project.get("runningSessionCount") or 0) for pid, project in active_sources.items()
+        }
         archived_counts = {
             pid: int(project.get("sessionCount") or 0) for pid, project in archived_sources.items()
         }
         for project in result:
             project["sessionCount"] = active_counts.get(project["id"], project["sessionCount"])
+            project["chatSessionCount"] = active_chat_counts.get(
+                project["id"], project.get("chatSessionCount", project["sessionCount"])
+            )
+            project["childSessionCount"] = active_child_counts.get(project["id"], project.get("childSessionCount", 0))
+            project["runningSessionCount"] = active_running_counts.get(
+                project["id"], project.get("runningSessionCount", 0)
+            )
             project["archivedSessionCount"] = archived_counts.get(project["id"], 0)
 
         # A Home/auto project can exist only in archived history, or only beyond
@@ -922,6 +969,9 @@ def build_tree(
             count_only = {
                 **source,
                 "archivedSessionCount": archived_count,
+                "chatSessionCount": active_chat_counts.get(pid, active_count),
+                "childSessionCount": active_child_counts.get(pid, 0),
+                "runningSessionCount": active_running_counts.get(pid, 0),
                 "previewSessions": [],
                 "repos": [],
                 "sessionCount": active_count,

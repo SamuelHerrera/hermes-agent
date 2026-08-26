@@ -111,6 +111,22 @@ def test_project_nodes_report_active_and_archived_session_counts_separately():
     assert project["archivedSessionCount"] == 2
 
 
+def test_project_nodes_split_top_level_child_and_running_chat_counts():
+    resolve = _resolver({"/repo": ("/repo", "/repo")})
+    projects = [_project("p1", "Repo", ["/repo"])]
+    parent = _session("/repo", branch="main", id="parent", running=True)
+    branch_child = _session("/repo", branch="main", parent_session_id="parent")
+    delegate_child = _session(None, id="child", delegate_parent_session_id="parent", running=True)
+
+    tree = pt.build_tree(projects, [parent, branch_child, delegate_child], [], resolve)
+    project = next(p for p in tree["projects"] if p["id"] == "p1")
+
+    assert project["sessionCount"] == 3
+    assert project["chatSessionCount"] == 1
+    assert project["childSessionCount"] == 2
+    assert project["runningSessionCount"] == 2
+
+
 def test_project_counts_can_cover_rows_beyond_the_hydrated_session_window():
     resolve = _resolver({"/repo": ("/repo", "/repo")})
     projects = [_project("p1", "Repo", ["/repo"])]
@@ -121,6 +137,8 @@ def test_project_counts_can_cover_rows_beyond_the_hydrated_session_window():
     project = next(p for p in tree["projects"] if p["id"] == "p1")
 
     assert project["sessionCount"] == 3
+    assert project["chatSessionCount"] == 3
+    assert project["childSessionCount"] == 0
 
 
 def test_archived_only_home_bucket_remains_visible_with_zero_open_chats():

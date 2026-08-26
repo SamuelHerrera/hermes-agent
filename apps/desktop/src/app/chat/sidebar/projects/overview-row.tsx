@@ -63,6 +63,42 @@ export function ProjectBackRow({ label, onClick }: { label: string; onClick: () 
   )
 }
 
+function ProjectSummaryCount({
+  count,
+  dataAttr,
+  icon,
+  label,
+  spinning = false
+}: {
+  count: number
+  dataAttr: 'archived' | 'chats' | 'children' | 'running'
+  icon: string
+  label: string
+  spinning?: boolean
+}) {
+  const countAttrs = {
+    ...(dataAttr === 'archived' ? { 'data-project-archived-count': true } : {}),
+    ...(dataAttr === 'chats' ? { 'data-project-chat-count': true, 'data-project-open-count': true } : {}),
+    ...(dataAttr === 'children' ? { 'data-project-child-count': true } : {}),
+    ...(dataAttr === 'running' ? { 'data-project-running-count': true } : {})
+  }
+
+  return (
+    <Tip label={label}>
+      <span
+        aria-label={label}
+        className="flex items-center gap-1 tabular-nums"
+        data-project-summary-count
+        data-project-summary-kind={dataAttr}
+        {...countAttrs}
+      >
+        <Codicon name={icon} size="0.75rem" spinning={spinning} />
+        <span>{count}</span>
+      </span>
+    </Tip>
+  )
+}
+
 interface ProjectOverviewRowProps {
   project: SidebarProjectTree
   onEnter?: (id: string) => void
@@ -112,6 +148,12 @@ export function ProjectOverviewRow({
       : latestProjectSessions(project, PROJECT_OVERVIEW_SESSION_LIMIT)
     : []
 
+  const totalActiveCount = project.sessionCount ?? 0
+  const childCount = project.childSessionCount ?? 0
+  const chatCount = project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount)
+  const runningCount = project.runningSessionCount ?? 0
+  const archivedCount = project.archivedSessionCount ?? 0
+
   // A collapsed project means hidden content, even for active work. The global
   // sidebar/session status surfaces still show running state elsewhere; this
   // disclosure only controls whether preview rows are shown under the project.
@@ -158,28 +200,35 @@ export function ProjectOverviewRow({
       lead={lead}
       secondaryMeta={
         <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
-          <Tip label={`${project.sessionCount} open chat${project.sessionCount === 1 ? '' : 's'}`}>
-            <span
-              aria-label={`${project.sessionCount} open chat${project.sessionCount === 1 ? '' : 's'}`}
-              className="flex items-center gap-1 tabular-nums"
-              data-project-open-count
-            >
-              <Codicon name="comment-discussion" size="0.75rem" />
-              <span>{project.sessionCount}</span>
-            </span>
-          </Tip>
-          <Tip
-            label={`${project.archivedSessionCount ?? 0} archived chat${project.archivedSessionCount === 1 ? '' : 's'}`}
-          >
-            <span
-              aria-label={`${project.archivedSessionCount ?? 0} archived chat${project.archivedSessionCount === 1 ? '' : 's'}`}
-              className="flex items-center gap-1 tabular-nums"
-              data-project-archived-count
-            >
-              <Codicon name="archive" size="0.75rem" />
-              <span>{project.archivedSessionCount ?? 0}</span>
-            </span>
-          </Tip>
+          {runningCount > 0 && (
+            <ProjectSummaryCount
+              count={runningCount}
+              dataAttr="running"
+              icon="sync"
+              label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
+              spinning
+            />
+          )}
+          <ProjectSummaryCount
+            count={chatCount}
+            dataAttr="chats"
+            icon="comment-discussion"
+            label={`${chatCount} chat${chatCount === 1 ? '' : 's'}`}
+          />
+          {childCount > 0 && (
+            <ProjectSummaryCount
+              count={childCount}
+              dataAttr="children"
+              icon="robot"
+              label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
+            />
+          )}
+          <ProjectSummaryCount
+            count={archivedCount}
+            dataAttr="archived"
+            icon="archive"
+            label={`${archivedCount} archived chat${archivedCount === 1 ? '' : 's'}`}
+          />
         </span>
       }
       // The label is grab surface too, not just the lead's grabber — same

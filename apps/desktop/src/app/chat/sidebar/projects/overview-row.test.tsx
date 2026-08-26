@@ -137,19 +137,36 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
   })
 
-  it('shows open and archived chat icon counts on the project metadata row', () => {
+  it('shows chat, child/subagent, running, and archived counts on the project metadata row', () => {
     const { container } = render(
-      <ProjectOverviewRow project={{ ...project, archivedSessionCount: 4, sessionCount: 7 }} />
+      <ProjectOverviewRow
+        project={{
+          ...project,
+          archivedSessionCount: 4,
+          chatSessionCount: 7,
+          childSessionCount: 6,
+          runningSessionCount: 2,
+          sessionCount: 13
+        }}
+      />
     )
 
     const secondary = container.querySelector('[data-sidebar-group-secondary]')
-    const openCount = container.querySelector('[data-project-open-count]')
+    const runningCount = container.querySelector('[data-project-running-count]')
+    const chatCount = container.querySelector('[data-project-chat-count]')
+    const childCount = container.querySelector('[data-project-child-count]')
     const archivedCount = container.querySelector('[data-project-archived-count]')
 
-    expect(secondary?.contains(openCount)).toBe(true)
+    expect(secondary?.contains(runningCount)).toBe(true)
+    expect(secondary?.contains(chatCount)).toBe(true)
+    expect(secondary?.contains(childCount)).toBe(true)
     expect(secondary?.contains(archivedCount)).toBe(true)
-    expect(openCount?.textContent).toContain('7')
-    expect(openCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
+    expect(runningCount?.textContent).toContain('2')
+    expect(runningCount?.querySelector('.codicon-sync')).toBeTruthy()
+    expect(chatCount?.textContent).toContain('7')
+    expect(chatCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
+    expect(childCount?.textContent).toContain('6')
+    expect(childCount?.querySelector('.codicon-robot')).toBeTruthy()
     expect(archivedCount?.textContent).toContain('4')
     expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
   })

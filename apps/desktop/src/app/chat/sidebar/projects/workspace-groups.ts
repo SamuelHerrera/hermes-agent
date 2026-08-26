@@ -57,7 +57,14 @@ export interface SidebarProjectTree {
   // exists only to carry the rows.
   isNoProject?: boolean
   repos: SidebarWorkspaceTree[]
+  /** Total active rows, including branch/delegate child chats (legacy field). */
   sessionCount: number
+  /** Active top-level chats, excluding branch/delegate child chats. */
+  chatSessionCount?: number
+  /** Active branch/delegate child chats. */
+  childSessionCount?: number
+  /** Active rows currently running, including child chats. */
+  runningSessionCount?: number
   archivedSessionCount?: number
   // Tokens and spend over the same sessions `sessionCount` counts, summed by
   // the backend — the tree only carries a preview of the rows themselves.
@@ -134,6 +141,23 @@ export const branchLaneId = (repoRoot: string, branch?: string): string =>
 
 /** A session's recency stamp (last activity, falling back to creation). */
 export const sessionRecency = (session: SessionInfo): number => session.last_active || session.started_at || 0
+
+const isChildSession = (session: SessionInfo): boolean =>
+  Boolean(session.parent_session_id || session.delegate_parent_session_id)
+
+const projectCountFields = (sessions: SessionInfo[]) => {
+  const childSessionCount = sessions.filter(isChildSession).length
+
+  return {
+    chatSessionCount: Math.max(0, sessions.length - childSessionCount),
+    childSessionCount,
+    runningSessionCount: sessions.filter(session => session.running || session.is_active).length,
+    sessionCount: sessions.length
+  }
+}
+
+const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
+  project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))
 
 /** Default-branch names that pin to the top and read as the repo's trunk. */
 const TRUNK_BRANCHES = new Set(['main', 'master', 'trunk', 'develop'])
@@ -637,8 +661,8 @@ function overlayHomeLane(
 
   return {
     ...project,
-    repos: [{ id: NO_PROJECT_ID, label: project.label, path: null, groups: [nextLane], sessionCount: sessions.length }],
-    sessionCount: sessions.length
+    ...projectCountFields(sessions),
+    repos: [{ id: NO_PROJECT_ID, label: project.label, path: null, groups: [nextLane], sessionCount: sessions.length }]
   }
 }
 
@@ -695,9 +719,9 @@ export function excludeProjectSessions(
 
   return {
     ...project,
+    ...projectCountFields(repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))),
     previewSessions,
-    repos,
-    sessionCount: repos.reduce((n, repo) => n + repo.sessionCount, 0)
+    repos
   }
 }
 
@@ -725,7 +749,7 @@ export function overlayLiveLanes(
     return project
   }
 
-  return { ...project, repos, sessionCount: repos.reduce((n, repo) => n + repo.sessionCount, 0) }
+  return { ...project, ...projectCountFields(projectSessions({ ...project, repos })), repos }
 }
 
 interface PreviewOverlayOptions {
