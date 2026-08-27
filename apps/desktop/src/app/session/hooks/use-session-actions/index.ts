@@ -78,6 +78,7 @@ import {
   type TileDock
 } from '@/store/session-states'
 import { broadcastSessionsChanged } from '@/store/session-sync'
+import { setSessionDraftingTool } from '@/store/tool-drafting'
 import { isWatchWindow } from '@/store/windows'
 import type { SessionCreateResponse, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
 
@@ -236,6 +237,11 @@ function hydratePendingPromptFromResume(
   // Other blocking prompt kinds still make the session input-bound even when
   // clarify-specific hydration has nothing to rebuild.
   return true
+}
+
+function hydrateDraftingToolFromResume(resumed: SessionResumeResponse): void {
+  const name = resumed.running ? (resumed.inflight?.drafting_tool?.trim() ?? '') : ''
+  setSessionDraftingTool(resumed.session_id, name)
 }
 
 // `session.create` params from the current profile + sticky-UI model/effort/fast,
@@ -886,6 +892,7 @@ export function useSessionActions({
               dropSessionState(cachedRuntimeId)
             } else {
               const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, clarifyBaseline)
+              hydrateDraftingToolFromResume(activated)
               const runtimeInfo = applyRuntimeInfo(activated.info)
 
               // `omit_messages` means the response carries NO transcript, not
@@ -1070,6 +1077,7 @@ export function useSessionActions({
         }
 
         const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, clarifyBaseline)
+        hydrateDraftingToolFromResume(resumed)
 
         if (prefetchedResult) {
           const previousMessages = resumedSameSelectedSession

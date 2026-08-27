@@ -100,6 +100,47 @@ def test_pending_prompt_snapshot_replays_blocking_clarify_payload(monkeypatch):
             server._pending_prompt_payloads.pop("req1", None)
 
 
+def test_live_session_payload_replays_inflight_tool_chrome(monkeypatch):
+    emitted = []
+    monkeypatch.setattr(server, "_emit", lambda event, sid, payload=None: emitted.append((event, sid, payload)))
+    monkeypatch.setattr(server, "_fallback_session_info", lambda _session: {})
+
+    session = {
+        "created_at": 1,
+        "history": [],
+        "history_lock": threading.Lock(),
+        "running": True,
+        "session_key": "stored-running",
+        "tool_progress_mode": "all",
+        "tool_started_at": {},
+    }
+    server._sessions["sid-running"] = session
+    try:
+        with session["history_lock"]:
+            server._start_inflight_turn(session, "ship it")
+        server._on_tool_generating("sid-running", "terminal")
+        server._on_reasoning_delta("sid-running", "Need tests.")
+        server._on_tool_start("sid-running", "term-1", "terminal", {"command": "npm test"})
+        server._on_tool_complete(
+            "sid-running",
+            "todo-1",
+            "todo",
+            {},
+            json.dumps({"todos": [{"id": "a", "content": "Run tests", "status": "completed"}]}),
+        )
+
+        inflight = server._live_session_payload("sid-running", session, omit_messages=True)["inflight"]
+        assert inflight["reasoning"] == "Need tests."
+        assert inflight.get("drafting_tool") is None
+        assert [event["type"] for event in inflight["events"]] == ["tool.start", "tool.complete"]
+        assert inflight["events"][0]["payload"]["tool_id"] == "term-1"
+        assert inflight["events"][1]["payload"]["todos"] == [
+            {"id": "a", "content": "Run tests", "status": "completed"}
+        ]
+    finally:
+        server._sessions.pop("sid-running", None)
+
+
 def test_session_slot_is_claimed_on_first_turn_not_on_create(monkeypatch, tmp_path):
     home = tmp_path / ".hermes"
     home.mkdir()

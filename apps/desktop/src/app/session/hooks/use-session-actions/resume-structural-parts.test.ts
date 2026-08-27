@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChatMessage } from '@/lib/chat-messages'
 
-import { reconcileResumeMessages } from './utils'
+import { appendLiveSessionProjection, reconcileResumeMessages } from './utils'
 
 const user = (id: string, text: string): ChatMessage => ({
   id,
@@ -138,5 +138,46 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
     expect(assistant.parts.some(part => part.type === 'reasoning')).toBe(false)
     expect(assistant.parts.some(part => part.type === 'tool-call')).toBe(false)
     expect(assistant.parts).toEqual([{ type: 'text', text: 'brand new partial' }])
+  })
+
+  it('rebuilds replayed inflight tool/task bars from backend resume events after restart', () => {
+    const [prompt, assistant] = appendLiveSessionProjection([user('u1', 'ship it')], {
+      session_id: 'runtime-1',
+      inflight: {
+        assistant: 'Working on it',
+        reasoning: 'Need to inspect the repo.',
+        streaming: true,
+        user: 'ship it',
+        events: [
+          {
+            type: 'tool.start',
+            payload: {
+              tool_id: 'term-1',
+              name: 'terminal',
+              context: 'root=/repo + npm test',
+              args: { command: 'npm test' }
+            }
+          },
+          {
+            type: 'tool.complete',
+            payload: {
+              tool_id: 'todo-1',
+              name: 'todo',
+              args: {},
+              result: { todos: [{ id: 'a', content: 'Run tests', status: 'completed' }] },
+              todos: [{ id: 'a', content: 'Run tests', status: 'completed' }]
+            }
+          }
+        ]
+      }
+    })
+
+    expect(prompt.parts).toEqual([{ type: 'text', text: 'ship it' }])
+    expect(assistant.role).toBe('assistant')
+    expect(assistant.pending).toBe(true)
+    expect(assistant.parts.some(part => part.type === 'reasoning')).toBe(true)
+    const toolParts = assistant.parts.filter(part => part.type === 'tool-call')
+    expect(toolParts.map(part => ('toolName' in part ? part.toolName : ''))).toEqual(['terminal', 'todo'])
+    expect(toolParts[1]).toMatchObject({ result: { todos: [{ id: 'a', content: 'Run tests', status: 'completed' }] } })
   })
 })

@@ -5589,6 +5589,8 @@ def _on_tool_start(sid: str, tool_call_id: str, name: str, args: dict):
                 payload["args_text"] = args_text
         # tool.complete is the source of truth for todos (full list from the
         # tool result). args.todos here may be a partial merge update.
+        _set_inflight_drafting_tool(sid, "")
+        _record_inflight_event(sid, "tool.start", payload)
         _emit("tool.start", sid, payload)
 
 
@@ -5636,6 +5638,7 @@ def _on_tool_complete(sid: str, tool_call_id: str, name: str, args: dict, result
     except Exception:
         pass
     if _tool_progress_enabled(sid) or payload.get("inline_diff") or _tool_lifecycle_required_for_ui(name):
+        _record_inflight_event(sid, "tool.complete", payload)
         _emit("tool.complete", sid, payload)
 
 
@@ -5671,6 +5674,7 @@ def _on_tool_progress(
         payload: dict[str, object] = {"text": str(preview)}
         if _session_verbose(sid):
             payload["verbose"] = True
+        _append_inflight_reasoning(sid, str(preview))
         _emit("reasoning.available", sid, payload)
         return
     if event_type == "moa.reference" and name:
@@ -5881,6 +5885,24 @@ def _mirror_subagent_to_child(event_type: str, payload: dict) -> None:
             _child_mirrors.pop(child_key, None)
 
 
+def _on_tool_generating(sid: str, name: str):
+    if not _tool_progress_enabled(sid):
+        return False
+    _set_inflight_drafting_tool(sid, name)
+    _emit("tool.generating", sid, {"name": name})
+    return True
+
+
+def _on_reasoning_delta(sid: str, text: str, *, verbose: bool = False) -> None:
+    _append_inflight_reasoning(sid, text)
+    _emit("reasoning.delta", sid, {"text": text, **({"verbose": True} if verbose else {})})
+
+
+def _on_thinking_delta(sid: str, text: str) -> None:
+    _append_inflight_reasoning(sid, text)
+    _emit("thinking.delta", sid, {"text": text})
+
+
 def _agent_cbs(sid: str) -> dict:
     callbacks = {
         "tool_start_callback": lambda tc_id, name, args: _on_tool_start(
@@ -5892,16 +5914,15 @@ def _agent_cbs(sid: str) -> dict:
         "tool_progress_callback": lambda event_type, name=None, preview=None, args=None, **kwargs: _on_tool_progress(
             sid, event_type, name, preview, args, **kwargs
         ),
-        "tool_gen_callback": lambda name: _tool_progress_enabled(sid)
-        and _emit("tool.generating", sid, {"name": name}),
-        "thinking_callback": lambda text: _emit("thinking.delta", sid, {"text": text}),
+        "tool_gen_callback": lambda name: _on_tool_generating(sid, name),
+        "thinking_callback": lambda text: _on_thinking_delta(sid, text),
         # Affection reaction (ily / <3 / good bot) → hearts. Core-detected, so
         # the TUI heart and desktop floating hearts share one signal.
         "reaction_callback": lambda kind: _emit("reaction", sid, {"kind": kind}),
-        "reasoning_callback": lambda text: _emit(
-            "reasoning.delta",
+        "reasoning_callback": lambda text: _on_reasoning_delta(
             sid,
-            {"text": text, **({"verbose": True} if _session_verbose(sid) else {})},
+            text,
+            verbose=_session_verbose(sid),
         ),
         "status_callback": lambda kind, text=None: _status_update(
             sid, str(kind), None if text is None else str(text)
@@ -7395,6 +7416,8 @@ def _start_inflight_turn(session: dict, text: Any) -> None:
     now = time.time()
     session["inflight_turn"] = {
         "assistant": "",
+        "events": [],
+        "reasoning": "",
         "started_at": now,
         "streaming": True,
         "updated_at": now,
@@ -7413,6 +7436,88 @@ def _append_inflight_delta(session: dict, delta: Any) -> None:
     turn["streaming"] = True
     turn["updated_at"] = time.time()
     session["inflight_turn"] = turn
+
+
+_INFLIGHT_EVENT_REPLAY_LIMIT = 96
+_INFLIGHT_EVENT_STRING_LIMIT = 24000
+_INFLIGHT_EVENT_ARRAY_LIMIT = 200
+
+
+def _trim_inflight_replay_value(value: Any, depth: int = 0) -> Any:
+    """Bound replay payloads so resume rebuilds UI chrome without ballooning."""
+    if isinstance(value, str):
+        if len(value) <= _INFLIGHT_EVENT_STRING_LIMIT:
+            return value
+        return f"{value[:_INFLIGHT_EVENT_STRING_LIMIT]}…"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if depth >= 4:
+        return str(value)[:_INFLIGHT_EVENT_STRING_LIMIT]
+    if isinstance(value, list):
+        return [_trim_inflight_replay_value(item, depth + 1) for item in value[:_INFLIGHT_EVENT_ARRAY_LIMIT]]
+    if isinstance(value, tuple):
+        return [_trim_inflight_replay_value(item, depth + 1) for item in value[:_INFLIGHT_EVENT_ARRAY_LIMIT]]
+    if isinstance(value, dict):
+        return {
+            str(key): _trim_inflight_replay_value(item, depth + 1)
+            for key, item in list(value.items())[:_INFLIGHT_EVENT_ARRAY_LIMIT]
+        }
+    return str(value)[:_INFLIGHT_EVENT_STRING_LIMIT]
+
+
+def _record_inflight_event(sid: str, event: str, payload: dict | None = None) -> None:
+    session = _sessions.get(sid)
+    if session is None:
+        return
+    with session["history_lock"]:
+        if not session.get("running"):
+            return
+        turn = session.get("inflight_turn")
+        if not isinstance(turn, dict):
+            return
+        events = list(turn.get("events") or [])
+        events.append({"type": str(event), "payload": _trim_inflight_replay_value(dict(payload or {}))})
+        turn["events"] = events[-_INFLIGHT_EVENT_REPLAY_LIMIT:]
+        turn["updated_at"] = time.time()
+        session["inflight_turn"] = turn
+
+
+def _append_inflight_reasoning(sid: str, text: Any) -> None:
+    value = "" if text is None else str(text)
+    if not value:
+        return
+    session = _sessions.get(sid)
+    if session is None:
+        return
+    with session["history_lock"]:
+        if not session.get("running"):
+            return
+        turn = session.get("inflight_turn")
+        if not isinstance(turn, dict):
+            return
+        current = str(turn.get("reasoning") or "")
+        turn["reasoning"] = _trim_inflight_replay_value(f"{current}{value}")
+        turn["updated_at"] = time.time()
+        session["inflight_turn"] = turn
+
+
+def _set_inflight_drafting_tool(sid: str, name: Any) -> None:
+    session = _sessions.get(sid)
+    if session is None:
+        return
+    with session["history_lock"]:
+        if not session.get("running"):
+            return
+        turn = session.get("inflight_turn")
+        if not isinstance(turn, dict):
+            return
+        label = str(name or "").strip()
+        if label:
+            turn["drafting_tool"] = label
+        else:
+            turn.pop("drafting_tool", None)
+        turn["updated_at"] = time.time()
+        session["inflight_turn"] = turn
 
 
 def _record_inflight_correction(session: dict, text: Any) -> None:
@@ -7892,6 +7997,15 @@ def _inflight_snapshot(session: dict) -> dict | None:
         snapshot["error"] = error
         snapshot["status"] = str(turn.get("status") or "error")
         snapshot["recoverable"] = bool(turn.get("recoverable"))
+    reasoning = str(turn.get("reasoning") or "")
+    if reasoning:
+        snapshot["reasoning"] = reasoning
+    events = turn.get("events")
+    if isinstance(events, list) and events:
+        snapshot["events"] = list(events[-_INFLIGHT_EVENT_REPLAY_LIMIT:])
+    drafting = str(turn.get("drafting_tool") or "").strip()
+    if drafting:
+        snapshot["drafting_tool"] = drafting
     return snapshot
 
 

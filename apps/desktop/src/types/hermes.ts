@@ -614,12 +614,17 @@ export interface SessionResumeResponse {
   }
   inflight?: null | {
     assistant?: string
+    drafting_tool?: string
+    /** Replayable one-shot UI events emitted while this turn was detached.
+     *  Used to rebuild running tool/task bars after a Desktop restart. */
+    events?: Array<{ payload?: Record<string, unknown>; type?: string }>
     /** Mid-turn redirect corrections, oldest first. The turn's original prompt
      *  stays in `user`; these are the follow-ups typed while it ran. */
     corrections?: string[]
     /** Retained failed turn: the error the terminal frame carried (the frame
      *  itself may have been lost to a disconnect). */
     error?: string
+    reasoning?: string
     recoverable?: boolean
     status?: string
     streaming?: boolean

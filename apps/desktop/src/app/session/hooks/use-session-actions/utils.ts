@@ -1,6 +1,6 @@
 import { textWithoutReferenceLines } from '@/components/assistant-ui/reference-kinds'
 import { getSession } from '@/hermes'
-import { assistantTextPart, type ChatMessage, chatMessageText, textPart, upsertToolPart } from '@/lib/chat-messages'
+import { assistantTextPart, type ChatMessage, chatMessageText, reasoningPart, textPart, upsertToolPart } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
@@ -695,6 +695,32 @@ function messageHasMatchingPendingTool(message: ChatMessage, payload: Parameters
   })
 }
 
+function replayInflightEvents(parts: ChatMessage['parts'], projection: Pick<SessionResumeResponse, 'inflight'>): ChatMessage['parts'] {
+  let next = [...parts]
+  const reasoning = projection.inflight?.reasoning ?? ''
+
+  if (reasoning.trim() && !next.some(part => part.type === 'reasoning')) {
+    next = [reasoningPart(reasoning), ...next]
+  }
+
+  for (const event of projection.inflight?.events ?? []) {
+    const payload = event?.payload
+    const type = event?.type
+
+    if (!payload || typeof payload !== 'object') {
+      continue
+    }
+
+    if (type === 'tool.complete') {
+      next = upsertToolPart(next, payload, 'complete')
+    } else if (type === 'tool.start' || type === 'tool.progress') {
+      next = upsertToolPart(next, payload, 'running')
+    }
+  }
+
+  return next
+}
+
 /**
  * Append the backend-only tail of a live turn to a stored transcript.
  *
@@ -732,7 +758,9 @@ export function appendLiveSessionProjection(
     !inflightError &&
     !queuedUser &&
     !inflightCorrections.length &&
-    !pendingToolPayload
+    !pendingToolPayload &&
+    !projection.inflight?.reasoning?.trim() &&
+    !(projection.inflight?.events?.length ?? 0)
   ) {
     return messages
   }
@@ -823,14 +851,21 @@ export function appendLiveSessionProjection(
     isLiveTailRow(liveAssistantOfCurrentTurn)
   )
 
-  if (inflightAssistant || inflightStreaming || inflightError || (inflightUser && queuedUser)) {
+  if (
+    inflightAssistant ||
+    inflightStreaming ||
+    inflightError ||
+    (inflightUser && queuedUser) ||
+    projection.inflight?.reasoning?.trim() ||
+    projection.inflight?.events?.length
+  ) {
     if (turnAlreadyStructured && !inflightError) {
       // Structure is authoritative; skip the text-only dump row.
     } else {
       projected.push({
         id: liveStreamId,
         role: 'assistant',
-        parts: inflightAssistant ? [assistantTextPart(inflightAssistant)] : [],
+        parts: replayInflightEvents(inflightAssistant ? [assistantTextPart(inflightAssistant)] : [], projection),
         pending: inflightStreaming,
         ...(inflightError ? { error: inflightError } : {})
       })
