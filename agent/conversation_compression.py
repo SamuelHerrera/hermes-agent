@@ -2187,8 +2187,10 @@ def compress_context(
             this topic.  Inspired by Claude Code's ``/compact <focus>``.
         force: If True, bypass any active summary-failure cooldown.  Set
             by the manual ``/compress`` slash command so users can retry
-            immediately after an auto-compress abort.  Auto-compress
-            callers use the default ``False``.
+            immediately after an auto-compress abort, and by provider-confirmed
+            input-overflow recovery because retrying the rejected request
+            without compression is guaranteed to fail.  Threshold-maintenance
+            auto-compress callers use the default ``False``.
         defer_context_engine_notification: Delay the existing context-engine
             hook until a manual host commits its outer history transaction.
         commit_fence: Optional cooperative fence for executor callers that

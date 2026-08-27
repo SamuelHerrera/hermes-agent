@@ -7602,7 +7602,9 @@ class AIAgent:
 
         ``force=True`` is passed by the manual ``/compress`` slash command
         so users can bypass the summary-failure cooldown after an
-        auto-compress abort.  Auto-compress callers use the default
+        auto-compress abort.  It is also used after a provider-confirmed
+        input-overflow error, where retrying without compression cannot work.
+        Threshold-maintenance auto-compress callers use the default
         ``force=False``.
         """
         from agent.conversation_compression import (

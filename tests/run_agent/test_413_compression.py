@@ -383,6 +383,49 @@ class TestHTTP413Compression:
         )
 
 
+    def test_provider_context_overflow_bypasses_compression_cooldown(self, agent):
+        """Provider-proven overflow must force compression despite cooldown.
+
+        A prior auto-compress timeout records a same-session cooldown.  That
+        cooldown is only a soft anti-thrash guard; once the provider has
+        rejected the request as over-context, retrying without compression is
+        guaranteed to fail.  The overflow recovery path must therefore use the
+        same cooldown bypass as manual /compress.
+        """
+        import time
+
+        err_400 = Exception(
+            "Error code: 400 - {'error': {'message': "
+            "\"Your input exceeds the context window of this model. "
+            "Please adjust your input and try again.\"}}"
+        )
+        setattr(err_400, "status_code", 400)
+        ok_resp = _mock_response(content="Recovered after forced compression", finish_reason="stop")
+        agent.client.chat.completions.create.side_effect = [err_400, ok_resp]
+        agent.context_compressor._summary_failure_cooldown_until = time.monotonic() + 900
+        prefill = [
+            {"role": "user", "content": "previous question"},
+            {"role": "assistant", "content": "previous answer"},
+        ]
+
+        with (
+            patch.object(agent, "_compress_context") as mock_compress,
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            mock_compress.return_value = (
+                [{"role": "user", "content": "compressed summary"}],
+                "compressed prompt",
+            )
+            result = agent.run_conversation("continue", conversation_history=prefill)
+
+        assert result["completed"] is True
+        assert result["final_response"] == "Recovered after forced compression"
+        mock_compress.assert_called_once()
+        assert mock_compress.call_args.kwargs.get("force") is True
+
+
     def test_context_length_retry_rebuilds_request_after_compression(self, agent):
         """Retry must send the compressed transcript, not the stale oversized payload."""
         err_400 = Exception(

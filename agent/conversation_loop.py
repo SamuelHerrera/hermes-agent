@@ -5467,6 +5467,13 @@ def run_conversation(
                         messages, system_message,
                         approx_tokens=estimate_request_tokens_rough(api_messages, tools=agent.tools or None),
                         task_id=effective_task_id,
+                        # Provider-confirmed input overflow is a hard failure,
+                        # not soft threshold maintenance. Bypass same-session
+                        # summary-timeout cooldowns here; otherwise a failed
+                        # auto-compress can leave the transcript unchanged and
+                        # this recovery path immediately reports "Cannot compress
+                        # further" without attempting the only viable fix.
+                        force=True,
                     )
                     if messages is _overflow_input and compression_skipped_due_to_lock(agent):
                         # #69870 lock-skip: the provider proved the request
