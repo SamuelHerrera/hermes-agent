@@ -205,24 +205,13 @@ describe('useDesktopIntegrations', () => {
       expect(navigate).toHaveBeenCalledWith('/remembered-session', { replace: true })
     })
 
-    it('waits for sessions before validating a remembered session route', () => {
+    it('restores a remembered session route before the session list loads', () => {
       window.localStorage.setItem('hermes.desktop.lastRoute.profile.default', '/remembered-session')
 
-      const result = render({ profileReady: true, sessions: [] })
-
-      expect(navigate).not.toHaveBeenCalled()
-      expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/remembered-session')
-
-      result.rerender({
-        activeProfile: 'default',
-        locationPathname: '/',
-        profileReady: true,
-        resumeExhaustedSessionId: null,
-        routedSessionId: null,
-        sessions: [session({ id: 'remembered-session', profile: 'default' })]
-      })
+      render({ profileReady: true, sessions: [] })
 
       expect(navigate).toHaveBeenCalledWith('/remembered-session', { replace: true })
+      expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/remembered-session')
     })
   })
 

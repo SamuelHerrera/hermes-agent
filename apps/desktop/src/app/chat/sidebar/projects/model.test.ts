@@ -47,12 +47,12 @@ describe('orderProjectsByIds', () => {
     expect(ids(orderProjectsByIds(projects, ['mine']))).toEqual(['mine', 'scanned-1', 'scanned-2'])
   })
 
-  it('still surfaces a new project that has real activity', () => {
-    // A project you just started working in should not sink beneath the saved
-    // order — only the zero-session discoveries do.
+  it('keeps hand-ordered positions ahead of newly active projects', () => {
+    // A project you just started working in stays visible, but should not move
+    // the rows the user deliberately positioned.
     const projects = [makeProject('ordered', 1), makeProject('just-started', 3)]
 
-    expect(ids(orderProjectsByIds(projects, ['ordered']))).toEqual(['just-started', 'ordered'])
+    expect(ids(orderProjectsByIds(projects, ['ordered']))).toEqual(['ordered', 'just-started'])
   })
 
   it('drops ids that are no longer present', () => {

@@ -89,4 +89,23 @@ describe('flattenSessionsWithBranches', () => {
       { branchChildCount: 1, branchCollapsed: true, hasBranchChildren: true, session: parent }
     ])
   })
+
+  it('defaults branches collapsed and reopens them from persisted branch state', () => {
+    const parent = session('parent', { last_active: 20 })
+    const branch = session('branch', { last_active: 10, parent_session_id: 'parent' })
+
+    expect(flattenSessionsWithBranches([parent, branch], { defaultBranchCollapsed: true })).toEqual([
+      { branchChildCount: 1, branchCollapsed: true, hasBranchChildren: true, session: parent }
+    ])
+
+    expect(
+      flattenSessionsWithBranches([parent, branch], {
+        branchOpenById: { parent: true },
+        defaultBranchCollapsed: true
+      })
+    ).toEqual([
+      { branchChildCount: 1, hasBranchChildren: true, session: parent },
+      { branchStem: '└─ ', session: branch }
+    ])
+  })
 })

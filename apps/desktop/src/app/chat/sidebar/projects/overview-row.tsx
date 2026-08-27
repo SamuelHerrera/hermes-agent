@@ -203,7 +203,6 @@ export function ProjectDetailHeaderRow({
           lead={<SidebarRowLead className="size-4">{projectIcon(appearanceProject)}</SidebarRowLead>}
           ref={rowRef}
           secondaryMeta={<ProjectSummaryMeta project={project} />}
-          totals={{ costUsd: project.totalCostUsd ?? 0, tokens: project.totalTokens ?? 0 }}
         />
       </ProjectContextMenu>
     </div>
@@ -308,7 +307,6 @@ export function ProjectOverviewRow({
           ? { ariaLabel: s.projects.toggle(project.label, !open), onToggle: toggleOpen, open }
           : undefined
       }
-      totals={{ costUsd: project.totalCostUsd ?? 0, tokens: project.totalTokens ?? 0 }}
     />
   )
 

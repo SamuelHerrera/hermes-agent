@@ -3,11 +3,15 @@ import type * as React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { SessionInfo } from '@/hermes'
+import { $sidebarSessionBranchOpen } from '@/store/layout'
 
 import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section'
 import type { VirtualSessionListProps } from './virtual-session-list'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  act(() => $sidebarSessionBranchOpen.set({}))
+})
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
@@ -60,7 +64,7 @@ function generateSessions(count: number): SessionInfo[] {
 const noop = () => {}
 
 describe('SidebarSessionsSection memoization & virtualizer stability', () => {
-  it('preserves child counts and collapse behavior when the flat list virtualizes', () => {
+  it('defaults child rows collapsed and preserves persisted expansion when the flat list virtualizes', () => {
     mockVirtualListPropsHistory.length = 0
     const sessions = generateSessions(VIRTUALIZE_THRESHOLD + 2)
     const parent = sessions[0]
@@ -88,15 +92,16 @@ describe('SidebarSessionsSection memoization & virtualizer stability', () => {
     const parentRow = initial.rows.find(row => row.kind === 'session' && row.entry.session.id === parent.id)
 
     expect(parentRow?.kind === 'session' ? parentRow.entry.branchChildCount : undefined).toBe(1)
-    expect(initial.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(true)
+    expect(parentRow?.kind === 'session' ? parentRow.entry.branchCollapsed : undefined).toBe(true)
+    expect(initial.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(false)
 
     act(() => initial.onToggleBranch(parent.id))
 
-    const collapsed = mockVirtualListPropsHistory.at(-1) as VirtualSessionListProps
-    const collapsedParent = collapsed.rows.find(row => row.kind === 'session' && row.entry.session.id === parent.id)
+    const expanded = mockVirtualListPropsHistory.at(-1) as VirtualSessionListProps
+    const expandedParent = expanded.rows.find(row => row.kind === 'session' && row.entry.session.id === parent.id)
 
-    expect(collapsedParent?.kind === 'session' ? collapsedParent.entry.branchCollapsed : undefined).toBe(true)
-    expect(collapsed.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(false)
+    expect(expandedParent?.kind === 'session' ? expandedParent.entry.branchCollapsed : undefined).toBeUndefined()
+    expect(expanded.rows.some(row => row.kind === 'session' && row.entry.session.id === child.id)).toBe(true)
   })
 
   it('memoizes flatRows and passes the exact same rows array reference across parent re-renders', () => {

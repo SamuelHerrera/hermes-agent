@@ -96,9 +96,9 @@ export function sortProjectsForOverview(
 // anything, every freshly-scanned checkout jumped above the projects they
 // actually work in.
 //
-// Fresh projects keep their place in the deterministic sort instead: ones with
-// real activity go on top (a project you just started still surfaces), and
-// zero-session discoveries sink below the hand-ordered list.
+// Fresh projects keep their deterministic relative order AFTER the hand-ordered
+// list, so a restart or background scan does not move the user's saved project
+// positions.
 export function orderProjectsByIds(projects: SidebarProjectTree[], orderIds: string[]): SidebarProjectTree[] {
   if (!orderIds.length) {
     return projects
@@ -113,11 +113,7 @@ export function orderProjectsByIds(projects: SidebarProjectTree[], orderIds: str
     return homeFirst(ordered)
   }
 
-  return homeFirst([
-    ...fresh.filter(project => project.sessionCount > 0),
-    ...ordered,
-    ...fresh.filter(project => project.sessionCount <= 0)
-  ])
+  return homeFirst([...ordered, ...fresh])
 }
 
 // Project drill-in lanes are git-driven: source them from `git worktree list` so

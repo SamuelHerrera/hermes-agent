@@ -95,7 +95,7 @@ describe('ProjectOverviewRow', () => {
     expect(tipTrigger(button)).toBeTruthy()
   })
 
-  it('puts the disclosure on the primary row and project tokens plus other actions on the second row', () => {
+  it('puts the disclosure on the primary row and keeps project actions on the second row without token totals', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 
     const { container } = render(
@@ -111,12 +111,10 @@ describe('ProjectOverviewRow', () => {
     const secondary = container.querySelector('[data-sidebar-group-secondary]')
     const toggle = screen.getByRole('button', { name: 'Show Test D sessions' })
     const add = screen.getByRole('button', { name: 'New session in Test D' })
-    const tokens = screen.getByText('1.3k')
 
     expect(primary?.contains(toggle)).toBe(true)
-    expect(primary?.contains(tokens)).toBe(false)
-    expect(secondary?.contains(tokens)).toBe(true)
     expect(secondary?.contains(add)).toBe(true)
+    expect(screen.queryByText('1.3k')).toBeNull()
   })
 
   it('uses full-row hover chrome and nav-sized lead icons in the flattened project list', () => {
@@ -142,7 +140,7 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
   })
 
-  it('shows compact icon/count metrics for chats, child/subagent, running, archived, and token total', () => {
+  it('shows compact icon/count metrics for chats, child/subagent, running, and archived without token total', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 
     const { container } = render(
@@ -177,7 +175,7 @@ describe('ProjectOverviewRow', () => {
     expect(childCount?.querySelector('.codicon-robot')).toBeTruthy()
     expect(archivedCount?.textContent).toBe('4')
     expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
-    expect(secondary?.textContent).toContain('1.3k')
+    expect(secondary?.textContent).not.toContain('1.3k')
     expect(secondary?.textContent).not.toContain('Run')
     expect(secondary?.textContent).not.toContain('Chats')
     expect(secondary?.textContent).not.toContain('Sub')

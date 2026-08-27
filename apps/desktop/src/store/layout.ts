@@ -47,6 +47,7 @@ const SIDEBAR_PR_FILTER_STORAGE_KEY = 'hermes.desktop.sidebarPrFilter'
 const SIDEBAR_WORKSPACE_ORDER_STORAGE_KEY = 'hermes.desktop.workspaceOrder'
 const SIDEBAR_WORKSPACE_PARENT_ORDER_STORAGE_KEY = 'hermes.desktop.workspaceParentOrder'
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = 'hermes.desktop.projectOrder'
+const SIDEBAR_SESSION_BRANCH_OPEN_STORAGE_KEY = 'hermes.desktop.sessionBranchOpen'
 const SIDEBAR_WORKSPACE_COLLAPSED_STORAGE_KEY = 'hermes.desktop.workspaceCollapsed'
 const SIDEBAR_WORKSPACE_NODE_OPEN_STORAGE_KEY = 'hermes.desktop.workspaceNodeOpen'
 const SIDEBAR_DISMISSED_AUTO_PROJECTS_STORAGE_KEY = 'hermes.desktop.dismissedAutoProjects'
@@ -111,11 +112,25 @@ export const $sidebarWorkspaceParentOrderIds = persistentAtom(
 )
 // Manual drag-order of projects in the overview. Empty = the deterministic
 // default sort (active first, explicit before auto, by recency); once the user
-// drags a project their order wins (orderByIds surfaces new projects on top).
+// drags a project their ordered rows stay ahead of newly discovered projects.
 export const $sidebarProjectOrderIds = persistentAtom(
   SIDEBAR_PROJECT_ORDER_STORAGE_KEY,
   [] as string[],
   Codecs.stringArray
+)
+
+export const $sidebarSessionBranchOpen = persistentAtom<Record<string, boolean>>(
+  SIDEBAR_SESSION_BRANCH_OPEN_STORAGE_KEY,
+  {},
+  Codecs.json<Record<string, boolean>>(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(raw).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+    )
+  })
 )
 // Explicit open/collapse state for sidebar workspace nodes AND review file-tree
 // folders, keyed by stable node id (repo root / worktree path / `review:<path>`).
@@ -706,6 +721,13 @@ export function setSidebarWorkspaceParentOrderIds(ids: string[]) {
 
 export function setSidebarProjectOrderIds(ids: string[]) {
   setOrderIds($sidebarProjectOrderIds, ids)
+}
+
+export function toggleSidebarSessionBranchOpen(id: string, defaultOpen = false): void {
+  const current = $sidebarSessionBranchOpen.get()
+  const open = current[id] ?? defaultOpen
+
+  $sidebarSessionBranchOpen.set({ ...current, [id]: !open })
 }
 
 export function setSidebarResizing(resizing: boolean) {

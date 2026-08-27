@@ -464,6 +464,15 @@ def _merge_profile_tree(
         _merge_by_id(repos, project.get("repos") or [], "groups")
         existing["repos"] = list(repos.values())
         existing["sessionCount"] = (existing.get("sessionCount") or 0) + (project.get("sessionCount") or 0)
+        existing["chatSessionCount"] = (existing.get("chatSessionCount") or 0) + (
+            project.get("chatSessionCount") or 0
+        )
+        existing["childSessionCount"] = (existing.get("childSessionCount") or 0) + (
+            project.get("childSessionCount") or 0
+        )
+        existing["runningSessionCount"] = (existing.get("runningSessionCount") or 0) + (
+            project.get("runningSessionCount") or 0
+        )
         existing["archivedSessionCount"] = (existing.get("archivedSessionCount") or 0) + (
             project.get("archivedSessionCount") or 0
         )

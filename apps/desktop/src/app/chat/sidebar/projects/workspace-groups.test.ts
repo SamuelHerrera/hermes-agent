@@ -13,6 +13,7 @@ import {
   overlayLiveLanes,
   overlayLivePreviews,
   overlayProjectRunningCounts,
+  overlayProjectSummaryCounts,
   sessionProjectColor,
   type SidebarProjectTree,
   type SidebarSessionGroup,
@@ -990,6 +991,26 @@ describe('overlayProjectRunningCounts', () => {
     const project = projectNode({ id: 'p_app', runningSessionCount: 2 })
 
     expect(overlayProjectRunningCounts([project], [], [], () => false)[0].runningSessionCount).toBe(0)
+  })
+})
+
+describe('overlayProjectSummaryCounts', () => {
+  it('raises stale zero chat counts from visible preview rows and clears stale running counts', () => {
+    const row = makeSession('/www/app', { id: 'done', running: false })
+
+    const project = projectNode({
+      chatSessionCount: 0,
+      id: 'p_app',
+      previewSessions: [row],
+      runningSessionCount: 1,
+      sessionCount: 0
+    })
+
+    const overlaid = overlayProjectSummaryCounts([project], [], [makeProject('p_app', ['/www/app'])], () => false)[0]
+
+    expect(overlaid.chatSessionCount).toBe(1)
+    expect(overlaid.runningSessionCount).toBe(0)
+    expect(overlaid.sessionCount).toBe(1)
   })
 })
 

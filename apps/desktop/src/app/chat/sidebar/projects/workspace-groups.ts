@@ -827,6 +827,75 @@ export function overlayProjectRunningCounts(
   return changed ? next : projects
 }
 
+/**
+ * Overlay renderer-visible rows onto project summary counters. Backend counts
+ * are authoritative for older/off-page history, but a live or preview row must
+ * never leave the project badge at 0 (the visible project says it has no chats
+ * while a chat is sitting under it). Running stays renderer-owned so stale
+ * backend hints clear as soon as the spinner predicate is false.
+ */
+export function overlayProjectSummaryCounts(
+  projects: SidebarProjectTree[],
+  live: SessionInfo[],
+  explicitProjects: ProjectInfo[],
+  isRunning: RunningPredicate,
+  removed: ReadonlySet<string> = NO_REMOVED
+): SidebarProjectTree[] {
+  const liveByProject = new Map<string, SessionInfo[]>()
+
+  for (const session of live) {
+    if (removed.has(session.id)) {
+      continue
+    }
+
+    const projectId = liveSessionProjectId(session, explicitProjects) ?? (isDetachedSession(session) ? NO_PROJECT_ID : null)
+
+    if (!projectId) {
+      continue
+    }
+
+    const bucket = liveByProject.get(projectId) ?? []
+    bucket.push(session)
+    liveByProject.set(projectId, bucket)
+  }
+
+  let changed = false
+
+  const next = projects.map(project => {
+    const visibleRows = [
+      ...projectSessions(project),
+      ...(project.previewSessions ?? []),
+      ...(liveByProject.get(project.id) ?? [])
+    ].filter(session => !removed.has(session.id))
+
+    const visibleCounts = projectCountFields(visibleRows, isRunning)
+    const sessionCount = Math.max(project.sessionCount ?? 0, visibleCounts.sessionCount)
+    const childSessionCount = Math.max(project.childSessionCount ?? 0, visibleCounts.childSessionCount)
+
+    const chatSessionCount = Math.max(
+      project.chatSessionCount ?? Math.max(0, (project.sessionCount ?? 0) - (project.childSessionCount ?? 0)),
+      visibleCounts.chatSessionCount
+    )
+
+    const runningSessionCount = visibleCounts.runningSessionCount
+
+    if (
+      sessionCount === (project.sessionCount ?? 0) &&
+      chatSessionCount === (project.chatSessionCount ?? Math.max(0, (project.sessionCount ?? 0) - (project.childSessionCount ?? 0))) &&
+      childSessionCount === (project.childSessionCount ?? 0) &&
+      runningSessionCount === (project.runningSessionCount ?? 0)
+    ) {
+      return project
+    }
+
+    changed = true
+
+    return { ...project, chatSessionCount, childSessionCount, runningSessionCount, sessionCount }
+  })
+
+  return changed ? next : projects
+}
+
 interface PreviewOverlayOptions {
   removed?: ReadonlySet<string>
   /** The active sort key as an id order; recency when empty. */

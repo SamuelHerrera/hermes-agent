@@ -18,6 +18,10 @@ export interface FlattenSessionsOptions {
   preserveOrder?: boolean
   /** Session ids whose branch children should stay hidden. */
   collapsedSessionIds?: ReadonlySet<string>
+  /** Explicit branch open state, keyed by parent session id. */
+  branchOpenById?: Readonly<Record<string, boolean>>
+  /** When true, branch children start hidden until explicitly expanded. */
+  defaultBranchCollapsed?: boolean
 }
 
 const recency = (session: SessionInfo): number => session.last_active || session.started_at || 0
@@ -116,7 +120,13 @@ export function flattenSessionsWithBranches(
     seen.add(session.id)
     const children = childrenByParent.get(session.id) ?? []
     const hasBranchChildren = children.length > 0
-    const branchCollapsed = hasBranchChildren && options.collapsedSessionIds?.has(session.id) === true
+    const explicitOpen = options.branchOpenById?.[session.id]
+
+    const branchCollapsed =
+      hasBranchChildren &&
+      (explicitOpen === undefined
+        ? options.defaultBranchCollapsed === true || options.collapsedSessionIds?.has(session.id) === true
+        : !explicitOpen)
 
     out.push({
       ...(hasBranchChildren ? { branchChildCount: children.length } : {}),

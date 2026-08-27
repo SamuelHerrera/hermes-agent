@@ -186,6 +186,9 @@ class TestCrossProfileProjectTree:
         project = next(p for p in payload["projects"] if not p["isNoProject"])
 
         assert project["sessionCount"] == 2
+        assert project["chatSessionCount"] == 2
+        assert project["childSessionCount"] == 0
+        assert project["runningSessionCount"] == 0
         assert project["archivedSessionCount"] == 2
 
     def test_profile_usage_covers_sessions_past_the_window(self, client, profiles_on_disk):

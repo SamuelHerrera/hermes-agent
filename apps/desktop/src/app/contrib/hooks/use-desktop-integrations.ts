@@ -98,10 +98,14 @@ export function useDesktopIntegrations({
           !!route && route !== NEW_CHAT_ROUTE && !routeSession && !isOverlayView(appViewForPath(route))
 
         // Boot adoption can publish renderer.ready before its async session
-        // refresh completes. Keep the restore latch open until ownership can be
-        // decided; treating an unloaded list as authoritative would erase valid
-        // remembered navigation permanently.
+        // refresh completes. Restore the remembered destination immediately so
+        // the shell does not paint a transient New Session tab on every restart;
+        // stale routed sessions are still cleared by the exhausted-resume guard
+        // below once the real resume path proves they are gone.
         if (sessions.length === 0 && !restorableNonSessionRoute && (routeSession || last)) {
+          restoredRef.current = true
+          navigate(routeSession ? route! : sessionRoute(last!), { replace: true })
+
           return
         }
 

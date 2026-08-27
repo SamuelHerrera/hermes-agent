@@ -150,7 +150,7 @@ import {
   orderProjectsByIds,
   overlayLiveLanes,
   overlayLivePreviews,
-  overlayProjectRunningCounts,
+  overlayProjectSummaryCounts,
   PROJECT_OVERVIEW_SESSION_LIMIT,
   ProjectBackRow,
   ProjectDetailHeaderRow,
@@ -810,7 +810,7 @@ export function ChatSidebar({
   // state on top: dismissed auto-projects, persisted repo/lane order, and the
   // overview sort. Membership is the backend tree's — never re-derived here.
   const projectModel = useMemo<SidebarProjectTree[]>(() => {
-    const visibleProjects = overlayProjectRunningCounts(
+    const visibleProjects = overlayProjectSummaryCounts(
       filterVisibleProjects(projectTree, dismissedAutoProjects)
         // A filtered-out project drops its whole lane, header included — hiding
         // only its rows would leave a row of empty folders behind.

@@ -1,7 +1,7 @@
 import type { useSensors } from '@dnd-kit/core'
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 
 import { SidebarPanelLabel } from '@/app/shell/sidebar-label'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
@@ -18,6 +18,7 @@ import {
 } from '@/lib/session-date-groups'
 import { sessionBucketLabel } from '@/lib/time'
 import { cn } from '@/lib/utils'
+import { $sidebarSessionBranchOpen, toggleSidebarSessionBranchOpen } from '@/store/layout'
 import { sessionMatchesStoredId, sessionPinId, setSessions } from '@/store/session'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 
@@ -276,7 +277,7 @@ export function SidebarSessionsSection({
   const dividerLabels = t.sidebar.dateDivider
   const statusDividerLabels = t.sidebar.statusDivider
   const dotStates = useStore($sessionDotStateById)
-  const [collapsedBranchIds, setCollapsedBranchIds] = useState<Set<string>>(() => new Set())
+  const branchOpenById = useStore($sidebarSessionBranchOpen)
   const sectionOpen = hideHeader || !collapsible ? true : open
   const hasGroupedSessions = Boolean(groups?.some(group => group.sessions.length > 0))
   // A defined project list is itself content (even an empty project should
@@ -302,22 +303,12 @@ export function SidebarSessionsSection({
   // recency sort — the drag order is layered on per date group below, so the
   // buckets stay truthful and a reorder never costs the list its dividers.
   const displayEntries = useMemo(
-    () => flattenSessionsWithBranches(sessions, { collapsedSessionIds: collapsedBranchIds, preserveOrder: pinned }),
-    [sessions, collapsedBranchIds, pinned]
+    () => flattenSessionsWithBranches(sessions, { branchOpenById, defaultBranchCollapsed: true, preserveOrder: pinned }),
+    [sessions, branchOpenById, pinned]
   )
 
   const toggleBranchCollapsed = useCallback((sessionId: string) => {
-    setCollapsedBranchIds(current => {
-      const next = new Set(current)
-
-      if (next.has(sessionId)) {
-        next.delete(sessionId)
-      } else {
-        next.add(sessionId)
-      }
-
-      return next
-    })
+    toggleSidebarSessionBranchOpen(sessionId, false)
   }, [])
 
   const renderRow = useCallback(
@@ -407,11 +398,11 @@ export function SidebarSessionsSection({
   // Sessions inside repos/worktrees are date-ordered and static.
   const renderRows = useCallback(
     (items: SessionInfo[]) =>
-      flattenSessionsWithBranches(items, { collapsedSessionIds: collapsedBranchIds }).map(
+      flattenSessionsWithBranches(items, { branchOpenById, defaultBranchCollapsed: true }).map(
         ({ branchChildCount, branchCollapsed, branchStem, hasBranchChildren, session }) =>
           renderRow(session, false, branchStem, hasBranchChildren, branchChildCount, branchCollapsed)
       ),
-    [collapsedBranchIds, renderRow]
+    [branchOpenById, renderRow]
   )
 
   // Flat recents as list rows: grouped by recency when enabled, plain otherwise.
