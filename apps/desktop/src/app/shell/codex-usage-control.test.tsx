@@ -46,7 +46,7 @@ describe('CodexUsageTitlebarControl', () => {
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {
-    render(
+    const { container } = render(
       <CodexUsageTitlebarControl
         usage={{
           buckets: [
@@ -85,6 +85,9 @@ describe('CodexUsageTitlebarControl', () => {
     expect(screen.getByText('Weekly messages')).toBeTruthy()
     expect(screen.getByText('50% left')).toBeTruthy()
     expect(screen.getByText('Monday 00:00 UTC')).toBeTruthy()
+    expect(
+      [...container.querySelectorAll('svg')].every(svg => svg.style.getPropertyValue('--codex-usage-remaining-color'))
+    ).toBe(true)
   })
 
   it('does not toggle the hover popover from trigger clicks and closes on blur', () => {

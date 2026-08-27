@@ -41,10 +41,12 @@ def codex_usage_payload():
         "rate_limit": {
             "primary_window": {
                 "used_percent": 21,
+                "limit_window_seconds": 604800,
                 "reset_at": 1779846359,
             },
             "secondary_window": {
                 "used_percent": 4,
+                "limit_window_seconds": 604800,
                 "reset_at": 1780230796,
             },
         },
@@ -93,6 +95,7 @@ def test_desktop_codex_usage_serialization_is_sanitized():
                 label="Session",
                 used_percent=40.4,
                 reset_at=reset_at,
+                reset_window_seconds=604800,
             ),
             account_usage.AccountUsageWindow(
                 key="secondary_window",
@@ -125,6 +128,7 @@ def test_desktop_codex_usage_serialization_is_sanitized():
         "used_percent": 40.4,
         "remaining_percent": 59.6,
         "reset_time": "2026-05-01T12:30:00+00:00",
+        "reset_window_ms": 604800000,
         "reset_credits": 2,
         "buckets": [
             {
@@ -133,6 +137,7 @@ def test_desktop_codex_usage_serialization_is_sanitized():
                 "used_percent": 40.4,
                 "remaining_percent": 59.6,
                 "reset_time": "2026-05-01T12:30:00+00:00",
+                "reset_window_ms": 604800000,
                 "detail": None,
             },
             {
@@ -141,6 +146,7 @@ def test_desktop_codex_usage_serialization_is_sanitized():
                 "used_percent": 12.0,
                 "remaining_percent": 88.0,
                 "reset_time": None,
+                "reset_window_ms": None,
                 "detail": None,
             },
             {
@@ -149,6 +155,7 @@ def test_desktop_codex_usage_serialization_is_sanitized():
                 "used_percent": 5.0,
                 "remaining_percent": 95.0,
                 "reset_time": None,
+                "reset_window_ms": None,
                 "detail": "temporary bucket",
             },
         ],
@@ -192,6 +199,7 @@ def test_desktop_codex_usage_unavailable_shape_is_stable():
         "used_percent": None,
         "remaining_percent": None,
         "reset_time": None,
+        "reset_window_ms": None,
         "reset_credits": 0,
         "buckets": [],
     }
@@ -242,9 +250,9 @@ def test_codex_usage_keeps_extra_windows_and_reset_credit_count(monkeypatch):
     payload = {
         "plan_type": "pro",
         "rate_limit": {
-            "primary_window": {"used_percent": 50, "reset_at": 1779846359},
-            "secondary_window": {"used_percent": 20, "reset_at": 1780230796},
-            "burst_window": {"used_percent": 3, "reset_at": 1780230999},
+            "primary_window": {"used_percent": 50, "limit_window_seconds": 604800, "reset_at": 1779846359},
+            "secondary_window": {"used_percent": 20, "limit_window_seconds": 604800, "reset_at": 1780230796},
+            "burst_window": {"used_percent": 3, "limit_window_seconds": 3600, "reset_at": 1780230999},
         },
         "rate_limit_reset_credits": {"available_count": 4},
     }
@@ -273,6 +281,8 @@ def test_codex_usage_keeps_extra_windows_and_reset_credit_count(monkeypatch):
         "burst_window",
     ]
     assert desktop_usage["buckets"][2]["label"] == "Burst Window"
+    assert desktop_usage["reset_window_ms"] == 604800000
+    assert desktop_usage["buckets"][2]["reset_window_ms"] == 3600000
 
 
 def test_codex_usage_account_id_read_failure_keeps_singleton_token(monkeypatch, codex_usage_payload):

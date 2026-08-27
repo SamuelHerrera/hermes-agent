@@ -80,11 +80,11 @@ export function mapCodexUsageSnapshot(snapshot: DesktopCodexUsageSnapshot | null
     remainingPercent: bucket.remaining_percent,
     resetAt: formatCodexResetTime(bucket.reset_time),
     resetAtRaw: bucket.reset_time,
-    resetWindowMs: codexResetWindowMs(bucket.key, bucket.label),
+    resetWindowMs: bucket.reset_window_ms ?? codexResetWindowMs(bucket.key, bucket.label),
     usedPercent: bucket.used_percent
   }))
 
-  const primaryResetWindowMs = buckets[0]?.resetWindowMs ?? codexResetWindowMs(null, null)
+  const primaryResetWindowMs = snapshot.reset_window_ms ?? buckets[0]?.resetWindowMs ?? codexResetWindowMs(null, null)
 
   return {
     state: 'available',

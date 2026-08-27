@@ -17,6 +17,7 @@ function availableUsage(overrides: Record<string, unknown> = {}) {
         key: 'primary',
         label: 'Primary window',
         remaining_percent: 68,
+        reset_window_ms: 604800000,
         reset_time: '2026-08-15T12:00:00Z',
         used_percent: 32
       }
@@ -25,6 +26,7 @@ function availableUsage(overrides: Record<string, unknown> = {}) {
     provider: 'openai-codex' as const,
     remaining_percent: 68,
     reset_credits: 1,
+    reset_window_ms: 604800000,
     reset_time: '2026-08-15T12:00:00Z',
     status: 'available' as const,
     used_percent: 32,
@@ -66,6 +68,7 @@ describe('useCodexUsage', () => {
       remainingPercent: 68,
       resetAt: expect.any(String),
       resetCredits: 1,
+      resetWindowMs: 604800000,
       usedPercent: 32,
       buckets: [
         {
@@ -73,6 +76,7 @@ describe('useCodexUsage', () => {
           label: 'Primary window',
           remainingPercent: 68,
           resetAt: expect.any(String),
+          resetWindowMs: 604800000,
           usedPercent: 32
         }
       ]
@@ -94,6 +98,7 @@ describe('useCodexUsage', () => {
               key: 'primary',
               label: 'Primary window',
               remaining_percent: 68,
+              reset_window_ms: 604800000,
               reset_time: '2026-08-20T03:32:23+00:00',
               used_percent: 32
             }

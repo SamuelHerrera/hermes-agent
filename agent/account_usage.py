@@ -29,6 +29,7 @@ class AccountUsageWindow:
     reset_at: Optional[datetime] = None
     detail: Optional[str] = None
     key: Optional[str] = None
+    reset_window_seconds: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +151,7 @@ def unavailable_desktop_codex_usage() -> dict[str, Any]:
         "used_percent": None,
         "remaining_percent": None,
         "reset_time": None,
+        "reset_window_ms": None,
         "reset_credits": 0,
         "buckets": [],
     }
@@ -178,8 +180,16 @@ def _serialize_desktop_window(window: AccountUsageWindow) -> dict[str, Any]:
         "used_percent": used,
         "remaining_percent": remaining,
         "reset_time": window.reset_at.isoformat() if window.reset_at else None,
+        "reset_window_ms": _serialize_reset_window_ms(window.reset_window_seconds),
         "detail": str(window.detail) if window.detail else None,
     }
+
+
+def _serialize_reset_window_ms(value: Optional[float]) -> Optional[int]:
+    if not _is_finite_num(value) or float(value) <= 0:
+        return None
+
+    return int(float(value) * 1000)
 
 
 def serialize_codex_usage_for_desktop(snapshot: Optional[AccountUsageSnapshot]) -> dict[str, Any]:
@@ -208,6 +218,7 @@ def serialize_codex_usage_for_desktop(snapshot: Optional[AccountUsageSnapshot]) 
         "used_percent": primary["used_percent"] if primary else None,
         "remaining_percent": primary["remaining_percent"] if primary else None,
         "reset_time": primary["reset_time"] if primary else None,
+        "reset_window_ms": primary["reset_window_ms"] if primary else None,
         "reset_credits": reset_credits,
         "buckets": buckets,
     }
@@ -625,6 +636,7 @@ def _fetch_codex_account_usage(
                 label=label,
                 used_percent=float(used),
                 reset_at=_parse_dt(window.get("reset_at")),
+                reset_window_seconds=window.get("limit_window_seconds"),
             )
         )
     for key in sorted(rate_limit):
@@ -642,6 +654,7 @@ def _fetch_codex_account_usage(
                 label=_title_case_slug(key) or str(key),
                 used_percent=float(used),
                 reset_at=_parse_dt(window.get("reset_at")),
+                reset_window_seconds=window.get("limit_window_seconds"),
             )
         )
     details: list[str] = []

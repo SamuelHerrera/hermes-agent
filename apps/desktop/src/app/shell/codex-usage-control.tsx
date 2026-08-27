@@ -176,6 +176,7 @@ function UsageResetIcon({
       aria-hidden="true"
       className="block size-6 overflow-visible"
       data-critical={remaining <= 15 || undefined}
+      style={CODEX_USAGE_ICON_STYLE}
       viewBox="0 0 24 24"
     >
       <defs>

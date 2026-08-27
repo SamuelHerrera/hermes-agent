@@ -16,6 +16,7 @@ type DesktopCodexUsageBucket = {
   key: string
   label: string
   remaining_percent: null | number
+  reset_window_ms: null | number
   reset_time: null | string
   used_percent: null | number
 }
@@ -27,6 +28,7 @@ type DesktopCodexUsage = {
   provider: 'openai-codex'
   remaining_percent: null | number
   reset_credits: number
+  reset_window_ms: null | number
   reset_time: null | string
   status: 'available' | 'unavailable'
   used_percent: null | number
