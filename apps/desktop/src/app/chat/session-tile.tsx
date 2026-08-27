@@ -41,8 +41,10 @@ import {
   $gatewayState,
   $selectedStoredSessionId,
   $sessions,
+  getRememberedSessionTitle,
   sessionMatchesStoredId,
-  sessionPinId
+  sessionPinId,
+  setRememberedSessionTitle
 } from '@/store/session'
 import {
   $sessionStates,
@@ -386,22 +388,25 @@ export function tileStoredRow(storedSessionId: string): SessionInfo | undefined 
   )
 }
 
-/** The tab's REGISTERED name. Deliberately the bare placeholder for a draft
- *  rather than its live composer title (`tabTitle` renders that): re-registering
- *  per keystroke would re-render the strip, and holding the draft's text here
- *  would let the registered name already match the row that lands on send —
- *  skipping the re-register that hands the tab back to this string. */
+/** The tab's REGISTERED name. A restored, already-known session may paint before
+ *  recents/project rows hydrate, so fall back to the tile's persisted last title
+ *  (or the remembered main-session title) instead of flashing "New session". A
+ *  true draft still renders its live composer title through `tabTitle`. */
 function tileTitle(storedSessionId: string): string {
   const stored = tileStoredRow(storedSessionId)
+  const explicit = $sessionTiles.get().find(tile => tile.storedSessionId === storedSessionId)?.workspaceTabTitle
+  const remembered = getRememberedSessionTitle($activeGatewayProfile.get(), storedSessionId)
 
-  return stored ? sessionTitle(stored) : NEW_SESSION_TITLE
+  return stored ? sessionTitle(stored) : explicit || remembered || NEW_SESSION_TITLE
 }
 
 /** The `@session` link payload for a tile tab drag — id + owning profile + title.
  *  Resolved at drag time, so an unsent tab drags under its draft name. */
 function tileDragPayload(storedSessionId: string): SessionDragPayload {
   const stored = tileStoredRow(storedSessionId)
-  const title = stored ? sessionTitle(stored) : draftTitleFor(storedSessionId) || NEW_SESSION_TITLE
+  const explicit = $sessionTiles.get().find(tile => tile.storedSessionId === storedSessionId)?.workspaceTabTitle
+  const remembered = getRememberedSessionTitle($activeGatewayProfile.get(), storedSessionId)
+  const title = stored ? sessionTitle(stored) : explicit || remembered || draftTitleFor(storedSessionId) || NEW_SESSION_TITLE
 
   return { id: storedSessionId, profile: stored?.profile ?? '', title }
 }
@@ -540,9 +545,21 @@ export function WorkspaceTabMenu({ children }: { children: React.ReactElement })
   )
 }
 
+function syncSessionTileTitles(): void {
+  for (const tile of $sessionTiles.get()) {
+    const stored = tileStoredRow(tile.storedSessionId)
+    const title = stored ? sessionTitle(stored) : ''
+
+    if (title && title !== tile.workspaceTabTitle) {
+      setRememberedSessionTitle($activeGatewayProfile.get(), tile.storedSessionId, title)
+      patchSessionTile(tile.storedSessionId, { workspaceTabTitle: title })
+    }
+  }
+}
+
 /** Keep pane contributions mirroring `$sessionTiles` (+ titles from
  *  `$sessions`). Tiles dock against main on the chosen edge, flex width. */
-export const watchSessionTiles = paneMirror<SessionTile>({
+const watchSessionTilePanes = paneMirror<SessionTile>({
   source: $sessionTiles,
   // $projectTree: a tile whose session is older than the recents page resolves
   // its title through the tree, which loads after the tiles register. (The tab's
@@ -565,7 +582,16 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   tabTrailing: storedSessionId => <SessionTabAttentionDot storedSessionId={storedSessionId} />,
   // Until the first turn lists a row there is no title to register, so the tab
   // takes its name from the composer instead — live, without re-registering.
-  tabTitle: storedSessionId => (tileStoredRow(storedSessionId) ? null : <SessionDraftTitle scope={storedSessionId} />),
+  tabTitle: storedSessionId => {
+    if (tileStoredRow(storedSessionId)) {
+      return null
+    }
+
+    const tile = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)
+    const remembered = getRememberedSessionTitle($activeGatewayProfile.get(), storedSessionId)
+
+    return tile?.workspaceTabTitle || remembered ? null : <SessionDraftTitle scope={storedSessionId} />
+  },
   tabPreview: storedSessionId => $sessionTiles.get().some(t => t.storedSessionId === storedSessionId && t.preview),
   render: storedSessionId => <SessionTilePane storedSessionId={storedSessionId} />,
   tabWrap: (storedSessionId, tab) => (
@@ -594,3 +620,12 @@ export const watchSessionTiles = paneMirror<SessionTile>({
   },
   close: requestCloseSessionTile
 })
+
+export function watchSessionTiles(): void {
+  const syncTitles = () => syncSessionTileTitles()
+
+  syncTitles()
+  $sessions.listen(syncTitles)
+  $projectTree.listen(syncTitles)
+  watchSessionTilePanes()
+}

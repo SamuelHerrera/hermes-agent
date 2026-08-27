@@ -36,6 +36,7 @@ const COMPOSER_FAST_KEY = 'hermes.desktop.composer.fast'
 // cross-profile corruption this storage boundary prevents (#67709).
 const LAST_SESSION_KEY = 'hermes.desktop.lastSessionId'
 const LAST_ROUTE_KEY = 'hermes.desktop.lastRoute'
+const LAST_SESSION_TITLE_KEY = 'hermes.desktop.lastSessionTitle'
 
 function profileNavigationKey(base: string, profile: string): string {
   const key = profile.trim() || 'default'
@@ -91,6 +92,37 @@ export function getRememberedSessionId(profile: string): null | string {
 export function setRememberedSessionId(id: null | string, profile: string): void {
   discardLegacyRememberedNavigation()
   persistString(profileNavigationKey(LAST_SESSION_KEY, profile), id)
+}
+
+function profileSessionTitleKey(profile: string, sessionId: string): string {
+  return `${profileNavigationKey(LAST_SESSION_TITLE_KEY, profile)}.session.${encodeURIComponent(sessionId)}`
+}
+
+export function getRememberedSessionTitle(profile: string, sessionId: null | string | undefined): string {
+  const id = sessionId?.trim()
+
+  if (!id) {
+    return ''
+  }
+
+  discardLegacyRememberedNavigation()
+
+  return storedString(profileSessionTitleKey(profile, id))?.trim() || ''
+}
+
+export function setRememberedSessionTitle(
+  profile: string,
+  sessionId: null | string | undefined,
+  title: null | string | undefined
+): void {
+  const id = sessionId?.trim()
+
+  if (!id) {
+    return
+  }
+
+  discardLegacyRememberedNavigation()
+  persistString(profileSessionTitleKey(profile, id), title?.trim() || null)
 }
 
 export function sessionBelongsToProfile(
@@ -640,6 +672,7 @@ export const setSessionProfilesTruncated = (next: Updater<Record<string, boolean
 export const setSessionProfilesUsage = (next: Updater<Record<string, ProfileUsage>>) =>
   updateAtom($sessionProfilesUsage, next)
 export const setSessionsLoading = (next: Updater<boolean>) => updateAtom($sessionsLoading, next)
+
 export const setActiveSessionId = (next: Updater<string | null>) => {
   updateAtom($activeSessionId, next)
 
@@ -647,6 +680,7 @@ export const setActiveSessionId = (next: Updater<string | null>) => {
     $workspaceEmptyPlaceholder.set(false)
   }
 }
+
 export const setActiveSessionStoredIdRotation = (next: Updater<ActiveSessionStoredIdRotation | null>) =>
   updateAtom($activeSessionStoredIdRotation, next)
 

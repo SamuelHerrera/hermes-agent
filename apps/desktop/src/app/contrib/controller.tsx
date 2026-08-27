@@ -53,10 +53,18 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH
 } from '@/store/layout'
+import { $activeGatewayProfile } from '@/store/profile'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
 import { $projectTree } from '@/store/projects'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
-import { $currentCwd, $selectedStoredSessionId, $sessions, $yoloActive, sessionMatchesStoredId } from '@/store/session'
+import {
+  $currentCwd,
+  $selectedStoredSessionId,
+  $sessions,
+  $yoloActive,
+  getRememberedSessionTitle,
+  sessionMatchesStoredId
+} from '@/store/session'
 import { watchSessionPins } from '@/store/session-pin-sync'
 import { detachWorkspaceSessionToTile } from '@/store/session-states'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
@@ -445,13 +453,14 @@ watchSessionPins()
 const syncWorkspaceTitle = () => {
   const selected = $selectedStoredSessionId.get()
   const stored = storedRowForPaneTitle(selected)
+  const rememberedTitle = selected ? getRememberedSessionTitle($activeGatewayProfile.get(), selected) : ''
 
   registry.register({
     id: 'workspace',
     area: 'panes',
     // The placeholder, not the draft's live name — `tabTitle` below renders
     // that. Keeping it here would re-register the pane on every keystroke.
-    title: stored ? storedSessionTitle(stored) : NEW_SESSION_TITLE,
+    title: stored ? storedSessionTitle(stored) : rememberedTitle || NEW_SESSION_TITLE,
     data: {
       // The leading slot is stable identity (project color or subagent). Transient
       // attention is a separate trailing dot so completion/unread does not mask

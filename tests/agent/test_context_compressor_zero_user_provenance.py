@@ -328,6 +328,14 @@ def test_background_process_notifications_do_not_become_compaction_anchors(
             id="dropped_toolcall_nudge",
         ),
         pytest.param(
+            "[System: Your previous tool call arguments were truncated before Hermes "
+            "could parse them, so no tool action was executed. Do NOT retry the same "
+            "oversized tool call. Break the operation into multiple smaller tool calls "
+            "with compact arguments (target under ~8K tokens per call), or use a "
+            "narrower patch/read range before continuing.]",
+            id="truncated_tool_call_recovery_nudge",
+        ),
+        pytest.param(
             "You just executed tool calls but returned an "
             "empty response. Please process the tool "
             "results above and continue with the task.",

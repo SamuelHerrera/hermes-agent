@@ -3888,6 +3888,98 @@ class TestRunConversation:
         assert second_call_messages[-1]["role"] == "user"
         assert "truncated by the output length limit" in second_call_messages[-1]["content"]
 
+    def test_truncated_tool_call_json_auto_recovers_with_chunking_nudge(self, agent):
+        """A cut-off structured tool call should auto-reprompt safely.
+
+        Some routers return finish_reason="tool_calls" while the arguments are
+        incomplete JSON. Hermes must not execute that partial call, but it also
+        should not immediately surface the generic output-length sentinel when a
+        smaller/chunked retry can continue the task.
+        """
+        self._setup_agent(agent)
+        truncated = _mock_response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                _mock_tool_call(
+                    name="web_search",
+                    arguments='{"query":"this arguments object is cut off',
+                    call_id="cut_off",
+                )
+            ],
+        )
+        recovered_tool = _mock_response(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                _mock_tool_call(
+                    name="web_search",
+                    arguments='{"query":"smaller retry"}',
+                    call_id="recovered",
+                )
+            ],
+        )
+        done = _mock_response(content="Recovered", finish_reason="stop")
+        agent.client.chat.completions.create.side_effect = [
+            truncated,
+            recovered_tool,
+            done,
+        ]
+
+        with (
+            patch("run_agent.handle_function_call", return_value="search result") as mock_handle,
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("search something")
+
+        assert result["completed"] is True
+        assert result["final_response"] == "Recovered"
+        assert mock_handle.call_count == 1
+        assert mock_handle.call_args.kwargs["tool_call_id"] == "recovered"
+        second_call_messages = agent.client.chat.completions.create.call_args_list[1].kwargs["messages"]
+        assert second_call_messages[-2]["role"] == "assistant"
+        assert second_call_messages[-1]["role"] == "user"
+        assert "_truncated_tool_call_recovery" not in second_call_messages[-2]
+        assert "_truncated_tool_call_recovery" not in second_call_messages[-1]
+        assert "previous tool call arguments were truncated" in second_call_messages[-1]["content"]
+        assert "multiple smaller tool calls" in second_call_messages[-1]["content"]
+
+    def test_truncated_tool_call_json_stops_after_bounded_recovery_loop(self, agent):
+        """Repeated cut-off tool JSON must not loop forever or execute partial args."""
+        self._setup_agent(agent)
+        truncated_responses = [
+            _mock_response(
+                content="",
+                finish_reason="tool_calls",
+                tool_calls=[
+                    _mock_tool_call(
+                        name="web_search",
+                        arguments=f'{{"query":"still cut off {idx}',
+                        call_id=f"cut_off_{idx}",
+                    )
+                ],
+            )
+            for idx in range(4)
+        ]
+        agent.client.chat.completions.create.side_effect = truncated_responses
+
+        with (
+            patch("run_agent.handle_function_call", return_value="should not run") as mock_handle,
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("search something")
+
+        assert result["completed"] is False
+        assert result["partial"] is True
+        assert result["error"] == "Truncated tool-call recovery loop detected"
+        assert "Auto-recovery stopped after 3 truncated tool-call retries" in result["final_response"]
+        assert agent.client.chat.completions.create.call_count == 4
+        mock_handle.assert_not_called()
+
     def test_length_continuation_preserves_large_provider_default_output_cap(self, agent):
         """Continuation retries must not shrink a higher provider default cap."""
         self._setup_agent(agent)
@@ -4163,7 +4255,13 @@ class TestRunConversation:
         bad_resp = _mock_response(
             content="", finish_reason="tool_calls", tool_calls=[bad_tc],
         )
-        agent.client.chat.completions.create.side_effect = [good_resp, bad_resp]
+        agent.client.chat.completions.create.side_effect = [
+            good_resp,
+            bad_resp,
+            bad_resp,
+            bad_resp,
+            bad_resp,
+        ]
 
         with (
             patch("run_agent.handle_function_call", return_value='{"success":true}'),
@@ -4174,9 +4272,12 @@ class TestRunConversation:
             result = agent.run_conversation("write then truncate")
 
         assert result.get("partial") is True
+        assert result["error"] == "Truncated tool-call recovery loop detected"
         msgs = result.get("messages") or []
         assert msgs[-1].get("role") == "assistant"
-        assert "truncated" in (msgs[-1].get("content") or "").lower()
+        assert "Auto-recovery stopped after 3 truncated tool-call retries" in (
+            msgs[-1].get("content") or ""
+        )
         assert any(isinstance(m, dict) and m.get("role") == "tool" for m in msgs)
 
 

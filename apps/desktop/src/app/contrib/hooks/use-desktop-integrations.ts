@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { openSession } from '@/app/open-session'
+import { sessionTitle } from '@/lib/chat-runtime'
 import { storedSessionIdForNotification } from '@/lib/session-ids'
 import { respondToApprovalAction } from '@/store/native-notifications'
 import { openFolderAsProject } from '@/store/projects'
@@ -10,8 +11,11 @@ import {
   getRememberedSessionId,
   sessionBelongsToProfile,
   setRememberedRoute,
-  setRememberedSessionId
+  setRememberedSessionId,
+  setRememberedSessionTitle,
+  setSelectedStoredSessionId
 } from '@/store/session'
+import { markSelectionRestore } from '@/store/session-states'
 import { onSessionsChanged } from '@/store/session-sync'
 import { openUpdatesWindow, startUpdatePoller, stopUpdatePoller } from '@/store/updates'
 import { isHudWindow, isSecondaryWindow } from '@/store/windows'
@@ -19,8 +23,6 @@ import type { SessionInfo } from '@/types/hermes'
 
 import { requestComposerFocus, requestComposerInsert } from '../../chat/composer/focus'
 import { appViewForPath, isOverlayView, NEW_CHAT_ROUTE, routeSessionId, sessionRoute } from '../../routes'
-
-type RememberedSession = Pick<SessionInfo, '_lineage_root_id' | 'id' | 'profile'>
 
 interface DesktopIntegrationsParams {
   activeProfile: string
@@ -33,7 +35,7 @@ interface DesktopIntegrationsParams {
   resumeExhaustedSessionId: null | string
   routedSessionId: null | string
   runtimeIdByStoredSessionId: { readonly current: Map<string, string> }
-  sessions: readonly RememberedSession[]
+  sessions: readonly SessionInfo[]
 }
 
 /**
@@ -76,6 +78,15 @@ export function useDesktopIntegrations({
 
   const restoredRef = useRef(false)
 
+  const primeSessionRestore = (storedSessionId: string) => {
+    // Cold-start restore is re-attaching already-open UI, not a new navigation.
+    // Publish the selected id before gateway resume so chrome can paint the
+    // remembered title immediately, but skip selection homing so a persisted
+    // focused tile/panel remains fronted during boot.
+    markSelectionRestore()
+    setSelectedStoredSessionId(storedSessionId)
+  }
+
   // Wait until boot has adopted the primary profile, then restore that profile's
   // navigation exactly once. The same effect owns subsequent writes so the
   // initial `/` cannot overwrite remembered history before it is read.
@@ -104,6 +115,7 @@ export function useDesktopIntegrations({
         // below once the real resume path proves they are gone.
         if (sessions.length === 0 && !restorableNonSessionRoute && (routeSession || last)) {
           restoredRef.current = true
+          primeSessionRestore(routeSession ?? last!)
           navigate(routeSession ? route! : sessionRoute(last!), { replace: true })
 
           return
@@ -117,6 +129,10 @@ export function useDesktopIntegrations({
           !isOverlayView(appViewForPath(route)) &&
           (!routeSession || sessionBelongsToProfile(sessions, routeSession, activeProfile))
         ) {
+          if (routeSession) {
+            primeSessionRestore(routeSession)
+          }
+
           navigate(route, { replace: true })
 
           return
@@ -129,6 +145,7 @@ export function useDesktopIntegrations({
         }
 
         if (last && sessionBelongsToProfile(sessions, last, activeProfile)) {
+          primeSessionRestore(last)
           navigate(sessionRoute(last), { replace: true })
 
           return
@@ -147,7 +164,10 @@ export function useDesktopIntegrations({
     // Session-shaped routes require an explicit matching owner; unresolved and
     // wrong-profile rows must not replace known-safe navigation.
     if (routedSessionId && sessionBelongsToProfile(sessions, routedSessionId, activeProfile)) {
+      const rememberedRow = sessions.find(session => sessionBelongsToProfile([session], routedSessionId, activeProfile))
+
       setRememberedSessionId(routedSessionId, activeProfile)
+      setRememberedSessionTitle(activeProfile, routedSessionId, rememberedRow ? sessionTitle(rememberedRow) : null)
       setRememberedRoute(locationPathname, activeProfile)
     } else if (!routedSessionId && !isOverlayView(appViewForPath(locationPathname))) {
       setRememberedRoute(locationPathname, activeProfile)

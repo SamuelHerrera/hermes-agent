@@ -251,6 +251,12 @@ _EPHEMERAL_SCAFFOLDING_FLAGS = (
     # drive the bounded retry. Persisting them would replay the internal
     # retry instruction as user-authored context on resume.
     "_dropped_toolcall_nudge",
+    # truncated tool-call JSON recovery: the assistant placeholder and user
+    # smaller-call nudge exist only to recover the current turn after a provider
+    # cut off function-call arguments mid-object. Persisting them would make a
+    # resumed transcript replay internal recovery instructions as if the user
+    # had typed them.
+    "_truncated_tool_call_recovery",
 )
 
 

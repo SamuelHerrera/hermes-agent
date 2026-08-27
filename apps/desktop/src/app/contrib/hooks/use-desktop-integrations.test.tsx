@@ -1,7 +1,7 @@
 import { renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { _resetLegacyDiscardForTests } from '@/store/session'
+import { $selectedStoredSessionId, _resetLegacyDiscardForTests } from '@/store/session'
 import type * as WindowsStore from '@/store/windows'
 import type { SessionInfo } from '@/types/hermes'
 
@@ -64,6 +64,7 @@ describe('useDesktopIntegrations', () => {
     window.localStorage.clear()
     _resetLegacyDiscardForTests()
     navigate = vi.fn()
+    $selectedStoredSessionId.set(null)
     // Every test starts as a main window; only the HUD describe flips this.
     closeActiveTabMock.mockReturnValue(false)
     hudWindowMock.mockReturnValue(false)
@@ -95,6 +96,7 @@ describe('useDesktopIntegrations', () => {
     }
 
     vi.restoreAllMocks()
+    $selectedStoredSessionId.set(null)
   })
 
   function render({
@@ -211,6 +213,7 @@ describe('useDesktopIntegrations', () => {
       render({ profileReady: true, sessions: [] })
 
       expect(navigate).toHaveBeenCalledWith('/remembered-session', { replace: true })
+      expect($selectedStoredSessionId.get()).toBe('remembered-session')
       expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/remembered-session')
     })
   })
@@ -396,6 +399,19 @@ describe('useDesktopIntegrations', () => {
   })
 
   describe('route-scoped restoration', () => {
+    it('persists the routed session title for no-flash restart chrome', () => {
+      render({
+        locationPathname: '/titled-session',
+        profileReady: true,
+        routedSessionId: 'titled-session',
+        sessions: [session({ id: 'titled-session', profile: 'default', title: 'Focused chat' })]
+      })
+
+      expect(window.localStorage.getItem('hermes.desktop.lastSessionTitle.profile.default.session.titled-session')).toBe(
+        'Focused chat'
+      )
+    })
+
     it('restores a non-session route like /skills', () => {
       window.localStorage.setItem('hermes.desktop.lastRoute.profile.default', '/skills')
 

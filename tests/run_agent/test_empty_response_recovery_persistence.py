@@ -154,6 +154,42 @@ def test_flush_never_writes_buried_empty_recovery_scaffolding():
     assert persisted[-1]["content"] == "All done."
 
 
+def test_flush_never_writes_buried_truncated_tool_call_recovery_scaffolding():
+    """Recovered truncated-tool-call nudges must not poison resumed history."""
+    agent = _agent_with_capturing_db()
+
+    messages = [
+        {"role": "user", "content": "run the task"},
+        {
+            "role": "assistant",
+            "content": "(discarded truncated tool call before execution: patch)",
+            "_truncated_tool_call_recovery": True,
+        },
+        {
+            "role": "user",
+            "content": "[System: Your previous tool call arguments were truncated before Hermes could parse them.]",
+            "_truncated_tool_call_recovery": True,
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call_2", "type": "function",
+                            "function": {"name": "patch", "arguments": "{}"}}],
+        },
+        {"role": "tool", "content": "{}", "tool_call_id": "call_2"},
+        {"role": "assistant", "content": "All done."},
+    ]
+
+    agent._flush_messages_to_session_db(messages, conversation_history=[])
+
+    persisted = agent._session_db.rows
+    assert all("truncated tool call" not in (row["content"] or "") for row in persisted)
+    assert [r["role"] for r in persisted] == [
+        "user", "assistant", "tool", "assistant",
+    ]
+    assert persisted[-1]["content"] == "All done."
+
+
 def test_flush_skips_thinking_prefill_scaffolding():
     agent = _agent_with_capturing_db()
     messages = [

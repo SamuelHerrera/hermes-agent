@@ -912,6 +912,21 @@ _DROPPED_TOOLCALL_NUDGE_CONTENT = (
     "the actual tool call now to continue the task."
 )
 
+# Re-prompt sent when a provider reports finish_reason="tool_calls" but the
+# structured arguments are cut off mid-JSON. Hermes must never execute the
+# partial call, but a bounded corrective retry can usually recover by making the
+# model split the intended action into smaller tool calls. Named so the
+# compressor can recognize it after SessionDB projection if a crash interrupts
+# recovery before the ephemeral flag can be used.
+_TRUNCATED_TOOL_CALL_RECOVERY_NUDGE = (
+    "[System: Your previous tool call arguments were truncated before Hermes "
+    "could parse them, so no tool action was executed. Do NOT retry the same "
+    "oversized tool call. Break the operation into multiple smaller tool calls "
+    "with compact arguments (target under ~8K tokens per call), or use a "
+    "narrower patch/read range before continuing.]"
+)
+_TRUNCATED_TOOL_CALL_MAX_RECOVERY_RETRIES = 3
+
 # Re-prompt sent when the model returns an empty response after executing tool
 # calls (#9400). Named for the same reason as the nudges above — its
 # _empty_recovery_synthetic metadata flag doesn't survive SessionDB projection.
@@ -1647,6 +1662,7 @@ def run_conversation(
     codex_ack_continuations = 0
     length_continue_retries = 0
     truncated_tool_call_retries = 0
+    truncated_tool_call_json_retries = 0
     truncated_response_parts: List[str] = []
     compression_attempts = 0
     # One resolved per-turn compression attempt cap, shared by every site that
@@ -6651,17 +6667,95 @@ def run_conversation(
                         if tc.function.name in {n for n, _ in invalid_json_args}
                     )
                     if _truncated:
+                        tool_names = [name for name, _ in invalid_json_args]
+                        tool_preview = ", ".join(tool_names[:3]) or "unknown"
+                        if (
+                            truncated_tool_call_json_retries
+                            < _TRUNCATED_TOOL_CALL_MAX_RECOVERY_RETRIES
+                        ):
+                            truncated_tool_call_json_retries += 1
+                            agent._invalid_json_retries = 0
+                            logger.warning(
+                                "Truncated tool-call JSON detected "
+                                "(finish_reason=%r, tools=%s) — auto-reprompting "
+                                "with chunking guidance (%d/%d)",
+                                finish_reason,
+                                tool_preview,
+                                truncated_tool_call_json_retries,
+                                _TRUNCATED_TOOL_CALL_MAX_RECOVERY_RETRIES,
+                            )
+                            agent._emit_status(
+                                "↻ Tool call was truncated before execution — "
+                                "retrying with smaller-call guidance "
+                                f"({truncated_tool_call_json_retries}/"
+                                f"{_TRUNCATED_TOOL_CALL_MAX_RECOVERY_RETRIES})"
+                            )
+
+                            # Keep role alternation valid while avoiding any
+                            # execution or persistence of the broken structured
+                            # call. Both messages are ephemeral scaffolding:
+                            # persistence skips them, and the provider sees only
+                            # a concise account of what happened plus the
+                            # smaller-call instruction.
+                            while (
+                                messages
+                                and isinstance(messages[-1], dict)
+                                and messages[-1].get("_truncated_tool_call_recovery")
+                            ):
+                                messages.pop()
+                            messages.append({
+                                "role": "assistant",
+                                "content": (
+                                    "(discarded truncated tool call before "
+                                    f"execution: {tool_preview})"
+                                ),
+                                "finish_reason": "length",
+                                "_truncated_tool_call_recovery": True,
+                            })
+                            messages.append({
+                                "role": "user",
+                                "content": _TRUNCATED_TOOL_CALL_RECOVERY_NUDGE,
+                                "_truncated_tool_call_recovery": True,
+                            })
+                            agent._session_messages = messages
+
+                            # Preventive retry: if the first cut-off happened
+                            # because the output cap was too low, make the next
+                            # attempt roomy enough; the nudge separately stops
+                            # same-oversized-call loops.
+                            _tc_requested_cap = agent._requested_output_cap_from_api_kwargs(api_kwargs)
+                            _tc_boost_base = agent.max_tokens if agent.max_tokens else 4096
+                            _tc_boost = _tc_boost_base * (2 ** truncated_tool_call_json_retries)
+                            if _tc_requested_cap is not None:
+                                _tc_boost = max(_tc_boost, _tc_requested_cap)
+                            agent._ephemeral_max_output_tokens = min(
+                                max(_tc_boost, 8192),
+                                max(32768, _tc_requested_cap or 0),
+                            )
+                            continue
+
                         agent._vprint(
                             f"{agent.log_prefix}⚠️  Truncated tool call arguments detected "
-                            f"(finish_reason={finish_reason!r}) — refusing to execute.",
+                            f"(finish_reason={finish_reason!r}) — refusing to execute after "
+                            f"{_TRUNCATED_TOOL_CALL_MAX_RECOVERY_RETRIES} auto-retries.",
                             force=True,
                         )
                         agent._invalid_json_retries = 0
                         agent._cleanup_task_resources(effective_task_id)
-                        _final_response = "Response truncated due to output length limit"
+                        _final_response = (
+                            "⚠️ Auto-recovery stopped after 3 truncated tool-call retries. "
+                            "The model kept sending incomplete tool-call JSON, so Hermes "
+                            "refused to execute any partial arguments. Try a narrower "
+                            "request, compact the session, or ask for one smaller patch/tool "
+                            "action at a time."
+                        )
                         # Same tool-tail close as interrupt / invalid-tool
                         # exhaustion — this path never reaches finalize_turn.
-                        close_interrupted_tool_sequence(messages, _final_response)
+                        if not close_interrupted_tool_sequence(messages, _final_response):
+                            messages.append({
+                                "role": "assistant",
+                                "content": _final_response,
+                            })
                         agent._persist_session(messages, conversation_history)
                         return {
                             "final_response": _final_response,
@@ -6669,7 +6763,7 @@ def run_conversation(
                             "api_calls": api_call_count,
                             "completed": False,
                             "partial": True,
-                            "error": _final_response,
+                            "error": "Truncated tool-call recovery loop detected",
                         }
 
                     # Track retries for invalid JSON arguments
@@ -6714,6 +6808,7 @@ def run_conversation(
                 
                 # Reset retry counter on successful JSON validation
                 agent._invalid_json_retries = 0
+                truncated_tool_call_json_retries = 0
 
                 # ── Post-call guardrails ──────────────────────────
                 assistant_message.tool_calls = agent._cap_delegate_task_calls(

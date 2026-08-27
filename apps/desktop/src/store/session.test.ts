@@ -16,6 +16,7 @@ import {
   commitWorkspaceCwdForSelectedSession,
   getRememberedRoute,
   getRememberedSessionId,
+  getRememberedSessionTitle,
   mergeSessionPage,
   rememberedSessionProfile,
   resolveComposerSessionKey,
@@ -25,6 +26,7 @@ import {
   setCurrentCwdTransient,
   setRememberedRoute,
   setRememberedSessionId,
+  setRememberedSessionTitle,
   setSelectedStoredSessionId,
   setSessions,
   shouldMigrateComposerScope,
@@ -583,6 +585,24 @@ describe('remembered session id (per profile)', () => {
 
     expect(getRememberedSessionId('ai-engineer')).toBeNull()
     expect(getRememberedSessionId('default')).toBe('personal-session')
+  })
+
+  it('scopes remembered session titles by profile and session id', () => {
+    setRememberedSessionTitle('ai-engineer', 'same-id', 'Work chat')
+    setRememberedSessionTitle('default', 'same-id', 'Personal chat')
+
+    expect(getRememberedSessionTitle('ai-engineer', 'same-id')).toBe('Work chat')
+    expect(getRememberedSessionTitle('default', 'same-id')).toBe('Personal chat')
+    expect(getRememberedSessionTitle('research', 'same-id')).toBe('')
+  })
+
+  it('encodes profile and session id in remembered session title keys', () => {
+    setRememberedSessionTitle('research/ops', 'session/with/slash', 'Ops chat')
+
+    expect(getRememberedSessionTitle('research/ops', 'session/with/slash')).toBe('Ops chat')
+    expect(
+      localStorage.getItem('hermes.desktop.lastSessionTitle.profile.research%2Fops.session.session%2Fwith%2Fslash')
+    ).toBe('Ops chat')
   })
 })
 

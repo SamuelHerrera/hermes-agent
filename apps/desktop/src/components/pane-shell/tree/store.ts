@@ -46,6 +46,7 @@ import { rootChildSide } from './renderer/track-model'
 // v2: v1 trees were saved against placeholder panes with index-order zone
 // assignment (chat could land in a corner cell). Retire them wholesale.
 const STORAGE_KEY = 'hermes.desktop.layoutTree.v2'
+const ACTIVE_GROUP_KEY = 'hermes.desktop.layoutTree.activeGroup'
 
 writeKey('hermes.desktop.layoutTree.v1', null)
 
@@ -314,7 +315,7 @@ export function registerLayoutResetHandler(fn: () => void): () => void {
 /** The zone the user last interacted with (clicked / focused into) — the ⌘W
  *  target when nothing is DOM-focused (activeElement is often `body` after a
  *  click lands on a non-focusable surface). Tracked by trackActiveTreeGroup. */
-export const $activeTreeGroup = atom<null | string>(null)
+export const $activeTreeGroup = atom<null | string>(isSecondaryWindow() ? null : readKey(ACTIVE_GROUP_KEY))
 
 /** Bumped whenever a pane's contributed STRIP TOOLS change shape (a toggle
  *  flipped, a handle registered). The strip reads `stripTools()` during render,
@@ -330,6 +331,10 @@ export function invalidateStripTools() {
 export function noteActiveTreeGroup(groupId: null | string) {
   if (groupId !== $activeTreeGroup.get()) {
     $activeTreeGroup.set(groupId)
+
+    if (!isSecondaryWindow()) {
+      writeKey(ACTIVE_GROUP_KEY, groupId)
+    }
   }
 }
 

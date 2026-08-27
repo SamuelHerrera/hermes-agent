@@ -433,6 +433,8 @@ export interface SessionTile {
   error?: string
   /** VS Code-style preview tab: replaceable until promoted by double-click. */
   preview?: boolean
+  /** Last known non-draft tab title, persisted so restart does not flash "New session". */
+  workspaceTabTitle?: string
 }
 
 // Tiles are persisted PER PROFILE: a session belongs to one profile, and the
@@ -448,14 +450,15 @@ const TILE_PANE_PREFIX = 'session-tile:'
 /** Persisted placement — `dir` + strip slot (`before`) + dock `anchor` so a
  *  restart / profile swap re-adopts tiles in the same order, not all stacked
  *  right of workspace. */
-type StoredTile = Pick<SessionTile, 'anchor' | 'before' | 'dir' | 'preview' | 'storedSessionId'>
+type StoredTile = Pick<SessionTile, 'anchor' | 'before' | 'dir' | 'preview' | 'storedSessionId' | 'workspaceTabTitle'>
 
 const toStored = (t: SessionTile): StoredTile => ({
   anchor: t.anchor,
   before: t.before,
   dir: t.dir,
   preview: t.preview,
-  storedSessionId: t.storedSessionId
+  storedSessionId: t.storedSessionId,
+  workspaceTabTitle: t.workspaceTabTitle
 })
 
 function parseTileList(value: unknown): StoredTile[] {
@@ -470,7 +473,8 @@ function parseTileList(value: unknown): StoredTile[] {
             before: typeof raw.before === 'string' || raw.before === null ? raw.before : undefined,
             dir: raw.dir,
             preview: typeof raw.preview === 'boolean' ? raw.preview : undefined,
-            storedSessionId: raw.storedSessionId
+            storedSessionId: raw.storedSessionId,
+            workspaceTabTitle: typeof raw.workspaceTabTitle === 'string' ? raw.workspaceTabTitle : undefined
           }
         })
     : []
