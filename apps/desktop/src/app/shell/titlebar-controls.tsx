@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { type ComponentProps, type MouseEvent, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, type MouseEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
@@ -91,13 +91,17 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
-const SIDEBAR_TOOLBAR_BREATHING_ROOM = 8
-const TITLEBAR_TOOL_WIDTH = 22
+const SIDEBAR_TOOLBAR_BREATHING_ROOM = 12
+const TITLEBAR_TOOL_WIDTH = 24
 const PROFILE_TOOL_WIDTH = 37
-const TERMINAL_TOOL_WIDTH = 26
+const TERMINAL_TOOL_WIDTH = 27
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
+}
+
+function isFeedbackStatusbarItem(item: StatusbarItem): boolean {
+  return `${item.id} ${item.title ?? ''} ${item.label ?? ''} ${item.toggleLabel ?? ''}`.toLowerCase().includes('feedback')
 }
 
 export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): boolean {
@@ -107,7 +111,8 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
 
-function useSidebarToolbarBudget(sidebarWidth: number): number {
+function useSidebarToolbarBudget(sidebarWidth: number): { budget: number; ref: RefObject<HTMLDivElement | null> } {
+  const ref = useRef<HTMLDivElement>(null)
   const fallbackBudget = Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_BREATHING_ROOM)
   const [budget, setBudget] = useState(fallbackBudget)
 
@@ -116,46 +121,46 @@ function useSidebarToolbarBudget(sidebarWidth: number): number {
   }, [fallbackBudget])
 
   useEffect(() => {
-    let frame = 0
-    let observer: ResizeObserver | null = null
-    let disposed = false
+    const element = ref.current
 
-    const sync = (container: HTMLElement) => {
-      const next = Math.max(0, container.getBoundingClientRect().width - SIDEBAR_TOOLBAR_BREATHING_ROOM)
+    if (!element) {
+      return undefined
+    }
+
+    let observer: ResizeObserver | null = null
+    let frame = 0
+
+    const sync = () => {
+      const next = Math.max(0, element.getBoundingClientRect().width)
+
+      if (next <= 0) {
+        return
+      }
+
       setBudget(current => (Math.abs(current - next) < 1 ? current : next))
     }
 
-    const bind = () => {
-      if (disposed) {
-        return
-      }
-
-      const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
-
-      if (!container) {
-        frame = window.requestAnimationFrame(bind)
-
-        return
-      }
-
-      sync(container)
-
-      if (typeof ResizeObserver !== 'undefined') {
-        observer = new ResizeObserver(() => sync(container))
-        observer.observe(container)
-      }
+    const schedule = () => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(sync)
     }
 
-    bind()
+    sync()
+    window.addEventListener('resize', schedule)
+
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(schedule)
+      observer.observe(element)
+    }
 
     return () => {
-      disposed = true
       window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', schedule)
       observer?.disconnect()
     }
   }, [])
 
-  return budget
+  return { budget, ref }
 }
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
@@ -350,7 +355,7 @@ export function TitlebarControls({
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
-  const toolbarBudget = useSidebarToolbarBudget(sidebarWidth)
+  const { budget: toolbarBudget, ref: toolbarRef } = useSidebarToolbarBudget(sidebarWidth)
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
@@ -565,16 +570,31 @@ export function TitlebarControls({
   const terminalStatusbarItem = pinnedStatusbarItemsById.get('terminal')
   const approvalStatusbarItem = pinnedStatusbarItemsById.get('approval-mode')
 
-  const requiredToolbarWidth =
+  type ToolbarInlineItem =
+    | { id: string; kind: 'statusbar'; item: StatusbarItem; width: number }
+    | { id: string; kind: 'tool'; tool: TitlebarTool; width: number }
+
+  const fixedSidebarToolbarWidth =
     leftToolbarTools.filter(tool => !tool.hidden).length * TITLEBAR_TOOL_WIDTH +
     TITLEBAR_TOOL_WIDTH +
     PROFILE_TOOL_WIDTH +
     TITLEBAR_TOOL_WIDTH
 
-  const optionalToolbarItems: Array<
-    | { id: string; kind: 'statusbar'; item: StatusbarItem; width: number }
-    | { group: 'system' | 'workspace'; id: string; kind: 'tool'; tool: TitlebarTool; width: number }
-  > = [
+  const actionableMenuStatusbarItems = visibleStatusbarItems.filter(
+    item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
+  )
+
+  const alwaysOverflowStatusbarItems = actionableMenuStatusbarItems.filter(isFeedbackStatusbarItem)
+  const expandableStatusbarItems = actionableMenuStatusbarItems.filter(item => !isFeedbackStatusbarItem(item))
+
+  const expandableToolbarItems: ToolbarInlineItem[] = [
+    ...expandableStatusbarItems.map(item => ({ id: item.id, item, kind: 'statusbar' as const, width: TITLEBAR_TOOL_WIDTH })),
+    ...overflowWorkspacePageTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
+    ...visibleLocalServiceTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
+    ...overflowSystemTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH }))
+  ]
+
+  const coreToolbarItems: ToolbarInlineItem[] = [
     ...pinnedSystemTools.map(tool => ({ group: 'system' as const, id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
     ...(approvalStatusbarItem
       ? [{ id: approvalStatusbarItem.id, item: approvalStatusbarItem, kind: 'statusbar' as const, width: TITLEBAR_TOOL_WIDTH }]
@@ -590,35 +610,46 @@ export function TitlebarControls({
       : [])
   ]
 
-  const visibleOptionalToolbarIds = new Set<string>()
-  let remainingToolbarWidth = toolbarBudget - requiredToolbarWidth
+  const visibleCoreToolbarIds = new Set<string>()
+  const visibleExpandableToolbarIds = new Set<string>()
+  let remainingToolbarWidth = toolbarBudget - fixedSidebarToolbarWidth
 
-  for (const item of [...optionalToolbarItems].reverse()) {
+  for (const item of [...coreToolbarItems].reverse()) {
     if (remainingToolbarWidth >= item.width) {
-      visibleOptionalToolbarIds.add(item.id)
+      visibleCoreToolbarIds.add(item.id)
       remainingToolbarWidth -= item.width
     }
   }
 
-  const overflowOptionalToolbarTools = optionalToolbarItems.flatMap(item =>
-    item.kind === 'tool' && !visibleOptionalToolbarIds.has(item.id) ? [item.tool] : []
+  for (const item of expandableToolbarItems) {
+    if (remainingToolbarWidth >= item.width) {
+      visibleExpandableToolbarIds.add(item.id)
+      remainingToolbarWidth -= item.width
+    }
+  }
+
+  const visibleExpandableToolbarItems = expandableToolbarItems.filter(item => visibleExpandableToolbarIds.has(item.id))
+  const visibleCoreToolbarItems = coreToolbarItems.filter(item => visibleCoreToolbarIds.has(item.id))
+
+  const overflowOptionalToolbarTools = [...expandableToolbarItems, ...coreToolbarItems].flatMap(item =>
+    item.kind === 'tool' && !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id) ? [item.tool] : []
   )
 
   const overflowStatusbarItems = [
-    ...optionalToolbarItems.flatMap(item =>
-      item.kind === 'statusbar' && !visibleOptionalToolbarIds.has(item.id) ? [item.item] : []
+    ...[...expandableToolbarItems, ...coreToolbarItems].flatMap(item =>
+      item.kind === 'statusbar' && !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id)
+        ? [item.item]
+        : []
     ),
-    ...visibleStatusbarItems.filter(
-      item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
-    )
+    ...alwaysOverflowStatusbarItems
   ]
 
-  const visibleOptionalSystemTools = pinnedSystemTools.filter(tool => visibleOptionalToolbarIds.has(tool.id))
-
-  const visibleOptionalWorkspaceTools = [
-    ...[...pinnedWorkspacePageTools].reverse(),
-    ...(newChatTool ? [newChatTool] : [])
-  ].filter(tool => visibleOptionalToolbarIds.has(tool.id))
+  const renderToolbarInlineItem = (item: ToolbarInlineItem) =>
+    item.kind === 'tool' ? (
+      <TitlebarToolButton key={`tool:${item.id}`} navigate={navigate} tool={item.tool} />
+    ) : (
+      <TitlebarStatusbarItemButton item={item.item} key={`status:${item.id}`} navigate={navigate} />
+    )
 
   return (
     <>
@@ -651,8 +682,10 @@ export function TitlebarControls({
           // This toolbar belongs to the sidebar's first content row, not the
           // draggable titlebar. Use a fallback because auxiliary/installed
           // smoke windows can render before the shell var is visible here.
-          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] rounded-md bg-(--ui-sidebar-surface-background)'
+          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)'
         )}
+        ref={toolbarRef}
+        style={{ width: `max(0px, calc(var(--workspace-left, ${sidebarWidth}px) - 1.125rem))` }}
       >
         {leftToolbarTools
           .filter(tool => !tool.hidden)
@@ -664,27 +697,12 @@ export function TitlebarControls({
             <TitlebarOverflowMenu
               navigate={navigate}
               statusbarItems={overflowStatusbarItems}
-              tools={[
-                ...overflowOptionalToolbarTools,
-                ...overflowWorkspacePageTools,
-                ...visibleLocalServiceTools,
-                ...overflowSystemTools
-              ]}
+              tools={overflowOptionalToolbarTools}
             />
+            {visibleExpandableToolbarItems.map(renderToolbarInlineItem)}
             <TitlebarProfileMenu />
             <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-            {visibleOptionalSystemTools.map(tool => (
-              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-            ))}
-            {approvalStatusbarItem && visibleOptionalToolbarIds.has(approvalStatusbarItem.id) && (
-              <TitlebarStatusbarItemButton item={approvalStatusbarItem} key="status:approval-mode" navigate={navigate} />
-            )}
-            {terminalStatusbarItem && visibleOptionalToolbarIds.has(terminalStatusbarItem.id) && (
-              <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
-            )}
-            {visibleOptionalWorkspaceTools.map(tool => (
-              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-            ))}
+            {visibleCoreToolbarItems.map(renderToolbarInlineItem)}
           </>
         )}
       </div>
