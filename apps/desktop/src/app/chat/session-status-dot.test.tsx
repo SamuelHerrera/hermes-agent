@@ -31,8 +31,11 @@ afterEach(() => {
   $unreadFinishedSessionIds.set([])
 })
 
-const spinner = (container: HTMLElement) => container.querySelector('.codicon-loading.codicon-modifier-spin')
+const spinner = (container: HTMLElement) =>
+  container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+
 const normalDot = (container: HTMLElement) => container.querySelector('span[aria-hidden="true"].rounded-full')
+const loadingRing = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-session-status="working"]')
 
 describe('SessionStatusDot running icon', () => {
   it('shows a rotating loading icon while a session is running', () => {
@@ -40,7 +43,12 @@ describe('SessionStatusDot running icon', () => {
 
     const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    expect(spinner(container)).toBeTruthy()
+    const runningSpinner = spinner(container)
+    const ring = loadingRing(container)
+
+    expect(runningSpinner).toBeTruthy()
+    expect(runningSpinner?.style.fontSize).toBe('0.75rem')
+    expect(ring?.classList.contains('size-3')).toBe(true)
     expect(normalDot(container)).toBeTruthy()
   })
 
@@ -72,8 +80,13 @@ describe('session tab attention treatment', () => {
 
     const lead = render(<SessionTabLead session={{ id: 's1' } as never} storedSessionId="s1" />)
 
+    const tabSpinner = spinner(lead.container)
+    const tabRing = loadingRing(lead.container)
+
     expect(lead.container.querySelector('[data-session-project-dot] [data-session-status="working"]')).toBeTruthy()
-    expect(lead.container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeTruthy()
+    expect(tabSpinner).toBeTruthy()
+    expect(tabSpinner?.style.fontSize).toBe('0.75rem')
+    expect(tabRing?.classList.contains('size-3')).toBe(true)
     expect(normalDot(lead.container)).toBeTruthy()
 
     const attention = render(<SessionTabAttentionDot storedSessionId="s1" />)

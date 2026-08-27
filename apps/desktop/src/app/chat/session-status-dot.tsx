@@ -29,6 +29,8 @@ type StatusIconVariant = {
 
 // Shared base for every active dot; idle is smaller and uses its own class.
 const DOT_BASE = 'size-1.5 rounded-full'
+const LOADING_RING_CLASS = 'size-3'
+const LOADING_RING_ICON_SIZE = '0.75rem'
 
 // Most states are dots: color + fill/hollow tell states apart. A live turn is
 // the exception — it becomes the only moving status treatment, then returns to a
@@ -46,7 +48,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // status treatment; settled states return to a normal dot.
   working: {
     ariaLabel: r => r.sessionRunning,
-    className: 'size-2.5 text-(--ui-accent)',
+    className: `${LOADING_RING_CLASS} text-(--ui-accent)`,
     icon: 'loading',
     role: 'status'
   },
@@ -55,7 +57,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // opacity is what says it has gone quiet.
   stalled: {
     ariaLabel: r => r.sessionRunning,
-    className: 'size-2.5 text-(--ui-accent) opacity-70',
+    className: `${LOADING_RING_CLASS} text-(--ui-accent) opacity-70`,
     icon: 'loading',
     role: 'status',
     title: r => r.sessionRunning
@@ -173,7 +175,7 @@ function LoadingProjectDot({
       role={variant.role}
       title={variant.title?.(r) ?? label}
     >
-      <Codicon className="absolute inset-0 block leading-none" name="loading" size="0.625rem" spinning />
+      <Codicon className="absolute inset-0 block leading-none" name="loading" size={LOADING_RING_ICON_SIZE} spinning />
       <ProjectColorDot color={color} />
     </span>
   )
@@ -210,8 +212,11 @@ export type SessionProjectDotProps = Pick<
 export function SessionProjectDot({ session, storedSessionId, branchStem, className }: SessionProjectDotProps) {
   const { t } = useI18n()
   const r = t.sidebar.row
+
   useStore($sessionColorById)
+
   const color = sessionColorFor(session) ?? null
+
   const dotState = useStoreSelector($sessionDotStateById, states =>
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'idle'
   )
