@@ -556,35 +556,54 @@ export function TitlebarControls({
   const terminalStatusbarItem = pinnedStatusbarItemsById.get('terminal')
   const approvalStatusbarItem = pinnedStatusbarItemsById.get('approval-mode')
 
-  const overflowStatusbarItems = visibleStatusbarItems.filter(
-    item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
-  )
-
   const requiredToolbarWidth =
     leftToolbarTools.filter(tool => !tool.hidden).length * TITLEBAR_TOOL_WIDTH +
     TITLEBAR_TOOL_WIDTH +
     PROFILE_TOOL_WIDTH +
-    TITLEBAR_TOOL_WIDTH +
-    (approvalStatusbarItem ? TITLEBAR_TOOL_WIDTH : 0) +
-    (terminalStatusbarItem ? TERMINAL_TOOL_WIDTH : 0)
+    TITLEBAR_TOOL_WIDTH
 
-  const optionalToolbarTools = [
-    ...pinnedSystemTools,
-    ...[...pinnedWorkspacePageTools].reverse(),
-    ...(newChatTool ? [newChatTool] : [])
+  const optionalToolbarItems: Array<
+    | { id: string; kind: 'statusbar'; item: StatusbarItem; width: number }
+    | { group: 'system' | 'workspace'; id: string; kind: 'tool'; tool: TitlebarTool; width: number }
+  > = [
+    ...pinnedSystemTools.map(tool => ({ group: 'system' as const, id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
+    ...(approvalStatusbarItem
+      ? [{ id: approvalStatusbarItem.id, item: approvalStatusbarItem, kind: 'statusbar' as const, width: TITLEBAR_TOOL_WIDTH }]
+      : []),
+    ...(terminalStatusbarItem
+      ? [{ id: terminalStatusbarItem.id, item: terminalStatusbarItem, kind: 'statusbar' as const, width: TERMINAL_TOOL_WIDTH }]
+      : []),
+    ...[...pinnedWorkspacePageTools]
+      .reverse()
+      .map(tool => ({ group: 'workspace' as const, id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
+    ...(newChatTool
+      ? [{ group: 'workspace' as const, id: newChatTool.id, kind: 'tool' as const, tool: newChatTool, width: TITLEBAR_TOOL_WIDTH }]
+      : [])
   ]
 
   const visibleOptionalToolbarIds = new Set<string>()
   let remainingToolbarWidth = toolbarBudget - requiredToolbarWidth
 
-  for (const tool of [...optionalToolbarTools].reverse()) {
-    if (remainingToolbarWidth >= TITLEBAR_TOOL_WIDTH) {
-      visibleOptionalToolbarIds.add(tool.id)
-      remainingToolbarWidth -= TITLEBAR_TOOL_WIDTH
+  for (const item of optionalToolbarItems) {
+    if (remainingToolbarWidth >= item.width) {
+      visibleOptionalToolbarIds.add(item.id)
+      remainingToolbarWidth -= item.width
     }
   }
 
-  const overflowOptionalToolbarTools = optionalToolbarTools.filter(tool => !visibleOptionalToolbarIds.has(tool.id))
+  const overflowOptionalToolbarTools = optionalToolbarItems.flatMap(item =>
+    item.kind === 'tool' && !visibleOptionalToolbarIds.has(item.id) ? [item.tool] : []
+  )
+
+  const overflowStatusbarItems = [
+    ...optionalToolbarItems.flatMap(item =>
+      item.kind === 'statusbar' && !visibleOptionalToolbarIds.has(item.id) ? [item.item] : []
+    ),
+    ...visibleStatusbarItems.filter(
+      item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
+    )
+  ]
+
   const visibleOptionalSystemTools = pinnedSystemTools.filter(tool => visibleOptionalToolbarIds.has(tool.id))
 
   const visibleOptionalWorkspaceTools = [
