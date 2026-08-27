@@ -85,6 +85,8 @@ export function useStatusbarItems({
   // the takeover store alone stays true behind a stacked sibling tab or a
   // minimized zone, which lit the button for a pane the user couldn't see.
   const terminalShowing = useStore($paneVisible('terminal'))
+  const filesShowing = useStore($paneVisible('files'))
+  const reviewShowing = useStore($paneVisible('review'))
   const primaryBusy = useStore($busy)
   // Draft / primary composer atom — used only while the focused surface is the
   // primary (or a draft with no runtime slice yet). A focused TILE keeps its
@@ -483,6 +485,28 @@ export function useStatusbarItems({
         toggleLabel: copy.toggleApprovalMode
       },
       {
+        actionId: 'view.showFiles',
+        className: `w-7 justify-center px-0${filesShowing ? ' bg-accent/55 text-foreground' : ''}`,
+        hidden: !chatOpen,
+        icon: <FolderOpen className="size-3.5" />,
+        id: 'files',
+        onSelect: () => togglePaneVisible('files'),
+        title: filesShowing ? 'Hide files' : 'Show files',
+        toggleLabel: 'Files',
+        variant: 'action'
+      },
+      {
+        actionId: 'view.toggleReview',
+        className: `w-7 justify-center px-0${reviewShowing ? ' bg-accent/55 text-foreground' : ''}`,
+        hidden: !chatOpen,
+        icon: <Codicon name="git-compare" size="0.875rem" />,
+        id: 'review',
+        onSelect: () => togglePaneVisible('review'),
+        title: reviewShowing ? 'Hide changes' : 'Show changes',
+        toggleLabel: 'Changes',
+        variant: 'action'
+      },
+      {
         actionId: 'view.showTerminal',
         className: `w-7 justify-center px-0${terminalShowing ? ' bg-accent/55 text-foreground' : ''}`,
         hidden: !chatOpen,
@@ -493,7 +517,9 @@ export function useStatusbarItems({
         toggleLabel: copy.toggleTerminal,
         variant: 'action'
       },
-      ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK ? [] : [clientVersionItem, ...(backendVersionItem ? [backendVersionItem] : [])])
+      ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK
+        ? []
+        : [clientVersionItem, ...(backendVersionItem ? [backendVersionItem] : [])])
     ],
     [
       approvalModeItem,
@@ -502,7 +528,9 @@ export function useStatusbarItems({
       chatOpen,
       clientVersionItem,
       copy,
+      filesShowing,
       gatewayState,
+      reviewShowing,
       terminalShowing,
       turnStartedAt
     ]
