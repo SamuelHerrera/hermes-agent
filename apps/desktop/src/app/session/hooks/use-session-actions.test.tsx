@@ -4,7 +4,8 @@ import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
-import { revealTreePane } from '@/components/pane-shell/tree/store'
+import { group } from '@/components/pane-shell/tree/model'
+import { $layoutTree, revealTreePane } from '@/components/pane-shell/tree/store'
 import {
   getAllSessionMessages,
   getLatestSessionMessages,
@@ -15,7 +16,7 @@ import {
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { $clarifyRequests, clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
-import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
+import { $activeGatewayProfile, $emptyWorkspaceRequest, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
 import {
   $projectScope,
   $projectTree,
@@ -128,11 +129,15 @@ function storedSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
 function Harness({
   navigate = vi.fn(),
   onReady,
-  requestGateway
+  requestGateway,
+  selectedStoredSessionId = null,
+  selectedStoredSessionIdRef
 }: {
   navigate?: ReturnType<typeof vi.fn>
   onReady: (handle: HarnessHandle) => void
   requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>
+  selectedStoredSessionId?: string | null
+  selectedStoredSessionIdRef?: MutableRefObject<string | null>
 }) {
   const ref = <T,>(value: T): MutableRefObject<T> => ({ current: value })
 
@@ -148,8 +153,8 @@ function Harness({
     requestGateway,
     resetViewSync: vi.fn(),
     runtimeIdByStoredSessionIdRef: ref(new Map<string, string>()),
-    selectedStoredSessionId: null,
-    selectedStoredSessionIdRef: ref<string | null>(null),
+    selectedStoredSessionId,
+    selectedStoredSessionIdRef: selectedStoredSessionIdRef ?? ref<string | null>(selectedStoredSessionId),
     sessionStateByRuntimeIdRef: ref(new Map<string, ClientSessionState>()),
     syncSessionStateToView: vi.fn(),
     updateSessionState: () => ({}) as ClientSessionState
@@ -1978,10 +1983,15 @@ describe('resumeSession warm-cache mapping integrity', () => {
 describe('archiveSession delegate visibility', () => {
   afterEach(() => {
     cleanup()
+    $emptyWorkspaceRequest.set(0)
+    $layoutTree.set(null)
     setSessions([])
     $projectTree.set([])
     $removedSessionIds.set(new Set())
     $sessionMutationsInFlight.set(new Set())
+    $sessionTiles.set([])
+    setActiveSessionId(null)
+    setSelectedStoredSessionId(null)
     vi.restoreAllMocks()
   })
 
@@ -2027,6 +2037,89 @@ describe('archiveSession delegate visibility', () => {
 
     expect($sessions.get().map(session => session.id)).toEqual(['unrelated'])
     expect([...$removedSessionIds.get()].sort()).toEqual(['child', 'grandchild', 'parent'])
+  })
+
+  it('promotes the next stacked chat tab instead of opening a New Session tab when archiving main', async () => {
+    const primary = storedSession({ id: 'primary', title: 'Primary chat' })
+    const next = storedSession({ id: 'next', title: 'Next chat' })
+    const selectedStoredSessionIdRef: MutableRefObject<string | null> = { current: 'primary' }
+    const navigate = vi.fn()
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          info: {},
+          message_count: 0,
+          messages: [],
+          resumed: 'next',
+          session_id: 'runtime-next',
+          session_key: 'next'
+        } as never
+      }
+
+      return {} as never
+    })
+
+    setSessions([primary, next])
+    setSelectedStoredSessionId('primary')
+    setActiveSessionId('runtime-primary')
+    $layoutTree.set(group(['workspace', 'session-tile:next'], { active: 'workspace', id: 'main' }))
+    $sessionTiles.set([{ storedSessionId: 'next' }])
+    vi.mocked(setSessionArchived).mockResolvedValue({ ok: true })
+
+    let handle: HarnessHandle | null = null
+    render(
+      <Harness
+        navigate={navigate}
+        onReady={value => (handle = value)}
+        requestGateway={requestGateway}
+        selectedStoredSessionId="primary"
+        selectedStoredSessionIdRef={selectedStoredSessionIdRef}
+      />
+    )
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.archiveSession('primary')
+    })
+
+    await waitFor(() => expect(requestGateway).toHaveBeenCalledWith('session.resume', expect.objectContaining({ session_id: 'next' })))
+    expect(navigate).toHaveBeenCalledWith(sessionRoute('next'), { replace: true })
+    expect($selectedStoredSessionId.get()).toBe('next')
+    expect($sessionTiles.get()).toEqual([])
+    expect($emptyWorkspaceRequest.get()).toBe(0)
+    expect($sessions.get().map(session => session.id)).toEqual(['next'])
+  })
+
+  it('parks the workspace instead of opening a New Session tab when archiving the final main tab', async () => {
+    const primary = storedSession({ id: 'primary', title: 'Primary chat' })
+    const beforeEmptyRequests = $emptyWorkspaceRequest.get()
+
+    setSessions([primary])
+    setSelectedStoredSessionId('primary')
+    setActiveSessionId('runtime-primary')
+    $layoutTree.set(group(['workspace'], { active: 'workspace', id: 'main' }))
+    vi.mocked(setSessionArchived).mockResolvedValue({ ok: true })
+
+    let handle: HarnessHandle | null = null
+    const requestGateway = vi.fn(async () => ({}) as never)
+    render(
+      <Harness
+        onReady={value => (handle = value)}
+        requestGateway={requestGateway}
+        selectedStoredSessionId="primary"
+        selectedStoredSessionIdRef={{ current: 'primary' }}
+      />
+    )
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.archiveSession('primary')
+    })
+
+    expect(requestGateway).not.toHaveBeenCalled()
+    expect($emptyWorkspaceRequest.get()).toBe(beforeEmptyRequests + 1)
+    expect($sessions.get()).toEqual([])
   })
 })
 

@@ -20,7 +20,7 @@ import { migrateSessionDraft } from '@/store/composer'
 import { clearQueuedPrompts, migrateQueuedPrompts } from '@/store/composer-queue'
 import { $pinnedSessionIds } from '@/store/layout'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
-import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey } from '@/store/profile'
+import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey, requestEmptyWorkspace } from '@/store/profile'
 import {
   beginSessionMutation,
   endSessionMutation,
@@ -74,6 +74,7 @@ import {
   $sessionTiles,
   closeSessionTile,
   dropSessionState,
+  nextSessionTileForWorkspace,
   openSessionTile,
   patchSessionTile,
   publishSessionState,
@@ -1632,6 +1633,10 @@ export function useSessionActions({
       // live tip after compression. Drop both so the pin can't linger.
       const archivedPinId = archived ? sessionPinId(archived) : storedSessionId
       const archivedIds = [...archivedFamilyIds, archived?.id, archived?._lineage_root_id]
+      const replacementCandidate = wasSelected ? nextSessionTileForWorkspace() : null
+
+      const replacementStoredSessionId =
+        replacementCandidate && !archivedIds.includes(replacementCandidate) ? replacementCandidate : null
 
       // Soft-hide the same visible family the backend will omit after refresh:
       // the parent plus every recursively nested delegate child.
@@ -1641,7 +1646,12 @@ export function useSessionActions({
       $pinnedSessionIds.set(previousPinned.filter(id => id !== storedSessionId && id !== archivedPinId))
 
       if (wasSelected) {
-        startFreshSessionDraft(true)
+        if (replacementStoredSessionId) {
+          navigate(sessionRoute(replacementStoredSessionId), { replace: true })
+          void resumeSession(replacementStoredSessionId, true)
+        } else {
+          requestEmptyWorkspace()
+        }
       }
 
       try {
@@ -1672,7 +1682,7 @@ export function useSessionActions({
         endSessionMutation(archivedIds)
       }
     },
-    [copy, runtimeIdByStoredSessionIdRef, selectedStoredSessionId, sessionStateByRuntimeIdRef, startFreshSessionDraft]
+    [copy, navigate, resumeSession, runtimeIdByStoredSessionIdRef, selectedStoredSessionId, sessionStateByRuntimeIdRef]
   )
 
   return {
