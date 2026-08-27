@@ -91,7 +91,9 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
-const SIDEBAR_TOOLBAR_BREATHING_ROOM = 12
+const SIDEBAR_LIVE_RESIZE_EVENT = 'hermes:sidebar-live-width'
+const SIDEBAR_TOOLBAR_EDGE_INSET = 18
+const SIDEBAR_TOOLBAR_FIT_SAFETY = 8
 const TITLEBAR_TOOL_WIDTH = 24
 const PROFILE_TOOL_WIDTH = 37
 const TERMINAL_TOOL_WIDTH = 27
@@ -111,14 +113,44 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
 
-function useSidebarToolbarBudget(sidebarWidth: number): { budget: number; ref: RefObject<HTMLDivElement | null> } {
+function toolbarWidthFromSidebarWidth(sidebarWidth: number): number {
+  return Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_EDGE_INSET)
+}
+
+function fitBudgetFromToolbarWidth(toolbarWidth: number): number {
+  return Math.max(0, toolbarWidth - SIDEBAR_TOOLBAR_FIT_SAFETY)
+}
+
+function useSidebarToolbarBudget(sidebarWidth: number): {
+  budget: number
+  ref: RefObject<HTMLDivElement | null>
+  width: string
+} {
   const ref = useRef<HTMLDivElement>(null)
-  const fallbackBudget = Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_BREATHING_ROOM)
-  const [budget, setBudget] = useState(fallbackBudget)
+  const fallbackToolbarWidth = toolbarWidthFromSidebarWidth(sidebarWidth)
+  const [liveToolbarWidth, setLiveToolbarWidth] = useState<number | null>(null)
+  const effectiveToolbarWidth = liveToolbarWidth ?? fallbackToolbarWidth
+  const [budget, setBudget] = useState(fitBudgetFromToolbarWidth(effectiveToolbarWidth))
 
   useEffect(() => {
-    setBudget(fallbackBudget)
-  }, [fallbackBudget])
+    setBudget(fitBudgetFromToolbarWidth(effectiveToolbarWidth))
+  }, [effectiveToolbarWidth])
+
+  useEffect(() => {
+    const syncLiveWidth = (event: Event) => {
+      const width = (event as CustomEvent<{ width?: number }>).detail?.width
+
+      if (typeof width !== 'number' || !Number.isFinite(width)) {
+        return
+      }
+
+      setLiveToolbarWidth(toolbarWidthFromSidebarWidth(width))
+    }
+
+    window.addEventListener(SIDEBAR_LIVE_RESIZE_EVENT, syncLiveWidth)
+
+    return () => window.removeEventListener(SIDEBAR_LIVE_RESIZE_EVENT, syncLiveWidth)
+  }, [])
 
   useEffect(() => {
     const element = ref.current
@@ -137,7 +169,8 @@ function useSidebarToolbarBudget(sidebarWidth: number): { budget: number; ref: R
         return
       }
 
-      setBudget(current => (Math.abs(current - next) < 1 ? current : next))
+      const nextBudget = fitBudgetFromToolbarWidth(next)
+      setBudget(current => (Math.abs(current - nextBudget) < 1 ? current : nextBudget))
     }
 
     const schedule = () => {
@@ -160,7 +193,13 @@ function useSidebarToolbarBudget(sidebarWidth: number): { budget: number; ref: R
     }
   }, [])
 
-  return { budget, ref }
+  return {
+    budget,
+    ref,
+    width: liveToolbarWidth === null
+      ? `max(0px, calc(var(--workspace-left, ${sidebarWidth}px) - ${SIDEBAR_TOOLBAR_EDGE_INSET}px))`
+      : `${liveToolbarWidth}px`
+  }
 }
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
@@ -355,7 +394,7 @@ export function TitlebarControls({
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
-  const { budget: toolbarBudget, ref: toolbarRef } = useSidebarToolbarBudget(sidebarWidth)
+  const { budget: toolbarBudget, ref: toolbarRef, width: toolbarWidth } = useSidebarToolbarBudget(sidebarWidth)
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
@@ -685,7 +724,7 @@ export function TitlebarControls({
           'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)'
         )}
         ref={toolbarRef}
-        style={{ width: `max(0px, calc(var(--workspace-left, ${sidebarWidth}px) - 1.125rem))` }}
+        style={{ width: toolbarWidth }}
       >
         {leftToolbarTools
           .filter(tool => !tool.hidden)

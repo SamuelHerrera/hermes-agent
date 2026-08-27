@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,7 +17,7 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 }))
 
 afterEach(() => {
-  setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
+  act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
   cleanup()
   vi.clearAllMocks()
 })
@@ -120,7 +120,7 @@ describe('TitlebarControls', () => {
   })
 
   it('reveals lower-priority toolbar actions when the sidebar is widened', () => {
-    setSidebarWidth(320)
+    act(() => setSidebarWidth(320))
 
     render(
       <MemoryRouter>
@@ -144,7 +144,6 @@ describe('TitlebarControls', () => {
       'More app actions',
       'Capabilities',
       'Messaging',
-      'Artifacts',
       'Profiles',
       'Codex subscription usage',
       'Mute haptics',
@@ -153,5 +152,35 @@ describe('TitlebarControls', () => {
       'New project',
       'New session'
     ])
+  })
+
+  it('reacts to live sidebar resize previews before the drag is committed', async () => {
+    render(
+      <MemoryRouter>
+        <TitlebarControls
+          onNewSession={vi.fn()}
+          onOpenSettings={vi.fn()}
+          statusbarItems={[
+            { icon: <span data-testid="approval-icon" />, id: 'approval-mode', title: 'Approval mode: Off', variant: 'action' },
+            { icon: <span data-testid="terminal-icon" />, id: 'terminal', title: 'Show terminal', variant: 'action' }
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull()
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('hermes:sidebar-live-width', { detail: { width: 380 } }))
+    })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Capabilities' })).toBeTruthy())
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('hermes:sidebar-live-width', { detail: { width: 210 } }))
+    })
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull())
+    expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy()
   })
 })

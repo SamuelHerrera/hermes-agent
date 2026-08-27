@@ -48,6 +48,9 @@ import {
 } from './track-model'
 import { TreeNode } from './tree-node'
 
+const SIDEBAR_LIVE_RESIZE_EVENT = 'hermes:sidebar-live-width'
+const SIDEBAR_PANE_IDS = new Set(['sessions', 'chat-sidebar'])
+
 /** The single group id a subtree resolves to, or null when it holds several
  *  zones — the sash can only collapse a boundary that IS exactly one zone. */
 function groupIdOf(node: LayoutNode): null | string {
@@ -326,6 +329,14 @@ export function TreeSplit({ node, root, rootRow }: { node: SplitNode; root?: boo
       const previewShift = (shiftPx: number) => {
         previewSide(kidA, a.fixed, a0px + shiftPx)
         previewSide(kidB, b.fixed, b0px - shiftPx)
+
+        if (a.fixed && a.paneIds.some(id => SIDEBAR_PANE_IDS.has(id))) {
+          window.dispatchEvent(new CustomEvent(SIDEBAR_LIVE_RESIZE_EVENT, { detail: { width: Math.round(a0px + shiftPx) } }))
+        }
+
+        if (b.fixed && b.paneIds.some(id => SIDEBAR_PANE_IDS.has(id))) {
+          window.dispatchEvent(new CustomEvent(SIDEBAR_LIVE_RESIZE_EVENT, { detail: { width: Math.round(b0px - shiftPx) } }))
+        }
       }
 
       const resize = rafCoalesce(previewShift)
