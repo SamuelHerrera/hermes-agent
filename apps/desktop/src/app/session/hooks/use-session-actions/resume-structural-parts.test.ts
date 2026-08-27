@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { $todosBySession, clearSessionTodos } from '@/store/todos'
 
-import { appendLiveSessionProjection, hydrateSessionTodosFromResume, reconcileResumeMessages } from './utils'
+import {
+  appendLiveSessionProjection,
+  hydrateSessionTodosFromMessages,
+  hydrateSessionTodosFromResume,
+  reconcileResumeMessages
+} from './utils'
 
 const user = (id: string, text: string): ChatMessage => ({
   id,
@@ -188,6 +193,41 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
     expect(toolParts[1]).toMatchObject({ result: { todos: [{ id: 'a', content: 'Run tests', status: 'completed' }] } })
     expect($todosBySession.get()['runtime-1']).toEqual([
       { id: 'a', content: 'Run tests', status: 'completed' }
+    ])
+
+    clearSessionTodos('runtime-1')
+  })
+
+  it('rebuilds the composer task list from recovered journal messages when backend inflight events are gone', () => {
+    clearSessionTodos('runtime-1')
+
+    const recoveredMessages: ChatMessage[] = [
+      user('u1', 'ship it'),
+      {
+        id: 'assistant-stream-1',
+        parts: [
+          {
+            type: 'tool-call',
+            toolCallId: 'todo-1',
+            toolName: 'todo',
+            result: {
+              todos: [
+                { id: 'a', content: 'Inspect code', status: 'completed' },
+                { id: 'b', content: 'Patch root cause', status: 'in_progress' }
+              ]
+            }
+          },
+          { type: 'text', text: 'Working on it' }
+        ],
+        pending: true,
+        role: 'assistant'
+      }
+    ]
+
+    expect(hydrateSessionTodosFromMessages('runtime-1', recoveredMessages)).toBe(true)
+    expect($todosBySession.get()['runtime-1']).toEqual([
+      { id: 'a', content: 'Inspect code', status: 'completed' },
+      { id: 'b', content: 'Patch root cause', status: 'in_progress' }
     ])
 
     clearSessionTodos('runtime-1')

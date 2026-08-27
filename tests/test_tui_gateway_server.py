@@ -1193,7 +1193,7 @@ def test_tui_clarify_lifecycle_events_emit_when_tool_progress_off(monkeypatch):
     monkeypatch.setitem(
         server._sessions,
         "clarify-off-test",
-        {"tool_progress_mode": "off", "tool_started_at": {}},
+        {"history_lock": threading.Lock(), "running": True, "tool_progress_mode": "off", "tool_started_at": {}},
     )
 
     args = {"question": "Pick one", "choices": ["A", "B"]}
@@ -1206,6 +1206,35 @@ def test_tui_clarify_lifecycle_events_emit_when_tool_progress_off(monkeypatch):
     assert events[0][2]["name"] == "clarify"
     assert events[0][2]["tool_id"] == "tool-clarify"
     assert events[1][2]["result"]["user_response"] == "A"
+
+
+def test_tui_todo_lifecycle_events_emit_when_tool_progress_off(monkeypatch):
+    events: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(
+        server, "_emit", lambda event_type, sid, payload: events.append((event_type, sid, payload))
+    )
+    session = {
+        "history_lock": threading.Lock(),
+        "running": True,
+        "tool_progress_mode": "off",
+        "tool_started_at": {},
+    }
+    monkeypatch.setitem(server._sessions, "todo-off-test", session)
+
+    with session["history_lock"]:
+        server._start_inflight_turn(session, "ship it")
+
+    result = json.dumps({"todos": [{"id": "a", "content": "Patch root cause", "status": "in_progress"}]})
+
+    server._on_tool_complete("todo-off-test", "tool-todo", "todo", {}, result)
+
+    assert [event[0] for event in events] == ["tool.complete"]
+    assert events[0][2]["todos"] == [{"id": "a", "content": "Patch root cause", "status": "in_progress"}]
+    inflight = server._live_session_payload("todo-off-test", session, omit_messages=True)["inflight"]
+    assert [event["type"] for event in inflight["events"]] == ["tool.complete"]
+    assert inflight["events"][0]["payload"]["todos"] == [
+        {"id": "a", "content": "Patch root cause", "status": "in_progress"}
+    ]
 
 
 def test_tui_non_interactive_tool_lifecycle_stays_hidden_when_tool_progress_off(monkeypatch):

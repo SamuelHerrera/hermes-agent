@@ -3,7 +3,7 @@ import { getSession } from '@/hermes'
 import { assistantTextPart, type ChatMessage, chatMessageText, reasoningPart, textPart, upsertToolPart } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
-import { parseTodos, type TodoItem } from '@/lib/todos'
+import { latestSessionTodos, parseTodos, type TodoItem } from '@/lib/todos'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { requestDesktopOnboardingForCredentialWarning } from '@/store/onboarding'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
@@ -758,6 +758,18 @@ export function hydrateSessionTodosFromResume(
   if (latest) {
     setSessionTodos(sessionId, latest)
   }
+}
+
+export function hydrateSessionTodosFromMessages(sessionId: string, messages: readonly ChatMessage[]): boolean {
+  const latest = latestSessionTodos(messages)
+
+  if (!sessionId || latest === null) {
+    return false
+  }
+
+  setSessionTodos(sessionId, latest)
+
+  return true
 }
 
 /**

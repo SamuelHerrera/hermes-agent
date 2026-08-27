@@ -92,6 +92,7 @@ import {
   applyStoredSessionPreviewRuntimeInfo,
   type BranchMessage,
   chatMessageArraysEquivalent,
+  hydrateSessionTodosFromMessages,
   hydrateSessionTodosFromResume,
   isSessionGoneError,
   patchSessionWorkspace,
@@ -1143,6 +1144,10 @@ export function useSessionActions({
         })
 
         recoveredInFlightTail = inFlightRecovery.applied
+
+        if (inFlightRecovery.applied) {
+          hydrateSessionTodosFromMessages(resumed.session_id, inFlightRecovery.messages)
+        }
 
         // Prefetch-hit fast path: `preferredMessages` IS the live `$messages`
         // array (already error-merged when `localSnapshot` was built), so reuse

@@ -4483,7 +4483,9 @@ def _tool_lifecycle_required_for_ui(name: str) -> bool:
     # wires request_id from clarify.request. If tool progress is off, suppressing
     # clarify's lifecycle events leaves only the sidebar attention dot visible.
     # setup_mcp is the same shape: its consent card mounts on the tool part.
-    return name in ("clarify", "setup_mcp")
+    # todo feeds the Desktop composer task list/status stack, so it must remain
+    # replayable across reconnect/restart even when optional tool chrome is off.
+    return name in ("clarify", "setup_mcp", "todo")
 
 
 def _restart_slash_worker(sid: str, session: dict):
