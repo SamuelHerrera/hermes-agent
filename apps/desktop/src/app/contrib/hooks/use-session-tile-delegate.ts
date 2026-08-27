@@ -2,12 +2,19 @@ import { useEffect } from 'react'
 
 import { getLatestSessionMessages, PROMPT_SUBMIT_REQUEST_TIMEOUT_MS } from '@/hermes'
 import { toChatMessages } from '@/lib/chat-messages'
+import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
 import { publishSessionState, setSessionTileDelegate } from '@/store/session-states'
 import type { SessionResumeResponse } from '@/types/hermes'
 
 import type { usePromptActions } from '../../session/hooks/use-prompt-actions'
 import { withSessionNotFoundResume } from '../../session/hooks/use-prompt-actions/utils'
-import { resolveSessionProfile } from '../../session/hooks/use-session-actions/utils'
+import {
+  appendLiveSessionProjection,
+  applyRuntimeInfo,
+  hydrateSessionTodosFromMessages,
+  hydrateSessionTodosFromResume,
+  resolveSessionProfile
+} from '../../session/hooks/use-session-actions/utils'
 import type { useSessionStateCache } from '../../session/hooks/use-session-state-cache'
 import type { GatewayRequester } from '../types'
 
@@ -125,13 +132,37 @@ export function useSessionTileDelegate({
           throw new Error('resume returned no session id')
         }
 
+        const resumedRunning = Boolean(resumed.running ?? resumed.info?.running)
+        const runtimeInfo = applyRuntimeInfo(resumed.info, { foreground: false })
+        const baseMessages = toChatMessages(prefetch?.messages ?? resumed.messages ?? [])
+        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || resumed.pending_prompt)
+        const projectedMessages = hasLiveProjection ? appendLiveSessionProjection(baseMessages, resumed) : baseMessages
+        const recovery = recoverInFlightTurnJournal(storedSessionId, projectedMessages, { keepPending: resumedRunning })
+
+        hydrateSessionTodosFromResume({ ...resumed, running: resumedRunning })
+
+        if (recovery.applied) {
+          hydrateSessionTodosFromMessages(runtimeId, recovery.messages)
+        }
+
         updateSessionState(
           runtimeId,
           state => ({
             ...state,
-            busy: Boolean(resumed?.info?.running),
-            messages:
-              state.messages.length > 0 ? state.messages : toChatMessages(prefetch?.messages ?? resumed?.messages ?? [])
+            ...(runtimeInfo ?? {}),
+            adoptedRunningTurn: state.adoptedRunningTurn || resumedRunning,
+            awaitingResponse: resumedRunning && !recovery.applied,
+            busy: resumedRunning,
+            messages: state.messages.length > 0 ? state.messages : recovery.messages,
+            ...(recovery.applied
+              ? {
+                  sawAssistantPayload: true,
+                  streamId: resumedRunning ? recovery.streamId : null,
+                  turnStartedAt: resumedRunning
+                    ? (recovery.turnStartedAt ?? state.turnStartedAt ?? Date.now())
+                    : state.turnStartedAt
+                }
+              : {})
           }),
           storedSessionId
         )
