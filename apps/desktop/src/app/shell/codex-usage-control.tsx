@@ -160,9 +160,8 @@ function UsageResetIcon({
   const progress = clampUnit(resetProgress)
   const fillHeight = CODEX_USAGE_CORE_SIZE * (remaining / 100)
   const fillY = CODEX_USAGE_CORE_ORIGIN + CODEX_USAGE_CORE_SIZE - fillHeight
-  const dotAngle = progress * Math.PI * 2 - Math.PI / 2
-  const dotX = 12 + CODEX_USAGE_RESET_RADIUS * Math.cos(dotAngle)
-  const dotY = 12 + CODEX_USAGE_RESET_RADIUS * Math.sin(dotAngle)
+  const resetArcPath = resetProgressArcPath(progress)
+  const resetDot = resetProgressPoint(progress)
 
   const remainingFill =
     unavailable || disabled
@@ -193,23 +192,17 @@ function UsageResetIcon({
         stroke="var(--codex-usage-track-color)"
         strokeWidth="1.5"
       />
-      <circle
-        cx="12"
-        cy="12"
-        data-testid="codex-usage-reset-progress"
-        fill="none"
-        r={CODEX_USAGE_RESET_RADIUS}
-        stroke={disabled || unavailable ? 'var(--ui-text-quaternary)' : 'var(--codex-usage-reset-color)'}
-        strokeDasharray={CODEX_USAGE_RESET_CIRCUMFERENCE}
-        strokeDashoffset={CODEX_USAGE_RESET_CIRCUMFERENCE * (1 - progress)}
-        strokeLinecap="round"
-        strokeWidth="1.5"
-        style={{
-          transform: 'rotate(-90deg)',
-          transformOrigin: '12px 12px',
-          transition: 'stroke-dashoffset 200ms ease'
-        }}
-      />
+      {resetArcPath && (
+        <path
+          d={resetArcPath}
+          data-testid="codex-usage-reset-progress"
+          fill="none"
+          stroke={disabled || unavailable ? 'var(--ui-text-quaternary)' : 'var(--codex-usage-reset-color)'}
+          strokeLinecap="round"
+          strokeWidth="1.5"
+          style={{ transition: 'd 200ms ease' }}
+        />
+      )}
       <circle
         cx="12"
         cy="12"
@@ -230,8 +223,8 @@ function UsageResetIcon({
         />
       </g>
       <circle
-        cx={dotX}
-        cy={dotY}
+        cx={resetDot.x}
+        cy={resetDot.y}
         fill={disabled || unavailable ? 'var(--ui-text-quaternary)' : 'var(--codex-usage-reset-color)'}
         r="1.2"
         style={{ transition: 'cx 200ms ease, cy 200ms ease' }}
@@ -372,15 +365,20 @@ export function codexUsageResetProgress(
   nowMs = Date.now()
 ): number {
   const resetMs = new Date(usage?.resetAtRaw ?? '').getTime()
-  const resetWindowMs = usage?.resetWindowMs ?? 0
 
-  if (!Number.isFinite(resetMs) || !Number.isFinite(resetWindowMs) || resetWindowMs <= 0) {
+  if (!Number.isFinite(resetMs)) {
     return 0
   }
 
   const millisecondsLeft = Math.max(0, resetMs - nowMs)
+  const resetWindowMs = usage?.resetWindowMs ?? 0
 
-  return clampUnit(1 - millisecondsLeft / Math.max(resetWindowMs, millisecondsLeft))
+  const effectiveWindowMs =
+    Number.isFinite(resetWindowMs) && resetWindowMs > 0 && resetWindowMs >= millisecondsLeft
+      ? resetWindowMs
+      : inferResetWindowMs(millisecondsLeft)
+
+  return clampUnit(1 - millisecondsLeft / effectiveWindowMs)
 }
 
 function clampUnit(value: number): number {
@@ -415,12 +413,47 @@ function codexUsageButtonLabel({
   return `Codex usage: ${formatPercent(percentLeft)} allowance left${resetText}`
 }
 
+function inferResetWindowMs(millisecondsLeft: number): number {
+  if (millisecondsLeft <= 5 * HOUR_MS) {
+    return 5 * HOUR_MS
+  }
+
+  if (millisecondsLeft <= DAY_MS) {
+    return DAY_MS
+  }
+
+  return Math.max(7 * DAY_MS, millisecondsLeft)
+}
+
+function resetProgressPoint(progress: number): { x: number; y: number } {
+  const angle = clampUnit(progress) * Math.PI * 2
+
+  return {
+    x: 12 + CODEX_USAGE_RESET_RADIUS * Math.sin(angle),
+    y: 12 - CODEX_USAGE_RESET_RADIUS * Math.cos(angle)
+  }
+}
+
+function resetProgressArcPath(progress: number): string | null {
+  const clamped = clampUnit(progress)
+
+  if (clamped <= 0) {
+    return null
+  }
+
+  const end = resetProgressPoint(Math.min(clamped, 0.9999))
+  const largeArc = clamped > 0.5 ? 1 : 0
+
+  return `M 12 3 A ${CODEX_USAGE_RESET_RADIUS} ${CODEX_USAGE_RESET_RADIUS} 0 ${largeArc} 1 ${end.x} ${end.y}`
+}
+
 function formatPercent(value: number): string {
   return `${Math.round(clampPercent(value))}%`
 }
 
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
 const CODEX_USAGE_RESET_RADIUS = 9
-const CODEX_USAGE_RESET_CIRCUMFERENCE = 2 * Math.PI * CODEX_USAGE_RESET_RADIUS
 const CODEX_USAGE_CORE_RADIUS = 5.25
 const CODEX_USAGE_CORE_SIZE = 10.5
 const CODEX_USAGE_CORE_ORIGIN = 6.75

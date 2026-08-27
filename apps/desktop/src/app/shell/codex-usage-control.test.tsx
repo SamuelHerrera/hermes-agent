@@ -37,12 +37,42 @@ describe('CodexUsageTitlebarControl', () => {
     ).toBe(0.75)
   })
 
-  it('renders a compact usage icon trigger whose fill is remaining usage', () => {
-    render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
+  it('falls back to a long reset window when older payloads omit the backend window length', () => {
+    expect(
+      codexUsageResetProgress(
+        {
+          resetAtRaw: '2026-09-01T12:00:00Z',
+          resetWindowMs: 5 * 60 * 60 * 1000
+        },
+        new Date('2026-08-27T12:00:00Z').getTime()
+      )
+    ).toBeCloseTo(2 / 7, 4)
+  })
 
-    expect(screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })).toBeTruthy()
-    expect(screen.getByTestId('codex-usage-fill').getAttribute('height')).toBe('7.875')
-    expect(screen.getByTestId('codex-usage-fill').getAttribute('y')).toBe('9.375')
+  it('renders a compact usage icon trigger whose fill is remaining usage', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-27T12:00:00Z'))
+
+    try {
+      render(
+        <CodexUsageTitlebarControl
+          usage={{
+            plan: 'Pro',
+            resetAtRaw: '2026-09-01T12:00:00Z',
+            resetWindowMs: 7 * 24 * 60 * 60 * 1000,
+            usedPercent: 25
+          }}
+        />
+      )
+
+      expect(screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })).toBeTruthy()
+      expect(screen.getByTestId('codex-usage-fill').getAttribute('height')).toBe('7.875')
+      expect(screen.getByTestId('codex-usage-fill').getAttribute('y')).toBe('9.375')
+      expect(screen.getByTestId('codex-usage-reset-progress').tagName.toLowerCase()).toBe('path')
+      expect(screen.getByTestId('codex-usage-reset-progress').getAttribute('d')).toMatch(/^M 12 3 A 9 9/)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {
