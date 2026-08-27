@@ -107,6 +107,57 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
 
+function useSidebarToolbarBudget(sidebarWidth: number): number {
+  const fallbackBudget = Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_BREATHING_ROOM)
+  const [budget, setBudget] = useState(fallbackBudget)
+
+  useEffect(() => {
+    setBudget(fallbackBudget)
+  }, [fallbackBudget])
+
+  useEffect(() => {
+    let frame = 0
+    let observer: ResizeObserver | null = null
+    let disposed = false
+
+    const sync = (container: HTMLElement) => {
+      const next = Math.max(0, container.getBoundingClientRect().width - SIDEBAR_TOOLBAR_BREATHING_ROOM)
+      setBudget(current => (Math.abs(current - next) < 1 ? current : next))
+    }
+
+    const bind = () => {
+      if (disposed) {
+        return
+      }
+
+      const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
+
+      if (!container) {
+        frame = window.requestAnimationFrame(bind)
+
+        return
+      }
+
+      sync(container)
+
+      if (typeof ResizeObserver !== 'undefined') {
+        observer = new ResizeObserver(() => sync(container))
+        observer.observe(container)
+      }
+    }
+
+    bind()
+
+    return () => {
+      disposed = true
+      window.cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [])
+
+  return budget
+}
+
 interface TitlebarControlsProps extends ComponentProps<'div'> {
   codexUsage?: CodexUsageData | null
   codexUsageState?: CodexUsageControlState
@@ -299,7 +350,7 @@ export function TitlebarControls({
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
-  const toolbarBudget = Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_BREATHING_ROOM)
+  const toolbarBudget = useSidebarToolbarBudget(sidebarWidth)
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
