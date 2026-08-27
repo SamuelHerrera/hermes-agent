@@ -631,13 +631,6 @@ export function treePanesWithPrefix(prefix: string): string[] {
   return tree ? allPaneIds(tree).filter(id => id.startsWith(prefix)) : []
 }
 
-/** The main tab strip's "+": open a new session as its own tab (reusing an
- *  already-open unused tab when one exists, so repeated clicks don't pile up
- *  empty sessions). The app wiring registers the concrete action so this
- *  generic renderer stays session-agnostic; null until wired (the "+" hides).
- *  An atom so the strip re-renders when the action becomes available. */
-export const $newSessionTabAction = atom<(() => void) | null>(null)
-
 /**
  * Keyboard slots (⌘1…⌘9, ⌃Tab) must index the SAME tabs the strip paints —
  * chrome-hidden panes (files in Focus layout), unregistered ones, and
@@ -759,7 +752,11 @@ export function parkEmptyWorkspaceHost(): boolean {
 
   const workspaceGroup = findGroupOfPane(tree, 'workspace')
 
-  if (!workspaceGroup || workspaceGroup.panes.length !== 1) {
+  // Judge the zone by the tabs the user can still see, not by raw persisted
+  // ids. A just-closed mirror pane may remain in the group briefly after its
+  // contribution disappears; treating that stale id as content strands the
+  // empty leftmost workspace zone even though its strip has no tabs.
+  if (!workspaceGroup || shownPanesInGroup(workspaceGroup).length > 0) {
     return false
   }
 
@@ -769,7 +766,14 @@ export function parkEmptyWorkspaceHost(): boolean {
     return false
   }
 
-  const next = removePane(tree, 'workspace')
+  // Remove the whole visually-empty origin. This also clears stale/hidden pane
+  // ids that would otherwise keep the split structurally alive after the
+  // permanent workspace host leaves it; their owners can re-adopt on reveal.
+  let next: LayoutNode | null = tree
+
+  for (const paneId of workspaceGroup.panes) {
+    next = next && removePane(next, paneId)
+  }
 
   if (!next || next === tree) {
     return false

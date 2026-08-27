@@ -1,9 +1,9 @@
 /**
- * Keeping the active tab (and the trailing "+") inside a scrolling tab strip.
+ * Keeping the active tab (and any trailing strip tools) inside a scrolling tab strip.
  *
  * Once a zone has more tabs than fit, opening a new one appended it past the
- * right edge: the tab you just created — and the "+" that created it — were
- * both off-screen, so a second new tab meant scrolling back by hand first.
+ * right edge: the tab you just created was off-screen, and active-pane tools
+ * after the final tab could be stranded there too.
  * Activating a tab from a keybind or the session list had the same problem in
  * the other direction.
  */
@@ -13,10 +13,10 @@ import { type RefObject, useLayoutEffect } from 'react'
 export interface TabStripGeometry {
   /** Visible width of the strip. */
   clientWidth: number
-  /** Active tab is the LAST one, so reveal the trailing "+" along with it. */
+  /** Active tab is the LAST one, so reveal trailing strip tools along with it. */
   last: boolean
   scrollLeft: number
-  /** Full scroll content: every tab plus the trailing "+". */
+  /** Full scroll content: every tab plus any trailing strip tools. */
   scrollWidth: number
   /** Active tab's edges, measured from the start of the scroll content. */
   tabEnd: number
@@ -35,8 +35,8 @@ export function tabStripScrollLeft({
 }: TabStripGeometry): number {
   const max = Math.max(0, scrollWidth - clientWidth)
 
-  // The last tab scrolls to the very end rather than to its own edge: the "+"
-  // lives after it in the same scroll content and has to come along.
+  // The last tab scrolls to the very end rather than to its own edge: trailing
+  // strip tools live after it in the same scroll content and should come along.
   if (last) {
     return max
   }
@@ -53,7 +53,7 @@ export function tabStripScrollLeft({
 }
 
 /** Scroll `activeId`'s tab into view whenever the activation or the tab set
- *  changes. `last` drives the "+"-follows-the-final-tab case. */
+ *  changes. `last` keeps trailing strip tools with the final tab. */
 export function useActiveTabVisible(
   scrollerRef: RefObject<HTMLDivElement | null>,
   activeId: string,

@@ -565,7 +565,7 @@ export const ChatView = memo(function ChatView({
             <div className="mb-2 text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-(--ui-subtle-fg)">
               No tabs open
             </div>
-            <div className="text-xs text-(--ui-faint-fg)">Open a session or press the tab + button to start.</div>
+            <div className="text-xs text-(--ui-faint-fg)">Open a session from the sidebar to start.</div>
           </div>
         </div>
       ) : (

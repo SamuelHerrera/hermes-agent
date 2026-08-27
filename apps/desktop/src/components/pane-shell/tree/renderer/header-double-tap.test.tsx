@@ -101,6 +101,14 @@ describe('pane tab/header double tap', () => {
     expect(container.querySelector('[data-tree-tab="workspace"]')).toBeNull()
   })
 
+  it('does not render a trailing new-tab plus button', () => {
+    const node = group(['workspace'], { active: 'workspace', id: 'grp-main' })
+    declareDefaultTree(node)
+    render(<TreeGroup node={node} />)
+
+    expect(screen.queryByRole('button', { name: /new session tab/i })).toBeNull()
+  })
+
   it('fronts sibling editor tabs instead of showing an empty workspace tab beside them', () => {
     $workspaceEmptyPlaceholder.set(true)
     disposers.push(

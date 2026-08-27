@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { tabStripScrollLeft } from './tab-strip-scroll'
 
 describe('tabStripScrollLeft', () => {
-  // 300px window over 900px of tabs + "+" → 600px of scroll range.
+  // 300px window over 900px of tabs + trailing tools → 600px of scroll range.
   const strip = (over: Partial<Parameters<typeof tabStripScrollLeft>[0]> = {}) =>
     tabStripScrollLeft({
       clientWidth: 300,
@@ -15,7 +15,7 @@ describe('tabStripScrollLeft', () => {
       ...over
     })
 
-  it('scrolls to the end for the last tab so the "+" comes with it', () => {
+  it('scrolls to the end for the last tab so trailing tools come with it', () => {
     expect(strip({ last: true, scrollLeft: 0, tabEnd: 880, tabStart: 780 })).toBe(600)
   })
 

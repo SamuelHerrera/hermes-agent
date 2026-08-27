@@ -39,7 +39,6 @@ import {
   $dropHint,
   $hiddenTreePanes,
   $narrowViewport,
-  $newSessionTabAction,
   $panesWithCloser,
   $stripToolsRevision,
   $treeDragging,
@@ -52,7 +51,6 @@ import {
   isCollapsePane,
   isMainStripPane,
   isSessionStripPane,
-  noteActiveTreeGroup,
   reloadTreePane,
   restoreTreePane,
   SESSION_TILE_DRAG,
@@ -160,7 +158,6 @@ export function TreeGroup({
 
   const hiddenPanes = useStore($hiddenTreePanes)
   const narrow = useStore($narrowViewport)
-  const newSessionTabAction = useStore($newSessionTabAction)
   const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
   const panesWithCloser = useStore($panesWithCloser)
   // Multi-tab selection (⌥/Ctrl-click, Shift-click) — null for every zone but
@@ -244,9 +241,8 @@ export function TreeGroup({
   const sessionsOnlyFixedPanel = shown.length === 1 && shown[0] === 'sessions'
   const headerVisible = !sessionsOnlyFixedPanel && !isEmpty && !verticalCollapse && (minimized || !headerHidden)
 
-  // Keep the activated tab — and, on the last one, the trailing "+" — inside
-  // the strip's scroll window. Opening a tab past the right edge otherwise
-  // left both the new tab and the button that made it out of view.
+  // Keep the activated tab inside the strip's scroll window. Opening a tab
+  // past the right edge otherwise leaves the newly-created tab out of view.
   useActiveTabVisible(tabsRef, activeId, {
     enabled: headerVisible,
     last: shown[shown.length - 1] === activeId,
@@ -515,35 +511,11 @@ export function TreeGroup({
             })}
 
             {/* Bare glyphs after the last tab: whatever the ACTIVE pane
-                contributes (a preview's console / DevTools), then the "+".
-                All of them are PaneStripGlyph — same size, colour and hover,
-                because they're the same button. */}
+                contributes (a preview's console / DevTools). */}
             {!minimized &&
               paneChrome(active)
                 .stripTools?.()
                 .map(tool => <PaneStripGlyph key={tool.id} {...tool} />)}
-
-            {/* Plain "+" after the last tab of a CHAT strip (the workspace
-                zone, or any zone holding session tabs) — always shown. Creates
-                a new session tab (mirrors ⌘T) via the app-registered action;
-                the pointerdown focuses this zone first, so the tab lands in
-                THIS strip. Hidden when unwired or the zone is minimized. */}
-            {(tabbedShown.some(isSessionStripPane) || workspacePlaceholder) && newSessionTabAction && !minimized && (
-              <span
-                // The action docks into the FOCUSED chat zone; clicking a
-                // background strip's "+" must make THAT zone the focused one
-                // first, or the tab opens in whichever zone was last clicked.
-                // (pointerdown's own focus tracking would land after the click
-                // handler reads the anchor.)
-                onPointerDownCapture={() => noteActiveTreeGroup(node.id)}
-              >
-                <PaneStripGlyph
-                  icon={<Codicon name="add" size="0.8125rem" />}
-                  label={t.zones.newSessionTab}
-                  onSelect={() => newSessionTabAction()}
-                />
-              </span>
-            )}
           </PaneTabStrip>
         </ZoneMenu>
       )}

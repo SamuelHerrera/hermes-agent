@@ -21,7 +21,6 @@ import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overla
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
 import {
-  $newSessionTabAction,
   hideLoneTreeTab,
   parkEmptyWorkspaceHost,
   registerPaneCloser
@@ -896,14 +895,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     toggleCommandCenter,
     toggleSelectedPin
   })
-
-  // Register the tab-strip "+" action (the generic renderer stays
-  // session-agnostic; null until wired hides the glyph).
-  useEffect(() => {
-    $newSessionTabAction.set(openNewSessionTab)
-
-    return () => $newSessionTabAction.set(null)
-  }, [openNewSessionTab])
 
   // The MAIN tab's Close. The workspace pane can't leave the tree, so its
   // closer empties it instead: the next stacked session shifts in, else main
