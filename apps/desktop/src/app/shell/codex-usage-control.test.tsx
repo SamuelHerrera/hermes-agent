@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
-import { codexUsageRemainingPercent, CodexUsageTitlebarControl } from './codex-usage-control'
+import { codexUsageRemainingPercent, codexUsageResetProgress, CodexUsageTitlebarControl } from './codex-usage-control'
 
 afterEach(cleanup)
 
@@ -25,11 +25,24 @@ describe('CodexUsageTitlebarControl', () => {
     expect(codexUsageRemainingPercent({ remainingPercent: 42, usedPercent: 90 })).toBe(42)
   })
 
+  it('computes reset arc progress from raw reset time and window length', () => {
+    expect(
+      codexUsageResetProgress(
+        {
+          resetAtRaw: '2026-08-15T12:00:00Z',
+          resetWindowMs: 24 * 60 * 60 * 1000
+        },
+        new Date('2026-08-15T06:00:00Z').getTime()
+      )
+    ).toBe(0.75)
+  })
+
   it('renders a compact usage icon trigger whose fill is remaining usage', () => {
     render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
-    expect(screen.getByRole('button', { name: 'Codex subscription usage' })).toBeTruthy()
-    expect(screen.getByTestId('codex-usage-fill').style.height).toBe('75%')
+    expect(screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })).toBeTruthy()
+    expect(screen.getByTestId('codex-usage-fill').getAttribute('height')).toBe('7.875')
+    expect(screen.getByTestId('codex-usage-fill').getAttribute('y')).toBe('9.375')
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {
@@ -59,7 +72,7 @@ describe('CodexUsageTitlebarControl', () => {
       />
     )
 
-    fireEvent.focus(screen.getByRole('button', { name: 'Codex subscription usage' }))
+    fireEvent.focus(screen.getByRole('button', { name: /Codex usage: 65% allowance left/ }))
 
     expect(await screen.findByText('65% left')).toBeTruthy()
     expect(screen.getByText('Team')).toBeTruthy()
@@ -80,7 +93,7 @@ describe('CodexUsageTitlebarControl', () => {
     try {
       render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
-      const button = screen.getByRole('button', { name: 'Codex subscription usage' })
+      const button = screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })
       fireEvent.pointerEnter(button)
       expect(screen.getByText('Pro')).toBeTruthy()
 
@@ -100,11 +113,11 @@ describe('CodexUsageTitlebarControl', () => {
   it('renders unavailable and hidden states without requiring usage data', async () => {
     const { rerender } = render(<CodexUsageTitlebarControl state="unavailable" usage={null} />)
 
-    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Codex subscription usage' }))
+    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Codex usage unavailable' }))
     expect(await screen.findByText('Unavailable')).toBeTruthy()
     expect(screen.getByText('Codex subscription usage is not available.')).toBeTruthy()
 
     rerender(<CodexUsageTitlebarControl state="hidden" usage={null} />)
-    expect(screen.queryByRole('button', { name: 'Codex subscription usage' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Codex usage/ })).toBeNull()
   })
 })

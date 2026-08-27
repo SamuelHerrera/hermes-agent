@@ -5,6 +5,8 @@ import type { CodexUsageControlState, CodexUsageData } from './codex-usage-contr
 export const CODEX_USAGE_REFRESH_MS = 120_000
 
 const SECOND_MS = 1000
+const HOUR_MS = 60 * 60 * SECOND_MS
+const DAY_MS = 24 * HOUR_MS
 
 type DesktopCodexUsageSnapshot = Awaited<ReturnType<NonNullable<Window['hermesDesktop']['codexUsage']>['get']>>
 
@@ -72,24 +74,46 @@ export function mapCodexUsageSnapshot(snapshot: DesktopCodexUsageSnapshot | null
     return UNAVAILABLE_USAGE
   }
 
+  const buckets = snapshot.buckets.map(bucket => ({
+    id: bucket.key,
+    label: bucket.label || bucket.key || 'Usage bucket',
+    remainingPercent: bucket.remaining_percent,
+    resetAt: formatCodexResetTime(bucket.reset_time),
+    resetAtRaw: bucket.reset_time,
+    resetWindowMs: codexResetWindowMs(bucket.key, bucket.label),
+    usedPercent: bucket.used_percent
+  }))
+
+  const primaryResetWindowMs = buckets[0]?.resetWindowMs ?? codexResetWindowMs(null, null)
+
   return {
     state: 'available',
     usage: {
       available: true,
-      buckets: snapshot.buckets.map(bucket => ({
-        id: bucket.key,
-        label: bucket.label || bucket.key || 'Usage bucket',
-        remainingPercent: bucket.remaining_percent,
-        resetAt: formatCodexResetTime(bucket.reset_time),
-        usedPercent: bucket.used_percent
-      })),
+      buckets,
       plan: snapshot.plan,
       remainingPercent: snapshot.remaining_percent,
       resetAt: formatCodexResetTime(snapshot.reset_time),
+      resetAtRaw: snapshot.reset_time,
       resetCredits: snapshot.reset_credits,
+      resetWindowMs: primaryResetWindowMs,
       usedPercent: snapshot.used_percent
     }
   }
+}
+
+function codexResetWindowMs(key?: null | string, label?: null | string): number {
+  const token = `${key ?? ''} ${label ?? ''}`.toLowerCase()
+
+  if (token.includes('weekly')) {
+    return 7 * DAY_MS
+  }
+
+  if (token.includes('daily')) {
+    return DAY_MS
+  }
+
+  return 5 * HOUR_MS
 }
 
 export function formatCodexResetTime(resetTime: null | string | undefined, nowMs = Date.now()): null | string {
