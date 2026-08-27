@@ -583,7 +583,7 @@ export function reloadTreePane(paneId: string): void {
 /** Close a tab the way its kind expects: a tool panel leaves the strip (and
  *  syncs its toggle), everything else routes through its owning Close. */
 export function closeTabPane(paneId: string) {
-  if (isCollapsePane(paneId)) {
+  if (isToolPanelPane(paneId)) {
     closeToolPane(paneId)
   } else {
     closeTreePane(paneId)
@@ -1745,10 +1745,10 @@ export function $paneVisible(paneId: string): ReadableAtom<boolean> {
 }
 
 /**
- * HIDE-STYLE PANES (files, review, preview): bind a pane's visibility STORE to
- * the tree so its toggle HIDES the pane — its zone collapses while the content
- * stays mounted — as opposed to the tool panels, which collapse to a rail and
- * keep their tab.
+ * HIDE-STYLE PANES (files, review, preview, terminal): bind a pane's visibility
+ * STORE to the tree so its toggle HIDES the pane — its zone collapses while the
+ * content stays mounted — as opposed to opt-in collapse panes, which collapse
+ * to a rail and keep their tab.
  *
  * `close` and `open` are a PAIR, and passing only one is the bug this exists to
  * prevent. The closer keeps the toggle truthful when the pane is closed from
@@ -1832,9 +1832,9 @@ export function bindToolPaneCollapse(
  * keypress — so user intent routes here and reactive bindings keep the quiet
  * path.
  *
- * Close goes through `closeTreePane` so each pane keeps its own semantics: a
- * tool panel collapses to its rail, files/review close through their store,
- * anything else is dismissed.
+ * Close goes through `closeTreePane` so each pane keeps its own semantics:
+ * collapse panes fold to their rail, files/review/terminal close through their
+ * store, anything else is dismissed.
  */
 export function togglePaneVisible(paneId: string) {
   if (isPaneVisible(paneId)) {
