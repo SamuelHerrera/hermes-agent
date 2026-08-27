@@ -91,10 +91,10 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
-const SIDEBAR_TOOLBAR_BREATHING_ROOM = 24
-const TITLEBAR_TOOL_WIDTH = 24
+const SIDEBAR_TOOLBAR_BREATHING_ROOM = 8
+const TITLEBAR_TOOL_WIDTH = 22
 const PROFILE_TOOL_WIDTH = 37
-const TERMINAL_TOOL_WIDTH = 27
+const TERMINAL_TOOL_WIDTH = 26
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
