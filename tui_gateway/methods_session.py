@@ -2516,13 +2516,21 @@ def _(rid, params: dict) -> dict:
         sid = str(params.get("session_id") or "")
         focus_topic = str(params.get("focus_topic", "") or "").strip()
         command = "/compress" + (f" {focus_topic}" if focus_topic else "")
+        from agent.conversation_compression import resolve_context_compression_timeouts
+
+        # Manual compression uses the progress-aware compression ceiling
+        # (600s by default). Keep the compute-host control wait above that
+        # ceiling so Desktop/TUI callers do not time out while the isolated host
+        # is still making legitimate compression progress.
+        _idle_timeout, compression_ceiling = resolve_context_compression_timeouts()
+        control_timeout = max(120.0, compression_ceiling + 60.0)
         try:
             ack = _send_compute_host_control(
                 sid,
                 route_name="session.compress",
                 command=command,
                 wait=True,
-                timeout=120.0,
+                timeout=control_timeout,
             )
         except Exception as exc:
             return _err(rid, 5019, f"compute-host compress failed: {exc}")
