@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { registry } from '@/contrib/registry'
 
-import { group, split } from './model'
+import { allPaneIds, group, split } from './model'
 import {
   $dismissedPanes,
   $hiddenTreePanes,
   $layoutTree,
   bindPaneVisibility,
+  closeTabPane,
   isPaneVisible,
+  markToolPanelPane,
   setTreeGroupMinimized,
   togglePaneVisible
 } from './store'
@@ -44,7 +46,8 @@ beforeEach(() => {
   for (const [id, data] of [
     ['workspace', { placement: 'main', uncloseable: true }],
     ['files', { placement: 'right' }],
-    ['review', { placement: 'right' }]
+    ['review', { placement: 'right' }],
+    ['scratch-tool', { placement: 'bottom' }]
   ] as const) {
     disposers.push(registry.register({ area: 'panes', data, id, render: () => null, title: id }))
   }
@@ -122,5 +125,57 @@ describe('the toggle round-trip', () => {
 
     expect($files.get()).toBe(true)
     expect(isPaneVisible('files')).toBe(true)
+  })
+})
+
+describe('an app-owned tool pane without collapse opt-in', () => {
+  const toolZone = () => {
+    const tree = $layoutTree.get()!
+
+    return tree.type === 'split'
+      ? (tree.children.find(c => c.type === 'group' && c.panes.includes('scratch-tool')) as
+          | { minimized?: boolean; panes: string[] }
+          | undefined)
+      : null
+  }
+
+  it('toggles closed by hiding instead of minimizing to a rail', () => {
+    $layoutTree.set(
+      split('column', [
+        group(['workspace'], { active: 'workspace', id: 'g-main' }),
+        group(['scratch-tool'], { active: 'scratch-tool', id: 'g-tool' })
+      ])
+    )
+
+    const $tool = atom(true)
+    markToolPanelPane('scratch-tool')
+    bindVisibility('scratch-tool', $tool)
+
+    expect(isPaneVisible('scratch-tool')).toBe(true)
+
+    togglePaneVisible('scratch-tool')
+
+    expect($tool.get()).toBe(false)
+    expect($hiddenTreePanes.get().has('scratch-tool')).toBe(true)
+    expect(toolZone()?.minimized).not.toBe(true)
+    expect(isPaneVisible('scratch-tool')).toBe(false)
+  })
+
+  it('tab close removes the tool tab and syncs its toggle store', () => {
+    $layoutTree.set(
+      split('column', [
+        group(['workspace'], { active: 'workspace', id: 'g-main' }),
+        group(['scratch-tool'], { active: 'scratch-tool', id: 'g-tool' })
+      ])
+    )
+
+    const $tool = atom(true)
+    markToolPanelPane('scratch-tool')
+    bindVisibility('scratch-tool', $tool)
+
+    closeTabPane('scratch-tool')
+
+    expect($tool.get()).toBe(false)
+    expect(allPaneIds($layoutTree.get()!)).not.toContain('scratch-tool')
   })
 })
