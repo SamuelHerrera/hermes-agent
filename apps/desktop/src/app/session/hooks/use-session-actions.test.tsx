@@ -34,6 +34,7 @@ import {
   $currentReasoningEffort,
   $messages,
   $newChatWorkspaceTarget,
+  $rememberedSessionRestorePending,
   $resumeFailedSessionId,
   $selectedStoredSessionId,
   $sessions,
@@ -442,7 +443,11 @@ async function createWith(
 }
 
 describe('startFreshSessionDraft', () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    $rememberedSessionRestorePending.set(false)
+    vi.restoreAllMocks()
+  })
 
   it('can reset machine-bound session state without closing the current overlay route', async () => {
     const navigate = vi.fn()
@@ -481,6 +486,25 @@ describe('startFreshSessionDraft', () => {
 
     expect(revealTreePane).toHaveBeenCalledWith('workspace')
     expect($terminalTakeover.get()).toBe(true)
+  })
+
+  it('ignores late fresh-draft resets while remembered-session restore is pending', async () => {
+    const navigate = vi.fn()
+    const requestGateway = vi.fn(async () => ({}) as never)
+    let handle: HarnessHandle | null = null
+
+    $rememberedSessionRestorePending.set(true)
+    setSelectedStoredSessionId('remembered-session')
+
+    render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+    vi.mocked(revealTreePane).mockClear()
+
+    act(() => handle!.startFreshSessionDraft({ preserveRoute: true, workspaceTarget: null }))
+
+    expect(revealTreePane).not.toHaveBeenCalledWith('workspace')
+    expect(navigate).not.toHaveBeenCalled()
+    expect($selectedStoredSessionId.get()).toBe('remembered-session')
   })
 })
 

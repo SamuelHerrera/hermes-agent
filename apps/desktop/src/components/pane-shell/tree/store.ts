@@ -284,14 +284,24 @@ export function registerPaneOpener(paneId: string, open: () => void) {
   paneOpeners[paneId] = open
 }
 
-// TOOL PANELS (terminal, logs, …): their toggle COLLAPSES the zone to a rail
-// (tab stays) instead of hiding it, and the tab's ✕ REMOVES it (vs a session
-// tile, whose ✕ closes the session). Membership tells the renderer which
-// semantics a tab gets. See bindPaneCollapse in the controller.
+// TOOL PANELS (terminal, logs, …): their tab's ✕ REMOVES it (vs a session
+// tile, whose ✕ closes the session). Older tool panes could also collapse to a
+// rail; keep that as a separate opt-in so app-owned tools can behave like normal
+// hide/show panes without losing keyboard Close semantics.
+const toolPanelPanes = new Set<string>()
 const collapsePanes = new Set<string>()
 
+export function markToolPanelPane(paneId: string) {
+  toolPanelPanes.add(paneId)
+}
+
 export function markCollapsePane(paneId: string) {
+  markToolPanelPane(paneId)
   collapsePanes.add(paneId)
+}
+
+export function isToolPanelPane(paneId: string): boolean {
+  return toolPanelPanes.has(paneId)
 }
 
 export function isCollapsePane(paneId: string): boolean {
@@ -521,10 +531,10 @@ export function closeToolPane(paneId: string) {
  *  skips them — without this rung ⌘W was a dead key over the terminal and the
  *  logs pane, the only tabs in the app you couldn't close from the keyboard. */
 export function closeFocusedToolTab(): boolean {
-  const group = tabTargetGroup(g => g.panes.some(isCollapsePane))
+  const group = tabTargetGroup(g => g.panes.some(isToolPanelPane))
   const active = group?.active
 
-  if (!active || !isCollapsePane(active)) {
+  if (!active || !isToolPanelPane(active)) {
     return false
   }
 

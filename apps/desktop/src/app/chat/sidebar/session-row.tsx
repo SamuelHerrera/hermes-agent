@@ -435,7 +435,7 @@ function SidebarSessionRowImpl({
             branchStem && 'pl-3.5',
             card
               ? 'flex-col items-stretch justify-center py-1.5 [--card-gap:0.6rem] gap-(--card-gap)'
-              : 'flex-col items-stretch justify-center gap-1 py-1',
+              : 'flex-col items-stretch justify-center gap-1 py-1'
           )}
           // Middle-click = open in a new tab (browser muscle memory).
           {...middleClickHandlers(() => {
@@ -493,12 +493,13 @@ function SidebarSessionRowImpl({
                     branchStem={branchStem}
                     className="transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0"
                     session={session}
+                    storedSessionId={session.id}
                   />
                 )}
               </SidebarRowGrab>
             ) : (
               <SidebarRowLead className="overflow-hidden">
-                {lead ?? <SessionProjectDot branchStem={branchStem} session={session} />}
+                {lead ?? <SessionProjectDot branchStem={branchStem} session={session} storedSessionId={session.id} />}
               </SidebarRowLead>
             )
 
@@ -533,7 +534,10 @@ function SidebarSessionRowImpl({
                       </SidebarRowLabel>
                     </OverflowTip>
                   </div>
-                  <div className={cn('flex min-h-5 min-w-0 items-center pl-5 pr-12', branchStem && 'pl-8')} data-session-row-secondary>
+                  <div
+                    className={cn('flex min-h-5 min-w-0 items-center pl-5 pr-12', branchStem && 'pl-8')}
+                    data-session-row-secondary
+                  >
                     {metadataNode}
                   </div>
                 </>
@@ -561,13 +565,13 @@ function SidebarSessionRowImpl({
                   <div className="flex min-w-0 items-center gap-1.5" data-session-card-secondary>
                     <SubagentSessionIcon session={session} storedSessionId={session.id} tooltip />
                     <OverflowTip label={title}>
-                    <SidebarRowLabel
-                      className="hover-marquee flex-1 text-[0.8125rem] leading-none font-medium text-(--ui-text-primary) group-data-[working=true]:text-foreground"
-                      onPointerEnter={armMarquee}
-                      onPointerLeave={disarmMarquee}
-                    >
-                      <span className="hover-marquee-inner">{title}</span>
-                    </SidebarRowLabel>
+                      <SidebarRowLabel
+                        className="hover-marquee flex-1 text-[0.8125rem] leading-none font-medium text-(--ui-text-primary) group-data-[working=true]:text-foreground"
+                        onPointerEnter={armMarquee}
+                        onPointerLeave={disarmMarquee}
+                      >
+                        <span className="hover-marquee-inner">{title}</span>
+                      </SidebarRowLabel>
                     </OverflowTip>
                     {metadataNode ? <span className="min-w-0 max-w-24 shrink-0">{metadataNode}</span> : null}
                   </div>
@@ -602,7 +606,11 @@ function SidebarSessionRowImpl({
           </div>
         ) : null}
         {!card ? (
-          <div className="absolute bottom-0.5 right-1 flex items-center" data-row-actions data-session-row-secondary-actions>
+          <div
+            className="absolute bottom-0.5 right-1 flex items-center"
+            data-row-actions
+            data-session-row-secondary-actions
+          >
             {actionsNode}
           </div>
         ) : null}

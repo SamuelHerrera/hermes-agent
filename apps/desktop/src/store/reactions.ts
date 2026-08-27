@@ -1,7 +1,8 @@
 import type { ChatMessage } from '@/lib/chat-messages'
 import { activeGateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
-import { $activeSessionId, $messages, setMessages } from '@/store/session'
+import { setMessages } from '@/store/session'
+import { $sessionStates, publishSessionState } from '@/store/session-states'
 import type { MessageReaction } from '@/types/hermes'
 
 /** The six iOS Tapback defaults, in Apple's order. */
@@ -29,16 +30,27 @@ export function applyReaction(
   return [...without, { emoji, author, at: Date.now() / 1000 }]
 }
 
-function writeReactions(messageId: string, reactions: MessageReaction[], rowId?: number) {
+function writeReactions(sessionId: string, messageId: string, reactions: MessageReaction[], rowId?: number) {
   // A NEW ChatMessage object per change is load-bearing: the runtime
   // repository caches normalized ThreadMessages in a WeakMap keyed by
   // ChatMessage identity, so a mutation in place renders stale.
   // Keyed by the renderer id, not rowId: a live message has no rowId yet.
-  setMessages(messages =>
+  const update = (messages: ChatMessage[]) =>
     messages.map(message =>
       message.id === messageId ? { ...message, reactions, ...(rowId === undefined ? {} : { rowId }) } : message
     )
-  )
+
+  const state = $sessionStates.get()[sessionId]
+
+  if (state) {
+    publishSessionState(sessionId, { ...state, messages: update(state.messages) })
+
+    return
+  }
+
+  // A just-created primary session can briefly have a runtime id before its
+  // per-session state is published. Its draft store is the only live surface.
+  setMessages(update)
 }
 
 /**
@@ -51,6 +63,7 @@ function writeReactions(messageId: string, reactions: MessageReaction[], rowId?:
 export async function toggleMessageReaction(
   message: ChatMessage,
   emoji: null | string,
+  sessionId: string | null,
   author: MessageReaction['author'] = 'user'
 ): Promise<void> {
   // A live message hasn't round-tripped through a resume yet, so it carries no
@@ -58,7 +71,6 @@ export async function toggleMessageReaction(
   // in any active conversation), let the backend resolve the newest row of
   // this role — which is exactly the message being reacted to.
   const rowId = message.rowId
-  const sessionId = $activeSessionId.get()
   const gateway = activeGateway()
 
   if (!sessionId || !gateway) {
@@ -67,9 +79,9 @@ export async function toggleMessageReaction(
     return
   }
 
-  const snapshot = $messages.get().find(m => m.id === message.id)?.reactions
+  const snapshot = message.reactions
 
-  writeReactions(message.id, applyReaction(snapshot, emoji, author))
+  writeReactions(sessionId, message.id, applyReaction(snapshot, emoji, author))
 
   try {
     const result = await gateway.request<MessageReactResponse>('message.react', {
@@ -80,11 +92,11 @@ export async function toggleMessageReaction(
     })
 
     // Learn the row id from the response so later toggles address it directly.
-    writeReactions(message.id, result?.reactions ?? [], result?.row_id)
+    writeReactions(sessionId, message.id, result?.reactions ?? [], result?.row_id)
   } catch (err) {
     // Be optimistic, THEN honest: a rejected write rolls back visibly and says
     // why, instead of the reaction quietly vanishing (desktop AGENTS.md).
-    writeReactions(message.id, snapshot ?? [])
+    writeReactions(sessionId, message.id, snapshot ?? [])
     notifyError(err, 'Could not react')
   }
 }

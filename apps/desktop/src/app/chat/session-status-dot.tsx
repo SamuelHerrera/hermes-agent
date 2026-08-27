@@ -94,9 +94,11 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   }
 }
 
-// Sidebar rows keep project identity on the left. Transient state moves to a
-// compact icon on the right, where its tooltip can explain the distinction
-// without replacing the user's chosen project/session color.
+// Sidebar rows keep project identity on the left. Most transient state moves to
+// a compact icon on the right, where its tooltip can explain the distinction
+// without replacing the user's chosen project/session color. Live turns are the
+// exception: the loading ring wraps the project dot itself so the moving cue and
+// the color identity read as one marker.
 const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconVariant> = {
   'needs-input': {
     className: 'text-amber-500',
@@ -138,6 +140,45 @@ const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconV
 export const sessionDotClassName = (state: SessionDotState): string =>
   DOT_VARIANTS[state].icon === 'loading' ? `${DOT_BASE} bg-(--ui-accent)` : DOT_VARIANTS[state].className
 
+const isLoadingDotState = (state: SessionDotState): state is 'working' | 'stalled' =>
+  state === 'working' || state === 'stalled'
+
+function ProjectColorDot({ color }: { color: null | string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={DOT_VARIANTS.idle.className}
+      style={color ? { backgroundColor: color } : undefined}
+    />
+  )
+}
+
+function LoadingProjectDot({
+  color,
+  r,
+  state
+}: {
+  color: null | string
+  r: Translations['sidebar']['row']
+  state: 'working' | 'stalled'
+}) {
+  const variant = DOT_VARIANTS[state]
+  const label = variant.ariaLabel?.(r)
+
+  return (
+    <span
+      aria-label={label}
+      className={cn('relative grid place-items-center', variant.className)}
+      data-session-status={state}
+      role={variant.role}
+      title={variant.title?.(r) ?? label}
+    >
+      <Codicon className="absolute inset-0 block leading-none" name="loading" size="0.625rem" spinning />
+      <ProjectColorDot color={color} />
+    </span>
+  )
+}
+
 export interface SessionStatusDotProps {
   /** The STORED session id — the key every live-state atom (working /
    *  attention / stalled / unread / background) is keyed by. Pane tabs and the
@@ -160,12 +201,20 @@ export interface SessionStatusDotProps {
   className?: string
 }
 
-export type SessionProjectDotProps = Pick<SessionStatusDotProps, 'branchStem' | 'className' | 'session'>
+export type SessionProjectDotProps = Pick<
+  SessionStatusDotProps,
+  'branchStem' | 'className' | 'session' | 'storedSessionId'
+>
 
-/** Project/session identity only — never replaced by transient runtime state. */
-export function SessionProjectDot({ session, branchStem, className }: SessionProjectDotProps) {
+/** Project/session identity, with live-turn motion wrapped around the color dot. */
+export function SessionProjectDot({ session, storedSessionId, branchStem, className }: SessionProjectDotProps) {
+  const { t } = useI18n()
+  const r = t.sidebar.row
   useStore($sessionColorById)
   const color = sessionColorFor(session) ?? null
+  const dotState = useStoreSelector($sessionDotStateById, states =>
+    storedSessionId ? (states[storedSessionId] ?? 'idle') : 'idle'
+  )
 
   return (
     <span className={cn('flex items-center gap-0.5', className)} data-session-project-dot>
@@ -174,11 +223,11 @@ export function SessionProjectDot({ session, branchStem, className }: SessionPro
           {branchStem}
         </span>
       ) : null}
-      <span
-        aria-hidden="true"
-        className={DOT_VARIANTS.idle.className}
-        style={color ? { backgroundColor: color } : undefined}
-      />
+      {isLoadingDotState(dotState) ? (
+        <LoadingProjectDot color={color} r={r} state={dotState} />
+      ) : (
+        <ProjectColorDot color={color} />
+      )}
     </span>
   )
 }
@@ -198,6 +247,10 @@ export function SessionStatusIcon({ className, storedSessionId }: SessionStatusI
   )
 
   if (dotState === 'idle') {
+    return null
+  }
+
+  if (isLoadingDotState(dotState)) {
     return null
   }
 
@@ -234,7 +287,7 @@ export function SessionAttentionDot({ className, storedSessionId }: SessionAtten
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
   )
 
-  if (dotState === 'idle' || dotState === 'draft') {
+  if (dotState === 'idle' || dotState === 'draft' || isLoadingDotState(dotState)) {
     return null
   }
 
@@ -260,8 +313,9 @@ export function SessionAttentionDot({ className, storedSessionId }: SessionAtten
  * the session switcher. It resolves everything itself from the stored session id:
  * the live state (via `$sessionDotStateById`, already reduced to one mutually
  * exclusive answer) and the color (override → project, via `sessionColorFor`).
- * An idle session shows its project color; the active states own the dot with
- * their semantic color so an attention cue is never masked by the tint.
+ * An idle session shows its project color; a live turn wraps that color with a
+ * loading ring; other active states own the dot with their semantic color so an
+ * attention cue is never masked by the tint.
  */
 export function SessionStatusDot({ storedSessionId, session, branchStem, className }: SessionStatusDotProps) {
   const { t } = useI18n()
@@ -291,16 +345,9 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
         // Rendered even with no color to paint: an empty dot of the same size
         // keeps every row's title on one left edge, so a session finishing
         // can't shift the list under the pointer.
-        <span aria-hidden="true" className={variant.className} style={color ? { backgroundColor: color } : undefined} />
-      ) : variant.icon === 'loading' ? (
-        <span
-          aria-label={variant.ariaLabel?.(r)}
-          className={cn('grid place-items-center', variant.className)}
-          role={variant.role}
-          title={variant.title?.(r)}
-        >
-          <Codicon className="block leading-none" name="loading" size="0.625rem" spinning />
-        </span>
+        <ProjectColorDot color={color} />
+      ) : isLoadingDotState(dotState) ? (
+        <LoadingProjectDot color={color} r={r} state={dotState} />
       ) : (
         <span
           aria-label={variant.ariaLabel?.(r)}

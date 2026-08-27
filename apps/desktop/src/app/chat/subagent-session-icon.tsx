@@ -20,13 +20,13 @@ export interface SessionTabLeadProps {
 }
 
 /** A tab has a stable leading identity glyph: subagents keep the robot, every
- * other session keeps the project/session color dot. Transient status renders
- * separately on the tab's trailing edge via SessionTabAttentionDot. */
+ * other session keeps the project/session color dot. Live loading wraps that
+ * dot; settled attention stays on the tab's trailing edge. */
 export function SessionTabLead({ session, storedSessionId }: SessionTabLeadProps) {
   return isSubagentSession(session) ? (
     <SubagentSessionIcon session={session} storedSessionId={storedSessionId} />
   ) : (
-    <SessionProjectDot session={session} />
+    <SessionProjectDot session={session} storedSessionId={storedSessionId} />
   )
 }
 

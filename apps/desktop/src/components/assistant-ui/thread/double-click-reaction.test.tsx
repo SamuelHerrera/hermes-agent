@@ -2,8 +2,11 @@
 // the same opt-in toggle as the rest of message reactions.
 import { AssistantRuntimeProvider, type ThreadMessage, useExternalStoreRuntime } from '@assistant-ui/react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { atom } from 'nanostores'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { PRIMARY_SESSION_VIEW, SessionViewProvider } from '@/app/chat/session-view'
+import { toggleMessageReaction } from '@/store/reactions'
 import type * as ReactionsStore from '@/store/reactions'
 import { $reactionsEnabled } from '@/store/reactions-enabled'
 import { $localReactions } from '@/store/reactions-local'
@@ -13,6 +16,14 @@ import { isTapbackDoubleClick } from './use-message-reactions'
 import { Thread } from '.'
 
 const createdAt = new Date('2026-05-01T00:00:00.000Z')
+
+const TILE_RUNTIME_ID = 'tile-runtime'
+
+const TILE_SESSION_VIEW = {
+  ...PRIMARY_SESSION_VIEW,
+  kind: 'tile' as const,
+  $runtimeId: atom<string | null>(TILE_RUNTIME_ID)
+}
 
 class TestResizeObserver {
   observe() {}
@@ -63,6 +74,7 @@ function Harness() {
 beforeEach(() => {
   $localReactions.set({})
   $reactionsEnabled.set(false)
+  vi.mocked(toggleMessageReaction).mockClear()
 })
 
 afterEach(() => {
@@ -114,5 +126,26 @@ describe('double-click to heart an assistant message', () => {
     fireEvent.doubleClick(message!, { detail: 2 })
 
     expect($localReactions.get()['assistant-1']).toBeUndefined()
+  })
+
+  it('persists through the runtime that owns a tiled transcript', async () => {
+    $reactionsEnabled.set(true)
+    render(
+      <SessionViewProvider value={TILE_SESSION_VIEW}>
+        <Harness />
+      </SessionViewProvider>
+    )
+
+    const message = (await screen.findByText('done')).closest('[data-slot="aui_assistant-message-root"]')
+
+    fireEvent.doubleClick(message!, { detail: 2 })
+
+    await waitFor(() =>
+      expect(toggleMessageReaction).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'assistant-1' }),
+        '❤️',
+        TILE_RUNTIME_ID
+      )
+    )
   })
 })

@@ -39,6 +39,7 @@ import { $projectTree } from '@/store/projects'
 import { sessionAwaitingInput } from '@/store/prompts'
 import {
   $gatewayState,
+  $rememberedSessionRestorePending,
   $selectedStoredSessionId,
   $sessions,
   getRememberedSessionTitle,
@@ -74,6 +75,7 @@ import { ChatView } from '.'
 
 const NO_MESSAGES: ChatMessage[] = []
 const NO_USAGE = { calls: 0, input: 0, output: 0, total: 0 } as const
+const RESTORING_SESSION_TITLE = 'Restoring session'
 
 /** The tile's SessionView: the same atom shape the primary chat renders
  *  from, computed from this session's slice of `$sessionStates`. */
@@ -397,7 +399,9 @@ function tileTitle(storedSessionId: string): string {
   const explicit = $sessionTiles.get().find(tile => tile.storedSessionId === storedSessionId)?.workspaceTabTitle
   const remembered = getRememberedSessionTitle($activeGatewayProfile.get(), storedSessionId)
 
-  return stored ? sessionTitle(stored) : explicit || remembered || NEW_SESSION_TITLE
+  return stored
+    ? sessionTitle(stored)
+    : explicit || remembered || ($rememberedSessionRestorePending.get() ? RESTORING_SESSION_TITLE : NEW_SESSION_TITLE)
 }
 
 /** The `@session` link payload for a tile tab drag — id + owning profile + title.
@@ -564,7 +568,7 @@ const watchSessionTilePanes = paneMirror<SessionTile>({
   // $projectTree: a tile whose session is older than the recents page resolves
   // its title through the tree, which loads after the tiles register. (The tab's
   // status dot subscribes to color/state itself, so it needs no `also` entry.)
-  also: [$sessions, $projectTree],
+  also: [$sessions, $projectTree, $rememberedSessionRestorePending],
   key: t => t.storedSessionId,
   prefix: 'session-tile',
   dir: t => t.dir,
@@ -590,7 +594,9 @@ const watchSessionTilePanes = paneMirror<SessionTile>({
     const tile = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)
     const remembered = getRememberedSessionTitle($activeGatewayProfile.get(), storedSessionId)
 
-    return tile?.workspaceTabTitle || remembered ? null : <SessionDraftTitle scope={storedSessionId} />
+    return tile?.workspaceTabTitle || remembered || $rememberedSessionRestorePending.get() ? null : (
+      <SessionDraftTitle scope={storedSessionId} />
+    )
   },
   tabPreview: storedSessionId => $sessionTiles.get().some(t => t.storedSessionId === storedSessionId && t.preview),
   render: storedSessionId => <SessionTilePane storedSessionId={storedSessionId} />,

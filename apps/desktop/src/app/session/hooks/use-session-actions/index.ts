@@ -39,9 +39,11 @@ import {
   $currentReasoningEffort,
   $messages,
   $newChatWorkspaceTarget,
+  $rememberedSessionRestorePending,
   $sessions,
   $workspaceEmptyPlaceholder,
   $yoloActive,
+  clearRememberedSessionRestorePending,
   type NewChatWorkspaceTarget,
   resolveComposerSessionKey,
   sessionPinId,
@@ -380,6 +382,14 @@ export function useSessionActions({
 
   const startFreshSessionDraft = useCallback(
     (options: boolean | FreshSessionDraftOptions = false) => {
+      if ($rememberedSessionRestorePending.get()) {
+        // A remembered-session restore can briefly coexist with the default `/`
+        // route and with late boot/reset callbacks. Those are not user intent to
+        // create a new tab; letting them through re-fronts workspace as a fresh
+        // "New Session" after the correct restored tab already appeared.
+        return
+      }
+
       const draftOptions = typeof options === 'boolean' ? { replaceRoute: options } : options
       const preserveRoute = draftOptions.preserveRoute ?? false
       const replaceRoute = draftOptions.replaceRoute ?? false
@@ -842,6 +852,7 @@ export function useSessionActions({
           setSelectedStoredSessionId(storedSessionId)
           selectedStoredSessionIdRef.current = storedSessionId
           setActiveSessionId(cachedRuntimeId)
+          clearRememberedSessionRestorePending()
           activeSessionIdRef.current = cachedRuntimeId
           syncSessionStateToView(cachedRuntimeId, cachedViewState)
           setCurrentCwdTransient(cachedViewState.cwd)
@@ -1171,6 +1182,7 @@ export function useSessionActions({
         }
 
         setActiveSessionId(resumed.session_id)
+        clearRememberedSessionRestorePending()
         activeSessionIdRef.current = resumed.session_id
         const runtimeInfo = applyRuntimeInfo(resumed.info)
 
@@ -1271,6 +1283,7 @@ export function useSessionActions({
             return
           }
 
+          clearRememberedSessionRestorePending()
           startFreshSessionDraft(true)
 
           return

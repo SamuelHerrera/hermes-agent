@@ -12,6 +12,7 @@ interface RouteResumeOptions {
   freshDraftReady: boolean
   gatewayState: string | undefined
   locationPathname: string
+  rememberedSessionRestorePending: boolean
   resumeSession: (sessionId: string, focus: boolean) => Promise<unknown>
   // Stored-session id whose most recent resume failed terminally (set by
   // useSessionActions, mirrored from $resumeFailedSessionId). While this equals
@@ -74,6 +75,7 @@ export function useRouteResume({
   freshDraftReady,
   gatewayState,
   locationPathname,
+  rememberedSessionRestorePending,
   resumeSession,
   resumeFailedSessionId,
   resumeExhaustedSessionId,
@@ -171,6 +173,14 @@ export function useRouteResume({
       return
     }
 
+    if (rememberedSessionRestorePending && isNewChatRoute(locationPathname)) {
+      // Cold-start restore begins at HashRouter's default `/` while the desktop
+      // integration effect replaces it with the remembered session route. Do not
+      // let the ordinary `/` handler clear selection/messages and paint a fresh
+      // "New session" draft in that gap.
+      return
+    }
+
     if (
       isNewChatRoute(locationPathname) &&
       !creatingSessionRef.current &&
@@ -189,6 +199,7 @@ export function useRouteResume({
     freshDraftReady,
     gatewayState,
     locationPathname,
+    rememberedSessionRestorePending,
     resumeSession,
     routedSessionId,
     runtimeIdByStoredSessionIdRef,

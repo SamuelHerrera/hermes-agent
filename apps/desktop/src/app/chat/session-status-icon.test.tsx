@@ -27,7 +27,8 @@ vi.mock('@/i18n', () => ({
 
 const tipTrigger = (el: HTMLElement) => el.closest('[data-slot="tooltip-trigger"]')
 
-const renderStatus = (storedSessionId: null | string = 's1') => render(<SessionStatusIcon storedSessionId={storedSessionId} />)
+const renderStatus = (storedSessionId: null | string = 's1') =>
+  render(<SessionStatusIcon storedSessionId={storedSessionId} />)
 
 afterEach(() => {
   cleanup()
@@ -65,23 +66,23 @@ describe('SessionStatusIcon', () => {
     expect(tipTrigger(status as HTMLElement)).toBeTruthy()
   })
 
-  it('shows a spinner while the session turn is working', () => {
+  it('leaves working turns to the leading project-dot spinner', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
     const { container } = renderStatus()
 
-    expect(container.querySelector('[data-session-status="working"] .codicon-loading.codicon-modifier-spin')).toBeTruthy()
+    expect(container.querySelector('[data-session-status="working"]')).toBeNull()
+    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeNull()
   })
 
-  it('shows a muted spinner when a working session has stalled', () => {
+  it('leaves stalled turns to the leading project-dot spinner', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
     setSessionStalled('s1', true)
 
     const { container } = renderStatus()
-    const status = container.querySelector<HTMLElement>('[data-session-status="stalled"]')
 
-    expect(status?.querySelector('.codicon-loading.codicon-modifier-spin')).toBeTruthy()
-    expect(status?.classList.contains('opacity-70')).toBe(true)
+    expect(container.querySelector('[data-session-status="stalled"]')).toBeNull()
+    expect(container.querySelector('.codicon-loading.codicon-modifier-spin')).toBeNull()
   })
 
   it('shows an amber question icon when the session needs input', () => {

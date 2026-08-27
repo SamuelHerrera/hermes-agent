@@ -504,7 +504,8 @@ export function TreeSplit({ node, root, rootRow }: { node: SplitNode; root?: boo
   // leaves dead space — e.g. terminal + logs split into two 38vh zones with
   // the rail above them collapsed). An UNCAPPED last track absorbs the
   // leftover; capped sidebars (review/files) keep their max and stay put.
-  const isMinimized = (child: LayoutNode) => child.type === 'group' && Boolean(child.minimized)
+  const isMinimized = (child: LayoutNode) =>
+    child.type === 'group' && Boolean(child.minimized) && child.panes.some(isCollapsePane)
 
   // SEMANTIC side collapse (titlebar toggles / ⌘B / ⌘J): at the ROOT row,
   // ⌘B owns the sessions column and ⌘J the other side columns — by pane

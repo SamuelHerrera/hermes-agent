@@ -13,12 +13,11 @@ import type { DoubleTapContext } from '@/components/pane-shell/tree/renderer/dra
 import {
   $layoutTree,
   bindPaneVisibility,
-  bindToolPaneCollapse,
   bindTreeSideVisibility,
   declareDefaultTree,
   dismissTreePane,
   isPaneVisible,
-  markCollapsePane,
+  markToolPanelPane,
   mirrorLayoutTree,
   paneRootSide,
   registerLayoutResetHandler,
@@ -37,7 +36,7 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { registry } from '@/contrib/registry'
 import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { NEW_SESSION_TITLE, sessionTitle as storedSessionTitle } from '@/lib/chat-runtime'
-import { Download, FileText, LayoutDashboard, PanelBottom, Terminal, Upload, Zap } from '@/lib/icons'
+import { Download, FileText, FolderOpen, GitCompare, LayoutDashboard, PanelBottom, Terminal, Upload, Zap } from '@/lib/icons'
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { setYoloEnabled } from '@/lib/yolo-session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
@@ -59,6 +58,7 @@ import { $projectTree } from '@/store/projects'
 import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
 import {
   $currentCwd,
+  $rememberedSessionRestorePending,
   $selectedStoredSessionId,
   $sessions,
   $yoloActive,
@@ -87,6 +87,8 @@ import { ShellContextMenu } from '../shell/shell-context-menu'
 
 import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
 import { ContribWiring, WiredPane } from './wiring'
+
+const RESTORING_SESSION_TITLE = 'Restoring session'
 
 /**
  * Stripped-down app root (bb/contrib-areas) on the layout TREE model, mounting
@@ -208,14 +210,10 @@ registry.registerMany([
     area: 'panes',
     title: 'terminal',
     // revealOnPreset: choosing a layout that places the terminal (e.g.
-    // "Terminal deck") turns takeover on so the zone actually shows, instead of
-    // staying collapsed behind the ⌃` toggle. height sizes the fixed track (a
-    // single-pane zone declaring a height is a fixed track — the preset weight
-    // is moot): a short deck, not a third of the window.
-    //
-    // NO minHeight: a tool panel drags all the way down to its collapsed
-    // header (the sash floors it at COLLAPSED_ZONE_PX and folds the zone to
-    // its rail there). A real floor left a sliver of unusable terminal.
+    // "Terminal deck") turns takeover on so the zone actually shows. height
+    // sizes the fixed track (a single-pane zone declaring a height is a fixed
+    // track — the preset weight is moot): a short deck, not a third of the
+    // window.
     data: { placement: 'bottom', height: '20vh', maxHeight: '80vh', revealOnPreset: true },
     render: () => <WiredPane part="terminal" />
   },
@@ -227,7 +225,6 @@ registry.registerMany([
     // content side rail so it cannot create a second tab in the sessions panel.
     data: {
       placement: 'right',
-      collapsible: true,
       dock: { pane: 'workspace', pos: 'right' },
       revealAliases: ['file-browser'],
       width: FILE_BROWSER_DEFAULT_WIDTH,
@@ -244,7 +241,6 @@ registry.registerMany([
     // like the other chrome toggles; its zone collapses while hidden.
     data: {
       placement: 'right',
-      collapsible: true,
       revealAliases: [REVIEW_PANE_ID],
       width: FILE_BROWSER_DEFAULT_WIDTH,
       minWidth: FILE_BROWSER_MIN_WIDTH,
@@ -333,6 +329,24 @@ registry.registerMany([
       run: () => window.dispatchEvent(new CustomEvent('hermes:open-keybinds'))
     } satisfies PaletteContribution
   },
+  paletteToggle({
+    id: 'view.showFiles',
+    label: 'Toggle files',
+    action: 'view.showFiles',
+    icon: FolderOpen,
+    keywords: ['files', 'file browser', 'tree', 'project files'],
+    get: () => isPaneVisible('files'),
+    set: () => togglePaneVisible('files')
+  }),
+  paletteToggle({
+    id: 'view.toggleReview',
+    label: 'Toggle changes',
+    action: 'view.toggleReview',
+    icon: GitCompare,
+    keywords: ['changes', 'review', 'diff', 'git', 'source control'],
+    get: () => isPaneVisible('review'),
+    set: () => togglePaneVisible('review')
+  }),
   // Profile sharing: bundle the active profile (config, skills, theme, layout)
   // into a portable archive, or adopt someone else's. Both open native dialogs,
   // so the palette closing on select is correct.
@@ -454,23 +468,31 @@ const syncWorkspaceTitle = () => {
   const selected = $selectedStoredSessionId.get()
   const stored = storedRowForPaneTitle(selected)
   const rememberedTitle = selected ? getRememberedSessionTitle($activeGatewayProfile.get(), selected) : ''
+  const pendingRestore = $rememberedSessionRestorePending.get()
+
+  const title = stored
+    ? storedSessionTitle(stored)
+    : rememberedTitle || (selected && pendingRestore ? RESTORING_SESSION_TITLE : NEW_SESSION_TITLE)
 
   registry.register({
     id: 'workspace',
     area: 'panes',
     // The placeholder, not the draft's live name — `tabTitle` below renders
     // that. Keeping it here would re-register the pane on every keystroke.
-    title: stored ? storedSessionTitle(stored) : rememberedTitle || NEW_SESSION_TITLE,
+    title,
     data: {
-      // The leading slot is stable identity (project color or subagent). Transient
-      // attention is a separate trailing dot so completion/unread does not mask
-      // the user's chosen color.
+      // The leading slot is stable identity (project color or subagent); live
+      // loading wraps that dot. Settled attention stays trailing so completion /
+      // unread does not mask the user's chosen color.
       tabLead: () => <SessionTabLead session={stored} storedSessionId={selected} />,
       tabTrailing: () => <SessionTabAttentionDot storedSessionId={selected} />,
       // A draft's name lives in its composer, not in any session row, so the
       // label subscribes to it directly — typing renames the tab without
       // re-registering the pane.
-      tabTitle: stored ? undefined : () => <SessionDraftTitle scope={selected} />,
+      tabTitle:
+        stored || (selected && (pendingRestore || rememberedTitle))
+          ? undefined
+          : () => <SessionDraftTitle scope={selected} />,
       // Pages aren't tab-able: the main zone's bar stands down while one shows.
       headerVeto: $workspaceIsPage.get(),
       placement: 'main',
@@ -485,8 +507,10 @@ const syncWorkspaceTitle = () => {
 
 $selectedStoredSessionId.listen(syncWorkspaceTitle)
 $sessions.listen(syncWorkspaceTitle)
+$rememberedSessionRestorePending.listen(syncWorkspaceTitle)
 $workspaceIsPage.listen(syncWorkspaceTitle)
 $projectTree.listen(syncWorkspaceTitle)
+syncWorkspaceTitle()
 
 // Layout reset collapses every session tile into main as a tab (after the
 // workspace) instead of re-scattering them — pre-placed before adoption.
@@ -499,13 +523,10 @@ registerLayoutResetHandler(stackSessionTilesIntoMain)
 // toggle mirrors the root row.
 // ---------------------------------------------------------------------------
 
-// HIDE-STYLE PANES (files, review, preview): the binding lives in the tree
-// store — bindPaneVisibility — alongside bindToolPaneCollapse, so both are
-// testable against the real function instead of a copy.
-
-// TOOL PANELS (terminal, logs): the binding lives in the tree store —
-// bindToolPaneCollapse — so the boot rule it encodes is testable against the
-// real function instead of a copy. See its docblock for the semantics.
+// HIDE-STYLE PANES (files, review, preview, terminal): the binding lives in the
+// tree store — bindPaneVisibility — so app toggles remove panels from the grid
+// instead of collapsing them to rails. Tool tabs are marked separately so ⌘W / ✕
+// still close the focused terminal/logs tab like a tab.
 
 // SIDES have one source of truth: the TREE. The legacy $panesFlipped flag is
 // DERIVED from where the sessions zone actually sits (TitlebarControls maps
@@ -577,9 +598,10 @@ bindPaneVisibility(
   closeReview,
   openReview
 )
-// ⌃` / statusbar toggle — the terminal COLLAPSES to a rail (tab stays), not
-// hides; PTYs stay alive while collapsed (see PersistentTerminal).
-bindToolPaneCollapse(
+// ⌃` / statusbar toggle — the terminal hides like other non-left panels instead
+// of collapsing to a rail; PTYs stay alive while hidden (see PersistentTerminal).
+markToolPanelPane('terminal')
+bindPaneVisibility(
   'terminal',
   $terminalTakeover,
   () => setTerminalTakeover(false),
@@ -650,8 +672,9 @@ const syncLogsPane = (open: boolean) => {
 }
 
 // Tool-panel tab semantics (✕ / ⌘W route through the store) so the palette
-// toggle stays truthful either way.
-markCollapsePane('logs')
+// toggle stays truthful either way. Logs are not collapsible; closing removes
+// the tab and the palette/titlebar door brings it back.
+markToolPanelPane('logs')
 registerPaneCloser('logs', () => $logsOpen.set(false))
 registerPaneOpener('logs', () => $logsOpen.set(true))
 syncLogsPane($logsOpen.get())

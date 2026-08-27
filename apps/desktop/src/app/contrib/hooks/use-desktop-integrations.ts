@@ -7,6 +7,7 @@ import { storedSessionIdForNotification } from '@/lib/session-ids'
 import { respondToApprovalAction } from '@/store/native-notifications'
 import { openFolderAsProject } from '@/store/projects'
 import {
+  clearRememberedSessionRestorePending,
   getRememberedRoute,
   getRememberedSessionId,
   sessionBelongsToProfile,
@@ -131,6 +132,8 @@ export function useDesktopIntegrations({
         ) {
           if (routeSession) {
             primeSessionRestore(routeSession)
+          } else {
+            clearRememberedSessionRestorePending()
           }
 
           navigate(route, { replace: true })
@@ -154,8 +157,11 @@ export function useDesktopIntegrations({
         if (last) {
           setRememberedSessionId(null, activeProfile)
         }
+
+        clearRememberedSessionRestorePending()
       } else {
         restoredRef.current = true
+        clearRememberedSessionRestorePending()
       }
     }
 

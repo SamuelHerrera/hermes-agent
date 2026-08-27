@@ -37,6 +37,21 @@ const COMPOSER_FAST_KEY = 'hermes.desktop.composer.fast'
 const LAST_SESSION_KEY = 'hermes.desktop.lastSessionId'
 const LAST_ROUTE_KEY = 'hermes.desktop.lastRoute'
 const LAST_SESSION_TITLE_KEY = 'hermes.desktop.lastSessionTitle'
+const NEW_CHAT_ROUTE_PATH = '/'
+
+const RESERVED_REMEMBERED_ROUTES = new Set([
+  '/',
+  '/settings',
+  '/command-center',
+  '/skills',
+  '/messaging',
+  '/webhooks',
+  '/artifacts',
+  '/cron',
+  '/profiles',
+  '/agents',
+  '/starmap'
+])
 
 function profileNavigationKey(base: string, profile: string): string {
   const key = profile.trim() || 'default'
@@ -124,6 +139,87 @@ export function setRememberedSessionTitle(
   discardLegacyRememberedNavigation()
   persistString(profileSessionTitleKey(profile, id), title?.trim() || null)
 }
+
+function pathnameFromHash(): string {
+  if (typeof window === 'undefined') {
+    return NEW_CHAT_ROUTE_PATH
+  }
+
+  const hash = window.location.hash.replace(/^#/, '')
+
+  return hash || NEW_CHAT_ROUTE_PATH
+}
+
+function isAuxiliaryBootstrapWindow(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    const win = new URLSearchParams(window.location.search).get('win')
+
+    return win === 'secondary' || win === 'hud'
+  } catch {
+    return false
+  }
+}
+
+export function sessionIdFromRememberedRoute(route: null | string | undefined): string | null {
+  const raw = route?.trim()
+
+  if (!raw) {
+    return null
+  }
+
+  const pathname = raw.replace(/[?#].*$/, '')
+
+  if (!pathname.startsWith('/') || RESERVED_REMEMBERED_ROUTES.has(pathname)) {
+    return null
+  }
+
+  const id = pathname.slice(1)
+
+  if (!id || id.includes('/')) {
+    return null
+  }
+
+  try {
+    return decodeURIComponent(id)
+  } catch {
+    return null
+  }
+}
+
+interface BootstrapRememberedSelection {
+  pendingRouteRestore: boolean
+  storedSessionId: string | null
+}
+
+function bootstrapRememberedSelection(profile = 'default'): BootstrapRememberedSelection {
+  const currentPathname = pathnameFromHash()
+  const routed = sessionIdFromRememberedRoute(currentPathname)
+
+  if (routed) {
+    return { pendingRouteRestore: false, storedSessionId: routed }
+  }
+
+  if (isAuxiliaryBootstrapWindow() || currentPathname !== NEW_CHAT_ROUTE_PATH) {
+    return { pendingRouteRestore: false, storedSessionId: null }
+  }
+
+  const route = getRememberedRoute(profile)
+  const routeSession = sessionIdFromRememberedRoute(route)
+  const last = getRememberedSessionId(profile)
+  const storedSessionId = route && route !== NEW_CHAT_ROUTE_PATH ? routeSession : routeSession ?? last
+
+  return { pendingRouteRestore: Boolean(storedSessionId), storedSessionId }
+}
+
+export function getBootstrapRememberedSessionId(profile = 'default'): string | null {
+  return bootstrapRememberedSelection(profile).storedSessionId
+}
+
+const bootstrapSelection = bootstrapRememberedSelection()
 
 export function sessionBelongsToProfile(
   sessions: readonly Pick<SessionInfo, '_lineage_root_id' | 'id' | 'profile'>[],
@@ -554,7 +650,8 @@ export interface ProfileUsage {
 export const $sessionProfilesUsage = atom<Record<string, ProfileUsage>>({})
 export const $sessionsLoading = atom(true)
 export const $activeSessionId = atom<string | null>(null)
-export const $selectedStoredSessionId = atom<string | null>(null)
+export const $selectedStoredSessionId = atom<string | null>(bootstrapSelection.storedSessionId)
+export const $rememberedSessionRestorePending = atom<boolean>(bootstrapSelection.pendingRouteRestore)
 export interface ActiveSessionStoredIdRotation {
   nextStoredSessionId: string
   previousStoredSessionId: string
@@ -716,6 +813,12 @@ export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
 
   if ($selectedStoredSessionId.get()) {
     $workspaceEmptyPlaceholder.set(false)
+  }
+}
+
+export function clearRememberedSessionRestorePending(): void {
+  if ($rememberedSessionRestorePending.get()) {
+    $rememberedSessionRestorePending.set(false)
   }
 }
 

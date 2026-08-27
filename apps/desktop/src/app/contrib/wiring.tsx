@@ -61,6 +61,7 @@ import {
   $gatewayState,
   $messages,
   $messagingSessions,
+  $rememberedSessionRestorePending,
   $resumeExhaustedSessionId,
   $resumeFailedSessionId,
   $selectedStoredSessionId,
@@ -209,6 +210,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const resumeFailedSessionId = useStore($resumeFailedSessionId)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const selectedStoredSessionId = useStore($selectedStoredSessionId)
+  const rememberedSessionRestorePending = useStore($rememberedSessionRestorePending)
   const messagingSessions = useStore($messagingSessions)
   const sessions = useStore($sessions)
   const activeGatewayProfile = useStore($activeGatewayProfile)
@@ -735,6 +737,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     freshDraftReady,
     gatewayState,
     locationPathname: location.pathname,
+    rememberedSessionRestorePending,
     resumeSession,
     resumeFailedSessionId,
     resumeExhaustedSessionId,
