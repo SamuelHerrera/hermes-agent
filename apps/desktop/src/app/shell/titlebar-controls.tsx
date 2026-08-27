@@ -584,7 +584,7 @@ export function TitlebarControls({
   const visibleOptionalToolbarIds = new Set<string>()
   let remainingToolbarWidth = toolbarBudget - requiredToolbarWidth
 
-  for (const item of optionalToolbarItems) {
+  for (const item of [...optionalToolbarItems].reverse()) {
     if (remainingToolbarWidth >= item.width) {
       visibleOptionalToolbarIds.add(item.id)
       remainingToolbarWidth -= item.width
@@ -667,10 +667,10 @@ export function TitlebarControls({
             {visibleOptionalSystemTools.map(tool => (
               <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
             ))}
-            {approvalStatusbarItem && (
+            {approvalStatusbarItem && visibleOptionalToolbarIds.has(approvalStatusbarItem.id) && (
               <TitlebarStatusbarItemButton item={approvalStatusbarItem} key="status:approval-mode" navigate={navigate} />
             )}
-            {terminalStatusbarItem && (
+            {terminalStatusbarItem && visibleOptionalToolbarIds.has(terminalStatusbarItem.id) && (
               <TitlebarStatusbarItemButton item={terminalStatusbarItem} key="status:terminal" navigate={navigate} />
             )}
             {visibleOptionalWorkspaceTools.map(tool => (
