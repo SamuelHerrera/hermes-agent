@@ -92,6 +92,7 @@ import {
   applyStoredSessionPreviewRuntimeInfo,
   type BranchMessage,
   chatMessageArraysEquivalent,
+  hydrateSessionTodosFromResume,
   isSessionGoneError,
   patchSessionWorkspace,
   preserveLocalPendingTurnMessages,
@@ -893,6 +894,7 @@ export function useSessionActions({
             } else {
               const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, clarifyBaseline)
               hydrateDraftingToolFromResume(activated)
+              hydrateSessionTodosFromResume(activated)
               const runtimeInfo = applyRuntimeInfo(activated.info)
 
               // `omit_messages` means the response carries NO transcript, not
@@ -1078,6 +1080,7 @@ export function useSessionActions({
 
         const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, clarifyBaseline)
         hydrateDraftingToolFromResume(resumed)
+        hydrateSessionTodosFromResume(resumed)
 
         if (prefetchedResult) {
           const previousMessages = resumedSameSelectedSession

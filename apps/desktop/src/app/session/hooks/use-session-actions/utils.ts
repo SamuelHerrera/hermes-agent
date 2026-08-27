@@ -3,6 +3,7 @@ import { getSession } from '@/hermes'
 import { assistantTextPart, type ChatMessage, chatMessageText, reasoningPart, textPart, upsertToolPart } from '@/lib/chat-messages'
 import { normalizePersonalityValue } from '@/lib/chat-runtime'
 import { embeddedImageUrls, textWithoutEmbeddedImages } from '@/lib/embedded-images'
+import { parseTodos, type TodoItem } from '@/lib/todos'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { requestDesktopOnboardingForCredentialWarning } from '@/store/onboarding'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
@@ -29,6 +30,7 @@ import {
 // Re-exported for the many session-actions/tile call sites that already import
 // it from here; the canonical definition lives in @/store/session.
 export { sessionMatchesStoredId }
+import { setSessionTodos } from '@/store/todos'
 import { reportBackendContract, reportInstallMethodWarning } from '@/store/updates'
 import type { SessionCreateResponse, SessionInfo, SessionResumeResponse, SessionRuntimeInfo } from '@/types/hermes'
 
@@ -719,6 +721,43 @@ function replayInflightEvents(parts: ChatMessage['parts'], projection: Pick<Sess
   }
 
   return next
+}
+
+export function hydrateSessionTodosFromResume(
+  projection: Pick<SessionResumeResponse, 'inflight' | 'running' | 'session_id'>
+): void {
+  const sessionId = projection.session_id
+
+  if (!sessionId || !projection.running) {
+    return
+  }
+
+  let latest: TodoItem[] | null = null
+
+  for (const event of projection.inflight?.events ?? []) {
+    const payload = event?.payload
+
+    if (!payload || typeof payload !== 'object') {
+      continue
+    }
+
+    const record = payload as Record<string, unknown>
+    const isTodo = record.name === 'todo' || Object.hasOwn(record, 'todos')
+
+    if (!isTodo) {
+      continue
+    }
+
+    const parsed = parseTodos(record.todos) ?? parseTodos(record.result) ?? parseTodos(record.args)
+
+    if (parsed !== null) {
+      latest = parsed
+    }
+  }
+
+  if (latest) {
+    setSessionTodos(sessionId, latest)
+  }
 }
 
 /**

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ChatMessage } from '@/lib/chat-messages'
+import { $todosBySession, clearSessionTodos } from '@/store/todos'
 
-import { appendLiveSessionProjection, reconcileResumeMessages } from './utils'
+import { appendLiveSessionProjection, hydrateSessionTodosFromResume, reconcileResumeMessages } from './utils'
 
 const user = (id: string, text: string): ChatMessage => ({
   id,
@@ -141,7 +142,9 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
   })
 
   it('rebuilds replayed inflight tool/task bars from backend resume events after restart', () => {
-    const [prompt, assistant] = appendLiveSessionProjection([user('u1', 'ship it')], {
+    clearSessionTodos('runtime-1')
+
+    const projection = {
       session_id: 'runtime-1',
       inflight: {
         assistant: 'Working on it',
@@ -169,8 +172,12 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
             }
           }
         ]
-      }
-    })
+      },
+      running: true
+    }
+
+    const [prompt, assistant] = appendLiveSessionProjection([user('u1', 'ship it')], projection)
+    hydrateSessionTodosFromResume(projection)
 
     expect(prompt.parts).toEqual([{ type: 'text', text: 'ship it' }])
     expect(assistant.role).toBe('assistant')
@@ -179,5 +186,10 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
     const toolParts = assistant.parts.filter(part => part.type === 'tool-call')
     expect(toolParts.map(part => ('toolName' in part ? part.toolName : ''))).toEqual(['terminal', 'todo'])
     expect(toolParts[1]).toMatchObject({ result: { todos: [{ id: 'a', content: 'Run tests', status: 'completed' }] } })
+    expect($todosBySession.get()['runtime-1']).toEqual([
+      { id: 'a', content: 'Run tests', status: 'completed' }
+    ])
+
+    clearSessionTodos('runtime-1')
   })
 })
