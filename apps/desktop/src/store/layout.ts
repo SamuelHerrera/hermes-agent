@@ -13,7 +13,7 @@ import type { PullRequestBucket } from './pull-requests'
 import type { SessionStatusBucket } from './session-dot-state'
 
 export const SIDEBAR_DEFAULT_WIDTH = 237
-export const SIDEBAR_MAX_WIDTH = 360
+export const SIDEBAR_MAX_WIDTH = 520
 // Open at the same width as the sessions sidebar so the two rails match, but
 // allow shrinking well below that (~30% under the old 14rem floor) for users who
 // want a narrow tree.

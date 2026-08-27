@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
+
 import type { StatusbarItem } from './statusbar-controls'
 import { TitlebarControls } from './titlebar-controls'
 
@@ -15,6 +17,7 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 }))
 
 afterEach(() => {
+  setSidebarWidth(SIDEBAR_DEFAULT_WIDTH)
   cleanup()
   vi.clearAllMocks()
 })
@@ -114,5 +117,38 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Open settings' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'kanban:approval-bridge' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'kanban:count' })).toBeNull()
+  })
+
+  it('reveals lower-priority toolbar actions when the sidebar is widened', () => {
+    setSidebarWidth(320)
+
+    render(
+      <MemoryRouter>
+        <TitlebarControls
+          onNewSession={vi.fn()}
+          onOpenSettings={vi.fn()}
+          statusbarItems={[
+            { icon: <span data-testid="approval-icon" />, id: 'approval-mode', title: 'Approval mode: Off', variant: 'action' },
+            { icon: <span data-testid="terminal-icon" />, id: 'terminal', title: 'Show terminal', variant: 'action' }
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    const buttonNames = within(screen.getByLabelText('App controls'))
+      .getAllByRole('button')
+      .map(button => button.getAttribute('aria-label'))
+
+    expect(buttonNames).toEqual([
+      'Hide sidebar',
+      'More app actions',
+      'Profiles',
+      'Codex subscription usage',
+      'Mute haptics',
+      'Approval mode: Off',
+      'Show terminal',
+      'New project',
+      'New session'
+    ])
   })
 })

@@ -31,6 +31,7 @@ import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import {
   $sidebarOpen,
+  $sidebarWidth,
   toggleSidebarOpen
 } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
@@ -90,7 +91,6 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
-const SIDEBAR_TOOLBAR_FALLBACK_BUDGET = 213
 const SIDEBAR_TOOLBAR_BREATHING_ROOM = 24
 const TITLEBAR_TOOL_WIDTH = 24
 const PROFILE_TOOL_WIDTH = 37
@@ -106,49 +106,6 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
-
-function useSidebarToolbarBudget(): number {
-  const [budget, setBudget] = useState(SIDEBAR_TOOLBAR_FALLBACK_BUDGET)
-
-  useEffect(() => {
-    let frame = 0
-    let observer: ResizeObserver | null = null
-
-    const sync = () => {
-      const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
-
-      if (!container) {
-        return
-      }
-
-      const next = Math.max(0, container.getBoundingClientRect().width - SIDEBAR_TOOLBAR_BREATHING_ROOM)
-      setBudget(current => (Math.abs(current - next) < 1 ? current : next))
-    }
-
-    const schedule = () => {
-      window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(sync)
-    }
-
-    const container = document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')
-
-    if (container && typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(schedule)
-      observer.observe(container)
-    }
-
-    window.addEventListener('resize', schedule)
-    sync()
-
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.removeEventListener('resize', schedule)
-      observer?.disconnect()
-    }
-  }, [])
-
-  return budget
-}
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
   codexUsage?: CodexUsageData | null
@@ -340,8 +297,9 @@ export function TitlebarControls({
   const modHeld = useModifierHeld()
   const hapticsMuted = useStore($hapticsMuted)
   const sidebarOpen = useStore($sidebarOpen)
+  const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
-  const toolbarBudget = useSidebarToolbarBudget()
+  const toolbarBudget = Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_BREATHING_ROOM)
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
