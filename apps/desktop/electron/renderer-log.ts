@@ -135,6 +135,7 @@ function sanitizeDiagnosticValue(value: unknown, depth = 0): unknown {
 export function formatRendererDiagnosticEvent(report: unknown): string {
   const input = report && typeof report === 'object' ? (report as Record<string, unknown>) : {}
   const asText = (value: unknown, fallback: string): string => String(value ?? fallback).slice(0, 96) || fallback
+
   const asFiniteNumber = (value: unknown): number =>
     typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
 

@@ -13128,6 +13128,7 @@ app.whenReady().then(() => {
     rememberLog(
       `[uat] app.activate mainWindow=${mainWindow && !mainWindow.isDestroyed() ? 'available' : 'missing'} windows=${BrowserWindow.getAllWindows().length}`
     )
+
     // Recreate the primary window if it's gone. Guard on mainWindow directly
     // (not just total window count) so a dock click still restores the main
     // window when only secondary session windows remain open.

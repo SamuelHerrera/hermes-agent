@@ -10,6 +10,7 @@
  */
 
 const startedAt = typeof performance !== 'undefined' ? performance.now() : 0
+
 const runId =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID().slice(0, 12)

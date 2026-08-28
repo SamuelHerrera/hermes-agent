@@ -845,6 +845,7 @@ export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => {
     previous
   })
 }
+
 export const setResumeFailedSessionId = (next: Updater<string | null>) => updateAtom($resumeFailedSessionId, next)
 export const setResumeExhaustedSessionId = (next: Updater<string | null>) => updateAtom($resumeExhaustedSessionId, next)
 export const setBusy = (next: Updater<boolean>) => updateAtom($busy, next)

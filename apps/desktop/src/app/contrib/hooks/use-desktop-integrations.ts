@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { openSession } from '@/app/open-session'
@@ -80,15 +80,18 @@ export function useDesktopIntegrations({
 
   const restoredRef = useRef(false)
 
-  const primeSessionRestore = (storedSessionId: string) => {
-    // Cold-start restore is re-attaching already-open UI, not a new navigation.
-    // Publish the selected id before gateway resume so chrome can paint the
-    // remembered title immediately, but skip selection homing so a persisted
-    // focused tile/panel remains fronted during boot.
-    markSelectionRestore()
-    setSelectedStoredSessionId(storedSessionId)
-    logUatEvent('restore', 'remembered-session.primed', { activeProfile, storedSessionId })
-  }
+  const primeSessionRestore = useCallback(
+    (storedSessionId: string) => {
+      // Cold-start restore is re-attaching already-open UI, not a new navigation.
+      // Publish the selected id before gateway resume so chrome can paint the
+      // remembered title immediately, but skip selection homing so a persisted
+      // focused tile/panel remains fronted during boot.
+      markSelectionRestore()
+      setSelectedStoredSessionId(storedSessionId)
+      logUatEvent('restore', 'remembered-session.primed', { activeProfile, storedSessionId })
+    },
+    [activeProfile]
+  )
 
   // Wait until boot has adopted the primary profile, then restore that profile's
   // navigation exactly once. The same effect owns subsequent writes so the
@@ -216,7 +219,7 @@ export function useDesktopIntegrations({
     } else if (!routedSessionId && !isOverlayView(appViewForPath(locationPathname))) {
       setRememberedRoute(locationPathname, activeProfile)
     }
-  }, [activeProfile, locationPathname, navigate, profileReady, routedSessionId, sessions])
+  }, [activeProfile, locationPathname, navigate, primeSessionRestore, profileReady, routedSessionId, sessions])
 
   useEffect(() => {
     if (!profileReady || !resumeExhaustedSessionId) {
