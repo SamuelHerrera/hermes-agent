@@ -1509,11 +1509,31 @@ body.guest-pointer-lock :is(webview, iframe) {
   ) !important;
 }
 
-[data-slot='composer-surface'] {
+[data-slot='composer-surface'],
+.composer-fallback-surface {
   border-color: color-mix(
     in srgb,
     var(--dt-composer-ring) calc(18% * var(--composer-ring-strength)),
     var(--dt-input)
+  ) !important;
+  border-left-color: color-mix(
+    in srgb,
+    var(--dt-composer-ring) calc(52% * var(--composer-ring-strength)),
+    transparent
+  ) !important;
+  border-left-width: 2px;
+  box-shadow: inset 3px 0 0
+    color-mix(in srgb, var(--dt-composer-ring) calc(24% * var(--composer-ring-strength)), transparent);
+}
+
+/* The coding/cwd/git-branch strip reads as the composer's internal middle
+   divider, so it must use the same project/session accent as the outside ring. */
+[data-slot='composer-surface'] .coding-status-bar,
+.composer-fallback-surface .coding-status-bar {
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--dt-composer-ring) calc(24% * var(--composer-ring-strength)),
+    transparent
   ) !important;
 }
 
