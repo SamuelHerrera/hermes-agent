@@ -44,6 +44,7 @@ class _RecordingDB:
     def __init__(self, db_path=None, **_kwargs):
         self.db_path = db_path
         self.closed = 0
+        self.live_turn_lease: dict | None = None
         self.rows: dict = {}
         self.reopen_error: Exception | None = None
 
@@ -71,6 +72,9 @@ class _RecordingDB:
 
     def get_messages_as_conversation(self, _target, **_kwargs):
         return []
+
+    def get_session_turn_lease_holder(self, _target):
+        return self.live_turn_lease
 
 
 @pytest.fixture()
@@ -193,6 +197,34 @@ def test_resume_closes_profile_db_on_deferred_cold_resume(profile_dbs, monkeypat
 
     assert resp["result"]["session_key"] == "s1"
     assert resp["result"]["status"] == "idle"
+    assert profile_dbs[0].closed == 1
+
+
+def test_resume_reports_live_durable_turn_lease_as_running(profile_dbs, monkeypatch):
+    """A fresh gateway must not show idle while another backend owns the turn."""
+
+    def _factory(db_path=None, **kwargs):
+        db = _RecordingDB(db_path=db_path, **kwargs)
+        db.rows["s1"] = {"id": "s1", "cwd": ""}
+        db.live_turn_lease = {
+            "conversation_id": "s1",
+            "holder": "pid=123:turn=s1:platform=desktop",
+        }
+        profile_dbs.append(db)
+        return db
+
+    monkeypatch.setattr("hermes_state.SessionDB", _factory)
+    monkeypatch.setattr(server, "_stored_session_runtime_overrides", lambda _found: {})
+
+    resp = _resume(session_id="s1", profile="work")
+    assert resp is not None
+    result = resp.get("result")
+    assert isinstance(result, dict)
+
+    assert result["session_key"] == "s1"
+    assert result["running"] is True
+    assert result["status"] == "working"
+    assert "auto_continue" not in result
     assert profile_dbs[0].closed == 1
 
 

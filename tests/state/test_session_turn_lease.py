@@ -293,6 +293,33 @@ def test_expired_turn_lease_is_reclaimed(tmp_path):
     )
 
 
+def test_get_session_turn_lease_holder_reports_active_holder(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("shared", source="test")
+    holder = f"pid={os.getpid()}:turn=shared"
+
+    assert db.get_session_turn_lease_holder("shared") is None
+    assert db.try_acquire_session_turn_lease("shared", holder, ttl_seconds=5)
+
+    active = db.get_session_turn_lease_holder("shared")
+
+    assert active is not None
+    assert active["conversation_id"] == "shared"
+    assert active["holder"] == holder
+
+
+def test_get_session_turn_lease_holder_hides_expired_holder(tmp_path):
+    db = SessionDB(tmp_path / "state.db")
+    db.create_session("shared", source="test")
+    assert db.try_acquire_session_turn_lease(
+        "shared", "legacy-holder", ttl_seconds=0.05
+    )
+
+    time.sleep(0.15)
+
+    assert db.get_session_turn_lease_holder("shared") is None
+
+
 def test_acquire_turn_lease_notifies_wait_callback(tmp_path):
     """Waiters get a progress callback while another holder owns the lease."""
     path = tmp_path / "state.db"

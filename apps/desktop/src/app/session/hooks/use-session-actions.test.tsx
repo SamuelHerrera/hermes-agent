@@ -869,6 +869,51 @@ describe('resumeSession failure recovery', () => {
     expect(renderedMessages).toContain('newest prompt')
   })
 
+  it('shows a lease-only resumed turn as still running', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    const storedMessages = [
+      { content: 'earlier question', role: 'user', timestamp: 1 },
+      { content: 'earlier answer', role: 'assistant', timestamp: 2 }
+    ]
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: storedMessages, session_id: 'stored-1' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          session_id: 'runtime-1',
+          session_key: 'stored-1',
+          resumed: 'stored-1',
+          message_count: storedMessages.length,
+          messages: [],
+          messages_omitted: true,
+          running: true,
+          status: 'working',
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, state) => (resumedState = state)}
+        requestGateway={requestGateway}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect(resumedState?.busy).toBe(true)
+    expect(resumedState?.awaitingResponse).toBe(true)
+    expect(resumedState?.adoptedRunningTurn).toBe(true)
+    expect(resumedState?.turnStartedAt).toBe(1_700_000_000_000)
+  })
+
   it('restores a pending clarify question from the backend resume payload', async () => {
     const storedMessages = [
       { content: 'earlier question', role: 'user', timestamp: 1 },

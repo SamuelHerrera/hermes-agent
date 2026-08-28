@@ -394,9 +394,16 @@ export function TitlebarControls({
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
-  const { budget: toolbarBudget, ref: toolbarRef, width: toolbarWidth } = useSidebarToolbarBudget(sidebarWidth)
+
+  const {
+    budget: toolbarBudget,
+    ref: toolbarRef,
+    width: toolbarWidth
+  } = useSidebarToolbarBudget(sidebarWidth)
+
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
+
   const canManageLocalServices = Boolean(window.hermesDesktop?.localServices) && connection?.mode === 'local'
 
   const runServiceAction = async (kind: 'backend' | 'gateway') => {
@@ -718,13 +725,13 @@ export function TitlebarControls({
         aria-label={t.shell.appControls}
         className={cn(
           titlebarToolClusterClass,
-          // This toolbar belongs to the sidebar's first content row, not the
-          // draggable titlebar. Use a fallback because auxiliary/installed
-          // smoke windows can render before the shell var is visible here.
-          'left-2.5 top-[calc(var(--titlebar-height,34px)+0.25rem)] overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)'
+          // This toolbar overlays the full-height sidebar scroll rail by
+          // design: no backing strip or layout spacer adds margin or shortens
+          // the scrollbar. Keep only the toolbar itself opaque for legibility.
+          'left-2.5 overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)'
         )}
         ref={toolbarRef}
-        style={{ width: toolbarWidth }}
+        style={{ top: 'var(--titlebar-height, 34px)', width: toolbarWidth }}
       >
         {leftToolbarTools
           .filter(tool => !tool.hidden)

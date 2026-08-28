@@ -5337,7 +5337,8 @@ def _session_info(agent, session: dict | None = None) -> dict:
         "project": _project_info_for_cwd(cwd),
         "terminal_backend": _effective_terminal_backend(),
         "personality": str(personality or ""),
-        "running": bool((session or {}).get("running")),
+        "running": bool((session or {}).get("running"))
+        or _session_has_live_detached_turn(session or {}),
         "title": _session_live_title(session or {}, session_key) if session_key else "",
         "stored_session_id": session_key or "",
         "desktop_contract": DESKTOP_BACKEND_CONTRACT,
@@ -7582,13 +7583,14 @@ def _fail_inflight_turn(session: dict, error: Any) -> None:
 #
 # A turn that concludes — success, handled error, interrupt — clears its
 # durable marker (see tui_gateway/turn_marker.py) in _run_prompt_submit's
-# finally. Only a process death leaves the marker behind, so a marker found
-# at session.resume time is positive proof the turn never finished AND the
-# client never saw a terminal frame. If the interruption is fresh, re-submit
-# the interrupted prompt automatically (the messaging gateway has done this
-# for restart-interrupted sessions since #27856); if it's stale, clear the
-# marker and let the recovered partial transcript speak for itself — the
-# user can ask to continue manually.
+# finally. A process death leaves the marker behind, so a fresh marker can
+# re-submit the interrupted prompt automatically (the messaging gateway has
+# done this for restart-interrupted sessions since #27856). A WS/client
+# disconnect can also leave the marker while the backend turn is still alive,
+# so auto-continue first checks the durable turn lease; the original holder
+# owns completion in that case. If the marker is stale, clear it and let the
+# recovered partial transcript speak for itself — the user can ask to continue
+# manually.
 
 _AUTO_CONTINUE_ENABLED_DEFAULT = True
 _AUTO_CONTINUE_FRESHNESS_MINUTES_DEFAULT = 15
@@ -7650,6 +7652,28 @@ def _auto_continue_note(prompt: str) -> str:
     )
 
 
+def _has_live_durable_turn_lease(session: dict, session_key: str) -> bool:
+    """True when another still-running backend turn owns this session.
+
+    Best-effort guard for auto-continue. Failure to inspect the lease must not
+    break crash recovery, so unknown/missing helpers fall back to the existing
+    marker decision.
+    """
+    try:
+        with _session_db(session) as db:
+            getter = (
+                getattr(db, "get_session_turn_lease_holder", None)
+                if db is not None
+                else None
+            )
+            if getter is None:
+                return False
+            return bool(getter(session_key))
+    except Exception:
+        logger.debug("auto-continue turn-lease check failed", exc_info=True)
+        return False
+
+
 def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> dict | None:
     """Kick off a continuation turn for a crash-interrupted session.
 
@@ -7670,6 +7694,16 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
         # Stale, disabled, or crash-looping: stop trying. The journal/partial
         # transcript still shows what happened; a manual message continues it.
         clear_turn_marker(home, session_key)
+        return None
+    if _has_live_durable_turn_lease(session, session_key):
+        # The renderer/socket disappeared, not the backend turn. Do not launch
+        # a duplicate continuation that will block on the session lease and
+        # eventually surface session_turn_lease_timeout; the live turn will
+        # clear the marker when it concludes.
+        logger.info(
+            "auto-continue skipped for session %s: live turn lease is still held",
+            session_key,
+        )
         return None
     if session.get("_auto_continue_scheduled"):
         return None
@@ -8230,6 +8264,8 @@ def _session_live_status(sid: str, session: dict) -> str:
         return "starting"
     if session.get("running"):
         return "working"
+    if _session_has_live_detached_turn(session):
+        return "working"
     return "idle"
 
 
@@ -8289,6 +8325,23 @@ def _session_lookup_key(session: dict, *, fallback: str = "") -> str:
         or fallback
         or ""
     )
+
+
+def _session_has_live_detached_turn(session: dict | None) -> bool:
+    """True when durable state says this session is running elsewhere.
+
+    A Desktop/renderer reconnect can create a fresh TUI gateway record while
+    the original backend process still owns the cross-process turn lease. This
+    backend cannot stream that turn, but the UI must still present the session
+    as busy so the user does not see an idle chat and manually send ``continue``
+    into the same conversation.
+    """
+    if not session or session.get("running"):
+        return False
+    key = _session_lookup_key(session)
+    if not key:
+        return False
+    return _has_live_durable_turn_lease(session, key)
 
 
 def _find_live_session_by_key(session_key: str) -> tuple[str, dict] | None:
@@ -8436,7 +8489,7 @@ def _live_session_payload(
         "message_count": len(history),
         "messages": [] if omit_messages else _history_to_messages(history),
         "messages_omitted": omit_messages,
-        "running": running,
+        "running": running or _session_has_live_detached_turn(session),
         "session_id": sid,
         "session_key": _session_lookup_key(session, fallback=sid),
         "started_at": float(session.get("created_at") or time.time()),

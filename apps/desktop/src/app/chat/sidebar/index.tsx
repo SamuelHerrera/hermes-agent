@@ -1423,7 +1423,7 @@ export function ChatSidebar({
       collapsible="none"
     >
       <SidebarContent className={cn("gap-0 overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent px-2.5 scrollbar-fade", SCROLL_GUTTER)}>
-        <SidebarGroup className="shrink-0 p-0 pb-0 pt-[calc(var(--titlebar-height,34px)+2.5rem)]">
+        <SidebarGroup className="shrink-0 p-0 pb-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
               {navItems.map(item => {
