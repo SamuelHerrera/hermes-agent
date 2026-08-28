@@ -12,6 +12,7 @@ import {
   getRememberedRoute,
   getRememberedSessionId,
   sessionBelongsToProfile,
+  sessionMatchesStoredId,
   setRememberedRoute,
   setRememberedSessionId,
   setRememberedSessionTitle,
@@ -121,27 +122,41 @@ export function useDesktopIntegrations({
         const routeSession = route ? routeSessionId(route) : null
         const last = getRememberedSessionId(activeProfile)
 
+        const routeSessionKnown = routeSession
+          ? sessions.some(session => sessionMatchesStoredId(session, routeSession))
+          : false
+
+        const lastSessionKnown = last ? sessions.some(session => sessionMatchesStoredId(session, last)) : false
+
         logUatEvent('restore', 'remembered-session.read', {
           activeProfile,
           lastSessionId: last,
+          lastSessionKnown,
           routeKind: routeSession ? 'session' : route === NEW_CHAT_ROUTE ? 'new-chat' : route ? 'page' : 'none',
-          routeSessionId: routeSession
+          routeSessionId: routeSession,
+          routeSessionKnown
         })
 
         const restorableNonSessionRoute =
           !!route && route !== NEW_CHAT_ROUTE && !routeSession && !isOverlayView(appViewForPath(route))
 
-        // Boot adoption can publish renderer.ready before its async session
-        // refresh completes. Restore the remembered destination immediately so
-        // the shell does not paint a transient New Session tab on every restart;
-        // stale routed sessions are still cleared by the exhausted-resume guard
-        // below once the real resume path proves they are gone.
-        if (sessions.length === 0 && !restorableNonSessionRoute && (routeSession || last)) {
+        // Boot adoption can publish renderer.ready while session rehydration is
+        // still populating the list. A non-empty list is NOT authoritative: it
+        // may contain only the first couple of reattached runtimes, as observed
+        // in the restart trace that painted New Session six seconds after the
+        // correct tabs appeared. Restore an unknown remembered id optimistically;
+        // an explicitly known wrong-profile row still fails ownership below, and
+        // a genuinely stale id is cleared by the exhausted-resume guard once the
+        // real resume path proves it is gone.
+        const unresolvedRememberedSession =
+          routeSession && !routeSessionKnown ? routeSession : !routeSession && last && !lastSessionKnown ? last : null
+
+        if (!restorableNonSessionRoute && unresolvedRememberedSession) {
           restoredRef.current = true
-          primeSessionRestore(routeSession ?? last!)
+          primeSessionRestore(unresolvedRememberedSession)
           logUatEvent('restore', 'remembered-session.navigate', {
-            reason: 'session-list-not-ready',
-            storedSessionId: routeSession ?? last!
+            reason: 'session-not-yet-listed',
+            storedSessionId: unresolvedRememberedSession
           })
           navigate(routeSession ? route! : sessionRoute(last!), { replace: true })
 
@@ -194,7 +209,10 @@ export function useDesktopIntegrations({
 
         if (last) {
           setRememberedSessionId(null, activeProfile)
-          logUatEvent('restore', 'remembered-session.id-cleared', { reason: 'not-owned-or-missing', storedSessionId: last })
+          logUatEvent('restore', 'remembered-session.id-cleared', {
+            reason: 'not-owned-or-missing',
+            storedSessionId: last
+          })
         }
 
         clearRememberedSessionRestorePending()
