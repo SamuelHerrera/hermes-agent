@@ -11,6 +11,7 @@ import {
   storedStringArray,
   storedStringRecord
 } from '@/lib/storage'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { invalidateCronModelImpactScopeState } from '@/store/cron-model-impact-scope'
 import { $gateway, ensureGatewayForProfile, openGatewayForProfile } from '@/store/gateway'
 import { setConnection } from '@/store/session'
@@ -162,12 +163,28 @@ export const $newChatProfile = atom<string | null>(null)
 export const $freshSessionRequest = atom(0)
 export const $emptyWorkspaceRequest = atom(0)
 
-export function requestFreshSession(): void {
-  $freshSessionRequest.set($freshSessionRequest.get() + 1)
+export function requestFreshSession(source = 'unspecified'): void {
+  const previous = $freshSessionRequest.get()
+
+  $freshSessionRequest.set(previous + 1)
+  logUatEvent('restore', 'fresh-session.requested', {
+    activeGatewayProfile: $activeGatewayProfile.get(),
+    next: previous + 1,
+    previous,
+    source
+  })
 }
 
-export function requestEmptyWorkspace(): void {
-  $emptyWorkspaceRequest.set($emptyWorkspaceRequest.get() + 1)
+export function requestEmptyWorkspace(source = 'unspecified'): void {
+  const previous = $emptyWorkspaceRequest.get()
+
+  $emptyWorkspaceRequest.set(previous + 1)
+  logUatEvent('restore', 'empty-workspace.requested', {
+    activeGatewayProfile: $activeGatewayProfile.get(),
+    next: previous + 1,
+    previous,
+    source
+  })
 }
 
 // Route profile-scoped REST settings (config/env/skills/tools/model/…) to the
@@ -349,7 +366,7 @@ export function selectProfile(name: string): void {
   $newChatProfile.set(target)
 
   if (switching) {
-    requestFreshSession()
+    requestFreshSession('profile.select')
   }
 
   void ensureGatewayProfile(target)
@@ -364,7 +381,7 @@ export function selectProfile(name: string): void {
 export function newSessionInProfile(name: string): void {
   const target = normalizeProfileKey(name)
   $newChatProfile.set(target)
-  requestFreshSession()
+  requestFreshSession('profile.new-session')
   void ensureGatewayProfile(target)
 }
 

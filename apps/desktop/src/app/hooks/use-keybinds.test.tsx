@@ -37,7 +37,7 @@ describe('useKeybinds New Session', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens a new session tab on Cmd/Ctrl+N instead of replacing the current chat', () => {
+  it('does not let uppercase N or Cmd/Ctrl+N create a session', () => {
     const openNewSessionTab = vi.fn()
     const startFreshSession = vi.fn()
 
@@ -47,6 +47,7 @@ describe('useKeybinds New Session', () => {
       </MemoryRouter>
     )
 
+    fireEvent.keyDown(window, { code: 'KeyN', key: 'N', shiftKey: true })
     fireEvent.keyDown(window, {
       code: 'KeyN',
       ctrlKey: !IS_MAC,
@@ -54,7 +55,26 @@ describe('useKeybinds New Session', () => {
       metaKey: IS_MAC
     })
 
-    expect(openNewSessionTab).toHaveBeenCalledTimes(1)
+    expect(openNewSessionTab).not.toHaveBeenCalled()
     expect(startFreshSession).not.toHaveBeenCalled()
+  })
+
+  it('keeps Cmd/Ctrl+T as the explicit new-session tab shortcut', () => {
+    const openNewSessionTab = vi.fn()
+
+    render(
+      <MemoryRouter>
+        <Harness openNewSessionTab={openNewSessionTab} startFreshSession={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    fireEvent.keyDown(window, {
+      code: 'KeyT',
+      ctrlKey: !IS_MAC,
+      key: 't',
+      metaKey: IS_MAC
+    })
+
+    expect(openNewSessionTab).toHaveBeenCalledTimes(1)
   })
 })

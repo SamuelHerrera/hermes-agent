@@ -11,6 +11,7 @@ import { setPluginEnabled } from '@/contrib/plugins-store'
 import { registry } from '@/contrib/registry'
 import { translateNow } from '@/i18n'
 import { readJson, readKey, writeJson, writeKey } from '@/lib/storage'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { notify } from '@/store/notifications'
 import { clearAllPaneSizeOverrides } from '@/store/panes'
 import { $selectedStoredSessionId, $workspaceEmptyPlaceholder, markSessionRead } from '@/store/session'
@@ -74,6 +75,32 @@ function persist(tree: LayoutNode | null) {
  *  the persisted (primary) layout and boots to the default — nothing but its
  *  own routed session. */
 export const $layoutTree = atom<LayoutNode | null>(isSecondaryWindow() ? null : loadPersisted())
+
+function traceTree(tree: LayoutNode | null): Record<string, unknown> {
+  if (!tree) {
+    return { groups: [], panes: [] }
+  }
+
+  return {
+    groups: groupLeafIds(tree).map(groupId => {
+      const node = findGroup(tree, groupId)
+
+      return {
+        active: node?.active ?? null,
+        headerHidden: node?.headerHidden === true,
+        id: groupId,
+        minimized: node?.minimized === true,
+        panes: node?.panes ?? []
+      }
+    }),
+    panes: allPaneIds(tree)
+  }
+}
+
+logUatEvent('tabs', 'layout.hydrated', {
+  secondaryWindow: isSecondaryWindow(),
+  tree: traceTree($layoutTree.get())
+})
 
 /**
  * Which layout preset the current tree came from; `'custom'` after the user
@@ -740,9 +767,11 @@ export function cycleTreeTabInFocusedZone(direction: 1 | -1): null | string {
 export function removeTreePane(paneId: string) {
   const tree = $layoutTree.get()
 
+  logUatEvent('tabs', 'pane.remove.requested', { paneId, present: Boolean(tree && allPaneIds(tree).includes(paneId)) })
+
   if (tree) {
     rememberPaneShare(tree, paneId)
-    commit(removePane(tree, paneId))
+    commit(removePane(tree, paneId), 'pane.remove')
   }
 }
 
@@ -760,6 +789,8 @@ export function parkEmptyWorkspaceHost(): boolean {
     return false
   }
 
+  logUatEvent('tabs', 'workspace.park.evaluate', { placeholder: true, tree: traceTree(tree) })
+
   const workspaceGroup = findGroupOfPane(tree, 'workspace')
 
   // Judge the zone by the tabs the user can still see, not by raw persisted
@@ -767,12 +798,18 @@ export function parkEmptyWorkspaceHost(): boolean {
   // contribution disappears; treating that stale id as content strands the
   // empty leftmost workspace zone even though its strip has no tabs.
   if (!workspaceGroup || shownPanesInGroup(workspaceGroup).length > 0) {
+    logUatEvent('tabs', 'workspace.park.skipped', {
+      reason: !workspaceGroup ? 'workspace-missing' : 'workspace-group-has-shown-panes'
+    })
+
     return false
   }
 
   const hasOtherMainSurface = allPaneIds(tree).some(id => id !== 'workspace' && isMainStripPane(id))
 
   if (!hasOtherMainSurface) {
+    logUatEvent('tabs', 'workspace.park.skipped', { reason: 'no-other-main-surface' })
+
     return false
   }
 
@@ -786,10 +823,13 @@ export function parkEmptyWorkspaceHost(): boolean {
   }
 
   if (!next || next === tree) {
+    logUatEvent('tabs', 'workspace.park.skipped', { reason: 'no-tree-change' })
+
     return false
   }
 
-  commit(next)
+  commit(next, 'workspace.park')
+  logUatEvent('tabs', 'workspace.park.applied', { groupId: workspaceGroup.id })
 
   return true
 }
@@ -802,8 +842,10 @@ function scheduleParkEmptyWorkspaceHost(): void {
   }
 
   emptyWorkspaceParkScheduled = true
+  logUatEvent('tabs', 'workspace.park.scheduled')
   queueMicrotask(() => {
     emptyWorkspaceParkScheduled = false
+    logUatEvent('tabs', 'workspace.park.microtask-fired')
     parkEmptyWorkspaceHost()
   })
 }
@@ -1053,6 +1095,18 @@ export function treeSideOfPane(paneId: string): TreeSide | null {
  * open its side, unhide it, and bring it to the front of its group.
  */
 export function revealTreePane(paneId: string) {
+  const requestedTree = $layoutTree.get()
+  const requestedGroup = requestedTree ? findGroupOfPane(requestedTree, paneId) : null
+
+  logUatEvent('tabs', 'pane.reveal.requested', {
+    active: requestedGroup?.active ?? null,
+    dismissed: $dismissedPanes.get().has(paneId),
+    groupId: requestedGroup?.id ?? null,
+    hidden: $hiddenTreePanes.get().has(paneId),
+    paneId,
+    present: Boolean(requestedTree && allPaneIds(requestedTree).includes(paneId))
+  })
+
   // Reveal beats a Close: un-dismiss and let adoption put the pane back.
   if ($dismissedPanes.get().has(paneId)) {
     setDismissed(paneId, false)
@@ -1084,6 +1138,7 @@ export function revealTreePane(paneId: string) {
 
   if (hiddenNow.has(paneId)) {
     setTreePaneHidden(paneId, false)
+    logUatEvent('tabs', 'pane.reveal.unhidden', { paneId })
 
     return
   }
@@ -1109,7 +1164,7 @@ export function revealTreePane(paneId: string) {
     }
 
     if (next !== tree) {
-      commit(next)
+      commit(next, 'pane.reveal')
     }
   }
 }
@@ -1204,11 +1259,18 @@ function adoptMissingPanes(target: LayoutNode, source: LayoutNode): LayoutNode {
  * panes it's missing.
  */
 export function declareDefaultTree(tree: LayoutNode) {
+  logUatEvent('tabs', 'layout.default-declared', {
+    current: traceTree($layoutTree.get()),
+    declared: traceTree(tree)
+  })
   defaultTree = tree
   const current = $layoutTree.get()
 
   if (!current) {
-    $layoutTree.set(enforceFixedLeftPanel(tree))
+    const initial = enforceFixedLeftPanel(tree)
+
+    $layoutTree.set(initial)
+    logUatEvent('tabs', 'layout.default-adopted', { tree: traceTree(initial) })
 
     return
   }
@@ -1216,7 +1278,7 @@ export function declareDefaultTree(tree: LayoutNode) {
   const next = enforceFixedLeftPanel(adoptMissingPanes(current, tree))
 
   if (next !== current) {
-    commit(next)
+    commit(next, 'layout.default-merge')
   }
 }
 
@@ -1328,6 +1390,8 @@ function adoptContributedPanes(): void {
     return
   }
 
+  logUatEvent('tabs', 'pane.adoption.requested', { paneIds: missing.map(pane => pane.id) })
+
   let next = tree
 
   for (const pane of missing) {
@@ -1384,7 +1448,7 @@ function adoptContributedPanes(): void {
   }
 
   if (next !== tree) {
-    commit(next)
+    commit(next, 'pane.adoption')
   }
 }
 
@@ -1394,15 +1458,21 @@ export function watchContributedPanes(): void {
   registry.subscribe(adoptContributedPanes)
 }
 
-function commit(next: LayoutNode | null) {
+function commit(next: LayoutNode | null, reason = 'unspecified') {
   if (!next) {
     return
   }
 
+  const previous = $layoutTree.get()
   const normalized = enforceFixedLeftPanel(next)
 
   $layoutTree.set(normalized)
   persist(normalized)
+  logUatEvent('tabs', 'tree.committed', {
+    after: traceTree(normalized),
+    before: traceTree(previous),
+    reason
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1604,6 +1674,8 @@ export function mergeTreeZones(groupIds: string[], paneId: string | readonly str
 export function activateTreePane(groupId: string, paneId: string) {
   const tree = $layoutTree.get()
 
+  logUatEvent('tabs', 'pane.activate.requested', { groupId, paneId })
+
   if (tree) {
     markSessionPaneRead(paneId)
     let next = setActivePaneOp(tree, groupId, paneId)
@@ -1617,7 +1689,7 @@ export function activateTreePane(groupId: string, paneId: string) {
       next = setGroupHeaderHiddenOp(next, groupId, false)
     }
 
-    commit(next)
+    commit(next, 'pane.activate')
   }
 }
 
@@ -1881,6 +1953,8 @@ export function hideLoneTreeTab(paneId: string): boolean {
   const group = tree ? findGroupOfPane(tree, paneId) : null
 
   if (!tree || !group) {
+    logUatEvent('tabs', 'pane.hide-lone.skipped', { paneId, reason: !tree ? 'tree-missing' : 'group-missing' })
+
     return false
   }
 
@@ -1892,7 +1966,13 @@ export function hideLoneTreeTab(paneId: string): boolean {
     next = setActivePaneOp(next, group.id, replacement)
   }
 
-  commit(next)
+  logUatEvent('tabs', 'pane.hide-lone.requested', {
+    activeBefore: group.active ?? null,
+    groupId: group.id,
+    paneId,
+    replacement
+  })
+  commit(next, 'pane.hide-lone')
 
   return true
 }

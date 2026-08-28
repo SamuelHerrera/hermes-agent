@@ -30,7 +30,7 @@ import {
 // Re-exported for the many session-actions/tile call sites that already import
 // it from here; the canonical definition lives in @/store/session.
 export { sessionMatchesStoredId }
-import { setSessionTodos } from '@/store/todos'
+import { clearSessionTodos, setSessionTodos, todosForHydration } from '@/store/todos'
 import { reportBackendContract, reportInstallMethodWarning } from '@/store/updates'
 import type { SessionCreateResponse, SessionInfo, SessionResumeResponse, SessionRuntimeInfo } from '@/types/hermes'
 
@@ -404,8 +404,15 @@ export function reconcileResumeMessages(nextMessages: ChatMessage[], previousMes
  * row misses its committed copy and is appended a second time at the end of the
  * transcript — the duplicated user bubble of #67603.
  */
-const isGatewaySystemMarker = (message: ChatMessage): boolean =>
-  message.role === 'user' && chatMessageText(message).trimStart().startsWith('[System:')
+const isGatewaySystemMarker = (message: ChatMessage): boolean => {
+  if (message.role !== 'user') {
+    return false
+  }
+
+  const text = chatMessageText(message).trimStart()
+
+  return text.startsWith('[System:') || text.startsWith('[IMPORTANT: Background process ')
+}
 
 /**
  * Does the row carry anything a viewer would miss — streamed answer text, or
@@ -513,7 +520,9 @@ export function preserveLocalPendingTurnMessages(
     }
   }
 
-  const latestAuthoritativeUser = [...nextMessages].reverse().find(message => message.role === 'user')
+  const latestAuthoritativeUser = [...nextMessages]
+    .reverse()
+    .find(message => message.role === 'user' && !isGatewaySystemMarker(message))
   const preserved: ChatMessage[] = []
   // Authoritative id → richer local pending row. Replacing (not appending)
   // avoids painting both the empty inflight shell and the full stream bubble.
@@ -760,14 +769,26 @@ export function hydrateSessionTodosFromResume(
   }
 }
 
-export function hydrateSessionTodosFromMessages(sessionId: string, messages: readonly ChatMessage[]): boolean {
+export function hydrateSessionTodosFromMessages(
+  sessionId: string,
+  messages: readonly ChatMessage[],
+  options: { allowActive?: boolean } = {}
+): boolean {
   const latest = latestSessionTodos(messages)
 
   if (!sessionId || latest === null) {
     return false
   }
 
-  setSessionTodos(sessionId, latest)
+  const hydrated = options.allowActive === false ? todosForHydration(latest) : latest
+
+  if (!hydrated) {
+    clearSessionTodos(sessionId)
+
+    return false
+  }
+
+  setSessionTodos(sessionId, hydrated)
 
   return true
 }

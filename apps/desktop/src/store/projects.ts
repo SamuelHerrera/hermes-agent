@@ -309,7 +309,7 @@ export function goToProject(id: string, options?: { newSession?: boolean }): voi
   if (cwd) {
     requestStartWorkSession(cwd, undefined, { openTab: true })
   } else {
-    requestFreshSession()
+    requestFreshSession('project.new-session-without-cwd')
   }
 }
 
@@ -1112,7 +1112,7 @@ export async function deleteProject(id: string): Promise<void> {
   // The open session's project is gone — reset to the intro draft (the session
   // itself survives; it just falls back to Recents).
   if (kickToIntro) {
-    requestFreshSession()
+    requestFreshSession('project.delete-active')
   }
 
   await persistOrRollback(snap, async () => {

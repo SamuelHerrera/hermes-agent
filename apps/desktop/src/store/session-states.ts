@@ -31,6 +31,7 @@ import {
 } from '@/components/pane-shell/tree/store'
 import { stableArray } from '@/lib/stable-array'
 import { readJson, writeJson } from '@/lib/storage'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import type { SessionInfo } from '@/types/hermes'
 
 import { $activeGatewayProfile, normalizeProfileKey, requestEmptyWorkspace } from './profile'
@@ -520,6 +521,23 @@ const profileKey = () => normalizeProfileKey($activeGatewayProfile.get())
 // tiles, and no repopulation on a profile switch.
 export const $sessionTiles = atom<SessionTile[]>(isSecondaryWindow() ? [] : [...(tilesByProfile[profileKey()] ?? [])])
 
+function traceTiles(tiles: readonly SessionTile[]) {
+  return tiles.map(tile => ({
+    anchor: tile.anchor ?? null,
+    before: tile.before ?? null,
+    dir: tile.dir,
+    preview: tile.preview === true,
+    runtimeId: tile.runtimeId ?? null,
+    storedSessionId: tile.storedSessionId
+  }))
+}
+
+logUatEvent('tabs', 'session-tiles.hydrated', {
+  profile: profileKey(),
+  secondaryWindow: isSecondaryWindow(),
+  tiles: traceTiles($sessionTiles.get())
+})
+
 function persistTiles() {
   // Shares the origin's storage; a secondary window holds no tiles, so a write
   // back would only wipe the primary's set.
@@ -530,7 +548,9 @@ function persistTiles() {
   writeJson(TILES_KEY, Object.keys(tilesByProfile).length === 0 ? null : tilesByProfile)
 }
 
-function saveTiles(tiles: SessionTile[]) {
+function saveTiles(tiles: SessionTile[], reason = 'unspecified') {
+  const previous = $sessionTiles.get()
+
   $sessionTiles.set(tiles)
   const stored = tiles.map(toStored)
 
@@ -541,6 +561,12 @@ function saveTiles(tiles: SessionTile[]) {
   }
 
   persistTiles()
+  logUatEvent('tabs', 'session-tiles.saved', {
+    after: traceTiles(tiles),
+    before: traceTiles(previous),
+    profile: profileKey(),
+    reason
+  })
 }
 
 // Profile switch: surface the new profile's tiles with runtime ids cleared so
@@ -549,12 +575,19 @@ function saveTiles(tiles: SessionTile[]) {
 // never carries tiles, so it stays out of this entirely.
 if (!isSecondaryWindow()) {
   $activeGatewayProfile.subscribe(() => {
-    $sessionTiles.set([...(tilesByProfile[profileKey()] ?? [])])
+    const tiles = [...(tilesByProfile[profileKey()] ?? [])]
+
+    $sessionTiles.set(tiles)
+    logUatEvent('tabs', 'session-tiles.profile-hydrated', { profile: profileKey(), tiles: traceTiles(tiles) })
   })
 }
 
 export function patchSessionTile(storedSessionId: string, patch: Partial<SessionTile>) {
-  saveTiles($sessionTiles.get().map(t => (t.storedSessionId === storedSessionId ? { ...t, ...patch } : t)))
+  logUatEvent('tabs', 'session-tile.patch.requested', { patchKeys: Object.keys(patch), storedSessionId })
+  saveTiles(
+    $sessionTiles.get().map(t => (t.storedSessionId === storedSessionId ? { ...t, ...patch } : t)),
+    'session-tile.patch'
+  )
 }
 
 /** Drop live runtime bindings so every tile re-resumes — used on gateway
@@ -671,7 +704,17 @@ export function openSessionTile(
   anchor?: string,
   before?: null | string
 ) {
+  logUatEvent('tabs', 'session-tile.open.requested', {
+    anchor: anchor ?? null,
+    before: before ?? null,
+    dir,
+    selectedStoredSessionId: $selectedStoredSessionId.get(),
+    storedSessionId
+  })
+
   if (storedSessionId === $selectedStoredSessionId.get()) {
+    logUatEvent('tabs', 'session-tile.open.skipped', { reason: 'already-primary', storedSessionId })
+
     return
   }
 
@@ -695,7 +738,7 @@ export function detachWorkspaceSessionToTile(
   }
 
   placeSessionTile(storedSessionId, dir, anchor, before)
-  requestEmptyWorkspace()
+  requestEmptyWorkspace('workspace.detach-to-tile')
   hideLoneTreeTab('workspace')
 }
 
@@ -704,8 +747,16 @@ function placeSessionTile(storedSessionId: string, dir: TileDock, anchor?: strin
 
   const dock = anchor ?? focusedSessionTabAnchor() ?? undefined
 
+  logUatEvent('tabs', 'session-tile.place', {
+    before: before ?? null,
+    dir,
+    dock: dock ?? null,
+    existing: tiles.some(t => t.storedSessionId === storedSessionId),
+    storedSessionId
+  })
+
   if (!tiles.some(t => t.storedSessionId === storedSessionId)) {
-    saveTiles([...tiles, { anchor: dock, before, dir, storedSessionId }])
+    saveTiles([...tiles, { anchor: dock, before, dir, storedSessionId }], 'session-tile.open')
     // Adoption is async via the registry — order sync runs after the move path
     // below; a brand-new tile's strip slot is already in `before`.
 
@@ -911,11 +962,13 @@ const closedStack = (): SessionTile[] => (closedTilesByProfile[profileKey()] ??=
 export function closeSessionTile(storedSessionId: string) {
   const tile = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)
 
+  logUatEvent('tabs', 'session-tile.close.requested', { found: Boolean(tile), storedSessionId })
+
   if (tile && !tile.preview) {
     closedStack().push({ anchor: tile.anchor, before: tile.before, dir: tile.dir, storedSessionId })
   }
 
-  saveTiles($sessionTiles.get().filter(t => t.storedSessionId !== storedSessionId))
+  saveTiles($sessionTiles.get().filter(t => t.storedSessionId !== storedSessionId), 'session-tile.close')
 
   // A settled session may never publish again, so the publish-time eviction
   // in publishSessionState can't reach it — drop its cached state here. A
@@ -932,11 +985,13 @@ export function closeSessionTile(storedSessionId: string) {
 export function discardSessionTile(storedSessionId: string) {
   const runtimeId = $sessionTiles.get().find(t => t.storedSessionId === storedSessionId)?.runtimeId
 
+  logUatEvent('tabs', 'session-tile.discard.requested', { runtimeId: runtimeId ?? null, storedSessionId })
+
   if (runtimeId) {
     dropSessionState(runtimeId)
   }
 
-  saveTiles($sessionTiles.get().filter(t => t.storedSessionId !== storedSessionId))
+  saveTiles($sessionTiles.get().filter(t => t.storedSessionId !== storedSessionId), 'session-tile.discard')
 }
 
 /** ⌘⇧T — reopen the most recently closed tab where it was, then focus it.
@@ -1019,6 +1074,7 @@ let selectionRestoreInFlight = false
 
 export function markSelectionRestore() {
   selectionRestoreInFlight = true
+  logUatEvent('restore', 'selection-restore.armed')
 }
 
 // Homing also FRONTS the workspace tab: the resumed chat loads in the workspace
@@ -1026,8 +1082,15 @@ export function markSelectionRestore() {
 $selectedStoredSessionId.listen(selected => {
   const restoring = selectionRestoreInFlight
   selectionRestoreInFlight = false
+  const homesToWorkspace = selectionHomesToWorkspace(selected, $sessionTiles.get())
 
-  if (restoring || !selectionHomesToWorkspace(selected, $sessionTiles.get())) {
+  logUatEvent('restore', 'selection.changed', {
+    homesToWorkspace,
+    restoring,
+    selectedStoredSessionId: selected
+  })
+
+  if (restoring || !homesToWorkspace) {
     return
   }
 

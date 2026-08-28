@@ -216,7 +216,11 @@ import {
   revalidateRemoteConnection
 } from './remote-liveness'
 import { missingRendererAssets } from './renderer-bundle'
-import { attachRendererConsoleCapture, formatRendererBoundaryReport } from './renderer-log'
+import {
+  attachRendererConsoleCapture,
+  formatRendererBoundaryReport,
+  formatRendererDiagnosticEvent
+} from './renderer-log'
 import {
   buildSessionWindowUrl,
   chatWindowWebPreferences,
@@ -12079,6 +12083,14 @@ ipcMain.on('hermes:logs:renderer-error', (_event, report) => {
   const { label, boundary, message, componentStack } = report && typeof report === 'object' ? report : {}
   rememberLog(formatRendererBoundaryReport(label, boundary, message, componentStack))
   flushDesktopLogBufferSync()
+})
+
+// Always-on local UAT diagnostics for renderer lifecycle/state transitions.
+// These are structured, privacy-clamped events emitted only by our packaged
+// renderer; they share desktop.log so `hermes debug share` and Settings → Logs
+// capture the exact delayed event sequence that preceded a UI mutation.
+ipcMain.on('hermes:logs:renderer-diagnostic', (_event, report) => {
+  rememberLog(formatRendererDiagnosticEvent(report))
 })
 
 function isExecutableFile(filePath) {

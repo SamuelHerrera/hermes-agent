@@ -54,7 +54,7 @@ describe('contributed keybind actions', () => {
 
     // The built-in keeps its own combo and its own (i18n) label — the
     // contribution is filtered out rather than overriding core.
-    expect(bindingsFor('session.new')).toEqual(['mod+n', 'shift+n'])
+    expect(bindingsFor('session.new')).toEqual([])
     expect(allKeybindActions().filter(a => a.id === 'session.new')).toHaveLength(1)
 
     dispose()

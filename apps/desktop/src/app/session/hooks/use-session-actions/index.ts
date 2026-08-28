@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n'
 import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { setSessionYolo } from '@/lib/yolo-session'
 import {
   $clarifyRequests,
@@ -291,6 +292,7 @@ async function desktopSessionCreateParams(cwd: string): Promise<Record<string, u
 interface FreshSessionDraftOptions {
   preserveRoute?: boolean
   replaceRoute?: boolean
+  source?: string
   workspaceTarget?: NewChatWorkspaceTarget
 }
 
@@ -383,15 +385,29 @@ export function useSessionActions({
 
   const startFreshSessionDraft = useCallback(
     (options: boolean | FreshSessionDraftOptions = false) => {
+      const draftOptions = typeof options === 'boolean' ? { replaceRoute: options } : options
+      const source = typeof options === 'boolean' ? 'boolean-replace-route' : (options.source ?? 'unspecified')
+
+      logUatEvent('restore', 'fresh-draft.requested', {
+        activeSessionId: activeSessionIdRef.current,
+        preserveRoute: draftOptions.preserveRoute ?? false,
+        rememberedSessionRestorePending: $rememberedSessionRestorePending.get(),
+        replaceRoute: draftOptions.replaceRoute ?? false,
+        selectedStoredSessionId: selectedStoredSessionIdRef.current,
+        source,
+        workspaceEmptyPlaceholder: $workspaceEmptyPlaceholder.get()
+      })
+
       if ($rememberedSessionRestorePending.get()) {
         // A remembered-session restore can briefly coexist with the default `/`
         // route and with late boot/reset callbacks. Those are not user intent to
         // create a new tab; letting them through re-fronts workspace as a fresh
         // "New Session" after the correct restored tab already appeared.
+        logUatEvent('restore', 'fresh-draft.suppressed', { reason: 'remembered-restore-pending', source })
+
         return
       }
 
-      const draftOptions = typeof options === 'boolean' ? { replaceRoute: options } : options
       const preserveRoute = draftOptions.preserveRoute ?? false
       const replaceRoute = draftOptions.replaceRoute ?? false
 
@@ -472,6 +488,12 @@ export function useSessionActions({
       setCurrentBranch('')
       // Never clear the composer here — ChatBar's per-thread draft swap owns it.
       setFreshDraftReady(true)
+      logUatEvent('restore', 'fresh-draft.applied', {
+        preserveRoute,
+        replaceRoute,
+        source,
+        workspaceTargetKind: workspaceTarget === undefined ? 'default' : workspaceTarget === null ? 'detached' : 'named'
+      })
     },
     [activeSessionIdRef, busyRef, navigate, onFreshDraftRouteIntent, resetViewSync, selectedStoredSessionIdRef]
   )
@@ -480,6 +502,10 @@ export function useSessionActions({
     async (preview: string | null = null): Promise<string | null> => {
       const startingStoredSessionId = selectedStoredSessionIdRef.current
       const startingRouteToken = getRouteToken()
+
+      logUatEvent('session', 'backend-session.create-for-send.requested', {
+        selectedStoredSessionId: startingStoredSessionId
+      })
 
       creatingSessionRef.current = true
 
@@ -499,6 +525,11 @@ export function useSessionActions({
         const params = await desktopSessionCreateParams(cwd)
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id ?? null
+
+        logUatEvent('session', 'backend-session.create-for-send.resolved', {
+          runtimeId: created.session_id,
+          storedSessionId: stored
+        })
 
         // Only a genuine move to a DIFFERENT chat mid-create should orphan the
         // session we just minted. The active runtime ref is deliberately not a
@@ -590,9 +621,20 @@ export function useSessionActions({
    *  list (Cursor-style draft tab); it surfaces on the next refresh once the
    *  first message persists a turn. "Open in split" keeps the listed behavior. */
   const openNewSessionTile = useCallback(
-    async (dir: TileDock = 'right', options?: { cwd?: null | string; listed?: boolean }) => {
+    async (dir: TileDock = 'right', options?: { cwd?: null | string; listed?: boolean; source?: string }) => {
+      const source = options?.source ?? 'unspecified'
+
+      logUatEvent('tabs', 'new-session-tile.requested', {
+        dir,
+        hasCwd: Boolean(options?.cwd),
+        listed: options?.listed ?? true,
+        source,
+        workspaceEmptyPlaceholder: $workspaceEmptyPlaceholder.get()
+      })
+
       if (dir === 'center' && $workspaceEmptyPlaceholder.get()) {
-        startFreshSessionDraft({ replaceRoute: true })
+        logUatEvent('tabs', 'new-session-tile.reused-workspace-placeholder', { source })
+        startFreshSessionDraft({ replaceRoute: true, source: `new-session-tile:${source}` })
 
         return
       }
@@ -606,6 +648,13 @@ export function useSessionActions({
         const params = await desktopSessionCreateParams((options?.cwd || resolveNewSessionCwd()).trim())
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id
+
+        logUatEvent('tabs', 'new-session-tile.backend-created', {
+          dir,
+          runtimeId: created.session_id,
+          source,
+          storedSessionId: stored ?? null
+        })
 
         if (!stored) {
           await requestGateway('session.close', { session_id: created.session_id }).catch(() => undefined)
@@ -642,11 +691,18 @@ export function useSessionActions({
         }
 
         revealTreePane(`session-tile:${stored}`)
+        logUatEvent('tabs', 'new-session-tile.opened', {
+          paneId: `session-tile:${stored}`,
+          runtimeId: created.session_id,
+          source,
+          storedSessionId: stored
+        })
 
         if (listed) {
           broadcastSessionsChanged()
         }
       } catch (error) {
+        logUatEvent('tabs', 'new-session-tile.failed', { source })
         notifyError(error, copy.createSessionFailed)
       }
     },
@@ -660,7 +716,7 @@ export function useSessionActions({
         // tab and stack a fresh draft beside it, matching the tab-strip "+".
         // The close-all placeholder is still reused by openNewSessionTile.
         $newChatProfile.set(null)
-        void openNewSessionTile('center', { listed: false })
+        void openNewSessionTile('center', { listed: false, source: 'sidebar.new-session' })
 
         return
       }
@@ -1159,7 +1215,7 @@ export function useSessionActions({
         recoveredInFlightTail = inFlightRecovery.applied
 
         if (inFlightRecovery.applied) {
-          hydrateSessionTodosFromMessages(resumed.session_id, inFlightRecovery.messages)
+          hydrateSessionTodosFromMessages(resumed.session_id, inFlightRecovery.messages, { allowActive: resumedRunning })
         }
 
         // Prefetch-hit fast path: `preferredMessages` IS the live `$messages`
@@ -1651,7 +1707,7 @@ export function useSessionActions({
           navigate(sessionRoute(replacementStoredSessionId), { replace: true })
           void resumeSession(replacementStoredSessionId, true)
         } else {
-          requestEmptyWorkspace()
+          requestEmptyWorkspace('session.remove-final-tab')
         }
       }
 

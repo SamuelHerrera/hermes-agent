@@ -33,6 +33,7 @@ import { type ChatMessage, chatMessageText, preserveLocalAssistantErrors, toChat
 import { sessionMessagesSignature } from '@/lib/session-signatures'
 import { isMessagingSource } from '@/lib/session-source'
 import { latestSessionTodos } from '@/lib/todos'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { activateWakeIndicator } from '@/lib/wake-indicator'
 import { playWakeSound } from '@/lib/wake-sound'
 import { $billingSettingsRequest } from '@/store/billing-block'
@@ -524,8 +525,12 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       return
     }
 
+    logUatEvent('restore', 'fresh-session.effect-observed', {
+      current: freshSessionRequest,
+      previous: lastFreshRef.current
+    })
     lastFreshRef.current = freshSessionRequest
-    startFreshSessionDraft()
+    startFreshSessionDraft({ source: 'wiring.fresh-session-request' })
   }, [freshSessionRequest, startFreshSessionDraft])
 
   // Close-all/close-final-tab should not materialize another visible "New
@@ -537,9 +542,14 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       return
     }
 
+    logUatEvent('restore', 'empty-workspace.effect-observed', {
+      current: emptyWorkspaceRequest,
+      previous: lastEmptyWorkspaceRef.current
+    })
     lastEmptyWorkspaceRef.current = emptyWorkspaceRequest
-    startFreshSessionDraft({ replaceRoute: true })
+    startFreshSessionDraft({ replaceRoute: true, source: 'wiring.empty-workspace-request' })
     setWorkspaceEmptyPlaceholder(true)
+    logUatEvent('restore', 'empty-workspace.placeholder-set', { value: true })
     hideLoneTreeTab('workspace')
     parkEmptyWorkspaceHost()
   }, [emptyWorkspaceRequest, startFreshSessionDraft])
@@ -575,7 +585,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const startSessionInWorkspace = useCallback(
     (path: null | string, options?: { openTab?: boolean }) => {
       if (options?.openTab && mainChatOccupied(activeSessionIdRef.current, $selectedStoredSessionId.get())) {
-        void openNewSessionTile('center', { cwd: path, listed: false })
+        void openNewSessionTile('center', { cwd: path, listed: false, source: 'workspace.start-session' })
 
         return
       }
@@ -780,7 +790,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             void ensureGatewayProfile(normalizeProfileKey(targetProfile))
           }
         } else if (payload?.start_new_session !== false) {
-          startFreshSessionDraft()
+          startFreshSessionDraft({ source: 'wake.detected' })
         }
 
         requestVoiceConversationStart()
@@ -795,7 +805,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
   useGatewayBoot({
     beforeConnectionSwitch: () => {
-      startFreshSessionDraft({ preserveRoute: true, workspaceTarget: null })
+      startFreshSessionDraft({ preserveRoute: true, source: 'gateway.before-connection-switch', workspaceTarget: null })
       resetOverlayReturnRoute()
       resetProjectTreeState()
       closeAllTerminals()
@@ -888,7 +898,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // it — Cursor-style. Every click opens a fresh "New session" tab (multiple
   // empty tabs are fine since none touch the session list).
   const openNewSessionTab = useCallback(() => {
-    void openNewSessionTile('center', { listed: false })
+    void openNewSessionTile('center', { listed: false, source: 'tab-strip-or-keybind' })
   }, [openNewSessionTile])
 
   // Single global listener for every rebindable hotkey plus the on-screen
@@ -941,7 +951,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     onNavigate: selectSidebarItem,
     onOpenSessionTab: sessionId => openSession(sessionId, navigate, 'tab'),
     onNewSessionInWorkspace: path => startSessionInWorkspace(path, { openTab: true }),
-    onNewSessionSplit: dir => void openNewSessionTile(dir),
+    onNewSessionSplit: dir => void openNewSessionTile(dir, { source: 'composer.new-session-split' }),
     onPasteClipboardImage: opts => composer.pasteClipboardImage(opts),
     onPickFiles: () => void composer.pickContextPaths('file'),
     onPickFolders: () => void composer.pickContextPaths('folder'),
