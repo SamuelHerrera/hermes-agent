@@ -10196,6 +10196,8 @@ function closeQuickEntryWindow() {
 function createWindow() {
   const icon = getAppIconPath()
   const savedWindowState = readWindowState()
+
+  rememberLog(`[uat] main-window.create requested appVersion=${app.getVersion()} savedState=${Boolean(savedWindowState)}`)
   mainWindow = new BrowserWindow({
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
     minWidth: WINDOW_MIN_WIDTH,
@@ -10253,6 +10255,7 @@ function createWindow() {
 
   const revealController = wireWindowReveal(createdMainWindow, {
     onRevealed: () => {
+      rememberLog(`[uat] main-window.revealed webContentsId=${createdMainWindow.webContents.id}`)
       // Persist geometry as soon as the window is visible so a crash before the
       // first clean resize/move/close still captures the restored bounds (#56726).
       schedulePersistWindowState()
@@ -10303,6 +10306,7 @@ function createWindow() {
 
   // the closed wrapper remains truthy, so clear only the window this callback owns.
   mainWindow.on('closed', () => {
+    rememberLog(`[uat] main-window.closed webContentsId=${createdMainWindow.webContents.id}`)
     closePetOverlay()
     wakeIndicatorController.close()
 
@@ -10390,6 +10394,7 @@ function createWindow() {
   startHermes().catch(error => rememberLog(error.stack || error.message))
 
   mainWindow.webContents.once('did-finish-load', () => {
+    rememberLog(`[uat] main-window.did-finish-load webContentsId=${createdMainWindow.webContents.id}`)
     // Zoom restore is handled by wireCommonWindowHandlers (shared with session
     // windows); no need to reapply it here.
     broadcastBootProgress()
@@ -13061,6 +13066,7 @@ app.on('open-url', (event, url) => {
 })
 
 app.whenReady().then(() => {
+  rememberLog(`[uat] app.ready appVersion=${app.getVersion()} packaged=${app.isPackaged}`)
   const systemCa = installWindowsSystemCaTrust(tls)
 
   if (systemCa.applied) {
@@ -13119,6 +13125,9 @@ app.whenReady().then(() => {
   }
 
   app.on('activate', () => {
+    rememberLog(
+      `[uat] app.activate mainWindow=${mainWindow && !mainWindow.isDestroyed() ? 'available' : 'missing'} windows=${BrowserWindow.getAllWindows().length}`
+    )
     // Recreate the primary window if it's gone. Guard on mainWindow directly
     // (not just total window count) so a dock click still restores the main
     // window when only secondary session windows remain open.
