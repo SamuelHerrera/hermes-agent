@@ -48,6 +48,84 @@ class TestInterruptModule:
             assert other_tid in _interrupted_threads  # other thread untouched
             _interrupted_threads.discard(other_tid)
 
+    def test_interrupted_thread_cannot_commit_approval_authority(self):
+        from tools.interrupt import commit_if_not_interrupted, set_interrupt
+
+        committed = []
+        set_interrupt(True)
+        try:
+            assert commit_if_not_interrupted(lambda: committed.append(True)) is False
+        finally:
+            set_interrupt(False)
+
+        assert committed == []
+
+    def test_reentrant_interrupt_rolls_back_commit(self):
+        from tools.interrupt import commit_if_not_interrupted, set_interrupt
+
+        authority = []
+
+        def commit():
+            authority.append("grant")
+            set_interrupt(True)
+
+        def rollback():
+            authority.remove("grant")
+
+        try:
+            assert commit_if_not_interrupted(commit, rollback) is False
+        finally:
+            set_interrupt(False)
+
+        assert authority == []
+
+    def test_approval_commit_and_stop_share_one_linearization_lock(self):
+        from tools.interrupt import (
+            _interrupted_threads,
+            _lock,
+            commit_if_not_interrupted,
+            set_interrupt,
+        )
+
+        worker_ready = threading.Event()
+        commit_entered = threading.Event()
+        stop_started = threading.Event()
+        release_commit = threading.Event()
+        result = {}
+
+        def commit():
+            commit_entered.set()
+            assert stop_started.wait(timeout=5)
+            assert release_commit.wait(timeout=5)
+            result["authority"] = True
+
+        def worker():
+            result["thread_id"] = threading.get_ident()
+            worker_ready.set()
+            result["committed"] = commit_if_not_interrupted(commit)
+
+        approval_thread = threading.Thread(target=worker)
+        approval_thread.start()
+        assert worker_ready.wait(timeout=5)
+        assert commit_entered.wait(timeout=5)
+
+        def stop():
+            stop_started.set()
+            set_interrupt(True, thread_id=result["thread_id"])
+
+        stop_thread = threading.Thread(target=stop)
+        stop_thread.start()
+        assert stop_started.wait(timeout=5)
+        release_commit.set()
+        approval_thread.join(timeout=5)
+        stop_thread.join(timeout=5)
+
+        assert result["committed"] is True
+        assert result["authority"] is True
+        with _lock:
+            assert result["thread_id"] in _interrupted_threads
+            _interrupted_threads.discard(result["thread_id"])
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: pre-tool interrupt check

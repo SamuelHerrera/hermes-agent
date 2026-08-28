@@ -1155,6 +1155,10 @@ def _execute_remote(
         # Execute the script on the remote backend
         logger.info("Executing code on %s backend (task %s)...",
                      env_type, effective_task_id[:8])
+        from tools.interrupt import is_interrupted as _is_interrupted
+
+        if _is_interrupted():
+            return _interrupted_before_execution_result()
         script_result = env.execute(
             f"cd {quoted_sandbox_dir} && {env_prefix} python3 script.py",
             timeout=timeout,
@@ -1252,6 +1256,18 @@ def _execute_remote(
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
+def _interrupted_before_execution_result() -> str:
+    return json.dumps({
+        "status": "interrupted",
+        "output": "[execution interrupted — script did not start]",
+        "error": "Script interrupted before execution.",
+        "exit_code": 130,
+        "tool_calls_made": 0,
+        "duration_seconds": 0,
+    }, ensure_ascii=False)
+
+
 def execute_code(
     code: str,
     task_id: Optional[str] = None,
@@ -1310,23 +1326,17 @@ def execute_code(
             "duration_seconds": 0,
         }, ensure_ascii=False)
 
-    # Clean interrupt slate for a user-approved script before EITHER dispatch
-    # path spawns it: drop a stale bit that landed on this thread during the
-    # blocking approval-wait so it can't kill the just-approved run on the first
-    # poll (local _wait_for_process loop, or remote/ssh env.execute which routes
-    # through the same poll loop).  A genuine post-clear interrupt re-sets the
-    # bit and is still caught downstream.
-    if _guard.get("user_approved"):
-        from tools.interrupt import clear_current_thread_interrupt
-        clear_current_thread_interrupt()
+    from tools.interrupt import is_interrupted as _is_interrupted
+
+    # Approval finalization can retain a later Stop. Fail closed before any
+    # local or remote executor setup begins.
+    if _is_interrupted():
+        return _interrupted_before_execution_result()
 
     if env_type != "local":
         return _execute_remote(code, task_id, enabled_tools)
 
     # --- Local execution path (UDS) --- below this line is unchanged ---
-
-    # Import per-thread interrupt check (cooperative cancellation)
-    from tools.interrupt import is_interrupted as _is_interrupted
 
     # Resolve config
     _cfg = _load_config()
@@ -1501,6 +1511,11 @@ def execute_code(
         if _existing_pp:
             _pp_parts.append(_existing_pp)
         child_env["PYTHONPATH"] = os.pathsep.join(_pp_parts)
+
+        # Stop may arrive while the local RPC sandbox is being prepared. Check
+        # again at the final handoff before user code can start.
+        if _is_interrupted():
+            return _interrupted_before_execution_result()
 
         proc = subprocess.Popen(
             [_child_python, _script_path],

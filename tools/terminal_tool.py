@@ -2693,6 +2693,18 @@ def _resolve_command_cwd(
     return recorded or default_cwd
 
 
+def _interrupted_before_execution_result(approval_note: str | None = None) -> str:
+    result = {
+        "output": "[Command interrupted]\nCommand did not start.",
+        "exit_code": 130,
+        "error": "Command interrupted before execution.",
+        "status": "interrupted",
+    }
+    if approval_note:
+        result["approval"] = approval_note.rstrip(".") + ", then interrupted."
+    return json.dumps(result, ensure_ascii=False)
+
+
 def terminal_tool(
     command: str,
     background: bool = False,
@@ -3087,10 +3099,10 @@ def terminal_tool(
         # Pre-exec security checks (tirith + dangerous command detection)
         # Skip check if force=True (user has confirmed they want to run it)
         approval_note = None
-        # True when the user explicitly approved this run (or pre-confirmed via
-        # force).  Drives the clean-interrupt-slate clear before env.execute so
-        # an approved command can't be SIGINT-killed by a bit that landed during
-        # the approval-wait (see clear_current_thread_interrupt).
+        # ``force`` is the only path that clears a pre-existing interrupt before
+        # execution. Human approval never clears Stop: approval persistence and
+        # interruption are linearized by the guard, and a later Stop must survive
+        # until the executor observes it.
         _approved_run = bool(force)
         if not force:
             approval = _check_all_guards(
@@ -3128,10 +3140,18 @@ def terminal_tool(
             if approval.get("user_approved"):
                 desc = approval.get("description", "flagged as dangerous")
                 approval_note = f"Command required approval ({desc}) and was approved by the user."
-                _approved_run = True
             elif approval.get("smart_approved"):
                 desc = approval.get("description", "flagged as dangerous")
                 approval_note = f"Command was flagged ({desc}) and auto-approved by smart approval."
+
+        # A force-confirmed replay gets one clean slate. Human-approved and
+        # automatic paths never erase a Stop that landed during approval.
+        if _approved_run:
+            from tools.interrupt import clear_current_thread_interrupt
+
+            clear_current_thread_interrupt()
+        if is_interrupted():
+            return _interrupted_before_execution_result(approval_note)
 
         # Prepare command for execution
         pty_disabled_reason = None
@@ -3159,6 +3179,10 @@ def terminal_tool(
                 env_type=env_type,
             )
             try:
+                # Background executors do not poll the turn interrupt after
+                # detaching, so fail closed at the last handoff before spawn.
+                if is_interrupted():
+                    return _interrupted_before_execution_result(approval_note)
                 if env_type == "local":
                     proc_session = process_registry.spawn_local(
                         command=command,
@@ -3413,16 +3437,6 @@ def terminal_tool(
             result = None
             command_cwd = None
 
-            # Clean interrupt slate for an approved command, ONCE before the
-            # retry loop: drop a stale bit that landed on this thread during the
-            # approval-wait so it can't SIGINT the just-approved run.  Do NOT
-            # re-clear inside the loop -- a genuine interrupt arriving during the
-            # backoff sleep between retries must survive and abort the command
-            # (caught by the next attempt's _wait_for_process poll loop -> 130).
-            if _approved_run:
-                from tools.interrupt import clear_current_thread_interrupt
-                clear_current_thread_interrupt()
-
             while retry_count <= max_retries:
                 try:
                     command_cwd = _resolve_command_cwd(
@@ -3441,6 +3455,10 @@ def terminal_tool(
                         # reads, RPC reads) intentionally stay unbounded.
                         "bounded_capture": True,
                     }
+                    # Recheck at every executor handoff so a Stop during setup
+                    # or retry backoff cannot start the next attempt.
+                    if is_interrupted():
+                        return _interrupted_before_execution_result(approval_note)
                     result = env.execute(command, **execute_kwargs)
                 except Exception as e:
                     error_str = str(e).lower()

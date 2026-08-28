@@ -1287,6 +1287,54 @@ describe('appendLiveSessionProjection', () => {
     })
   })
 
+  it('reattaches a resumed clarify request to the structured current-turn assistant', () => {
+    const stored: ChatMessage[] = [
+      msg('current-user', 'user', 'choose a deployment target'),
+      {
+        id: 'current-assistant',
+        role: 'assistant',
+        pending: true,
+        parts: [
+          { type: 'reasoning', text: 'I need the user to choose.' },
+          { type: 'text', text: 'Asked a question' }
+        ]
+      }
+    ]
+
+    const restored = appendLiveSessionProjection(stored, {
+      session_id: 'runtime-1',
+      inflight: {
+        user: 'choose a deployment target',
+        assistant: 'Asked a question',
+        reasoning: 'I need the user to choose.',
+        streaming: true
+      },
+      pending_prompt: {
+        event: 'clarify.request',
+        payload: {
+          request_id: 'resumed-clarify',
+          question: 'Which target?',
+          choices: ['staging', 'production']
+        }
+      }
+    })
+
+    expect(restored).toHaveLength(2)
+    expect(restored[1]).toMatchObject({ id: 'current-assistant', pending: true })
+    expect(restored[1].parts).toContainEqual(
+      expect.objectContaining({
+        type: 'tool-call',
+        toolCallId: 'resumed-clarify',
+        toolName: 'clarify',
+        args: {
+          question: 'Which target?',
+          choices: ['staging', 'production'],
+          request_id: 'resumed-clarify'
+        }
+      })
+    )
+  })
+
   it('does not append a blocking assistant row without a current user boundary', () => {
     const stored = [msg('old-user', 'user', 'earlier task'), msg('old-assistant', 'assistant', 'earlier answer')]
 
@@ -1304,6 +1352,142 @@ describe('appendLiveSessionProjection', () => {
 
     expect(restored).toEqual(stored)
     expect(restored.map(message => message.role)).toEqual(['user', 'assistant'])
+  })
+
+  it('embeds a resumed approval snapshot in the matching pending tool row', () => {
+    const stored = [msg('current-user', 'user', 'run the command')]
+
+    const restored = appendLiveSessionProjection(stored, {
+      session_id: 'runtime-1',
+      inflight: {
+        assistant: '',
+        events: [
+          {
+            type: 'tool.start',
+            payload: {
+              args: { command: 'rm -rf /tmp/x' },
+              name: 'terminal',
+              tool_id: 'terminal-call-1'
+            }
+          }
+        ],
+        streaming: true,
+        user: 'run the command'
+      },
+      pending_prompt: {
+        event: 'approval.request',
+        payload: {
+          command: 'rm -rf /tmp/x',
+          description: 'dangerous command',
+          request_id: 'approval-1'
+        }
+      }
+    })
+
+    expect(restored.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        type: 'tool-call',
+        toolCallId: 'terminal-call-1',
+        toolName: 'terminal',
+        args: {
+          command: 'rm -rf /tmp/x',
+          __hermes_pending_approval: {
+            command: 'rm -rf /tmp/x',
+            description: 'dangerous command',
+            request_id: 'approval-1',
+            session_id: 'runtime-1'
+          }
+        }
+      })
+    )
+  })
+
+  it('matches a resumed approval to its command instead of the newest terminal tool', () => {
+    const restored = appendLiveSessionProjection([msg('current-user', 'user', 'run both commands')], {
+      session_id: 'runtime-1',
+      inflight: {
+        assistant: '',
+        events: [
+          {
+            type: 'tool.start',
+            payload: {
+              args: { command: 'rm -rf /tmp/approved-target' },
+              name: 'terminal',
+              tool_id: 'terminal-approved'
+            }
+          },
+          {
+            type: 'tool.start',
+            payload: {
+              args: { command: 'rm -rf /tmp/different-target' },
+              name: 'terminal',
+              tool_id: 'terminal-newest'
+            }
+          }
+        ],
+        streaming: true,
+        user: 'run both commands'
+      },
+      pending_prompt: {
+        event: 'approval.request',
+        payload: {
+          command: 'rm -rf /tmp/approved-target',
+          description: 'dangerous command',
+          request_id: 'approval-1'
+        }
+      }
+    })
+
+    const toolParts = restored.at(-1)?.parts.filter(part => part.type === 'tool-call') ?? []
+    const approved = toolParts.find(part => part.type === 'tool-call' && part.toolCallId === 'terminal-approved')
+    const newest = toolParts.find(part => part.type === 'tool-call' && part.toolCallId === 'terminal-newest')
+
+    expect(approved).toEqual(
+      expect.objectContaining({
+        args: expect.objectContaining({
+          __hermes_pending_approval: expect.objectContaining({ request_id: 'approval-1' })
+        })
+      })
+    )
+    expect(newest).not.toEqual(
+      expect.objectContaining({
+        args: expect.objectContaining({ __hermes_pending_approval: expect.anything() })
+      })
+    )
+  })
+
+  it('projects the canonical MCP setup snapshot event', () => {
+    const restored = appendLiveSessionProjection([msg('current-user', 'user', 'configure notion')], {
+      session_id: 'runtime-1',
+      inflight: {
+        assistant: '',
+        events: [],
+        streaming: true,
+        user: 'configure notion'
+      },
+      pending_prompt: {
+        event: 'mcp.setup.request',
+        payload: {
+          action: 'install',
+          reason: 'Required for the requested workspace action',
+          request_id: 'mcp-1',
+          server: 'notion'
+        }
+      }
+    })
+
+    expect(restored.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        args: {
+          action: 'install',
+          reason: 'Required for the requested workspace action',
+          server: 'notion'
+        },
+        toolCallId: 'mcp-1',
+        toolName: 'setup_mcp',
+        type: 'tool-call'
+      })
+    )
   })
 
   it('reattaches a repeated clarify question to the newest pending turn', () => {

@@ -19,6 +19,7 @@ import {
 import { migrateSessionDraft } from '@/store/composer'
 import { clearQueuedPrompts, migrateQueuedPrompts } from '@/store/composer-queue'
 import { $pinnedSessionIds } from '@/store/layout'
+import { $mcpSetupRequests, clearMcpSetupRequest, setMcpSetupRequest } from '@/store/mcp-setup'
 import { clearNotifications, notify, notifyError } from '@/store/notifications'
 import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalizeProfileKey, requestEmptyWorkspace } from '@/store/profile'
 import {
@@ -29,6 +30,18 @@ import {
   tombstoneSessions,
   untombstoneSessions
 } from '@/store/projects'
+import { pendingPromptChangedSince, pendingPromptCheckpoint, pendingPromptRevision } from '@/store/prompt-revision'
+import {
+  clearApprovalRequest,
+  clearSecretRequest,
+  clearSudoRequest,
+  sessionApprovalRequest,
+  sessionSecretRequest,
+  sessionSudoRequest,
+  setApprovalRequest,
+  setSecretRequest,
+  setSudoRequest
+} from '@/store/prompts'
 import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionStoredIdRotation,
@@ -164,63 +177,173 @@ function reconcileAuthoritativeMessages(
   return preserveLocalAssistantErrors(withPendingTurn, previousMessages)
 }
 
-interface ClarifyResumeBaseline {
-  requestId: string
+interface PendingPromptResumeBaseline {
+  approvalRequestId?: string
+  checkpoint: number
+  clarifyRequestId?: string
+  mcpSetupRequestId?: string
+  revision: number
+  secretRequestId?: string
   sessionId: string
+  sudoRequestId?: string
+}
+
+function pendingPromptResumeBaseline(
+  sessionId: string,
+  checkpoint = pendingPromptCheckpoint()
+): PendingPromptResumeBaseline {
+  return {
+    approvalRequestId: sessionApprovalRequest(sessionId).get()?.requestId,
+    checkpoint,
+    clarifyRequestId: $clarifyRequests.get()[sessionId]?.requestId,
+    mcpSetupRequestId: $mcpSetupRequests.get()[sessionId]?.requestId,
+    revision: pendingPromptRevision(sessionId),
+    secretRequestId: sessionSecretRequest(sessionId).get()?.requestId,
+    sessionId,
+    sudoRequestId: sessionSudoRequest(sessionId).get()?.requestId
+  }
+}
+
+function pendingPromptRequestId(event: string | undefined, sessionId: string): string | undefined {
+  if (event === 'clarify.request') {
+    return $clarifyRequests.get()[sessionId]?.requestId
+  }
+
+  if (event === 'approval.request') {
+    return sessionApprovalRequest(sessionId).get()?.requestId
+  }
+
+  if (event === 'sudo.request') {
+    return sessionSudoRequest(sessionId).get()?.requestId
+  }
+
+  if (event === 'secret.request') {
+    return sessionSecretRequest(sessionId).get()?.requestId
+  }
+
+  if (event === 'mcp.setup.request') {
+    return $mcpSetupRequests.get()[sessionId]?.requestId
+  }
+
+  return undefined
+}
+
+function baselineRequestId(event: string | undefined, baseline: PendingPromptResumeBaseline | null): string | undefined {
+  if (event === 'clarify.request') {
+    return baseline?.clarifyRequestId
+  }
+
+  if (event === 'approval.request') {
+    return baseline?.approvalRequestId
+  }
+
+  if (event === 'sudo.request') {
+    return baseline?.sudoRequestId
+  }
+
+  if (event === 'secret.request') {
+    return baseline?.secretRequestId
+  }
+
+  if (event === 'mcp.setup.request') {
+    return baseline?.mcpSetupRequestId
+  }
+
+  return undefined
+}
+
+function clearPendingPromptBaseline(
+  baseline: PendingPromptResumeBaseline | null,
+  preserveEvent?: string,
+  preserveRequestId?: string
+): void {
+  if (!baseline) {
+    return
+  }
+
+  const preserve = (event: string, requestId?: string) =>
+    Boolean(requestId && preserveEvent === event && preserveRequestId === requestId)
+
+  if (baseline.clarifyRequestId && !preserve('clarify.request', baseline.clarifyRequestId)) {
+    clearClarifyRequest(baseline.clarifyRequestId, baseline.sessionId)
+  }
+
+  if (baseline.approvalRequestId && !preserve('approval.request', baseline.approvalRequestId)) {
+    clearApprovalRequest(baseline.sessionId, baseline.approvalRequestId)
+  }
+
+  if (baseline.sudoRequestId && !preserve('sudo.request', baseline.sudoRequestId)) {
+    clearSudoRequest(baseline.sessionId, baseline.sudoRequestId)
+  }
+
+  if (baseline.secretRequestId && !preserve('secret.request', baseline.secretRequestId)) {
+    clearSecretRequest(baseline.sessionId, baseline.secretRequestId)
+  }
+
+  if (baseline.mcpSetupRequestId && !preserve('mcp.setup.request', baseline.mcpSetupRequestId)) {
+    clearMcpSetupRequest(baseline.mcpSetupRequestId, baseline.sessionId)
+  }
+}
+
+function hasPendingPrompt(sessionId: string): boolean {
+  return Boolean(
+    $clarifyRequests.get()[sessionId] ||
+    sessionApprovalRequest(sessionId).get() ||
+    sessionSudoRequest(sessionId).get() ||
+    sessionSecretRequest(sessionId).get() ||
+    $mcpSetupRequests.get()[sessionId]
+  )
 }
 
 function hydratePendingPromptFromResume(
   resumed: SessionResumeResponse,
-  baseline: ClarifyResumeBaseline | null = null
+  baseline: PendingPromptResumeBaseline | null = null
 ): boolean {
   const event = resumed.pending_prompt?.event
   const payload = resumed.pending_prompt?.payload
-  const currentRequest = $clarifyRequests.get()[resumed.session_id]
-
-  const clearBaseline = () => {
-    if (baseline) {
-      clearClarifyRequest(baseline.requestId, baseline.sessionId)
-    }
-  }
 
   if (!event || !payload) {
-    clearBaseline()
+    clearPendingPromptBaseline(baseline)
 
-    // A newer live event can race the activation response. Targeted clearing
-    // removes only the request that existed when resume began and preserves the
-    // newer request if one arrived meanwhile.
-    return Boolean($clarifyRequests.get()[resumed.session_id])
+    return hasPendingPrompt(resumed.session_id)
   }
 
+  const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
+  const currentRequestId = pendingPromptRequestId(event, resumed.session_id)
+  const previousRequestId = baselineRequestId(event, baseline)
+  const resumedRevision = pendingPromptRevision(resumed.session_id)
+
+  const stateChangedDuringResume = Boolean(
+    baseline &&
+      (pendingPromptRevision(baseline.sessionId) !== baseline.revision ||
+        pendingPromptChangedSince(resumed.session_id, baseline.checkpoint) ||
+        (pendingPromptCheckpoint() > baseline.checkpoint && resumedRevision === 0))
+  )
+
+  // A live event or resolution is newer than the resume snapshot. Keep an
+  // exact still-pending request, but never resurrect one that disappeared or
+  // overwrite a newer request of the same kind.
+  if (stateChangedDuringResume && currentRequestId !== requestId) {
+    clearPendingPromptBaseline(baseline, event, currentRequestId)
+
+    return hasPendingPrompt(resumed.session_id)
+  }
+
+  if (currentRequestId && requestId && currentRequestId !== requestId && currentRequestId !== previousRequestId) {
+    clearPendingPromptBaseline(baseline, event, currentRequestId)
+
+    return true
+  }
+
+  clearPendingPromptBaseline(baseline, event, requestId)
+
   if (event === 'clarify.request') {
-    const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
     const question = typeof payload.question === 'string' ? payload.question : ''
     const rawChoices = payload.choices
     const choices = normalizeChoices(rawChoices)
 
     if (!requestId || !question) {
-      clearBaseline()
-
-      return Boolean($clarifyRequests.get()[resumed.session_id])
-    }
-
-    // Preserve a newer request delivered live after the backend took its resume
-    // snapshot. Conversely, if the baseline request disappeared during the RPC,
-    // its answer/expiry event is newer than the snapshot; do not resurrect it.
-    if (currentRequest && currentRequest.requestId !== requestId && currentRequest.requestId !== baseline?.requestId) {
-      return true
-    }
-
-    if (
-      baseline?.sessionId === resumed.session_id &&
-      baseline.requestId === requestId &&
-      !currentRequest
-    ) {
-      return false
-    }
-
-    if (baseline && (baseline.sessionId !== resumed.session_id || baseline.requestId !== requestId)) {
-      clearBaseline()
+      return hasPendingPrompt(resumed.session_id)
     }
 
     if (rawChoices != null && choices.length === 0) {
@@ -237,11 +360,60 @@ function hydratePendingPromptFromResume(
     return true
   }
 
-  clearBaseline()
+  if (event === 'mcp.setup.request') {
+    const server = typeof payload.server === 'string' ? payload.server : ''
 
-  // Other blocking prompt kinds still make the session input-bound even when
-  // clarify-specific hydration has nothing to rebuild.
-  return true
+    if (!requestId || !server) {
+      return false
+    }
+
+    const rawAction = typeof payload.action === 'string' ? payload.action : 'install'
+    const action = rawAction === 'enable' || rawAction === 'authorize' ? rawAction : 'install'
+    setMcpSetupRequest({
+      action,
+      reason: typeof payload.reason === 'string' ? payload.reason : '',
+      requestId,
+      server,
+      sessionId: resumed.session_id
+    })
+
+    return true
+  }
+
+  if (event === 'approval.request') {
+    setApprovalRequest({
+      allowPermanent: payload.allow_permanent !== false,
+      choices: Array.isArray(payload.choices)
+        ? payload.choices.filter(choice => typeof choice === 'string')
+        : undefined,
+      command: typeof payload.command === 'string' ? payload.command : '',
+      description: typeof payload.description === 'string' ? payload.description : 'dangerous command',
+      requestId: requestId || undefined,
+      sessionId: resumed.session_id,
+      smartDenied: payload.smart_denied === true
+    })
+
+    return true
+  }
+
+  if (event === 'sudo.request' && requestId) {
+    setSudoRequest({ requestId, sessionId: resumed.session_id })
+
+    return true
+  }
+
+  if (event === 'secret.request' && requestId) {
+    setSecretRequest({
+      envVar: typeof payload.env_var === 'string' ? payload.env_var : '',
+      prompt: typeof payload.prompt === 'string' ? payload.prompt : '',
+      requestId,
+      sessionId: resumed.session_id
+    })
+
+    return true
+  }
+
+  return false
 }
 
 function hydrateDraftingToolFromResume(resumed: SessionResumeResponse): void {
@@ -748,7 +920,12 @@ export function useSessionActions({
       // under the current route (the "open chat A, chat B loads" bug). On a
       // mismatch the mapping is cross-wired: purge both sides and report a miss
       // so the caller falls through to a full resume that rebinds a correct id.
-      let clarifyBaseline: ClarifyResumeBaseline | null = null
+      const promptCheckpoint = pendingPromptCheckpoint()
+
+      let promptBaseline = pendingPromptResumeBaseline(
+        runtimeIdByStoredSessionIdRef.current.get(storedSessionId) ?? storedSessionId,
+        promptCheckpoint
+      )
 
       const takeWarmCache = (): { runtimeId: string; state: ClientSessionState } | null => {
         const runtimeId = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
@@ -799,14 +976,7 @@ export function useSessionActions({
       if (warmHit) {
         const cachedRuntimeId = warmHit.runtimeId
         const cachedState = warmHit.state
-        const cachedClarifyRequest = $clarifyRequests.get()[cachedRuntimeId]
-
-        if (cachedClarifyRequest) {
-          clarifyBaseline = {
-            requestId: cachedClarifyRequest.requestId,
-            sessionId: cachedRuntimeId
-          }
-        }
+        promptBaseline = pendingPromptResumeBaseline(cachedRuntimeId, promptCheckpoint)
 
         const stored =
           $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId)) ?? storedForProfile
@@ -905,7 +1075,13 @@ export function useSessionActions({
               sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
               dropSessionState(cachedRuntimeId)
             } else {
-              const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, clarifyBaseline)
+              const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, promptBaseline)
+
+              const activatedForProjection =
+                activated.pending_prompt && !pendingPromptNeedsInput
+                  ? { ...activated, pending_prompt: undefined }
+                  : activated
+
               hydrateDraftingToolFromResume(activated)
               hydrateSessionTodosFromResume(activated)
               const runtimeInfo = applyRuntimeInfo(activated.info)
@@ -919,13 +1095,20 @@ export function useSessionActions({
               // to the in-flight prompt until the turn finished and the
               // post-turn hydrate restored it.
               let activatedMessages = activated.messages_omitted
-                ? appendLiveSessionProjection(cachedViewState.messages, activated)
+                ? appendLiveSessionProjection(cachedViewState.messages, activatedForProjection)
                 : activated.messages.length || activated.inflight || activated.queued
-                  ? reconcileAuthoritativeMessages(activated.messages, cachedViewState.messages, activated)
+                  ? reconcileAuthoritativeMessages(
+                      activated.messages,
+                      cachedViewState.messages,
+                      activatedForProjection
+                    )
                   : cachedViewState.messages
 
               const running = Boolean(activated.running ?? cachedViewState.busy)
-              const activatedHasLiveProjection = Boolean(activated.inflight || activated.queued || activated.pending_prompt)
+
+              const activatedHasLiveProjection = Boolean(
+                activated.inflight || activated.queued || pendingPromptNeedsInput
+              )
 
               // While idle, the persisted REST transcript is the display
               // authority: session.activate returns the runtime's compressed
@@ -1091,7 +1274,11 @@ export function useSessionActions({
           return
         }
 
-        const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, clarifyBaseline)
+        const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, promptBaseline)
+
+        const resumedForProjection =
+          resumed.pending_prompt && !pendingPromptNeedsInput ? { ...resumed, pending_prompt: undefined } : resumed
+
         hydrateDraftingToolFromResume(resumed)
         hydrateSessionTodosFromResume(resumed)
 
@@ -1117,7 +1304,7 @@ export function useSessionActions({
         const prefetchMatchesResumedSession =
           !prefetchedStoredSessionId || !resumedStoredSessionId || prefetchedStoredSessionId === resumedStoredSessionId
 
-        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || resumed.pending_prompt)
+        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || pendingPromptNeedsInput)
 
         const preferredMessages =
           prefetchApplied && prefetchMatchesResumedSession && !hasLiveProjection
@@ -1134,8 +1321,8 @@ export function useSessionActions({
                 // on, so the projection alone remains the degraded fallback.)
                 const resumedMessages =
                   resumed.messages_omitted && prefetchApplied && prefetchMatchesResumedSession
-                    ? appendLiveSessionProjection(localSnapshot, resumed)
-                    : reconcileAuthoritativeMessages(resumed.messages, previousMessages, resumed)
+                    ? appendLiveSessionProjection(localSnapshot, resumedForProjection)
+                    : reconcileAuthoritativeMessages(resumed.messages, previousMessages, resumedForProjection)
 
                 return chatMessageArraysEquivalent(currentMessages, resumedMessages) ? currentMessages : resumedMessages
               })()
@@ -1185,6 +1372,7 @@ export function useSessionActions({
         setActiveSessionId(resumed.session_id)
         clearRememberedSessionRestorePending()
         activeSessionIdRef.current = resumed.session_id
+
         const runtimeInfo = applyRuntimeInfo(resumed.info)
 
         patchSessionWorkspace(storedSessionId, runtimeInfo?.cwd)

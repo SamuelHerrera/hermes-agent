@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/i18n'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
-import { $secretRequest, $sudoRequest, clearAllPrompts, setSecretRequest, setSudoRequest } from '@/store/prompts'
+import {
+  $secretRequest,
+  $sudoRequest,
+  clearAllPrompts,
+  setApprovalRequest,
+  setSecretRequest,
+  setSudoRequest
+} from '@/store/prompts'
 import { $activeSessionId } from '@/store/session'
 
 import { PromptOverlays } from './prompt-overlays'
@@ -29,6 +36,16 @@ afterEach(() => {
 })
 
 describe('PromptOverlays', () => {
+  it('shows the explicitly scoped session approval during an active-id handoff', () => {
+    $activeSessionId.set('previous-runtime')
+    setApprovalRequest({ command: 'rm -rf /tmp/x', description: 'dangerous command', sessionId: 's1' })
+
+    renderPrompts('s1')
+
+    expect(screen.getByRole('button', { name: /Run/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Reject/ })).toBeTruthy()
+  })
+
   it('dismisses a stale sudo dialog when the gateway no longer has the password request', async () => {
     const request = vi.fn().mockRejectedValue(new Error('no pending password request'))
 

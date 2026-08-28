@@ -202,6 +202,34 @@ def test_host_transport_wait_is_interruptible_and_pollable():
     assert polls
 
 
+def test_host_transport_rechecks_interrupt_after_dequeue():
+    from hermes_cli.approval_transport import invoke_approval_transport
+
+    first_check = threading.Event()
+    interrupted = threading.Event()
+
+    def present(request):
+        assert first_check.wait(timeout=1)
+        interrupted.set()
+        return request.respond("once")
+
+    def is_interrupted():
+        if not first_check.is_set():
+            first_check.set()
+            return False
+        return interrupted.is_set()
+
+    result = invoke_approval_transport(
+        present,
+        _request(),
+        timeout_seconds=1,
+        is_interrupted=is_interrupted,
+    )
+
+    assert result.choice == "deny"
+    assert result.failure == "interrupted"
+
+
 def test_host_rejects_decision_completed_after_deadline(monkeypatch):
     import hermes_cli.approval_transport as transport_module
 
@@ -344,6 +372,92 @@ def test_execute_code_gateway_uses_selected_transport(monkeypatch):
     assert len(seen) == 1
     assert seen[0].pattern_key == "execute_code"
     assert seen[0].surface == "gateway"
+
+
+def test_terminal_selected_transport_rechecks_interrupt_before_return(monkeypatch):
+    from tools import approval
+    from tools.interrupt import set_interrupt
+
+    _configure_manual_guard(monkeypatch, approval, PluginManager())
+
+    def approve_then_interrupt(**_kwargs):
+        set_interrupt(True)
+        return {"selected": True, "choice": "session", "failure": None}
+
+    monkeypatch.setattr(approval, "_present_with_selected_transport", approve_then_interrupt)
+    try:
+        result = approval.check_all_command_guards("rm -rf /tmp/example", "local")
+    finally:
+        set_interrupt(False)
+
+    assert result["approved"] is False
+    assert result["user_consent"] is False
+    with approval._lock:
+        assert "danger" not in approval._session_approved.get("session-a", set())
+
+
+def test_execute_code_selected_transport_rechecks_interrupt_before_return(monkeypatch):
+    from tools import approval
+    from tools.interrupt import set_interrupt
+
+    monkeypatch.setattr(approval, "_get_approval_mode", lambda: "manual")
+    monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: True)
+    monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
+    monkeypatch.setattr(approval, "is_approved", lambda *_args: False)
+
+    def approve_then_interrupt(**_kwargs):
+        set_interrupt(True)
+        return {"selected": True, "choice": "session", "failure": None}
+
+    monkeypatch.setattr(approval, "_present_with_selected_transport", approve_then_interrupt)
+    try:
+        result = approval.check_execute_code_guard("print('danger')", "local")
+    finally:
+        set_interrupt(False)
+
+    assert result["approved"] is False
+    assert result["user_consent"] is False
+    with approval._lock:
+        assert "execute_code" not in approval._session_approved.get("default", set())
+
+
+@pytest.mark.parametrize("surface", ["terminal", "execute_code"])
+def test_selected_transport_rolls_back_grant_if_persistence_interrupts(
+    monkeypatch, surface
+):
+    from tools import approval
+    from tools.interrupt import set_interrupt
+
+    _configure_manual_guard(monkeypatch, approval, PluginManager())
+    monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
+    monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: True)
+    monkeypatch.setattr(
+        approval,
+        "_present_with_selected_transport",
+        lambda **_kwargs: {"selected": True, "choice": "session", "failure": None},
+    )
+    real_approve_session = approval.approve_session
+
+    def persist_then_interrupt(session_key, pattern_key):
+        real_approve_session(session_key, pattern_key)
+        set_interrupt(True)
+
+    monkeypatch.setattr(approval, "approve_session", persist_then_interrupt)
+    try:
+        if surface == "terminal":
+            result = approval.check_all_command_guards(
+                "rm -rf /tmp/example", "local"
+            )
+            pattern_key = "danger"
+        else:
+            result = approval.check_execute_code_guard("print('danger')", "local")
+            pattern_key = "execute_code"
+    finally:
+        set_interrupt(False)
+
+    assert result["approved"] is False
+    with approval._lock:
+        assert pattern_key not in approval._session_approved.get("session-a", set())
 
 
 def test_transport_failure_denies_without_builtin_fallback(monkeypatch):

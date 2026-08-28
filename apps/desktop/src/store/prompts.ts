@@ -1,6 +1,7 @@
 import { atom, computed, type ReadableAtom } from 'nanostores'
 
 import { $clarifyRequest, $clarifyRequests } from './clarify'
+import { markPendingPromptChanged } from './prompt-revision'
 import { $activeSessionId } from './session'
 
 // Blocking interactive prompts the gateway raises mid-turn. Each maps to a
@@ -40,8 +41,19 @@ function keyedPromptStore<T extends KeyedPrompt>(): PromptStore<T> {
   return {
     $active: computed([$all, $activeSessionId], (all, activeId) => all[keyFor(activeId)] ?? null),
     $all,
-    reset: () => $all.set({}),
-    set: request => $all.set({ ...$all.get(), [keyFor(request.sessionId)]: request }),
+    reset() {
+      const all = $all.get()
+
+      for (const value of Object.values(all)) {
+        markPendingPromptChanged(value.sessionId)
+      }
+
+      $all.set({})
+    },
+    set(request) {
+      markPendingPromptChanged(request.sessionId)
+      $all.set({ ...$all.get(), [keyFor(request.sessionId)]: request })
+    },
     clear(sessionId, requestId) {
       const all = $all.get()
 
@@ -52,13 +64,24 @@ function keyedPromptStore<T extends KeyedPrompt>(): PromptStore<T> {
         if (current && !(requestId && idOf(current) !== requestId)) {
           const next = { ...all }
           delete next[key]
+          markPendingPromptChanged(current.sessionId)
           $all.set(next)
         }
 
         return
       }
 
-      const next = Object.fromEntries(Object.entries(all).filter(([, v]) => requestId && idOf(v) !== requestId))
+      const next = Object.fromEntries(
+        Object.entries(all).filter(([, value]) => {
+          const keep = Boolean(requestId && idOf(value) !== requestId)
+
+          if (!keep) {
+            markPendingPromptChanged(value.sessionId)
+          }
+
+          return keep
+        })
+      )
 
       if (Object.keys(next).length !== Object.keys(all).length) {
         $all.set(next as Record<string, T>)
@@ -67,15 +90,16 @@ function keyedPromptStore<T extends KeyedPrompt>(): PromptStore<T> {
   }
 }
 
-// Approval is session-keyed on the backend (one in-flight approval per session,
-// resolved via approval.respond {choice, session_id}). It carries no request_id,
-// unlike sudo/secret which are _block()-style request/response.
+// Approval is session-keyed in the renderer, but the backend can queue more
+// than one per session. Modern events carry request_id so a response resolves
+// the command actually shown instead of falling back to FIFO compatibility.
 export interface ApprovalRequest extends KeyedPrompt {
   // false when the backend won't honor a permanent allow (tirith warning) → hide "Always allow".
   allowPermanent?: boolean
   choices?: string[]
   command: string
   description: string
+  requestId?: string
   smartDenied?: boolean
 }
 

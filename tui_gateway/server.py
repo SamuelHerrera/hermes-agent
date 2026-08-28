@@ -44,6 +44,7 @@ from tui_gateway.turn_marker import (
     record_turn_start,
 )
 from tui_gateway.transport import (
+    SessionFanoutTransport,
     StdioTransport,
     Transport,
     bind_transport,
@@ -360,6 +361,73 @@ _stdio_transport = StdioTransport(lambda: _real_stdout, _stdout_lock)
 # the gateway in-process and captures stdout into logs, so stale JSON-RPC frames
 # must not fall through there while the session waits for resume or reap.
 _detached_ws_transport = _DropTransport()
+
+
+def _session_transport_lock(session: dict) -> threading.RLock:
+    lock = session.get("_transport_lock")
+    if lock is None:
+        lock = threading.RLock()
+        session.setdefault("_transport_lock", lock)
+        lock = session["_transport_lock"]
+    return lock
+
+
+def _attach_session_transport(session: dict, transport: Transport | None) -> None:
+    """Attach one client transport without replacing existing viewers."""
+    if transport is None:
+        return
+    with _session_transport_lock(session):
+        current = session.get("transport")
+        if current is transport:
+            pass
+        elif isinstance(current, SessionFanoutTransport):
+            current.add(transport)
+        elif current is None or current is _detached_ws_transport:
+            session["transport"] = transport
+        else:
+            session["transport"] = SessionFanoutTransport(current, transport)
+        if isinstance(session.get("transport"), SessionFanoutTransport):
+            session["_had_fanout_transport"] = True
+        if transport is not _detached_ws_transport:
+            session.setdefault("viewers", {})[transport] = time.time()
+
+
+def _detach_session_transport(session: dict, transport: Transport | None) -> int:
+    """Detach one client and return the number of fanout peers left."""
+    with _session_transport_lock(session):
+        viewers = session.get("viewers")
+        if viewers:
+            viewers.pop(transport, None)
+        current = session.get("transport")
+        if isinstance(current, SessionFanoutTransport):
+            remaining = current.remove(transport)
+            if remaining == 0:
+                session["transport"] = _detached_ws_transport
+            return remaining
+        if current is transport:
+            session["transport"] = _detached_ws_transport
+            return 0
+        if current is None or current is _detached_ws_transport:
+            return 0
+        return 1
+
+
+def _session_transport_contains(session: dict, transport: Transport | None) -> bool:
+    with _session_transport_lock(session):
+        current = session.get("transport")
+        if current is transport and current is not _detached_ws_transport:
+            return True
+        return isinstance(current, SessionFanoutTransport) and current.contains(transport)
+
+
+def _session_transport_count(session: dict) -> int:
+    with _session_transport_lock(session):
+        current = session.get("transport")
+        if current is None or current is _detached_ws_transport:
+            return 0
+        if isinstance(current, SessionFanoutTransport):
+            return current.count()
+        return 1
 
 
 class _SlashWorker:
@@ -925,7 +993,10 @@ def _pop_session_by_id(sid: str) -> dict | None:
     the global ``_session_resume_lock``.
     """
     with _sessions_lock:
-        session = _sessions.pop(sid, None)
+        session = _sessions.get(sid)
+        if session is not None:
+            session["_closing"] = True
+            _sessions.pop(sid, None)
     if session is None:
         return None
     # The session is already out of _sessions here, so downstream teardown
@@ -933,6 +1004,24 @@ def _pop_session_by_id(sid: str) -> dict | None:
     # recover its live id by scanning the dict — stamp it on the record.
     session["_sid"] = sid
     return session
+
+
+def _pop_session_by_id_for_transport(
+    sid: str, transport: Transport | None
+) -> tuple[dict | None, str]:
+    """Atomically authorize and claim a client-requested session close."""
+    with _sessions_lock:
+        session = _sessions.get(sid)
+        if session is None:
+            return None, "missing"
+        if session.get("_closing") or session.get("_finalized"):
+            return None, "closing"
+        if transport is not None and not _session_transport_contains(session, transport):
+            return None, "forbidden"
+        session["_closing"] = True
+        _sessions.pop(sid, None)
+    session["_sid"] = sid
+    return session, ""
 
 
 def _teardown_popped_session(
@@ -1088,9 +1177,15 @@ def _schedule_ws_orphan_reap(sid: str) -> None:
         session = None
         with _session_resume_lock:
             current = _sessions.get(sid)
-            if not _ws_session_is_orphaned(current):
+            if (
+                not current
+                or current.get("_finalized")
+                or current.get("transport") is not _detached_ws_transport
+            ):
                 return
-            if _session_has_active_delegations(sid, current):
+            if current.get("running") or _session_has_active_delegations(
+                sid, current
+            ):
                 reschedule = True
             else:
                 session = _pop_session_by_id(sid)
@@ -1121,18 +1216,52 @@ def _close_sessions_for_transport(
 
     Returns ``(reaped, detached)`` counts for disconnect-path observability."""
     with _sessions_lock:
-        owned = [(sid, s) for sid, s in _sessions.items() if s.get("transport") is transport]
+        owned = [
+            (sid, session)
+            for sid, session in _sessions.items()
+            if _session_transport_contains(session, transport)
+            or transport in (session.get("viewers") or {})
+        ]
     reaped = 0
     detached = 0
     for sid, session in owned:
-        if session.get("close_on_disconnect"):
-            _close_session_by_id(sid, end_reason=end_reason)
-            reaped += 1
-        else:
-            # Point detached sessions at the drop sentinel (NOT real stdio) so
-            # _ws_session_is_orphaned recognizes them and the grace-reap can
-            # actually fire; a standalone `hermes --tui` keeps real _stdio.
-            session["transport"] = _detached_ws_transport
+        claimed_for_teardown = None
+        should_schedule_reap = False
+        with _session_resume_lock:
+            with _sessions_lock:
+                current = _sessions.get(sid)
+                if current is None or current is not session:
+                    continue
+                was_fanout = isinstance(
+                    current.get("transport"), SessionFanoutTransport
+                ) or bool(current.get("_had_fanout_transport"))
+                remaining_count = _detach_session_transport(current, transport)
+                if remaining_count == 0 and not was_fanout:
+                    # Compatibility for records created before fanout support:
+                    # their viewer registry can know peers the old single slot
+                    # did not retain.
+                    legacy_viewers = [
+                        (ts, viewer_transport)
+                        for viewer_transport, ts in (current.get("viewers") or {}).items()
+                        if not _transport_is_dead(viewer_transport)
+                    ]
+                    for _ts, viewer_transport in sorted(
+                        legacy_viewers, key=lambda item: item[0]
+                    ):
+                        _attach_session_transport(current, viewer_transport)
+                    remaining_count = _session_transport_count(current)
+                if remaining_count > 0:
+                    continue
+                if current.get("close_on_disconnect"):
+                    claimed_for_teardown = _pop_session_by_id(sid)
+                else:
+                    current["transport"] = _detached_ws_transport
+                    current.pop("_client_gone_interrupt_requested", None)
+                    should_schedule_reap = True
+        if claimed_for_teardown is not None:
+            if _teardown_popped_session(claimed_for_teardown, end_reason=end_reason):
+                reaped += 1
+        elif should_schedule_reap:
             detached += 1
             try:
                 _schedule_ws_orphan_reap(sid)
@@ -1170,11 +1299,13 @@ def _transport_is_dead(transport) -> bool:
     # so let the idle reaper evict healthy standalone TUI sessions).
     if transport is _detached_ws_transport:
         return True
+    if isinstance(transport, SessionFanoutTransport):
+        return transport.count() == 0
     return getattr(transport, "_closed", None) is True
 
 
 def _session_is_evictable(sid: str, session: dict, now: float) -> bool:
-    if session.get("running") or _session_pending_kind(sid):
+    if session.get("running") or _session_pending_kind(sid) or _session_pending_approval(session):
         return False
     if _session_has_active_delegations(sid, session):
         return False
@@ -1267,7 +1398,7 @@ def _session_is_lru_evictable(sid: str, session: dict) -> bool:
     # awaiting input, still building, or owning active delegated work), but
     # WITHOUT the hours-scale age gate: a detached session is eligible the
     # moment it loses its client.
-    if session.get("running") or _session_pending_kind(sid):
+    if session.get("running") or _session_pending_kind(sid) or _session_pending_approval(session):
         return False
     if _session_has_active_delegations(sid, session):
         return False
@@ -1591,7 +1722,29 @@ def write_json(obj: dict) -> bool:
     if obj.get("method") == "event":
         sid = ((obj.get("params") or {}).get("session_id")) or ""
         if sid and (t := (_sessions.get(sid) or {}).get("transport")) is not None:
-            return t.write(obj)
+            accepted = t.write(obj)
+            if not accepted and isinstance(t, SessionFanoutTransport):
+                orphaned = False
+                claimed_for_teardown = None
+                with _sessions_lock:
+                    session = _sessions.get(sid)
+                    if session is not None:
+                        with _session_transport_lock(session):
+                            if session.get("transport") is t and t.count() == 0:
+                                session.get("viewers", {}).clear()
+                                if session.get("close_on_disconnect"):
+                                    claimed_for_teardown = _pop_session_by_id(sid)
+                                else:
+                                    session["transport"] = _detached_ws_transport
+                                    orphaned = True
+                if claimed_for_teardown is not None:
+                    _teardown_popped_session(
+                        claimed_for_teardown,
+                        end_reason="transport_write_failed",
+                    )
+                elif orphaned:
+                    _schedule_ws_orphan_reap(sid)
+            return accepted
 
     return (current_transport() or _stdio_transport).write(obj)
 
@@ -1856,13 +2009,8 @@ def _send_compute_host_control(
     )
 
 
-def _emit_approval_request(sid: str, data: dict | None) -> None:
-    """Emit an ``approval.request`` event to the TUI client with the command
-    redacted. The approval payload is built from the RAW command string, so a
-    credential-shaped value Tirith flagged would otherwise be echoed verbatim
-    to the TUI client (#48456 — third egress transport alongside the chat
-    platforms and the SSE/API stream fixed in #50767). Reuse the shared gateway
-    seam so all approval transports redact consistently."""
+def _approval_request_payload(data: dict | None) -> dict:
+    """Build the client-safe approval payload shared by emit and replay."""
     payload = dict(data or {})
     if "choices" not in payload:
         if payload.get("smart_denied"):
@@ -1875,7 +2023,19 @@ def _emit_approval_request(sid: str, data: dict | None) -> None:
         from gateway.run import _redact_approval_command
 
         payload["command"] = _redact_approval_command(payload.get("command"))
-    _emit("approval.request", sid, payload)
+    return payload
+
+
+def _emit_approval_request(sid: str, data: dict | None) -> None:
+    """Emit a redacted ``approval.request`` event to the TUI client.
+
+    The approval payload is built from the RAW command string, so a
+    credential-shaped value Tirith flagged would otherwise be echoed verbatim
+    to the TUI client (#48456 — third egress transport alongside the chat
+    platforms and the SSE/API stream fixed in #50767). Reuse the shared gateway
+    seam so all approval transports redact consistently.
+    """
+    _emit("approval.request", sid, _approval_request_payload(data))
 
 
 def _status_update(sid: str, kind: str, text: str | None = None):
@@ -1977,8 +2137,8 @@ def _current_session_steer_authority(
     session record currently stored under that id. Session transport rebinding,
     removal, or id reuse therefore invalidates an earlier generation.
     """
-    transport = current_transport()
-    if transport is None or not session_id:
+    request_transport = current_transport()
+    if request_transport is None or not session_id:
         return None, None
     expected_session = _current_runtime_session_record.get()
     with _sessions_lock:
@@ -1986,10 +2146,42 @@ def _current_session_steer_authority(
         if (
             session is None
             or (expected_session is not None and session is not expected_session)
-            or session.get("transport") is not transport
+            or session.get("_closing")
+            or session.get("_finalized")
+            or not _session_transport_contains(session, request_transport)
         ):
             return None, None
-        return transport, session
+        authority = session.get("_steer_authority_token")
+        if authority is None:
+            authority = session.get("transport")
+            if authority is None or authority is _detached_ws_transport:
+                authority = object()
+            session.setdefault("_steer_authority_token", authority)
+            authority = session["_steer_authority_token"]
+        return authority, session
+
+
+def _session_control_authority_error(rid: str, session: dict) -> dict | None:
+    """Reject control RPCs from sockets not attached to the target session."""
+    if session.get("_closing") or session.get("_finalized"):
+        return _err(rid, 4090, "session is closing")
+    transport = current_transport()
+    if transport is None or _session_transport_contains(session, transport):
+        return None
+    return _err(rid, 4030, "session control requires an attached transport")
+
+
+@contextlib.contextmanager
+def _session_control_effect_claim(rid: str, sid: str, session: dict):
+    """Hold the live-generation claim through one short control side effect."""
+    with _sessions_lock:
+        if _sessions.get(sid) is not session:
+            yield _err(rid, 4090, "session is closing")
+            return
+        authority_error = _session_control_authority_error(rid, session)
+        if authority_error is None and _sessions.get(sid) is not session:
+            authority_error = _err(rid, 4090, "session is closing")
+        yield authority_error
 
 
 def dispatch(req: dict, transport: Optional[Transport] = None) -> dict | None:
@@ -3384,9 +3576,22 @@ def _clear_pending(sid: str | None = None) -> None:
     """
     with _prompt_lock:
         for rid, (owner_sid, ev) in list(_pending.items()):
-            if sid is None or owner_sid == sid:
+            if (sid is None or owner_sid == sid) and not ev.is_set() and rid not in _answers:
                 _answers[rid] = ""
                 ev.set()
+
+
+def _clear_pending_for_session_record(sid: str, session: dict) -> bool:
+    """Release prompts only while ``sid`` still names this exact record."""
+    with _prompt_lock:
+        with _sessions_lock:
+            if _sessions.get(sid) is not session:
+                return False
+        for rid, (owner_sid, ev) in list(_pending.items()):
+            if owner_sid == sid and not ev.is_set() and rid not in _answers:
+                _answers[rid] = ""
+                ev.set()
+    return True
 
 
 # ── Agent factory ────────────────────────────────────────────────────
@@ -5229,6 +5434,12 @@ def _current_profile_name() -> str:
 #     key-addressed (keyless rows render read-only in Desktop Settings).
 DESKTOP_BACKEND_CONTRACT = 6
 
+_SESSION_CAPABILITIES = {"session_multi_client_fanout": True}
+
+
+def _session_capabilities() -> dict:
+    return dict(_SESSION_CAPABILITIES)
+
 
 def _session_usage_snapshot(session: dict | None) -> dict:
     agent = (session or {}).get("agent")
@@ -5341,6 +5552,7 @@ def _session_info(agent, session: dict | None = None) -> dict:
         "title": _session_live_title(session or {}, session_key) if session_key else "",
         "stored_session_id": session_key or "",
         "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+        "capabilities": _session_capabilities(),
         "version": "",
         "release_date": "",
         "update_behind": None,
@@ -7906,7 +8118,7 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
             session.pop("queued_prompts", None)
         session["running"] = True
         if queued.get("transport") is not None:
-            session["transport"] = queued["transport"]
+            _attach_session_transport(session, queued["transport"])
     use_compute_host = _session_uses_compute_host(session)
     with session["history_lock"]:
         if int(session.get("_queued_prompt_generation", 0)) != queue_generation:
@@ -8099,6 +8311,7 @@ def _lazy_resume_info(
         "skills": {},
         "lazy": True,
         "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+        "capabilities": _session_capabilities(),
         "profile_name": _response_profile_name(profile),
     }
     if provider:
@@ -8192,6 +8405,18 @@ def _schedule_agent_build(sid: str, delay: float = 0.05) -> None:
     timer.start()
 
 
+def _session_pending_approval(session: dict) -> dict | None:
+    session_key = str(session.get("session_key") or "")
+    if not session_key:
+        return None
+    try:
+        from tools.approval import pending_gateway_approval
+
+        return pending_gateway_approval(session_key)
+    except Exception:
+        return None
+
+
 def _session_pending_kind(sid: str) -> str:
     for rid, (owner_sid, _ev) in list(_pending.items()):
         if owner_sid != sid:
@@ -8201,7 +8426,7 @@ def _session_pending_kind(sid: str) -> str:
     return ""
 
 
-def _session_pending_prompt_snapshot(sid: str) -> dict | None:
+def _session_pending_prompt_snapshot(sid: str, session: dict | None = None) -> dict | None:
     """Return the pending blocking prompt payload for a reattaching client.
 
     ``clarify.request`` and sibling prompt events are one-shot WebSocket frames.
@@ -8217,11 +8442,13 @@ def _session_pending_prompt_snapshot(sid: str) -> dict | None:
                 continue
             event, payload = _pending_prompt_payloads.get(rid, ("input.request", {}))
             return {"event": str(event), "payload": dict(payload)}
+    if session is not None and (approval := _session_pending_approval(session)):
+        return {"event": "approval.request", "payload": _approval_request_payload(approval)}
     return None
 
 
 def _session_live_status(sid: str, session: dict) -> str:
-    if _session_pending_kind(sid):
+    if _session_pending_kind(sid) or _session_pending_approval(session):
         return "waiting"
     ready = session.get("agent_ready")
     # Unset + build never started = a lazy watch session sitting idle, not a
@@ -8326,6 +8553,7 @@ def _fallback_session_info(session: dict) -> dict:
         # a current backend is falsely flagged "out of date" (#68392). The sibling
         # session.create shape (_lazy_resume_info) already carries it (#36112).
         "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+        "capabilities": _session_capabilities(),
     }
 
 
@@ -8413,7 +8641,7 @@ def _live_session_payload(
         if cols is not None:
             session["cols"] = cols
         if transport is not None:
-            session["transport"] = transport
+            _attach_session_transport(session, transport)
         if touch:
             session["last_active"] = time.time()
         in_memory_history = list(session.get("display_history_prefix") or []) + list(
@@ -8422,7 +8650,7 @@ def _live_session_payload(
         inflight = _inflight_snapshot(session)
         queued = _queued_prompt_snapshot(session)
         running = bool(session.get("running"))
-    pending_prompt = _session_pending_prompt_snapshot(sid)
+    pending_prompt = _session_pending_prompt_snapshot(sid, session)
     # Prefer the persisted display lineage (candidate-inclusive) so this payload
     # matches the eager session.resume + REST transcript; the DB has its own
     # lock, so read it outside the session history lock.
@@ -11212,9 +11440,30 @@ def _respond(rid, params, key, *, allow_expired=False):
             if allow_expired and r:
                 return _ok(rid, {"status": "expired"})
             return _err(rid, 4009, f"no pending {key} request")
-        _, ev = entry
-        _answers[r] = params.get(key, "")
-        ev.set()
+        sid, ev = entry
+        response_transport = current_transport()
+        # Publish an answer atomically with the session generation's teardown
+        # claim. Once _pop_session_by_id marks a session closing, no socket can
+        # wake its blocked agent turn.
+        with _sessions_lock:
+            response_session = _sessions.get(sid)
+            if response_transport is not None:
+                if response_session is None:
+                    return _err(rid, 4030, "prompt response requires a live session")
+                if response_session.get("_closing") or response_session.get(
+                    "_finalized"
+                ):
+                    return _err(rid, 4090, "session is closing")
+                if not _session_transport_contains(
+                    response_session, response_transport
+                ):
+                    return _err(
+                        rid, 4030, "prompt response requires an attached transport"
+                    )
+            if ev.is_set():
+                return _ok(rid, {"status": "already_resolved"})
+            _answers[r] = params.get(key, "")
+            ev.set()
     return _ok(rid, {"status": "ok"})
 
 

@@ -1,6 +1,7 @@
 import { atom, computed } from 'nanostores'
 
 import { $gateway } from './gateway'
+import { markPendingPromptChanged } from './prompt-revision'
 
 /**
  * Pending `mcp.setup.request`s — the desktop half of the `setup_mcp` tool's
@@ -38,6 +39,7 @@ export const sessionMcpSetupRequest = (sessionId: string | null) =>
   computed($mcpSetupRequests, requests => requests[keyFor(sessionId)] ?? null)
 
 export function setMcpSetupRequest(request: McpSetupRequest): void {
+  markPendingPromptChanged(request.sessionId)
   $mcpSetupRequests.set({ ...$mcpSetupRequests.get(), [keyFor(request.sessionId)]: request })
 }
 
@@ -54,6 +56,7 @@ export function clearMcpSetupRequest(requestId?: string, sessionId?: string | nu
 
     const next = { ...requests }
     delete next[key]
+    markPendingPromptChanged(current.sessionId)
     $mcpSetupRequests.set(next)
 
     return
@@ -66,6 +69,7 @@ export function clearMcpSetupRequest(requestId?: string, sessionId?: string | nu
     if (requestId && value.requestId !== requestId) {
       next[key] = value
     } else {
+      markPendingPromptChanged(value.sessionId)
       changed = true
     }
   }

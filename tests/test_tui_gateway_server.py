@@ -11707,6 +11707,7 @@ def test_session_create_lazy_info_reports_desktop_contract(monkeypatch):
     info = resp["result"]["info"]
 
     assert info["desktop_contract"] == server.DESKTOP_BACKEND_CONTRACT
+    assert info["capabilities"]["session_multi_client_fanout"] is True
 
     server._sessions.pop(resp["result"]["session_id"], None)
 
@@ -11742,6 +11743,7 @@ def test_session_activate_lazy_info_reports_desktop_contract():
         info = resp["result"]["info"]
         assert info["lazy"] is True
         assert info["desktop_contract"] == server.DESKTOP_BACKEND_CONTRACT
+        assert info["capabilities"]["session_multi_client_fanout"] is True
     finally:
         server._sessions.pop(sid, None)
 
@@ -15241,7 +15243,11 @@ def test_slash_exec_concurrent_first_use_spawns_single_worker(monkeypatch):
 def test_session_close_rpc_claims_then_tears_down(monkeypatch):
     seen = []
     claimed = {"session_key": "k"}
-    monkeypatch.setattr(server, "_pop_session_by_id", lambda sid: seen.append(sid) or claimed)
+    monkeypatch.setattr(
+        server,
+        "_pop_session_by_id_for_transport",
+        lambda sid, _transport: (seen.append(sid) or claimed, ""),
+    )
     monkeypatch.setattr(
         server,
         "_teardown_popped_session",
@@ -15257,19 +15263,25 @@ def test_session_close_rpc_claims_then_tears_down(monkeypatch):
 def test_close_sessions_for_transport_closes_flagged_repoints_rest(monkeypatch):
     seen = []
     monkeypatch.setattr(
-        server, "_close_session_by_id",
-        lambda sid, *, end_reason: bool(seen.append((sid, end_reason))) or True,
+        server,
+        "_teardown_popped_session",
+        lambda session, *, end_reason: bool(
+            seen.append((session, end_reason))
+        )
+        or True,
     )
     # Detached session "b" would schedule a real grace-reap threading.Timer that
     # outlives the test; grace=0 short-circuits it so no thread lingers.
     monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 0)
     transport = object()  # the disconnecting transport
+    flagged = {"transport": transport, "close_on_disconnect": True}
     server._sessions.clear()
-    server._sessions["a"] = {"transport": transport, "close_on_disconnect": True}
+    server._sessions["a"] = flagged
     server._sessions["b"] = {"transport": transport, "close_on_disconnect": False}
     try:
         server._close_sessions_for_transport(transport, end_reason="ws_disconnect")
-        assert seen == [("a", "ws_disconnect")]  # only the flagged one closed
+        assert seen == [(flagged, "ws_disconnect")]  # only the flagged one closed
+        assert "a" not in server._sessions
         assert server._sessions["b"]["transport"] is server._detached_ws_transport  # re-pointed
     finally:
         server._sessions.clear()

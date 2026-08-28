@@ -327,7 +327,7 @@ def _(rid, params: dict) -> dict:
     # streaming events on the active websocket even if an earlier disconnect
     # or fallback moved the session transport to stdio.
     if (t := current_transport()) is not None:
-        session["transport"] = t
+        _attach_session_transport(session, t)
     while True:
         busy_transport = None
         with session["history_lock"]:
@@ -1355,16 +1355,22 @@ def _(rid, params: dict) -> dict:
     try:
         from tools.approval import resolve_gateway_approval
 
-        return _ok(
-            rid,
-            {
-                "resolved": resolve_gateway_approval(
-                    session["session_key"],
-                    params.get("choice", "deny"),
-                    resolve_all=params.get("all", False),
-                )
-            },
-        )
+        # Linearize approval resolution with session teardown. The close claim
+        # marks the record closing while holding this same lock.
+        with _sessions_lock:
+            if authority_error := _session_control_authority_error(rid, session):
+                return authority_error
+            return _ok(
+                rid,
+                {
+                    "resolved": resolve_gateway_approval(
+                        session["session_key"],
+                        params.get("choice", "deny"),
+                        resolve_all=params.get("all", False),
+                        request_id=params.get("request_id"),
+                    )
+                },
+            )
     except Exception as e:
         return _err(rid, 5004, str(e))
 

@@ -1,21 +1,8 @@
-"""Regression tests: a user-approved command runs from a clean interrupt slate.
+"""Regression tests for approval and pre-execution interrupt handling.
 
-Bug (manual approvals, the default): a user approves a scanner-flagged command,
-then hits Stop / sends a message.  `agent.interrupt()` sets the per-thread
-interrupt bit on the execution thread *during* the blocking approval-wait; the
-deny that follows is a no-op once the approval was granted, so the bit persists.
-Nothing cleared it between approval-grant and `env.execute`, so
-`_wait_for_process` SIGINT-killed the just-approved command on its first poll and
-returned exit 130 + "[Command interrupted]" while still carrying the
-"...approved by the user." note (the 3-part signature).
-
-Fix: clear the current thread's interrupt bit once before the approved command
-spawns its child (terminal foreground; execute_code local + remote), and enrich
-the note on a genuine post-start interrupt instead of implying success.
-
-Invariant preserved: a genuine interrupt arriving AFTER execution starts (or
-during a retry backoff) must still SIGINT the command (exit 130); non-approved
-commands keep current interrupt behavior.
+Only an explicit ``force=True`` terminal replay clears a stale interrupt.
+Human-approved terminal and execute_code work must retain a Stop that lands
+after the approval commit and before process spawn.
 """
 import json
 import threading
@@ -27,7 +14,6 @@ from tools import terminal_tool as tt
 from tools.interrupt import (
     set_interrupt,
     is_interrupted,
-    clear_current_thread_interrupt,
     _interrupted_threads,
     _lock,
 )
@@ -84,6 +70,51 @@ def test_non_approved_command_still_interrupts_on_stale_bit(monkeypatch):
 
     assert result["exit_code"] == 130, result
     assert "[Command interrupted]" in result["output"]
+
+
+def test_human_approved_command_does_not_clear_stop(monkeypatch):
+    monkeypatch.setattr(
+        tt,
+        "_check_all_guards",
+        lambda *a, **k: {
+            "approved": True,
+            "user_approved": True,
+            "description": "dangerous",
+        },
+    )
+    set_interrupt(True)
+
+    result = json.loads(tt.terminal_tool(command="sleep 0.5; echo DONE"))
+
+    assert result["exit_code"] == 130, result
+    assert "DONE" not in result["output"]
+    assert "[Command interrupted]" in result["output"]
+
+
+@pytest.mark.parametrize("background", [False, True])
+def test_stop_from_approval_handoff_prevents_immediate_terminal_effect(
+    monkeypatch, tmp_path, background
+):
+    sentinel = tmp_path / f"must_not_exist_{background}"
+
+    def approve_then_stop(*_args, **_kwargs):
+        set_interrupt(True)
+        return {
+            "approved": True,
+            "user_approved": True,
+            "description": "dangerous",
+        }
+
+    monkeypatch.setattr(tt, "_check_all_guards", approve_then_stop)
+
+    result = json.loads(tt.terminal_tool(
+        command=f"touch {sentinel}",
+        background=background,
+    ))
+
+    assert result["exit_code"] == 130, result
+    assert result["status"] == "interrupted"
+    assert not sentinel.exists(), "executor started after Stop won the handoff"
 
 
 def test_approved_command_genuine_interrupt_after_start_still_kills(tmp_path):
@@ -161,12 +192,11 @@ def test_natural_exit_130_not_mislabeled_as_interrupt(monkeypatch):
     assert "[Command interrupted]" not in result["output"]
 
 
-def test_retry_backoff_does_not_clear_genuine_interrupt(monkeypatch):
-    """A genuine interrupt that lands during the retry backoff must survive
-    (the clear runs ONCE before the loop, never re-clearing on retries)."""
+def test_retry_backoff_interrupt_prevents_next_attempt(monkeypatch):
+    """A Stop during retry backoff must prevent another executor handoff."""
     from tools.environments.local import LocalEnvironment
 
-    calls = {"n": 0, "interrupted_at_retry": None}
+    calls = {"n": 0}
 
     def fake_execute(self, command, **kw):
         if "sleep 1" not in command:  # ignore any incidental execute calls
@@ -175,9 +205,7 @@ def test_retry_backoff_does_not_clear_genuine_interrupt(monkeypatch):
         if calls["n"] == 1:
             set_interrupt(True)  # Stop lands during the first attempt / backoff
             raise RuntimeError("transient backend error")
-        # Second attempt: the bit set during the backoff must NOT be re-cleared.
-        calls["interrupted_at_retry"] = is_interrupted()
-        return {"output": "partial\n[Command interrupted]", "returncode": 130}
+        raise AssertionError("executor retried after Stop")
 
     monkeypatch.setattr(LocalEnvironment, "execute", fake_execute)
     monkeypatch.setattr("tools.terminal_tool.time.sleep", lambda *a, **k: None)
@@ -185,17 +213,17 @@ def test_retry_backoff_does_not_clear_genuine_interrupt(monkeypatch):
 
     result = json.loads(tt.terminal_tool(command="sleep 1", force=True, task_id="retry-test"))
 
-    assert calls["n"] == 2, calls
-    assert calls["interrupted_at_retry"] is True, "retry must NOT re-clear a genuine interrupt"
+    assert calls["n"] == 1, calls
     assert result["exit_code"] == 130, result
+    assert result["status"] == "interrupted"
 
 
 # ---------------------------------------------------------------------------
 # execute_code (same root cause, its own approval-wait + spawn/poll loop)
 # ---------------------------------------------------------------------------
 
-def test_execute_code_approved_clears_stale_interrupt_bit(monkeypatch):
-    """An approved execute_code script (local path) runs from a clean slate."""
+def test_execute_code_approved_does_not_clear_stop(monkeypatch):
+    """A Stop after execute_code approval must survive until execution."""
     from tools.code_execution_tool import execute_code
 
     monkeypatch.setattr(
@@ -210,9 +238,34 @@ def test_execute_code_approved_clears_stale_interrupt_bit(monkeypatch):
         task_id="test-clean-slate",
     ))
 
-    assert result["status"] == "success", result
-    assert "CODE_DONE" in result["output"]
-    assert "execution interrupted" not in result["output"]
+    assert result["status"] != "success", result
+    assert "CODE_DONE" not in result["output"]
+
+
+def test_stop_from_approval_handoff_prevents_immediate_execute_code_effect(
+    monkeypatch, tmp_path
+):
+    from tools.code_execution_tool import execute_code
+
+    sentinel = tmp_path / "execute_code_must_not_exist"
+
+    def approve_then_stop(*_args, **_kwargs):
+        set_interrupt(True)
+        return {"approved": True, "user_approved": True}
+
+    monkeypatch.setattr(
+        "tools.approval.check_execute_code_guard",
+        approve_then_stop,
+    )
+
+    result = json.loads(execute_code(
+        code=f"from pathlib import Path; Path({str(sentinel)!r}).touch()",
+        task_id="test-pre-spawn-stop",
+    ))
+
+    assert result["status"] == "interrupted", result
+    assert result["exit_code"] == 130
+    assert not sentinel.exists(), "execute_code child started after Stop won"
 
 
 def test_execute_code_non_approved_still_interrupts_on_stale_bit(monkeypatch):

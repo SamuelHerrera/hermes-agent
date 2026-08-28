@@ -48,29 +48,63 @@ export const APPROVAL_TOOLS = new Set(['terminal', 'execute_code'])
 // Canonical gateway choices (ui-tui/src/components/prompts.tsx).
 type ApprovalChoice = 'once' | 'session' | 'always' | 'deny'
 
+function snapshotApprovalRequest(part: ToolPart): ApprovalRequest | null {
+  if (!part.args || typeof part.args !== 'object') {
+    return null
+  }
+
+  const row = part.args as Record<string, unknown>
+  const snapshot = row.__hermes_pending_approval
+
+  if (!snapshot || typeof snapshot !== 'object') {
+    return null
+  }
+
+  const data = snapshot as Record<string, unknown>
+  const command = typeof data.command === 'string' ? data.command : ''
+  const sessionId = typeof data.session_id === 'string' ? data.session_id : ''
+
+  if (!command || !sessionId) {
+    return null
+  }
+
+  return {
+    allowPermanent: data.allow_permanent !== false,
+    choices: Array.isArray(data.choices) ? data.choices.filter(choice => typeof choice === 'string') : undefined,
+    command,
+    description: typeof data.description === 'string' ? data.description : '',
+    requestId: typeof data.request_id === 'string' ? data.request_id : undefined,
+    sessionId,
+    smartDenied: data.smart_denied === true
+  }
+}
+
 export const PendingToolApproval: FC<{ part: ToolPart }> = ({ part }) => {
   // The tool row lives in whichever session's transcript rendered it — read
   // THAT session's approval (works for the primary and every tile).
   const sessionId = useStore(useSessionView().$runtimeId)
   const $request = useMemo(() => sessionApprovalRequest(sessionId), [sessionId])
-  const request = useStore($request)
+  const storedRequest = useStore($request)
+  const snapshotRequest = useMemo(() => snapshotApprovalRequest(part), [part])
+  const request = storedRequest ?? snapshotRequest
 
   if (!request || !APPROVAL_TOOLS.has(part.toolName)) {
     return null
   }
 
-  return <InlineApprovalBar request={request} />
+  return <InlineApprovalBar request={request} snapshotBacked={!storedRequest && Boolean(snapshotRequest)} />
 }
 
-const InlineApprovalBar: FC<{ request: ApprovalRequest }> = ({ request }) => {
+const InlineApprovalBar: FC<{ request: ApprovalRequest; snapshotBacked?: boolean }> = ({ request, snapshotBacked = false }) => {
   useEffect(() => registerApprovalInlineAnchor(request.sessionId), [request.sessionId])
 
-  return <ApprovalBar request={request} surface="inline" />
+  return <ApprovalBar request={request} snapshotBacked={snapshotBacked} surface="inline" />
 }
 
-export const PendingApprovalFallback: FC = () => {
+export const PendingApprovalFallback: FC<{ sessionId?: string | null }> = ({ sessionId: scopedSessionId }) => {
   const { t } = useI18n()
-  const sessionId = useStore(useSessionView().$runtimeId)
+  const contextualSessionId = useStore(useSessionView().$runtimeId)
+  const sessionId = scopedSessionId === undefined ? contextualSessionId : scopedSessionId
   const $request = useMemo(() => sessionApprovalRequest(sessionId), [sessionId])
   const $inlineVisible = useMemo(() => sessionApprovalInlineVisible(sessionId), [sessionId])
   const request = useStore($request)
@@ -102,7 +136,11 @@ export const PendingApprovalFallback: FC = () => {
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform)
 
-const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline' }> = ({ request, surface }) => {
+const ApprovalBar: FC<{ request: ApprovalRequest; snapshotBacked?: boolean; surface: 'floating' | 'inline' }> = ({
+  request,
+  snapshotBacked = false,
+  surface
+}) => {
   const { t } = useI18n()
   const copy = t.assistant.approval
   const gateway = useStore($gateway)
@@ -128,8 +166,14 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
     async (choice: ApprovalChoice) => {
       // Another bar (or the keyboard path) may have already resolved this
       // approval; the map is the single source of truth, so bail if this
-      // session's request is gone.
-      if (busy || !sessionApprovalRequest(request.sessionId).get()) {
+      // session's request is gone or has been replaced by another command.
+      const current = sessionApprovalRequest(request.sessionId).get()
+
+      if (
+        busy ||
+        (!snapshotBacked && !current) ||
+        (request.requestId && current && current.requestId !== request.requestId)
+      ) {
         return
       }
 
@@ -144,16 +188,17 @@ const ApprovalBar: FC<{ request: ApprovalRequest; surface: 'floating' | 'inline'
       try {
         await gateway.request<{ resolved?: boolean }>('approval.respond', {
           choice,
+          ...(request.requestId ? { request_id: request.requestId } : {}),
           session_id: request.sessionId ?? undefined
         })
         triggerHaptic(choice === 'deny' ? 'cancel' : 'submit')
-        clearApprovalRequest(request.sessionId)
+        clearApprovalRequest(request.sessionId, request.requestId)
       } catch (error) {
         notifyError(error, copy.sendFailed)
         setSubmitting(null)
       }
     },
-    [busy, copy.gatewayDisconnected, copy.sendFailed, gateway, request.sessionId]
+    [busy, copy.gatewayDisconnected, copy.sendFailed, gateway, request.requestId, request.sessionId, snapshotBacked]
   )
 
   // ⌘/Ctrl+Enter → Run, Esc → Reject.

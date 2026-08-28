@@ -1,6 +1,7 @@
 import { atom, computed } from 'nanostores'
 
 import { $gateway } from './gateway'
+import { markPendingPromptChanged } from './prompt-revision'
 import { $activeSessionId } from './session'
 
 export interface ClarifyRequest {
@@ -74,6 +75,7 @@ export const sessionClarifyRequest = (sessionId: string | null) =>
   computed($clarifyRequests, requests => requests[keyFor(sessionId)] ?? null)
 
 export function setClarifyRequest(request: ClarifyRequest): void {
+  markPendingPromptChanged(request.sessionId)
   $clarifyRequests.set({ ...$clarifyRequests.get(), [keyFor(request.sessionId)]: request })
 }
 
@@ -92,6 +94,7 @@ export function clearClarifyRequest(requestId?: string, sessionId?: string | nul
 
     const next = { ...requests }
     delete next[key]
+    markPendingPromptChanged(current.sessionId)
     $clarifyRequests.set(next)
 
     return
@@ -106,6 +109,7 @@ export function clearClarifyRequest(requestId?: string, sessionId?: string | nul
     if (requestId && value.requestId !== requestId) {
       next[key] = value
     } else {
+      markPendingPromptChanged(value.sessionId)
       changed = true
     }
   }

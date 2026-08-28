@@ -183,6 +183,74 @@ class StdioTransport:
         return None
 
 
+class SessionFanoutTransport:
+    """Thread-safe, best-effort event fanout for one live session.
+
+    Websocket lifecycle remains owned by the websocket server. Closing this
+    wrapper only releases references; it never closes the underlying peers.
+    """
+
+    __slots__ = ("_lock", "_transports")
+
+    def __init__(self, *transports: Transport) -> None:
+        self._lock = threading.RLock()
+        self._transports: list[Transport] = []
+        for transport in transports:
+            self.add(transport)
+
+    def add(self, transport: Transport | None) -> None:
+        if transport is None:
+            return
+        with self._lock:
+            if not any(peer is transport for peer in self._transports):
+                self._transports.append(transport)
+
+    def remove(self, transport: Transport | None) -> int:
+        with self._lock:
+            self._transports = [
+                peer for peer in self._transports if peer is not transport
+            ]
+            return len(self._transports)
+
+    def contains(self, transport: Transport | None) -> bool:
+        with self._lock:
+            return any(peer is transport for peer in self._transports)
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._transports)
+
+    def write(self, obj: dict) -> bool:
+        with self._lock:
+            targets = list(self._transports)
+
+        failed: list[Transport] = []
+        accepted = False
+        for transport in targets:
+            try:
+                ok = bool(transport.write(obj))
+            except Exception:
+                logger.debug("session fanout transport write failed", exc_info=True)
+                ok = False
+            if ok:
+                accepted = True
+            else:
+                failed.append(transport)
+
+        if failed:
+            with self._lock:
+                self._transports = [
+                    peer
+                    for peer in self._transports
+                    if not any(peer is dead for dead in failed)
+                ]
+        return accepted
+
+    def close(self) -> None:
+        with self._lock:
+            self._transports.clear()
+
+
 class TeeTransport:
     """Mirrors writes to one primary plus N best-effort secondaries.
 

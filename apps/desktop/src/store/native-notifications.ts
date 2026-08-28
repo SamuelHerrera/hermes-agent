@@ -4,7 +4,7 @@ import { persistString, storedString } from '@/lib/storage'
 
 import { $gateway } from './gateway'
 import { withinNativeNotifyBaseline } from './notify-baseline'
-import { clearApprovalRequest } from './prompts'
+import { clearApprovalRequest, sessionApprovalRequest } from './prompts'
 import { $activeSessionId } from './session'
 
 // Native OS notifications (Electron `Notification`), separate from the in-app
@@ -154,6 +154,7 @@ export interface NativeNotificationInput {
   title: string
   body?: string
   sessionId?: null | string
+  requestId?: string
   /**
    * Not tied to a chat session (e.g. pet generation). Fires whenever the user
    * is away, bypassing the session-match gate that completion kinds normally
@@ -193,6 +194,7 @@ export function dispatchNativeNotification(input: NativeNotificationInput): void
     actions: input.actions,
     body: input.body,
     kind: input.kind,
+    requestId: input.requestId,
     sessionId: input.sessionId ?? undefined,
     silent: input.silent,
     tag: input.tag,
@@ -217,9 +219,14 @@ export function dispatchPluginNativeNotification(pluginId: string, input: Plugin
   dispatchNativeNotification({ ...input, global: true, kind: 'plugin', tag: pluginId })
 }
 
-// Resolve a pending approval from a notification button, mirroring the in-app
-// Run/Reject bar. Keyed by session id — a background approval has no local guard.
-export async function respondToApprovalAction(sessionId: null | string, actionId: string): Promise<void> {
+// Resolve the exact approval represented by a notification button. The
+// request-id guard prevents an old OS notification from authorizing a newer
+// queued command in the same session.
+export async function respondToApprovalAction(
+  sessionId: null | string,
+  actionId: string,
+  requestId?: string
+): Promise<void> {
   const choice = actionId === 'approve' ? 'once' : actionId === 'reject' ? 'deny' : null
 
   if (!choice) {
@@ -227,14 +234,19 @@ export async function respondToApprovalAction(sessionId: null | string, actionId
   }
 
   const gateway = $gateway.get()
+  const approval = sessionApprovalRequest(sessionId).get()
 
-  if (!gateway) {
+  if (!gateway || !approval || (approval.requestId && approval.requestId !== requestId)) {
     return
   }
 
   try {
-    await gateway.request('approval.respond', { choice, session_id: sessionId ?? undefined })
-    clearApprovalRequest(sessionId)
+    await gateway.request('approval.respond', {
+      choice,
+      ...(approval.requestId ? { request_id: approval.requestId } : {}),
+      session_id: sessionId ?? undefined
+    })
+    clearApprovalRequest(sessionId, approval.requestId)
   } catch {
     // Leave the prompt parked so the user can still resolve it in-app.
   }

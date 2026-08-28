@@ -245,7 +245,7 @@ function SecretDialog({ sessionId }: { sessionId: string | null }) {
 export function PromptOverlays({ sessionId }: { sessionId: string | null }) {
   return (
     <>
-      <PendingApprovalFallback />
+      <PendingApprovalFallback sessionId={sessionId} />
       <SudoDialog sessionId={sessionId} />
       <SecretDialog sessionId={sessionId} />
     </>

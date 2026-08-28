@@ -335,6 +335,28 @@ describe('ClarifyTool recommended option', () => {
 })
 
 describe('ClarifyTool pending marker', () => {
+  it('renders and answers a resume-snapshot prompt when the session store missed hydration', async () => {
+    mockMessageRunning = false
+    const request = vi.fn().mockResolvedValue({ ok: true })
+
+    $activeSessionId.set('session-1')
+    $gateway.set({ request } as never)
+    const props = liveClarifyProps()
+    const args = { ...props.args, request_id: 'snapshot-request' }
+
+    renderClarify(<ClarifyTool {...props} args={args} argsText={JSON.stringify(args)} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /staging/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }))
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith('clarify.respond', {
+        answer: 'staging',
+        request_id: 'snapshot-request'
+      })
+    })
+  })
+
   it('renders a rehydrated pending request even before assistant-ui marks the thread running', () => {
     mockMessageRunning = false
     $activeSessionId.set('session-1')

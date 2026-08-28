@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ClientSessionState } from '@/app/types'
 import { createClientSessionState } from '@/lib/chat-runtime'
+import { clearAllPrompts, sessionApprovalRequest } from '@/store/prompts'
 import type { RpcEvent } from '@/types/hermes'
 
 import { STREAM_DELTA_FLUSH_MS } from './utils'
@@ -75,6 +76,7 @@ describe('turn end without message.complete (session.info running=false)', () =>
 
   afterEach(() => {
     cleanup()
+    clearAllPrompts()
     vi.useRealTimers()
     vi.restoreAllMocks()
   })
@@ -124,5 +126,21 @@ describe('turn end without message.complete (session.info running=false)', () =>
     // pending, and the stream binding is released.
     expect(state?.messages.every(message => !message.pending)).toBe(true)
     expect(state?.streamId).toBeNull()
+  })
+
+  it('preserves approval request identity from the live gateway event', async () => {
+    await mountHarness()
+
+    emit({
+      payload: {
+        command: 'rm -rf /tmp/second',
+        description: 'second queued command',
+        request_id: 'approval-second'
+      },
+      session_id: SID,
+      type: 'approval.request'
+    })
+
+    expect(sessionApprovalRequest(SID).get()?.requestId).toBe('approval-second')
   })
 })

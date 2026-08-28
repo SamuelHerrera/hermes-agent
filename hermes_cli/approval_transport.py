@@ -201,6 +201,9 @@ def invoke_approval_transport(
                 except Exception:
                     logger.debug("Approval transport poll callback failed", exc_info=True)
 
+    if is_interrupted is not None and is_interrupted():
+        logger.info("Approval transport result discarded after interrupt for %s", request.request_id)
+        return ApprovalTransportResult("deny", "interrupted")
     if completed_at > deadline:
         logger.warning("Approval transport timed out for request %s", request.request_id)
         return ApprovalTransportResult("deny", "timeout")
@@ -216,4 +219,7 @@ def invoke_approval_transport(
     if value.choice not in request.allowed_choices:
         logger.warning("Approval transport returned a disallowed choice")
         return ApprovalTransportResult("deny", "invalid")
+    if is_interrupted is not None and is_interrupted():
+        logger.info("Approval transport decision discarded after interrupt for %s", request.request_id)
+        return ApprovalTransportResult("deny", "interrupted")
     return ApprovalTransportResult(value.choice)

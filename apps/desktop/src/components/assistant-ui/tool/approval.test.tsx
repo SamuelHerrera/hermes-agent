@@ -36,7 +36,14 @@ function setRequest(
   extra: { choices?: string[]; smartDenied?: boolean } = {}
 ) {
   $activeSessionId.set('sess-1')
-  setApprovalRequest({ allowPermanent, command, description: 'dangerous command', sessionId: 'sess-1', ...extra })
+  setApprovalRequest({
+    allowPermanent,
+    command,
+    description: 'dangerous command',
+    requestId: 'approval-live',
+    sessionId: 'sess-1',
+    ...extra
+  })
 }
 
 function mockGateway() {
@@ -54,6 +61,34 @@ afterEach(() => {
 })
 
 describe('PendingToolApproval', () => {
+  it('renders and answers a resume-snapshot approval when the session store missed hydration', async () => {
+    const request = mockGateway()
+
+    const resumedPart = {
+      ...part('terminal'),
+      args: {
+        command: 'rm -rf /tmp/x',
+        __hermes_pending_approval: {
+          command: 'rm -rf /tmp/x',
+          description: 'dangerous command',
+          request_id: 'approval-1',
+          session_id: 'runtime-resumed'
+        }
+      }
+    } as ToolPart
+
+    render(<PendingToolApproval part={resumedPart} />)
+    fireEvent.click(screen.getByRole('button', { name: /Reject/ }))
+
+    await waitFor(() => {
+      expect(request).toHaveBeenCalledWith('approval.respond', {
+        choice: 'deny',
+        request_id: 'approval-1',
+        session_id: 'runtime-resumed'
+      })
+    })
+  })
+
   it('renders nothing when there is no pending approval', () => {
     const { container } = render(<PendingToolApproval part={part('terminal')} />)
 
@@ -83,7 +118,11 @@ describe('PendingToolApproval', () => {
     fireEvent.click(screen.getByRole('button', { name: /Run/ }))
 
     await waitFor(() => {
-      expect(request).toHaveBeenCalledWith('approval.respond', { choice: 'once', session_id: 'sess-1' })
+      expect(request).toHaveBeenCalledWith('approval.respond', {
+        choice: 'once',
+        request_id: 'approval-live',
+        session_id: 'sess-1'
+      })
     })
     expect($approvalRequest.get()).toBeNull()
   })
@@ -109,7 +148,11 @@ describe('PendingToolApproval', () => {
     fireEvent.click(screen.getByRole('button', { name: /Reject/ }))
 
     await waitFor(() => {
-      expect(request).toHaveBeenCalledWith('approval.respond', { choice: 'deny', session_id: 'sess-1' })
+      expect(request).toHaveBeenCalledWith('approval.respond', {
+        choice: 'deny',
+        request_id: 'approval-live',
+        session_id: 'sess-1'
+      })
     })
   })
 

@@ -615,7 +615,7 @@ export function preserveLocalPendingTurnMessages(
 }
 
 function pendingPromptToolPayload(
-  projection: Pick<SessionResumeResponse, 'pending_prompt'>
+  projection: Pick<SessionResumeResponse, 'inflight' | 'pending_prompt' | 'session_id'>
 ): Parameters<typeof upsertToolPart>[1] | null {
   const event = projection.pending_prompt?.event
   const payload = projection.pending_prompt?.payload
@@ -633,13 +633,71 @@ function pendingPromptToolPayload(
       return null
     }
 
+    const liveToolId = projection.inflight?.events?.find(inflightEvent => {
+      if (inflightEvent.type !== 'tool.start' || inflightEvent.payload?.name !== 'clarify') {
+        return false
+      }
+
+      const args = inflightEvent.payload.args
+
+      return Boolean(
+        args &&
+          typeof args === 'object' &&
+          'question' in args &&
+          typeof args.question === 'string' &&
+          args.question === question
+      )
+    })?.payload?.tool_id
+
     return {
       args: {
         choices: Array.isArray(payload.choices) ? payload.choices.filter(choice => typeof choice === 'string') : [],
-        question
+        question,
+        request_id: requestId
       },
       name: 'clarify',
-      tool_id: requestId
+      tool_id: typeof liveToolId === 'string' && liveToolId ? liveToolId : requestId
+    }
+  }
+
+  if (event === 'approval.request') {
+    const originatingToolId = typeof payload.tool_id === 'string' ? payload.tool_id : ''
+    const command = typeof payload.command === 'string' ? payload.command : ''
+
+    const liveTool = [...(projection.inflight?.events ?? [])].reverse().find(inflightEvent => {
+      if (inflightEvent.type !== 'tool.start' || typeof inflightEvent.payload?.tool_id !== 'string') {
+        return false
+      }
+
+      if (originatingToolId) {
+        return inflightEvent.payload.tool_id === originatingToolId
+      }
+
+      if (inflightEvent.payload.name !== 'terminal' || !command) {
+        return false
+      }
+
+      const args = inflightEvent.payload.args
+
+      return Boolean(args && typeof args === 'object' && 'command' in args && args.command === command)
+    })?.payload
+
+    if (!liveTool || typeof liveTool.tool_id !== 'string' || typeof liveTool.name !== 'string') {
+      return null
+    }
+
+    const liveArgs = liveTool.args && typeof liveTool.args === 'object' ? liveTool.args : {}
+
+    return {
+      args: {
+        ...liveArgs,
+        __hermes_pending_approval: {
+          ...payload,
+          session_id: projection.session_id
+        }
+      },
+      name: liveTool.name,
+      tool_id: liveTool.tool_id
     }
   }
 
@@ -953,7 +1011,14 @@ export function appendLiveSessionProjection(
           (message, index) => index > currentTurnStart && messageHasMatchingPendingTool(message, pendingToolPayload)
         )
 
-  const targetIndex = matchingIndex >= 0 ? matchingIndex : withProjected.findIndex(message => message.id === liveStreamId)
+  const streamIndex = withProjected.findIndex(message => message.id === liveStreamId)
+
+  const structuredCurrentTurnIndex =
+    turnAlreadyStructured && inflightUserAlreadyPersisted && liveAssistantOfCurrentTurn
+      ? withProjected.findIndex(message => message.id === liveAssistantOfCurrentTurn.id)
+      : -1
+
+  const targetIndex = matchingIndex >= 0 ? matchingIndex : streamIndex >= 0 ? streamIndex : structuredCurrentTurnIndex
 
   if (targetIndex >= 0) {
     return withProjected.map((message, index) =>

@@ -650,6 +650,9 @@ export interface SessionResumeResponse {
 export interface SessionRuntimeInfo {
   approval_mode?: 'manual' | 'off' | 'smart'
   branch?: string
+  capabilities?: {
+    session_multi_client_fanout?: boolean
+  }
   config_warning?: string
   credential_warning?: string
   cwd?: string

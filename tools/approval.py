@@ -22,10 +22,11 @@ import tempfile
 import threading
 import time
 import unicodedata
+import uuid
 from typing import Optional
 from hermes_cli.config import cfg_get
 
-from tools.interrupt import is_interrupted
+from tools.interrupt import commit_if_not_interrupted, is_interrupted
 from utils import env_var_enabled, is_truthy_value
 
 logger = logging.getLogger(__name__)
@@ -2319,7 +2320,7 @@ def detect_dangerous_command(command: str) -> tuple:
 # Per-session approval state (thread-safe)
 # =========================================================================
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _pending: dict[str, dict] = {}
 _session_approved: dict[str, set] = {}
 _session_yolo: set[str] = set()
@@ -2566,7 +2567,8 @@ class _ApprovalEntry:
 
     def __init__(self, data: dict):
         self.event = threading.Event()
-        self.data = data          # command, description, pattern_keys, …
+        self.data = dict(data)     # command, description, pattern_keys, …
+        self.data.setdefault("request_id", uuid.uuid4().hex)
         self.result: Optional[str] = None  # "once"|"session"|"always"|"deny"
         # Optional free-text reason supplied with an explicit deny
         # (``/deny <reason>``) so the agent can adapt instead of only
@@ -2603,9 +2605,19 @@ def unregister_gateway_notify(session_key: str) -> None:
         entry.event.set()
 
 
+def pending_gateway_approval(session_key: str) -> Optional[dict]:
+    """Return a detached snapshot of the oldest unresolved approval."""
+    with _lock:
+        queue = _gateway_queues.get(session_key)
+        if not queue:
+            return None
+        return dict(queue[0].data)
+
+
 def resolve_gateway_approval(session_key: str, choice: str,
                              resolve_all: bool = False,
-                             reason: Optional[str] = None) -> int:
+                             reason: Optional[str] = None,
+                             request_id: Optional[str] = None) -> int:
     """Called by the gateway's /approve or /deny handler to unblock
     waiting agent thread(s).
 
@@ -2623,19 +2635,30 @@ def resolve_gateway_approval(session_key: str, choice: str,
         queue = _gateway_queues.get(session_key)
         if not queue:
             return 0
-        if resolve_all:
+        if request_id:
+            targets = [
+                entry
+                for entry in queue
+                if entry.data.get("request_id") == request_id
+            ]
+            if not targets:
+                return 0
+            queue[:] = [entry for entry in queue if entry not in targets]
+        elif resolve_all:
             targets = list(queue)
             queue.clear()
         else:
             targets = [queue.pop(0)]
         if not queue:
             _gateway_queues.pop(session_key, None)
-
-    for entry in targets:
-        entry.result = choice
-        if reason:
-            entry.reason = reason
-        entry.event.set()
+        # Publish the decision before releasing the queue lock. An interrupt
+        # waiter may wake and override the entry to deny, so no resolver write
+        # may remain outstanding after the event becomes observable.
+        for entry in targets:
+            entry.result = choice
+            if reason:
+                entry.reason = reason
+            entry.event.set()
     return len(targets)
 
 
@@ -2811,15 +2834,58 @@ def load_permanent_allowlist() -> set:
         return set()
 
 
-def save_permanent_allowlist(patterns: set):
-    """Save permanently allowed command patterns to config."""
+def save_permanent_allowlist(patterns: set) -> bool:
+    """Persist permanent patterns and verify the resulting config state."""
     try:
-        from hermes_cli.config import load_config, save_config
+        from hermes_cli.config import load_config, read_raw_config, save_config
         config = load_config()
         config["command_allowlist"] = list(patterns)
         save_config(config)
+        persisted = set(read_raw_config().get("command_allowlist", []) or [])
+        if persisted != set(patterns):
+            logger.warning("Permanent allowlist write could not be verified")
+            return False
+        return True
     except Exception as e:
         logger.warning("Could not save allowlist: %s", e)
+        return False
+
+
+def _commit_approval_authority(
+    session_key: str,
+    session_keys: set[str],
+    permanent_keys: set[str],
+) -> bool:
+    """Commit reusable grants atomically with the current turn's Stop state."""
+    with _lock:
+        existing_session = _session_approved.get(session_key, set())
+        new_session_keys = session_keys - existing_session
+        new_permanent_keys = permanent_keys - _permanent_approved
+
+        def _commit() -> None:
+            for key in session_keys:
+                approve_session(session_key, key)
+            for key in permanent_keys:
+                approve_permanent(key)
+
+        def _rollback() -> None:
+            grants = _session_approved.get(session_key)
+            if grants is not None:
+                grants.difference_update(new_session_keys)
+                if not grants:
+                    _session_approved.pop(session_key, None)
+            _permanent_approved.difference_update(new_permanent_keys)
+
+        def _finalize() -> None:
+            if permanent_keys:
+                persisted = save_permanent_allowlist(_permanent_approved)
+                if persisted is False:
+                    logger.error(
+                        "Permanent approval committed in memory but durability "
+                        "could not be verified"
+                    )
+
+        return commit_if_not_interrupted(_commit, _rollback, _finalize)
 
 
 # =========================================================================
@@ -3325,6 +3391,13 @@ def _run_approval_gate(
     if is_approved(session_key, pattern_key):
         return {"approved": True, "message": None}
 
+    def _commit_choice(choice: str | None) -> bool:
+        session_keys = {pattern_key} if choice in {"session", "always"} else set()
+        permanent_keys = {pattern_key} if choice == "always" else set()
+        return _commit_approval_authority(
+            session_key, session_keys, permanent_keys
+        )
+
     approval_callback = _resolve_cli_approval_callback(approval_callback)
 
     is_cli = _is_interactive_cli()
@@ -3403,6 +3476,11 @@ def _run_approval_gate(
             choice = decision["choice"]
             deny_reason = decision.get("reason")
 
+            if is_interrupted():
+                resolved = True
+                choice = "deny"
+                deny_reason = None
+
             if not resolved or choice is None or choice == "deny":
                 if not resolved:
                     reason = "timed out without user response"
@@ -3426,12 +3504,15 @@ def _run_approval_gate(
                     "user_consent": False,
                 }
 
-            if choice == "session":
-                approve_session(session_key, pattern_key)
-            elif choice == "always":
-                approve_session(session_key, pattern_key)
-                approve_permanent(pattern_key)
-                save_permanent_allowlist(_permanent_approved)
+            if not _commit_choice(choice):
+                return {
+                    "approved": False,
+                    "message": "BLOCKED: Action cancelled by user interrupt.",
+                    "pattern_key": pattern_key,
+                    "description": description,
+                    "outcome": "interrupted",
+                    "user_consent": False,
+                }
             return {"approved": True, "message": None}
 
         # No notify callback: interactive CLI with a panel callback should
@@ -3512,13 +3593,15 @@ def _run_approval_gate(
             "user_consent": False,
         }
 
-    if choice == "session":
-        approve_session(session_key, pattern_key)
-    elif choice == "always":
-        approve_session(session_key, pattern_key)
-        approve_permanent(pattern_key)
-        save_permanent_allowlist(_permanent_approved)
-
+    if not _commit_choice(choice):
+        return {
+            "approved": False,
+            "message": "BLOCKED: Action cancelled by user interrupt.",
+            "pattern_key": pattern_key,
+            "description": description,
+            "outcome": "interrupted",
+            "user_consent": False,
+        }
     return {"approved": True, "message": None}
 
 
@@ -3916,6 +3999,18 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
             if not queue:
                 _gateway_queues.pop(session_key, None)
 
+    def _deny_entry_for_interrupt() -> None:
+        """Make cancellation the final observable decision for this entry."""
+        with _lock:
+            queue = _gateway_queues.get(session_key, [])
+            if entry in queue:
+                queue.remove(entry)
+            if not queue:
+                _gateway_queues.pop(session_key, None)
+            entry.result = "deny"
+            entry.reason = None
+            entry.event.set()
+
     # Notify plugins that an approval is being requested. Fires before the
     # gateway notify callback so observers get the event in real time.
     _fire_approval_hook(
@@ -3930,7 +4025,7 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
 
     # Notify the user (bridges sync agent thread → async gateway)
     try:
-        notify_cb(approval_data)
+        notify_cb(dict(entry.data))
     except Exception as exc:
         logger.warning("Gateway approval notify failed: %s", exc)
         _drop_entry()
@@ -3981,20 +4076,27 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict,
                     "returning deny for session %s",
                     session_key,
                 )
-                entry.result = "deny"
-                entry.event.set()
+                _deny_entry_for_interrupt()
                 resolved = True
                 break
             _remaining = _deadline - time.monotonic()
             if _remaining <= 0:
                 break
             if entry.event.wait(timeout=min(1.0, _remaining)):
+                if is_interrupted():
+                    _deny_entry_for_interrupt()
                 resolved = True
                 break
             if touch_activity_if_due is not None:
                 touch_activity_if_due(_activity_state, "waiting for user approval")
 
     _drop_entry()
+
+    # Close the wake-to-return gap too: Stop may arrive after Event.wait()
+    # returned but before this helper publishes its final decision.
+    if is_interrupted():
+        _deny_entry_for_interrupt()
+        resolved = True
 
     choice = entry.result
     # Normalize outcome for the post hook. Unresolved (timeout) and None both
@@ -4279,6 +4381,22 @@ def check_all_command_guards(command: str, env_type: str,
     # session — the UI was stricter than the persistence layer.
     has_permanent_capable = any(not is_t for _, _, is_t in warnings)
 
+    def _commit_warning_approval(choice: str | None) -> bool:
+        session_keys: set[str] = set()
+        permanent_keys: set[str] = set()
+        if not smart_denied_for_owner:
+            for key, _, is_tirith in warnings:
+                if choice in {"session", "always"}:
+                    session_keys.add(key)
+                if choice == "always" and not is_tirith:
+                    permanent_keys.add(key)
+        committed = _commit_approval_authority(
+            session_key, session_keys, permanent_keys
+        )
+        if committed:
+            _reset_denials(session_key)
+        return committed
+
     # An explicitly selected plugin transport replaces every built-in prompt
     # surface (CLI/TUI/gateway/ACP). Detection, allowed scopes, persistence,
     # timeout, and final authorization remain host-owned. A failed transport
@@ -4294,6 +4412,12 @@ def check_all_command_guards(command: str, env_type: str,
         allow_permanent=has_permanent_capable and not smart_denied_for_owner,
     )
     if transport_attempt.get("selected"):
+        if is_interrupted():
+            return _transport_denied_result(
+                pattern_key=primary_key,
+                description=combined_desc,
+                failure="interrupted",
+            )
         transport_failure = transport_attempt.get("failure")
         if transport_failure and transport_attempt.get("fallback") == "builtin":
             logger.warning(
@@ -4325,17 +4449,12 @@ def check_all_command_guards(command: str, env_type: str,
                     "outcome": "denied",
                     "user_consent": False,
                 }
-            if not smart_denied_for_owner:
-                for key, _, is_tirith in warnings:
-                    if transport_choice == "session" or (
-                        transport_choice == "always" and is_tirith
-                    ):
-                        approve_session(session_key, key)
-                    elif transport_choice == "always":
-                        approve_session(session_key, key)
-                        approve_permanent(key)
-                        save_permanent_allowlist(_permanent_approved)
-            _reset_denials(session_key)
+            if not _commit_warning_approval(transport_choice):
+                return _transport_denied_result(
+                    pattern_key=primary_key,
+                    description=combined_desc,
+                    failure="interrupted",
+                )
             return {
                 "approved": True,
                 "message": None,
@@ -4397,6 +4516,11 @@ def check_all_command_guards(command: str, env_type: str,
             choice = decision["choice"]
             deny_reason = decision.get("reason")
 
+            if is_interrupted():
+                resolved = True
+                choice = "deny"
+                deny_reason = None
+
             if not resolved or choice is None or choice == "deny":
                 # Consent contract: silence is NOT consent, and an explicit
                 # deny is also a hard halt — both produce a BLOCKED outcome
@@ -4436,21 +4560,18 @@ def check_all_command_guards(command: str, env_type: str,
                     "deny_reason": deny_reason,
                 }
 
-            # A smart-DENY owner override is always one operation, even if an
-            # older client returns "session" or "always". Manual and ESCALATE
-            # choices retain their existing persistence semantics.
-            if not smart_denied_for_owner:
-                for key, _, is_tirith in warnings:
-                    if choice == "session" or (choice == "always" and is_tirith):
-                        approve_session(session_key, key)
-                    elif choice == "always":
-                        approve_session(session_key, key)
-                        approve_permanent(key)
-                        save_permanent_allowlist(_permanent_approved)
-
-            # A human approval (including an ESCALATE-then-approve or a
-            # smart-DENY owner override) resets the consecutive-denial tally.
-            _reset_denials(session_key)
+            if not _commit_warning_approval(choice):
+                return {
+                    "approved": False,
+                    "message": (
+                        "BLOCKED: Command cancelled by user interrupt. The user "
+                        "has NOT consented to this action after cancellation."
+                    ),
+                    "pattern_key": primary_key,
+                    "description": combined_desc,
+                    "outcome": "interrupted",
+                    "user_consent": False,
+                }
             return {"approved": True, "message": None,
                     "user_approved": True, "description": combined_desc}
 
@@ -4560,21 +4681,15 @@ def check_all_command_guards(command: str, env_type: str,
             "user_consent": False,
         }
 
-    # Smart-DENY owner overrides are one-operation scoped. Preserve existing
-    # persistence for manual mode and smart ESCALATE.
-    if not smart_denied_for_owner:
-        for key, _, is_tirith in warnings:
-            if choice == "session" or (choice == "always" and is_tirith):
-                # tirith: session only (no permanent broad allowlisting)
-                approve_session(session_key, key)
-            elif choice == "always":
-                # dangerous patterns: permanent allowed
-                approve_session(session_key, key)
-                approve_permanent(key)
-                save_permanent_allowlist(_permanent_approved)
-
-    # A human approval resets the consecutive-denial tally.
-    _reset_denials(session_key)
+    if not _commit_warning_approval(choice):
+        return {
+            "approved": False,
+            "message": "BLOCKED: Command cancelled by user interrupt.",
+            "pattern_key": primary_key,
+            "description": combined_desc,
+            "outcome": "interrupted",
+            "user_consent": False,
+        }
     return {"approved": True, "message": None,
             "user_approved": True, "description": combined_desc}
 
@@ -4708,6 +4823,21 @@ def check_execute_code_guard(code: str, env_type: str,
         # Interactive DENY falls through to one-operation human approval;
         # ESCALATE retains the normal manual approval behavior.
 
+    def _commit_execute_approval(choice: str | None) -> bool:
+        persist = not smart_denied_for_owner and choice in {"session", "always"}
+        session_keys = {pattern_key} if persist else set()
+        permanent_keys = (
+            {pattern_key}
+            if not smart_denied_for_owner and choice == "always"
+            else set()
+        )
+        committed = _commit_approval_authority(
+            session_key, session_keys, permanent_keys
+        )
+        if committed:
+            _reset_denials(session_key)
+        return committed
+
     # Redacted copies for user-visible rendering only. An execute_code script
     # can embed credentials (e.g. api_key = "sk-..."), and the gateway renders
     # this payload directly to Discord/Slack — those messages are
@@ -4730,6 +4860,12 @@ def check_execute_code_guard(code: str, env_type: str,
         allow_permanent=not smart_denied_for_owner,
     )
     if transport_attempt.get("selected"):
+        if is_interrupted():
+            return _transport_denied_result(
+                pattern_key=pattern_key,
+                description=description,
+                failure="interrupted",
+            )
         transport_failure = transport_attempt.get("failure")
         if transport_failure and transport_attempt.get("fallback") == "builtin":
             logger.warning(
@@ -4758,14 +4894,12 @@ def check_execute_code_guard(code: str, env_type: str,
                     "outcome": "denied",
                     "user_consent": False,
                 }
-            if not smart_denied_for_owner:
-                if choice == "session":
-                    approve_session(session_key, pattern_key)
-                elif choice == "always":
-                    approve_session(session_key, pattern_key)
-                    approve_permanent(pattern_key)
-                    save_permanent_allowlist(_permanent_approved)
-            _reset_denials(session_key)
+            if not _commit_execute_approval(choice):
+                return _transport_denied_result(
+                    pattern_key=pattern_key,
+                    description=description,
+                    failure="interrupted",
+                )
             return {
                 "approved": True,
                 "message": None,
@@ -4833,6 +4967,11 @@ def check_execute_code_guard(code: str, env_type: str,
     choice = decision["choice"]
     deny_reason = decision.get("reason")
 
+    if is_interrupted():
+        resolved = True
+        choice = "deny"
+        deny_reason = None
+
     if not resolved or choice is None or choice == "deny":
         reason = "timed out without user response" if not resolved else "denied by user"
         addendum = " Silence is not consent." if not resolved else ""
@@ -4855,20 +4994,15 @@ def check_execute_code_guard(code: str, env_type: str,
             "deny_reason": deny_reason,
         }
 
-    # Never persist a smart-DENY override under the coarse execute_code key;
-    # doing so would approve unrelated future scripts. Manual and ESCALATE
-    # decisions preserve their existing session/permanent behavior.
-    if not smart_denied_for_owner:
-        if choice == "session":
-            approve_session(session_key, pattern_key)
-        elif choice == "always":
-            approve_session(session_key, pattern_key)
-            approve_permanent(pattern_key)
-            save_permanent_allowlist(_permanent_approved)
-    # choice == "once": no persistence — approval lasts this single call only.
-
-    # A human approval resets the consecutive-denial tally.
-    _reset_denials(session_key)
+    if not _commit_execute_approval(choice):
+        return {
+            "approved": False,
+            "message": "BLOCKED: execute_code cancelled by user interrupt.",
+            "pattern_key": pattern_key,
+            "description": description,
+            "outcome": "interrupted",
+            "user_consent": False,
+        }
     return {"approved": True, "message": None,
             "user_approved": True, "description": description}
 
@@ -4936,6 +5070,8 @@ def request_elicitation_consent(
         if not decision.get("resolved"):
             return "cancel"
         choice = decision.get("choice")
+        if is_interrupted():
+            return "decline"
         if choice in ("once", "session", "always"):
             return "accept"
         return "decline"

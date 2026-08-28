@@ -154,6 +154,7 @@ def _(rid, params: dict) -> dict:
                 "project": _project_info_for_cwd(_sessions[sid]["cwd"]),
                 "lazy": True,
                 "desktop_contract": DESKTOP_BACKEND_CONTRACT,
+                "capabilities": _session_capabilities(),
                 "profile_name": _response_profile_name(profile),
             },
         },
@@ -957,21 +958,37 @@ def _(rid, params: dict) -> dict:
     returns enough state for Ink to redraw around another live session id.
     """
     sid = str(params.get("session_id") or "")
-    session, err = _sess_nowait({"session_id": sid}, rid)
-    if err:
-        return err
-    assert session is not None
+    transport = current_transport() or _stdio_transport
+    with _sessions_lock:
+        session = _sessions.get(sid)
+        if (
+            session is None
+            or session.get("_closing")
+            or session.get("_finalized")
+        ):
+            return _err(rid, 4001, "session not found")
+        _attach_session_transport(session, transport)
 
-    return _ok(
-        rid,
-        _live_session_payload(
-            sid,
-            session,
-            touch=True,
-            transport=current_transport() or _stdio_transport,
-            omit_messages=is_truthy_value(params.get("omit_messages", False)),
-        ),
+    payload = _live_session_payload(
+        sid,
+        session,
+        touch=True,
+        omit_messages=is_truthy_value(params.get("omit_messages", False)),
     )
+
+    # Payload construction reads history and the DB outside the lifecycle lock.
+    # Revalidate the exact generation before publishing success: a concurrent
+    # close may have claimed this record while those snapshots were built.
+    with _sessions_lock:
+        if (
+            _sessions.get(sid) is not session
+            or session.get("_closing")
+            or session.get("_finalized")
+        ):
+            _detach_session_transport(session, transport)
+            return _err(rid, 4001, "session not found")
+
+    return _ok(rid, payload)
 
 
 @method("session.delete")
@@ -2765,7 +2782,13 @@ def _(rid, params: dict) -> dict:
     # reaper. Finalization may run arbitrary plugin/agent cleanup and must not
     # keep every unrelated session.resume waiting behind it.
     with _session_resume_lock:
-        session = _pop_session_by_id(sid)
+        session, claim_error = _pop_session_by_id_for_transport(
+            sid, current_transport()
+        )
+    if claim_error == "forbidden":
+        return _err(rid, 4030, "session close requires an attached transport")
+    if claim_error == "closing":
+        return _err(rid, 4090, "session is closing")
     closed = _teardown_popped_session(session, end_reason="tui_close")
     return _ok(rid, {"closed": closed})
 
@@ -2954,25 +2977,28 @@ def _(rid, params: dict) -> dict:
 
 @method("session.interrupt")
 def _(rid, params: dict) -> dict:
-    # Keypress barge-in: stopping the turn also silences its streaming TTS
-    # (voice is process-global, so no per-session scoping is needed).
-    _tts_stream_stop()
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    sid = str(params.get("session_id") or "")
     if _session_uses_compute_host(session):
-        sid = str(params.get("session_id") or "")
-        if session.get("running"):
-            try:
-                _get_compute_host_supervisor().interrupt(sid, request_id=f"interrupt-{rid}")
-            except Exception as exc:
-                return _err(rid, 5019, f"compute-host interrupt failed: {exc}")
-        with session["history_lock"]:
-            session["_turn_cancel_requested"] = True
-            session["queued_prompt"] = None
-            session.pop("queued_prompts", None)
-            session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
-        _clear_pending(sid)
+        with _session_control_effect_claim(rid, sid, session) as authority_error:
+            if authority_error:
+                return authority_error
+            # Keypress barge-in: stopping the turn also silences its streaming
+            # TTS (voice is process-global, so authorize before this side effect).
+            _tts_stream_stop()
+            if session.get("running"):
+                try:
+                    _get_compute_host_supervisor().interrupt(sid, request_id=f"interrupt-{rid}")
+                except Exception as exc:
+                    return _err(rid, 5019, f"compute-host interrupt failed: {exc}")
+            with session["history_lock"]:
+                session["_turn_cancel_requested"] = True
+                session["queued_prompt"] = None
+                session.pop("queued_prompts", None)
+                session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
+        _clear_pending_for_session_record(sid, session)
         try:
             from tools.approval import resolve_gateway_approval
 
@@ -2983,40 +3009,33 @@ def _(rid, params: dict) -> dict:
     session, err = _sess(params, rid)
     if err:
         return err
-    # Safety net: if the turn's run thread is already gone but `running` stayed
-    # stuck (a crash/desync that skipped the run loop's `finally`), force-clear it
-    # so the session can't be permanently bricked at 4009 "session busy" — every
-    # send/restore/resume would otherwise reject until a full backend restart.
-    # Always tell the agent to interrupt when the session claims a run is active:
-    # stale flags are cleared below, and fresh turns clear the interrupt flag at
-    # entry. This keeps a stale/missing thread handle from making Stop a no-op.
-    run_thread = session.get("_run_thread")
-    run_thread_alive = run_thread is not None and run_thread.is_alive()
-    should_interrupt = bool(session.get("running"))
-    with session["history_lock"]:
-        session["_turn_cancel_requested"] = True
-        session["queued_prompt"] = None
-        session.pop("queued_prompts", None)
-        session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
-    if should_interrupt:
-        from agent.interrupt_compat import request_hard_interrupt
-
-        request_hard_interrupt(session["agent"])
-    if not run_thread_alive:
+    with _session_control_effect_claim(rid, sid, session) as authority_error:
+        if authority_error:
+            return authority_error
+        _tts_stream_stop()
+        # Safety net: if the turn's run thread is already gone but `running`
+        # stayed stuck, force-clear it so the session cannot remain bricked.
+        run_thread = session.get("_run_thread")
+        run_thread_alive = run_thread is not None and run_thread.is_alive()
+        should_interrupt = bool(session.get("running"))
         with session["history_lock"]:
-            if session.get("running"):
-                session["running"] = False
-                _clear_inflight_turn(session)
+            session["_turn_cancel_requested"] = True
+            session["queued_prompt"] = None
+            session.pop("queued_prompts", None)
+            session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
+        if should_interrupt:
+            from agent.interrupt_compat import request_hard_interrupt
 
-    # Stop = stop the TURN (cooperative interrupt above also kills the in-flight
-    # foreground subprocess). Background processes the agent started (dev servers,
-    # watchers) are intentionally left running — kill those individually with the
-    # "x" on the task row (process.kill). Don't reap them here.
-    # Scope the pending-prompt release to THIS session.  A global
-    # _clear_pending() would collaterally cancel clarify/sudo/secret
-    # prompts on unrelated sessions sharing the same tui_gateway
-    # process, silently resolving them to empty strings.
-    _clear_pending(params.get("session_id", ""))
+            request_hard_interrupt(session["agent"])
+        if not run_thread_alive:
+            with session["history_lock"]:
+                if session.get("running"):
+                    session["running"] = False
+                    _clear_inflight_turn(session)
+
+    # Stop = stop the TURN. Background processes remain running. Scope the
+    # pending-prompt release to this exact session generation only.
+    _clear_pending_for_session_record(sid, session)
     try:
         from tools.approval import resolve_gateway_approval
 
@@ -3244,22 +3263,26 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
-    agent = session.get("agent")
-    if agent is None or not hasattr(agent, "steer"):
-        return _err(rid, 4010, "agent does not support steer")
-    try:
-        accepted = agent.steer(text)
-    except Exception as exc:
-        return _err(rid, 5000, f"steer failed: {exc}")
-    if accepted:
-        # Record the correction on the live turn exactly like session.redirect
-        # does. Without this, a resume/reconnect while the turn is running
-        # rebuilds the transcript from the inflight snapshot and the steered
-        # text has no user bubble — the "my message vanished on reload" loss.
-        with session["history_lock"]:
-            _record_inflight_correction(session, text)
-            session["last_active"] = time.time()
-    return _ok(rid, {"status": "queued" if accepted else "rejected", "text": text})
+    sid = str(params.get("session_id") or "")
+    with _session_control_effect_claim(rid, sid, session) as authority_error:
+        if authority_error:
+            return authority_error
+        agent = session.get("agent")
+        if agent is None or not hasattr(agent, "steer"):
+            return _err(rid, 4010, "agent does not support steer")
+        try:
+            accepted = agent.steer(text)
+        except Exception as exc:
+            return _err(rid, 5000, f"steer failed: {exc}")
+        if accepted:
+            # Record the correction on the live turn exactly like session.redirect
+            # does. Without this, a resume/reconnect while the turn is running
+            # rebuilds the transcript from the inflight snapshot and the steered
+            # text has no user bubble — the "my message vanished on reload" loss.
+            with session["history_lock"]:
+                _record_inflight_correction(session, text)
+                session["last_active"] = time.time()
+        return _ok(rid, {"status": "queued" if accepted else "rejected", "text": text})
 
 
 @method("session.redirect")
@@ -3271,34 +3294,38 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
-    agent = session.get("agent")
-    # Turn-build window: a fresh turn flips running=True and kicks off an async
-    # agent build, so session["agent"] is briefly None. That is not an
-    # unsupported runtime — queue the correction server-side so it reaches the
-    # model as the next turn, instead of a misleading 4010 the client silently
-    # swallows into a lost follow-up.
-    if agent is None and session.get("running"):
-        _enqueue_prompt(session, text, current_transport() or _stdio_transport)
-        session["last_active"] = time.time()
-        return _ok(rid, {"status": "queued", "text": text})
-    if (
-        agent is None
-        or getattr(agent, "_supports_active_turn_redirect", False) is not True
-        or not hasattr(agent, "redirect")
-    ):
-        return _err(rid, 4010, "agent does not support active-turn redirect")
-    try:
-        accepted = agent.redirect(text)
-    except Exception as exc:
-        return _err(rid, 5000, f"redirect failed: {exc}")
-    if accepted:
-        with session["history_lock"]:
-            _record_inflight_correction(session, text)
+    sid = str(params.get("session_id") or "")
+    with _session_control_effect_claim(rid, sid, session) as authority_error:
+        if authority_error:
+            return authority_error
+        agent = session.get("agent")
+        # Turn-build window: a fresh turn flips running=True and kicks off an async
+        # agent build, so session["agent"] is briefly None. That is not an
+        # unsupported runtime — queue the correction server-side so it reaches the
+        # model as the next turn, instead of a misleading 4010 the client silently
+        # swallows into a lost follow-up.
+        if agent is None and session.get("running"):
+            _enqueue_prompt(session, text, current_transport() or _stdio_transport)
             session["last_active"] = time.time()
-    return _ok(
-        rid,
-        {"status": "redirected" if accepted else "rejected", "text": text},
-    )
+            return _ok(rid, {"status": "queued", "text": text})
+        if (
+            agent is None
+            or getattr(agent, "_supports_active_turn_redirect", False) is not True
+            or not hasattr(agent, "redirect")
+        ):
+            return _err(rid, 4010, "agent does not support active-turn redirect")
+        try:
+            accepted = agent.redirect(text)
+        except Exception as exc:
+            return _err(rid, 5000, f"redirect failed: {exc}")
+        if accepted:
+            with session["history_lock"]:
+                _record_inflight_correction(session, text)
+                session["last_active"] = time.time()
+        return _ok(
+            rid,
+            {"status": "redirected" if accepted else "rejected", "text": text},
+        )
 
 
 @method("terminal.resize")

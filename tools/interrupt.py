@@ -17,6 +17,7 @@ Usage in tools:
 import logging
 import os
 import threading
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ if _DEBUG_INTERRUPT:
 
 # Set of thread idents that have been interrupted.
 _interrupted_threads: set[int] = set()
-_lock = threading.Lock()
+_interrupt_epochs: dict[int, int] = {}
+_lock = threading.RLock()
 
 
 def set_interrupt(active: bool, thread_id: int | None = None) -> None:
@@ -45,9 +47,11 @@ def set_interrupt(active: bool, thread_id: int | None = None) -> None:
                    current thread (backward compat for CLI/tests).
     """
     tid = thread_id if thread_id is not None else threading.current_thread().ident
+    assert tid is not None
     with _lock:
         if active:
             _interrupted_threads.add(tid)
+            _interrupt_epochs[tid] = _interrupt_epochs.get(tid, 0) + 1
         else:
             _interrupted_threads.discard(tid)
         _snapshot = set(_interrupted_threads) if _DEBUG_INTERRUPT else None
@@ -70,17 +74,43 @@ def is_interrupted() -> bool:
         return tid in _interrupted_threads
 
 
+def commit_if_not_interrupted(
+    commit: Callable[[], None],
+    rollback: Callable[[], None] | None = None,
+    finalize: Callable[[], None] | None = None,
+) -> bool:
+    """Run an approval commit atomically with interrupt publication.
+
+    A concurrent ``set_interrupt(True, tid)`` either wins first, in which case
+    the callback is not run, or waits until the callback has committed. A
+    re-entrant interrupt published by the reversible commit path itself is
+    detected by its epoch and rolled back before failure is returned. Once that
+    check passes, ``finalize`` is the transaction's irreversible seal: an
+    interrupt published during finalization is ordered after the approval and
+    remains set for the executor to observe.
+    """
+    tid = threading.current_thread().ident
+    assert tid is not None
+    with _lock:
+        if tid in _interrupted_threads:
+            return False
+        epoch = _interrupt_epochs.get(tid, 0)
+        commit()
+        if tid in _interrupted_threads or _interrupt_epochs.get(tid, 0) != epoch:
+            if rollback is not None:
+                rollback()
+            return False
+        if finalize is not None:
+            finalize()
+        return True
+
+
 def clear_current_thread_interrupt() -> None:
     """Clear any interrupt bit on the CURRENT thread.
 
-    Gives a user-approved command a clean interrupt slate immediately before
-    it spawns its child process, so a stale bit that landed on this thread
-    during the blocking approval-wait cannot SIGINT the just-approved run
-    (exit 130 + "[Command interrupted]").  Single-thread ordering on this tid
-    keeps the DO-NOT-BREAK invariant intact: a *genuine* interrupt arriving
-    after this call re-sets the bit on the same thread and is still observed by
-    the executor's poll loop.  Call this directly, never via the
-    _interrupt_event proxy (its .clear() binds to whatever thread runs it).
+    Used only by explicit force-confirmed terminal replays. Human approval does
+    not clear Stop. Call this directly, never via the ``_interrupt_event`` proxy
+    (its ``clear()`` binds to whichever thread invokes it).
     """
     set_interrupt(False)  # thread_id=None -> current thread (see set_interrupt)
 

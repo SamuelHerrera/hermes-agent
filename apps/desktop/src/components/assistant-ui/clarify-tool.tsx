@@ -42,6 +42,7 @@ import { parseMaybeObject } from './tool/fallback-model/format'
 interface ClarifyArgs {
   question?: string
   choices?: string[] | null
+  requestId?: string
 }
 
 interface ClarifyResult {
@@ -73,7 +74,8 @@ function readClarifyArgs(args: unknown): ClarifyArgs {
 
   return {
     question,
-    choices: choices.length > 0 ? choices : null
+    choices: choices.length > 0 ? choices : null,
+    requestId: stringField(row, 'request_id')
   }
 }
 
@@ -230,7 +232,8 @@ function ClarifyToolLive(props: ToolCallMessagePartProps) {
   const fromArgs = useMemo(() => readClarifyArgs(props.args), [props.args])
 
   const hasHydratedPendingRequest = Boolean(
-    request?.requestId && (!fromArgs.question || !request.question || fromArgs.question === request.question)
+    fromArgs.requestId ||
+      (request?.requestId && (!fromArgs.question || !request.question || fromArgs.question === request.question))
   )
 
   // Stopped mid-prompt with no live backend request — don't leave a dead
@@ -325,16 +328,23 @@ function ClarifyToolPending({ args }: ToolCallMessagePartProps) {
   const fromArgs = useMemo(() => readClarifyArgs(args), [args])
 
   const matchingRequest = useMemo(() => {
-    if (!request) {
-      return null
+    if (request) {
+      if (fromArgs.question && request.question && fromArgs.question !== request.question) {
+        return null
+      }
+
+      return request
     }
 
-    if (fromArgs.question && request.question && fromArgs.question !== request.question) {
-      return null
-    }
-
-    return request
-  }, [fromArgs.question, request])
+    return fromArgs.requestId
+      ? {
+          choices: fromArgs.choices,
+          question: fromArgs.question || '',
+          requestId: fromArgs.requestId,
+          sessionId
+        }
+      : null
+  }, [fromArgs.choices, fromArgs.question, fromArgs.requestId, request, sessionId])
 
   const question = fromArgs.question || matchingRequest?.question || ''
 

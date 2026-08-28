@@ -11,7 +11,7 @@ import {
   setNativeNotifyKind
 } from './native-notifications'
 import { __resetNativeNotifyBaselineForTests, markNativeNotifyBaseline } from './notify-baseline'
-import { $approvalRequest, setApprovalRequest } from './prompts'
+import { $approvalRequest, clearAllPrompts, sessionApprovalRequest, setApprovalRequest } from './prompts'
 import { $activeSessionId, setActiveSessionId } from './session'
 
 const desktopWindow = window as unknown as { hermesDesktop?: Window['hermesDesktop'] }
@@ -49,6 +49,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  clearAllPrompts()
+
   if (initialHermesDesktop) {
     desktopWindow.hermesDesktop = initialHermesDesktop
   } else {
@@ -133,11 +135,23 @@ describe('dispatchNativeNotification preferences', () => {
     expect(notify).toHaveBeenCalledTimes(1)
   })
 
-  it('forwards kind and sessionId to the bridge', () => {
+  it('forwards kind, sessionId, and requestId to the bridge', () => {
     setActiveSessionId('abc')
-    dispatchNativeNotification({ body: 'hi', kind: 'turnError', sessionId: 'abc', title: 'boom' })
+    dispatchNativeNotification({
+      body: 'hi',
+      kind: 'turnError',
+      requestId: 'approval-abc',
+      sessionId: 'abc',
+      title: 'boom'
+    })
     expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ body: 'hi', kind: 'turnError', sessionId: 'abc', title: 'boom' })
+      expect.objectContaining({
+        body: 'hi',
+        kind: 'turnError',
+        requestId: 'approval-abc',
+        sessionId: 'abc',
+        title: 'boom'
+      })
     )
   })
 })
@@ -239,22 +253,49 @@ describe('respondToApprovalAction', () => {
 
   it('approves via approval.respond {choice: "once"} and clears the prompt', async () => {
     setActiveSessionId('bg')
-    setApprovalRequest({ command: 'rm -rf /', description: 'dangerous', sessionId: 'bg' })
+    setApprovalRequest({ command: 'rm -rf /', description: 'dangerous', requestId: 'approval-bg', sessionId: 'bg' })
 
-    await respondToApprovalAction('bg', 'approve')
+    await respondToApprovalAction('bg', 'approve', 'approval-bg')
 
-    expect(request).toHaveBeenCalledWith('approval.respond', { choice: 'once', session_id: 'bg' })
+    expect(request).toHaveBeenCalledWith('approval.respond', {
+      choice: 'once',
+      request_id: 'approval-bg',
+      session_id: 'bg'
+    })
     expect($approvalRequest.get()).toBeNull()
   })
 
   it('rejects via approval.respond {choice: "deny"}', async () => {
-    await respondToApprovalAction('bg', 'reject')
-    expect(request).toHaveBeenCalledWith('approval.respond', { choice: 'deny', session_id: 'bg' })
+    setApprovalRequest({ command: 'rm -rf /', description: 'dangerous', requestId: 'approval-bg', sessionId: 'bg' })
+    await respondToApprovalAction('bg', 'reject', 'approval-bg')
+    expect(request).toHaveBeenCalledWith('approval.respond', {
+      choice: 'deny',
+      request_id: 'approval-bg',
+      session_id: 'bg'
+    })
   })
 
   it('ignores unknown action ids', async () => {
     await respondToApprovalAction('bg', 'snooze')
     expect(request).not.toHaveBeenCalled()
+  })
+
+  it('does not let an old notification action resolve a newer approval', async () => {
+    setApprovalRequest({ command: 'dangerous-new', description: 'newer', requestId: 'approval-new', sessionId: 'bg' })
+
+    await respondToApprovalAction('bg', 'approve', 'approval-old')
+
+    expect(request).not.toHaveBeenCalled()
+    expect(sessionApprovalRequest('bg').get()?.requestId).toBe('approval-new')
+  })
+
+  it('fails closed when a modern approval notification omits request identity', async () => {
+    setApprovalRequest({ command: 'dangerous', description: 'modern', requestId: 'approval-modern', sessionId: 'bg' })
+
+    await respondToApprovalAction('bg', 'approve')
+
+    expect(request).not.toHaveBeenCalled()
+    expect(sessionApprovalRequest('bg').get()?.requestId).toBe('approval-modern')
   })
 
   it('no-ops without a gateway', async () => {

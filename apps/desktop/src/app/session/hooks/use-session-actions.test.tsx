@@ -16,6 +16,7 @@ import {
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { $clarifyRequests, clearClarifyRequest, setClarifyRequest } from '@/store/clarify'
 import { clearSessionDraft, stashSessionDraft, takeSessionDraft } from '@/store/composer'
+import { $mcpSetupRequests, clearMcpSetupRequest, setMcpSetupRequest } from '@/store/mcp-setup'
 import { $activeGatewayProfile, $emptyWorkspaceRequest, $newChatProfile, ensureGatewayProfile } from '@/store/profile'
 import {
   $projectScope,
@@ -24,6 +25,20 @@ import {
   $sessionMutationsInFlight,
   ALL_PROJECTS
 } from '@/store/projects'
+import { markPendingPromptChanged } from '@/store/prompt-revision'
+import {
+  $approvalRequest,
+  clearAllPrompts,
+  clearApprovalRequest,
+  clearSecretRequest,
+  clearSudoRequest,
+  sessionApprovalRequest,
+  sessionSecretRequest,
+  sessionSudoRequest,
+  setApprovalRequest,
+  setSecretRequest,
+  setSudoRequest
+} from '@/store/prompts'
 import { openRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionId,
@@ -701,6 +716,8 @@ describe('resumeSession failure recovery', () => {
   afterEach(() => {
     cleanup()
     clearClarifyRequest()
+    clearMcpSetupRequest()
+    clearAllPrompts()
     setActiveSessionId(null)
     setResumeFailedSessionId(null)
     setMessages([])
@@ -927,6 +944,272 @@ describe('resumeSession failure recovery', () => {
     })
     expect(resumedState?.needsInput).toBe(true)
     expect(JSON.stringify(resumedState?.messages)).toContain('Which deployment target?')
+  })
+
+  it('restores a pending approval from the backend resume payload', async () => {
+    const storedMessages = [
+      { content: 'run the command', role: 'user', timestamp: 1 },
+      { content: 'Awaiting approval', role: 'assistant', timestamp: 2 }
+    ]
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: storedMessages, session_id: 'stored-1' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          session_id: 'runtime-1',
+          session_key: 'stored-1',
+          resumed: 'stored-1',
+          message_count: storedMessages.length,
+          messages: [],
+          messages_omitted: true,
+          running: true,
+          pending_prompt: {
+            event: 'approval.request',
+            payload: {
+              request_id: 'approval-1',
+              command: 'rm -rf /tmp/phase1',
+              description: 'recursive delete',
+              allow_permanent: false,
+              choices: ['once', 'session', 'deny']
+            }
+          },
+          info: {}
+        } as never
+      }
+
+      return {} as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, state) => (resumedState = state)}
+        requestGateway={requestGateway}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect($approvalRequest.get()).toEqual({
+      allowPermanent: false,
+      choices: ['once', 'session', 'deny'],
+      command: 'rm -rf /tmp/phase1',
+      description: 'recursive delete',
+      requestId: 'approval-1',
+      sessionId: 'runtime-1',
+      smartDenied: false
+    })
+    expect(resumedState?.needsInput).toBe(true)
+  })
+
+  it('does not project a clarification that resolved while session.activate was in flight', async () => {
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
+      messages: [{ content: 'deploy', role: 'user', timestamp: 1 }],
+      session_id: 'stored-1'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method !== 'session.activate') {
+        return {} as never
+      }
+
+      // The live resolution wins while this older resume snapshot is still
+      // in flight.
+      clearClarifyRequest('stale-request', 'runtime-stale')
+
+      return {
+        info: null,
+        inflight: {
+          assistant: 'Asked a question',
+          events: [
+            {
+              payload: {
+                args: { choices: ['staging'], question: 'Which target?' },
+                name: 'clarify',
+                tool_id: 'call-stale'
+              },
+              type: 'tool.start'
+            }
+          ],
+          reasoning: 'Thought',
+          started_at: 1,
+          streaming: true,
+          user: 'deploy'
+        },
+        messages: [],
+        messages_omitted: true,
+        pending_prompt: {
+          event: 'clarify.request',
+          payload: { choices: ['staging'], question: 'Which target?', request_id: 'stale-request' },
+          request_id: 'stale-request'
+        },
+        resumed: 'stored-1',
+        running: true,
+        session_id: 'runtime-stale',
+        session_key: 'stored-1',
+        started_at: 1,
+        status: 'waiting'
+      } as never
+    })
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={{ current: new Map([['stored-1', 'runtime-stale']]) }}
+        sessionStateByRuntimeIdRef={{
+          current: new Map([['runtime-stale', createClientSessionState('stored-1')]])
+        }}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    setClarifyRequest({
+      choices: ['staging'],
+      question: 'Which target?',
+      requestId: 'stale-request',
+      sessionId: 'runtime-stale'
+    })
+    await resume!('stored-1', true)
+
+    expect($clarifyRequests.get()['runtime-stale']).toBeUndefined()
+    expect(JSON.stringify($messages.get())).not.toContain('stale-request')
+  })
+
+  it.each([
+    {
+      clear: () => clearApprovalRequest('runtime-stale', 'stale-approval'),
+      event: 'approval.request',
+      payload: {
+        command: 'rm -rf /tmp/stale',
+        description: 'stale approval',
+        request_id: 'stale-approval'
+      },
+      read: () => sessionApprovalRequest('runtime-stale').get(),
+      seed: () =>
+        setApprovalRequest({
+          command: 'rm -rf /tmp/stale',
+          description: 'stale approval',
+          requestId: 'stale-approval',
+          sessionId: 'runtime-stale'
+        })
+    },
+    {
+      clear: () => clearSudoRequest('runtime-stale', 'stale-sudo'),
+      event: 'sudo.request',
+      payload: { request_id: 'stale-sudo' },
+      read: () => sessionSudoRequest('runtime-stale').get(),
+      seed: () => setSudoRequest({ requestId: 'stale-sudo', sessionId: 'runtime-stale' })
+    },
+    {
+      clear: () => clearSecretRequest('runtime-stale', 'stale-secret'),
+      event: 'secret.request',
+      payload: { env_var: 'SECRET_TOKEN', prompt: 'Secret token', request_id: 'stale-secret' },
+      read: () => sessionSecretRequest('runtime-stale').get(),
+      seed: () =>
+        setSecretRequest({
+          envVar: 'SECRET_TOKEN',
+          prompt: 'Secret token',
+          requestId: 'stale-secret',
+          sessionId: 'runtime-stale'
+        })
+    },
+    {
+      clear: () => clearMcpSetupRequest('stale-mcp', 'runtime-stale'),
+      event: 'mcp.setup.request',
+      payload: { action: 'install', reason: 'Needed', request_id: 'stale-mcp', server: 'notion' },
+      read: () => $mcpSetupRequests.get()['runtime-stale'] ?? null,
+      seed: () =>
+        setMcpSetupRequest({
+          action: 'install',
+          reason: 'Needed',
+          requestId: 'stale-mcp',
+          server: 'notion',
+          sessionId: 'runtime-stale'
+        })
+    }
+  ])('does not resurrect a resolved $event snapshot from session.activate', async ({ clear, event, payload, read, seed }) => {
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: 'stored-1' } as never)
+    seed()
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method !== 'session.activate') {
+        return {} as never
+      }
+
+      clear()
+
+      return {
+        info: null,
+        messages: [],
+        messages_omitted: true,
+        pending_prompt: { event, payload },
+        resumed: 'stored-1',
+        running: true,
+        session_id: 'runtime-stale',
+        session_key: 'stored-1',
+        status: 'waiting'
+      } as never
+    })
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={{ current: new Map([['stored-1', 'runtime-stale']]) }}
+        sessionStateByRuntimeIdRef={{
+          current: new Map([['runtime-stale', createClientSessionState('stored-1')]])
+        }}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect(read()).toBeNull()
+  })
+
+  it('does not resurrect a cold-resume prompt after its revision evidence is evicted', async () => {
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method !== 'session.resume') {
+        return {} as never
+      }
+
+      setApprovalRequest({
+        command: 'dangerous',
+        description: 'cold race',
+        requestId: 'approval-cold',
+        sessionId: 'runtime-cold'
+      })
+      clearApprovalRequest('runtime-cold', 'approval-cold')
+
+      for (let index = 0; index < 513; index += 1) {
+        markPendingPromptChanged(`revision-eviction-${index}`)
+      }
+
+      return {
+        messages: [],
+        pending_prompt: {
+          event: 'approval.request',
+          payload: {
+            command: 'dangerous',
+            description: 'cold race',
+            request_id: 'approval-cold'
+          }
+        },
+        session_id: 'runtime-cold'
+      } as never
+    })
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(<ResumeHarness onReady={ready => (resume = ready)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect(sessionApprovalRequest('runtime-cold').get()).toBeNull()
   })
 
   it('uses the continuation projection when resume rotates an equal-length stored transcript', async () => {
