@@ -400,6 +400,7 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         const apply = explicitSid ? isActiveEvent : !activeSessionIdRef.current
         const statePatch = sessionInfoStatePatch(payload)
         const hasStatePatch = hasSessionInfoStatePatch(statePatch)
+        const usagePatch = payload?.usage && typeof payload.usage === 'object' ? payload.usage : null
         const modelChanged = typeof payload?.model === 'string'
         const providerChanged = typeof payload?.provider === 'string'
         const runningChanged = typeof payload?.running === 'boolean'
@@ -493,14 +494,15 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           }
         }
 
-        if (sessionId && hasStatePatch) {
+        if (sessionId && (hasStatePatch || usagePatch)) {
           updateSessionState(
             sessionId,
             state => ({
               ...state,
               ...statePatch,
               branch: statePatch.branch ?? state.branch,
-              cwd: statePatch.cwd ?? state.cwd
+              cwd: statePatch.cwd ?? state.cwd,
+              usage: usagePatch ? { calls: 0, input: 0, output: 0, total: 0, ...(state.usage ?? {}), ...usagePatch } : state.usage
             }),
             payload?.stored_session_id || undefined
           )

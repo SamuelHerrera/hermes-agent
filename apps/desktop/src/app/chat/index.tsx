@@ -42,6 +42,7 @@ import {
   setCurrentUsage,
   shouldMigrateComposerScope
 } from '@/store/session'
+import { $sessionColorById, sessionColorFor } from '@/store/session-color'
 import { $sessionStates, publishSessionState } from '@/store/session-states'
 import { isAuxiliaryWindow, isWatchWindow } from '@/store/windows'
 import type { ModelOptionsResponse, UsageStats } from '@/types/hermes'
@@ -347,8 +348,20 @@ export const ChatView = memo(function ChatView({
   const lastVisibleIsUser = useStore(view.$lastVisibleIsUser)
   const selectedSessionId = useStore(view.$storedId)
   const sessions = useStore($sessions)
+  const sessionColorById = useStore($sessionColorById)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
+
+  const selectedSession = useMemo(
+    () => (selectedSessionId ? sessions.find(session => sessionMatchesStoredId(session, selectedSessionId)) : null),
+    [selectedSessionId, sessions]
+  )
+
+  const sessionAccentColor = selectedSession
+    ? sessionColorFor(selectedSession)
+    : selectedSessionId
+      ? sessionColorById[selectedSessionId]
+      : undefined
 
   // Durable composer/queue scope (lineage root) so auto-compression tip rotation
   // does not wipe an in-progress draft or orphan /queue entries. For the
@@ -661,6 +674,7 @@ export const ChatView = memo(function ChatView({
               onTranscribeAudio={onTranscribeAudio}
               onUsageSnapshot={publishContextUsage}
               queueSessionKey={queueSessionKey}
+              sessionAccentColor={sessionAccentColor}
               sessionId={activeSessionId}
               state={chatBarState}
             />

@@ -1,6 +1,15 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  type ClipboardEvent,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef
+} from 'react'
 
 import { useHudComposerDrag } from '@/app/hud/composer-drag'
 import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/components/chat/composer-dock'
@@ -90,6 +99,7 @@ export function ChatBar({
   focusKey,
   gateway,
   maxRecordingSeconds = 120,
+  sessionAccentColor,
   queueSessionKey,
   sessionId,
   state,
@@ -344,6 +354,26 @@ export function ChatBar({
 
   const hasComposerPayload = hasText || attachments.length > 0
   const canSubmit = busy || hasComposerPayload
+
+  const composerDockStyle = useMemo(() => {
+    const style: CSSProperties & Record<string, string> = {}
+
+    if (poppedOut) {
+      style.bottom = `${popoutPosition.bottom}px`
+      style.right = `${popoutPosition.right}px`
+      // A compact one-sentence width when floating.
+      style['--composer-popout-width'] = `${POPOUT_WIDTH_REM}rem`
+    }
+
+    if (sessionAccentColor) {
+      // Scoped to this dock so every border belonging to this chat (surface,
+      // status stack seam, queue/edit chips) inherits the same project/session
+      // hue without changing global theme inputs elsewhere in the window.
+      style['--dt-composer-ring'] = sessionAccentColor
+    }
+
+    return Object.keys(style).length > 0 ? style : undefined
+  }, [poppedOut, popoutPosition.bottom, popoutPosition.right, sessionAccentColor])
 
   // Steer only makes sense mid-turn, text-only (the gateway can't carry images
   // into a tool result) and never for a slash command (those execute inline).
@@ -1130,16 +1160,7 @@ export function ChatBar({
           // that contains the strips, the status stack, AND the composer, so
           // one measurement covers everything the thread must clear.
           ref={composerDockRef}
-          style={
-            poppedOut
-              ? {
-                  bottom: `${popoutPosition.bottom}px`,
-                  right: `${popoutPosition.right}px`,
-                  // A compact one-sentence width when floating.
-                  ['--composer-popout-width' as string]: `${POPOUT_WIDTH_REM}rem`
-                }
-              : undefined
-          }
+          style={composerDockStyle}
         >
           {/* Aligned to the composer SURFACE, which sits inside the composer's
               5px transparent grab margin — so both strips carry the same inset

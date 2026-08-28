@@ -5127,10 +5127,17 @@ def _get_usage(agent) -> dict:
         # (conversation_compression.py) to 0 so the transitional turn reads as
         # unknown (no gauge) instead of leaking context_used=-1. Matches the
         # CLI status-bar path (cli.py _get_status_bar_snapshot).
-        last_prompt = getattr(comp, "last_prompt_tokens", 0) or 0
-        if last_prompt < 0:
-            last_prompt = 0
         ctx_max = getattr(comp, "context_length", 0) or 0
+        raw_last_prompt = getattr(comp, "last_prompt_tokens", 0) or 0
+        last_prompt = raw_last_prompt if raw_last_prompt > 0 else 0
+        # Right after compression, the compressor deliberately stores -1 in
+        # last_prompt_tokens until the next provider-reported prompt size
+        # arrives. The post-compression rough estimate is still the best live
+        # occupancy for display, and unlike session_total_tokens it is scoped to
+        # the current window, so using it clears stale pre-compression warnings
+        # without resurrecting the old cumulative-total bug (#50421).
+        if not last_prompt and raw_last_prompt < 0 and getattr(comp, "awaiting_real_usage_after_compression", False):
+            last_prompt = getattr(comp, "last_compression_rough_tokens", 0) or 0
         if ctx_max and last_prompt:
             usage["context_used"] = last_prompt
             usage["context_max"] = ctx_max
@@ -7472,7 +7479,10 @@ def _record_inflight_event(sid: str, event: str, payload: dict | None = None) ->
     session = _sessions.get(sid)
     if session is None:
         return
-    with session["history_lock"]:
+    lock = session.get("history_lock")
+    if lock is None:
+        return
+    with lock:
         if not session.get("running"):
             return
         turn = session.get("inflight_turn")
@@ -7508,7 +7518,10 @@ def _set_inflight_drafting_tool(sid: str, name: Any) -> None:
     session = _sessions.get(sid)
     if session is None:
         return
-    with session["history_lock"]:
+    lock = session.get("history_lock")
+    if lock is None:
+        return
+    with lock:
         if not session.get("running"):
             return
         turn = session.get("inflight_turn")

@@ -22,10 +22,11 @@ let handleEvent: ((event: RpcEvent) => void) | null = null
 let refreshHermesConfig: ReturnType<typeof vi.fn<() => Promise<void>>>
 let refreshSessions: ReturnType<typeof vi.fn<() => Promise<void>>>
 let queryClient: QueryClient
+let sessionStates: Map<string, ClientSessionState>
 
 function Harness() {
   const activeSessionIdRef = useRef<string | null>(ACTIVE_SID)
-  const sessionStateByRuntimeIdRef = useRef(new Map<string, ClientSessionState>())
+  const sessionStateByRuntimeIdRef = useRef(sessionStates)
 
   const stream = useMessageStream({
     activeGatewayProfile: ACTIVE_PROFILE,
@@ -61,6 +62,7 @@ const sessionInfo = (sessionId: string, payload: Record<string, unknown>) =>
 
 beforeEach(() => {
   handleEvent = null
+  sessionStates = new Map()
   refreshHermesConfig = vi.fn<() => Promise<void>>(async () => undefined)
   refreshSessions = vi.fn<() => Promise<void>>(async () => undefined)
   queryClient = new QueryClient()
@@ -136,6 +138,36 @@ describe('session.info model-options invalidation gating', () => {
     sessionInfo(ACTIVE_SID, { model: 'm2', provider: 'p1', running: true })
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: modelOptionsQueryKey(ACTIVE_PROFILE, ACTIVE_SID) })
+  })
+})
+
+describe('session.info usage reconciliation', () => {
+  it('updates the per-session usage cache so the active context meter clears stale warnings', async () => {
+    await mountStream()
+    sessionStates.set(ACTIVE_SID, {
+      ...createClientSessionState(),
+      usage: {
+        calls: 3,
+        context_max: 272_000,
+        context_percent: 84,
+        context_used: 227_200,
+        input: 0,
+        output: 0,
+        total: 0
+      }
+    })
+
+    sessionInfo(ACTIVE_SID, {
+      usage: {
+        context_max: 272_000,
+        context_percent: 51,
+        context_used: 137_600
+      }
+    })
+
+    expect(sessionStates.get(ACTIVE_SID)?.usage).toEqual(
+      expect.objectContaining({ context_max: 272_000, context_percent: 51, context_used: 137_600 })
+    )
   })
 })
 

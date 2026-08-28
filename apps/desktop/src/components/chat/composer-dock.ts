@@ -15,7 +15,10 @@ export const composerSurfaceGlass = cn(
 )
 
 const composerDockEdge = (edge: 'bottom' | 'top') =>
-  cn('border border-border/65', edge === 'top' ? 'rounded-t-2xl border-b-0' : 'rounded-b-2xl border-t-0')
+  cn(
+    'border border-[color-mix(in_srgb,var(--dt-composer-ring)_calc(18%*var(--composer-ring-strength)),var(--dt-input))]',
+    edge === 'top' ? 'rounded-t-2xl border-b-0' : 'rounded-b-2xl border-t-0'
+  )
 
 /** Glassy docked card — the status stack / queue. Paints the SAME
  *  `--composer-fill` as the surface, so rest / scrolled / focused / drawer-open

@@ -16351,6 +16351,26 @@ def test_get_usage_clamps_post_compression_sentinel():
     assert "context_percent" not in usage
 
 
+def test_get_usage_reports_post_compression_rough_estimate_until_real_usage():
+    """After compression, the UI should show the shrunken current-window
+    estimate instead of keeping the stale pre-compression warning alive."""
+    agent = types.SimpleNamespace(
+        model="test-model",
+        session_total_tokens=4_000_000,
+        context_compressor=types.SimpleNamespace(
+            last_prompt_tokens=-1,
+            last_compression_rough_tokens=137_600,
+            awaiting_real_usage_after_compression=True,
+            context_length=272_000,
+            compression_count=6,
+        ),
+    )
+    usage = server._get_usage(agent)
+    assert usage["context_used"] == 137_600
+    assert usage["context_max"] == 272_000
+    assert usage["context_percent"] == 51
+
+
 # ---------------------------------------------------------------------------
 # Streaming TTS — per-turn pipeline + barge-in
 # ---------------------------------------------------------------------------

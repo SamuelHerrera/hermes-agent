@@ -121,7 +121,6 @@ export function useDesktopIntegrations({
         const route = getRememberedRoute(activeProfile)
         const routeSession = route ? routeSessionId(route) : null
         const last = getRememberedSessionId(activeProfile)
-
         const routeSessionKnown = routeSession
           ? sessions.some(session => sessionMatchesStoredId(session, routeSession))
           : false

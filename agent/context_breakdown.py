@@ -86,6 +86,45 @@ def _strip_blocks(text: str, *blocks: str) -> str:
     return out.strip()
 
 
+def _scaled_categories_for_context(
+    categories: List[tuple[str, str, int]],
+    *,
+    context_used: int,
+    estimated_total: int,
+    measured: bool,
+) -> List[tuple[str, str, int]]:
+    """Return category token counts that add up to the visible usage.
+
+    Category attribution is produced by a cheap chars/4 estimator, while the
+    headline may use provider-reported prompt tokens. When those diverge, the UI
+    should not show rows whose sum is larger than the advertised context window
+    occupancy. Keep the category proportions but normalize them to the measured
+    headline total.
+    """
+    if not measured or context_used <= 0 or estimated_total <= 0 or context_used == estimated_total:
+        return categories
+
+    scaled: List[tuple[str, str, int]] = []
+    largest_index = 0
+    largest_tokens = -1
+    running = 0
+
+    for index, (category_id, label, tokens) in enumerate(categories):
+        next_tokens = round(tokens / estimated_total * context_used) if tokens > 0 else 0
+        scaled.append((category_id, label, next_tokens))
+        running += next_tokens
+        if next_tokens > largest_tokens:
+            largest_tokens = next_tokens
+            largest_index = index
+
+    delta = context_used - running
+    if scaled and delta:
+        category_id, label, tokens = scaled[largest_index]
+        scaled[largest_index] = (category_id, label, max(0, tokens + delta))
+
+    return scaled
+
+
 def compute_session_context_breakdown(
     agent: Any,
     messages: Optional[List[dict]] = None,
@@ -143,6 +182,12 @@ def compute_session_context_breakdown(
         context_used = anchored_used
     else:
         context_used = measured_used if measured_used > 0 else estimated_total
+    categories_for_display = _scaled_categories_for_context(
+        categories,
+        context_used=context_used,
+        estimated_total=estimated_total,
+        measured=anchored_used is not None or measured_used > 0,
+    )
     context_percent = (
         max(0, min(100, round(context_used / context_max * 100)))
         if context_max
@@ -157,7 +202,7 @@ def compute_session_context_breakdown(
                 "label": label,
                 "tokens": tokens,
             }
-            for category_id, label, tokens in categories
+            for category_id, label, tokens in categories_for_display
             if tokens > 0
         ],
         "context_max": context_max,

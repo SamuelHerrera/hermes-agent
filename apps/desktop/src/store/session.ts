@@ -836,6 +836,7 @@ export function clearRememberedSessionRestorePending(): void {
 
 export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)
 export const setFreshDraftReady = (next: Updater<boolean>) => updateAtom($freshDraftReady, next)
+
 export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => {
   const previous = $workspaceEmptyPlaceholder.get()
 

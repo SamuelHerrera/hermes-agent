@@ -40,6 +40,8 @@ export interface ChatBarProps {
   state: ChatBarState
   currentUsage: UsageStats
   gateway?: HermesGateway | null
+  /** Project/session color resolved by the parent surface; tints composer borders. */
+  sessionAccentColor?: string
   queueSessionKey?: string | null
   sessionId?: string | null
   cwd?: string | null

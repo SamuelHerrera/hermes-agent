@@ -1510,7 +1510,11 @@ body.guest-pointer-lock :is(webview, iframe) {
 }
 
 [data-slot='composer-surface'] {
-  border-color: var(--ui-stroke-secondary) !important;
+  border-color: color-mix(
+    in srgb,
+    var(--dt-composer-ring) calc(18% * var(--composer-ring-strength)),
+    var(--dt-input)
+  ) !important;
 }
 
 [data-slot='composer-fade'] {

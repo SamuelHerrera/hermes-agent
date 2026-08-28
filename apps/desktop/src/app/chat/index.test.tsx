@@ -19,9 +19,11 @@ import {
   $selectedStoredSessionId,
   $sessions
 } from '@/store/session'
+import { $sessionColorOverrides, setSessionColorOverride } from '@/store/session-color'
 
 const threadRenderCount = vi.hoisted(() => ({ current: 0 }))
 const threadProps = vi.hoisted(() => ({ current: null as null | { intro?: unknown } }))
+const chatBarProps = vi.hoisted(() => ({ current: null as null | { sessionAccentColor?: string } }))
 
 vi.mock('@/components/assistant-ui/thread', async () => {
   const React = await import('react')
@@ -50,7 +52,18 @@ vi.mock('@/lib/model-options', () => ({
 }))
 vi.mock('./chat-drop-overlay', () => ({ ChatDropOverlay: () => null }))
 vi.mock('./chat-swap-overlay', () => ({ ChatSwapOverlay: () => null }))
-vi.mock('./composer', () => ({ ChatBar: () => null, ChatBarFallback: () => null }))
+vi.mock('./composer', async () => {
+  const React = await import('react')
+
+  return {
+    ChatBar: (props: { sessionAccentColor?: string }) => {
+      chatBarProps.current = props
+
+      return React.createElement('div', { 'data-testid': 'chatbar' })
+    },
+    ChatBarFallback: () => null
+  }
+})
 vi.mock('./hooks/use-file-drop-zone', () => ({
   useFileDropZone: () => ({ dragKind: null, dropHandlers: {} })
 }))
@@ -76,6 +89,7 @@ function assistantMessage(id: string, text: string): ChatMessage {
 describe('ChatView empty new sessions', () => {
   beforeEach(() => {
     threadProps.current = null
+    chatBarProps.current = null
     $activeSessionId.set(null)
     $awaitingResponse.set(false)
     $busy.set(false)
@@ -88,6 +102,7 @@ describe('ChatView empty new sessions', () => {
     $messages.set([])
     $selectedStoredSessionId.set(null)
     $sessions.set([])
+    $sessionColorOverrides.set({})
   })
 
   afterEach(() => {
@@ -95,6 +110,7 @@ describe('ChatView empty new sessions', () => {
     vi.restoreAllMocks()
     $freshDraftReady.set(false)
     $gatewayState.set('idle')
+    $sessionColorOverrides.set({})
   })
 
   it('keeps a primary fresh draft visually empty instead of rendering the intro wordmark', () => {
@@ -135,6 +151,85 @@ describe('ChatView empty new sessions', () => {
 
     expect(screen.getByTestId('thread')).toBeTruthy()
     expect(threadProps.current?.intro).toBeUndefined()
+  })
+})
+
+describe('ChatView composer accent', () => {
+  beforeEach(() => {
+    chatBarProps.current = null
+    $activeSessionId.set('runtime-1')
+    $awaitingResponse.set(false)
+    $busy.set(false)
+    $contextSuggestions.set([])
+    $currentCwd.set('/work')
+    $currentModel.set('test-model')
+    $currentProvider.set('test-provider')
+    $freshDraftReady.set(false)
+    $gatewayState.set('open')
+    $messages.set([assistantMessage('assistant-1', 'Ready')])
+    $selectedStoredSessionId.set('stored-1')
+    $sessions.set([{ id: 'stored-1', message_count: 1, title: 'Colored chat' } as never])
+    $sessionColorOverrides.set({})
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+    $activeSessionId.set(null)
+    $awaitingResponse.set(false)
+    $busy.set(false)
+    $contextSuggestions.set([])
+    $currentCwd.set('')
+    $currentModel.set('')
+    $currentProvider.set('')
+    $freshDraftReady.set(false)
+    $gatewayState.set('idle')
+    $messages.set([])
+    $selectedStoredSessionId.set(null)
+    $sessions.set([])
+    $sessionColorOverrides.set({})
+  })
+
+  it('passes the resolved project/session color to the composer chrome', () => {
+    setSessionColorOverride('stored-1', '#ff5c7a')
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/stored-1']}>
+          <ChatView
+            gateway={null}
+            maxVoiceRecordingSeconds={120}
+            onAddContextRef={vi.fn()}
+            onAddUrl={vi.fn()}
+            onAttachDroppedItems={vi.fn()}
+            onAttachImageBlob={vi.fn()}
+            onBranchInNewChat={vi.fn()}
+            onCancel={vi.fn()}
+            onDeleteSelectedSession={vi.fn()}
+            onEdit={vi.fn()}
+            onPasteClipboardImage={vi.fn()}
+            onPickFiles={vi.fn()}
+            onPickFolders={vi.fn()}
+            onPickImages={vi.fn()}
+            onReload={vi.fn()}
+            onRemoveAttachment={vi.fn()}
+            onRetryResume={vi.fn()}
+            onSteer={vi.fn()}
+            onSubmit={vi.fn()}
+            onThreadMessagesChange={vi.fn()}
+            onToggleSelectedPin={vi.fn()}
+            onTranscribeAudio={vi.fn()}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
+    expect(screen.getByTestId('chatbar')).toBeTruthy()
+    expect(chatBarProps.current?.sessionAccentColor).toBe('#ff5c7a')
   })
 })
 

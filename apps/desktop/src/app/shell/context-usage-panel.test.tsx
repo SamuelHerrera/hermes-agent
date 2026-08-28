@@ -90,4 +90,24 @@ describe('ContextUsagePanel', () => {
 
     await waitFor(() => expect(secondGateway).toHaveBeenCalledTimes(1))
   })
+
+  it('sizes the colored bar to the headline context usage, not the category estimate sum', async () => {
+    const requestGateway = vi.fn().mockResolvedValue({
+      ...breakdown,
+      categories: [{ color: 'teal', id: 'conversation', label: 'Conversation', tokens: 200_000 }],
+      context_max: 200_000,
+      context_percent: 50,
+      context_used: 100_000,
+      estimated_total: 200_000
+    })
+
+    const { container } = render(
+      <ContextUsagePanel currentUsage={initialUsage} requestGateway={requestGateway} sessionId="runtime-1" />
+    )
+
+    await waitFor(() => expect(container.querySelector('[data-slot="context-usage-bar"] span')).toBeTruthy())
+
+    const segment = container.querySelector('[data-slot="context-usage-bar"] span') as HTMLElement
+    expect(segment.style.width).toBe('50%')
+  })
 })
