@@ -4,6 +4,7 @@ import { closeActiveTab } from '@/app/chat/close-tab'
 import { openSession } from '@/app/open-session'
 import { sessionTitle } from '@/lib/chat-runtime'
 import { storedSessionIdForNotification } from '@/lib/session-ids'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { respondToApprovalAction } from '@/store/native-notifications'
 import { openFolderAsProject } from '@/store/projects'
 import {
@@ -86,6 +87,7 @@ export function useDesktopIntegrations({
     // focused tile/panel remains fronted during boot.
     markSelectionRestore()
     setSelectedStoredSessionId(storedSessionId)
+    logUatEvent('restore', 'remembered-session.primed', { activeProfile, storedSessionId })
   }
 
   // Wait until boot has adopted the primary profile, then restore that profile's
@@ -94,6 +96,16 @@ export function useDesktopIntegrations({
   // This ref is a one-time lifecycle latch, not a mirror of reactive atom state.
   // eslint-disable-next-line no-restricted-syntax
   useEffect(() => {
+    logUatEvent('restore', 'desktop-integrations.restore-evaluated', {
+      activeProfile,
+      isHudWindow: isHudWindow(),
+      isNewChatRoute: locationPathname === NEW_CHAT_ROUTE,
+      profileReady,
+      restored: restoredRef.current,
+      routedSessionId,
+      sessionCount: sessions.length
+    })
+
     if (!profileReady || isHudWindow()) {
       return
     }
@@ -106,6 +118,13 @@ export function useDesktopIntegrations({
         const routeSession = route ? routeSessionId(route) : null
         const last = getRememberedSessionId(activeProfile)
 
+        logUatEvent('restore', 'remembered-session.read', {
+          activeProfile,
+          lastSessionId: last,
+          routeKind: routeSession ? 'session' : route === NEW_CHAT_ROUTE ? 'new-chat' : route ? 'page' : 'none',
+          routeSessionId: routeSession
+        })
+
         const restorableNonSessionRoute =
           !!route && route !== NEW_CHAT_ROUTE && !routeSession && !isOverlayView(appViewForPath(route))
 
@@ -117,6 +136,10 @@ export function useDesktopIntegrations({
         if (sessions.length === 0 && !restorableNonSessionRoute && (routeSession || last)) {
           restoredRef.current = true
           primeSessionRestore(routeSession ?? last!)
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: 'session-list-not-ready',
+            storedSessionId: routeSession ?? last!
+          })
           navigate(routeSession ? route! : sessionRoute(last!), { replace: true })
 
           return
@@ -136,6 +159,10 @@ export function useDesktopIntegrations({
             clearRememberedSessionRestorePending()
           }
 
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: routeSession ? 'validated-session-route' : 'validated-page-route',
+            storedSessionId: routeSession
+          })
           navigate(route, { replace: true })
 
           return
@@ -145,10 +172,18 @@ export function useDesktopIntegrations({
         // clear the stale entry so the next cold start won't re-try it.
         if (routeSession) {
           setRememberedRoute(null, activeProfile)
+          logUatEvent('restore', 'remembered-session.route-cleared', {
+            reason: 'unvalidated-session-route',
+            storedSessionId: routeSession
+          })
         }
 
         if (last && sessionBelongsToProfile(sessions, last, activeProfile)) {
           primeSessionRestore(last)
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: 'validated-last-session',
+            storedSessionId: last
+          })
           navigate(sessionRoute(last), { replace: true })
 
           return
@@ -156,12 +191,15 @@ export function useDesktopIntegrations({
 
         if (last) {
           setRememberedSessionId(null, activeProfile)
+          logUatEvent('restore', 'remembered-session.id-cleared', { reason: 'not-owned-or-missing', storedSessionId: last })
         }
 
         clearRememberedSessionRestorePending()
+        logUatEvent('restore', 'remembered-session.pending-cleared', { reason: 'nothing-restorable' })
       } else {
         restoredRef.current = true
         clearRememberedSessionRestorePending()
+        logUatEvent('restore', 'remembered-session.pending-cleared', { reason: 'explicit-non-default-route' })
       }
     }
 
