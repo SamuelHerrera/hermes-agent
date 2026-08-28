@@ -221,6 +221,13 @@ describe('dispatchNativeNotification throttle', () => {
     dispatchNativeNotification({ kind: 'turnDone', sessionId, title: 'done again' })
     expect(notify).toHaveBeenCalledTimes(1)
   })
+
+  it('does not collapse distinct approval request identities', () => {
+    const sessionId = freshSession()
+    dispatchNativeNotification({ kind: 'approval', requestId: 'approval-a', sessionId, title: 'approve A' })
+    dispatchNativeNotification({ kind: 'approval', requestId: 'approval-b', sessionId, title: 'approve B' })
+    expect(notify).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('sendTestNativeNotification', () => {

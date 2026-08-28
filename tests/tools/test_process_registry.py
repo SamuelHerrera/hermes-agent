@@ -706,6 +706,52 @@ class TestPruning:
 # Spawn env sanitization
 # =========================================================================
 
+class TestInterruptibleSpawn:
+    def test_local_background_spawn_is_skipped_when_stop_wins(self, registry, monkeypatch):
+        from tools.interrupt import set_interrupt
+
+        popen_calls = []
+        monkeypatch.setattr("tools.process_registry._find_shell", lambda: "/bin/bash")
+        monkeypatch.setattr(
+            "tools.process_registry._is_supervised_gateway_process",
+            lambda: False,
+        )
+        monkeypatch.setattr(
+            "tools.process_registry.subprocess.Popen",
+            lambda *args, **kwargs: popen_calls.append((args, kwargs)),
+        )
+
+        set_interrupt(True)
+        try:
+            session = registry.spawn_local(
+                "echo hello",
+                cwd="/tmp",
+                interruptible_start=True,
+            )
+        finally:
+            set_interrupt(False)
+
+        assert session.exited is True
+        assert session.exit_code == 130
+        assert session.completion_reason == "interrupted_before_start"
+        assert popen_calls == []
+
+    def test_remote_background_spawn_preserves_interrupted_start(self, registry):
+        class FakeEnv:
+            def execute(self, command, **kwargs):
+                return {
+                    "interrupted_before_start": True,
+                    "output": "Execution interrupted before process start.",
+                    "returncode": 130,
+                }
+
+        session = registry.spawn_via_env(FakeEnv(), "echo hello")
+
+        assert session.exited is True
+        assert session.exit_code == 130
+        assert session.completion_reason == "interrupted_before_start"
+        assert session.pid is None
+
 class TestSpawnEnvSanitization:
     def test_spawn_local_strips_blocked_vars_from_background_env(self, registry):
         captured = {}

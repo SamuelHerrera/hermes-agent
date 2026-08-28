@@ -46,7 +46,7 @@ _IS_WINDOWS = platform.system() == "Windows"
 from tools.environments.local import _find_shell, _resolve_safe_cwd, _sanitize_subprocess_env
 from hermes_cli._subprocess_compat import windows_hide_flags
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from hermes_cli.config import get_hermes_home
 
@@ -978,6 +978,7 @@ class ProcessRegistry:
         session_key: str = "",
         env_vars: dict = None,
         use_pty: bool = False,
+        interruptible_start: bool = False,
     ) -> ProcessSession:
         """
         Spawn a background process locally.
@@ -988,6 +989,8 @@ class ProcessRegistry:
             use_pty: If True, use a pseudo-terminal via ptyprocess for interactive
                      CLI tools (Codex, Claude Code, Python REPL). Falls back to
                      subprocess.Popen if ptyprocess is not installed.
+            interruptible_start: Linearize the physical spawn with this turn's
+                                 Stop signal.
         """
         # Guard against the `A && B &` subshell-wait trap (issue #68915).
         # Bash parses ``A && B &`` as ``(A && B) &`` — a subshell that holds
@@ -1006,6 +1009,22 @@ class ProcessRegistry:
             cwd=_resolve_safe_cwd(cwd or os.getcwd()),
             started_at=time.time(),
         )
+
+        def _start_process(factory: Callable[[], Any]) -> Any:
+            if not interruptible_start:
+                return factory()
+
+            from tools.interrupt import start_if_not_interrupted
+
+            start_result = start_if_not_interrupted(factory)
+            if start_result.started:
+                return start_result.value
+
+            session.exited = True
+            session.exit_code = 130
+            session.completion_reason = "interrupted_before_start"
+            session.termination_source = "interrupt"
+            return None
 
         pty_scope_attempted = False
         if use_pty:
@@ -1044,12 +1063,16 @@ class ProcessRegistry:
                         "worker shares the gateway cgroup."
                     )
 
-                pty_proc = _PtyProcessCls.spawn(
-                    pty_argv,
-                    cwd=session.cwd,
-                    env=pty_env,
-                    dimensions=(30, 120),
+                pty_proc = _start_process(
+                    lambda: _PtyProcessCls.spawn(
+                        pty_argv,
+                        cwd=session.cwd,
+                        env=pty_env,
+                        dimensions=(30, 120),
+                    )
                 )
+                if pty_proc is None:
+                    return session
                 session.pid = pty_proc.pid
                 session.host_start_time = self._safe_host_start_time(session.pid)
                 # Store the pty handle on the session for read/write
@@ -1093,7 +1116,9 @@ class ProcessRegistry:
         # stdout is a pipe, hiding output from process(action="poll")).
         bg_env = _sanitize_subprocess_env(os.environ, env_vars)
         bg_env["PYTHONUNBUFFERED"] = "1"
-        _popen_kwargs = {"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}
+        _popen_kwargs: dict[str, Any] = (
+            {"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}
+        )
 
         # Cgroup isolation (#70716): when running in the live, supervised
         # systemd gateway, wrap the worker in its own transient systemd
@@ -1142,19 +1167,23 @@ class ProcessRegistry:
                     _systemd_run_user_scope_available(),
                 )
 
-        proc = subprocess.Popen(
-            spawn_argv,
-            text=True,
-            cwd=session.cwd,
-            env=bg_env,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=popen_start_new_session,
-            **_popen_kwargs,
+        proc = _start_process(
+            lambda: subprocess.Popen(
+                spawn_argv,
+                text=True,
+                cwd=session.cwd,
+                env=bg_env,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=popen_start_new_session,
+                **_popen_kwargs,
+            )
         )
+        if proc is None:
+            return session
 
         session.process = proc
         session.pid = proc.pid
@@ -1257,14 +1286,24 @@ class ProcessRegistry:
         )
 
         try:
-            result = env.execute(
+            from tools.environments.base import execute_with_interruptible_start
+
+            result = execute_with_interruptible_start(
+                env,
                 bg_command,
                 timeout=timeout,
                 rewrite_compound_background=False,
+                cancel_on_interrupt=False,
             )
+            if result.get("returncode") == 130 and result.get("interrupted_before_start") is True:
+                session.exited = True
+                session.exit_code = 130
+                session.completion_reason = "interrupted_before_start"
+                session.termination_source = "interrupt"
+                session.output_buffer = result.get("output", "").strip()
             output = result.get("output", "").strip()
             # Try to extract the PID from the output
-            for line in output.splitlines():
+            for line in output.splitlines() if not session.exited else ():
                 line = line.strip()
                 if line.isdigit():
                     session.pid = int(line)
@@ -1272,7 +1311,7 @@ class ProcessRegistry:
             # If the wrapper couldn't produce a PID (for example, syntax
             # error or broken redirect), treat it as a failed launch instead
             # of exposing a fake running session.
-            if session.pid is None:
+            if not session.exited and session.pid is None:
                 session.exited = True
                 session.exit_code = int(result.get("returncode", -1))
                 if session.exit_code == 0:

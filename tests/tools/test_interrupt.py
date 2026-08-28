@@ -126,6 +126,211 @@ class TestInterruptModule:
             assert result["thread_id"] in _interrupted_threads
             _interrupted_threads.discard(result["thread_id"])
 
+    def test_execution_start_and_stop_share_one_linearization_lock(self):
+        from tools.interrupt import (
+            _interrupted_threads,
+            _lock,
+            start_if_not_interrupted,
+            set_interrupt,
+        )
+
+        effect_entered = threading.Event()
+        release_effect = threading.Event()
+        stop_started = threading.Event()
+        order = []
+        result = {}
+
+        def effect():
+            effect_entered.set()
+            assert stop_started.wait(timeout=5)
+            assert release_effect.wait(timeout=5)
+            order.append("effect")
+            return "process"
+
+        def worker():
+            result["thread_id"] = threading.get_ident()
+            result["start"] = start_if_not_interrupted(effect)
+
+        execution_thread = threading.Thread(target=worker)
+        execution_thread.start()
+        assert effect_entered.wait(timeout=5)
+
+        def stop():
+            stop_started.set()
+            set_interrupt(True, thread_id=result["thread_id"])
+            order.append("stop")
+
+        stop_thread = threading.Thread(target=stop)
+        stop_thread.start()
+        assert stop_started.wait(timeout=5)
+        release_effect.set()
+        execution_thread.join(timeout=5)
+        stop_thread.join(timeout=5)
+
+        assert not execution_thread.is_alive()
+        assert not stop_thread.is_alive()
+        assert result["start"].started is True
+        assert result["start"].value == "process"
+        assert result["start"].interrupted_during_start is False
+        assert order == ["effect", "stop"]
+        with _lock:
+            _interrupted_threads.discard(result["thread_id"])
+
+    def test_slow_start_does_not_block_stop_for_an_unrelated_thread(self):
+        from tools.interrupt import set_interrupt, start_if_not_interrupted
+
+        start_entered = threading.Event()
+        release_start = threading.Event()
+        start_done = threading.Event()
+        unrelated_stop_done = threading.Event()
+
+        def slow_start():
+            def effect():
+                start_entered.set()
+                assert release_start.wait(timeout=5)
+
+                return object()
+
+            start_if_not_interrupted(effect)
+            start_done.set()
+
+        starter = threading.Thread(target=slow_start)
+        starter.start()
+        assert start_entered.wait(timeout=5)
+
+        unrelated_tid = threading.get_ident()
+
+        def stop_unrelated():
+            set_interrupt(True, unrelated_tid)
+            unrelated_stop_done.set()
+
+        stopper = threading.Thread(target=stop_unrelated)
+        stopper.start()
+
+        try:
+            assert unrelated_stop_done.wait(timeout=2)
+        finally:
+            release_start.set()
+            starter.join(timeout=5)
+            stopper.join(timeout=5)
+            set_interrupt(False, unrelated_tid)
+
+        assert start_done.is_set()
+
+    def test_execution_does_not_start_after_stop_linearizes(self):
+        from tools.interrupt import (
+            _interrupted_threads,
+            _lock,
+            start_if_not_interrupted,
+            set_interrupt,
+        )
+
+        worker_ready = threading.Event()
+        effects = []
+        result = {}
+
+        def worker():
+            result["thread_id"] = threading.get_ident()
+            worker_ready.set()
+            result["start"] = start_if_not_interrupted(
+                lambda: effects.append("started")
+            )
+
+        with _lock:
+            execution_thread = threading.Thread(target=worker)
+            execution_thread.start()
+            assert worker_ready.wait(timeout=5)
+            set_interrupt(True, thread_id=result["thread_id"])
+
+        execution_thread.join(timeout=5)
+
+        assert not execution_thread.is_alive()
+        assert result["start"].started is False
+        assert result["start"].value is None
+        assert effects == []
+        with _lock:
+            _interrupted_threads.discard(result["thread_id"])
+
+    def test_reentrant_stop_is_reported_after_start_without_deadlock(self):
+        from tools.interrupt import start_if_not_interrupted, set_interrupt
+
+        def start():
+            set_interrupt(True)
+            return "process"
+
+        try:
+            result = start_if_not_interrupted(start)
+        finally:
+            set_interrupt(False)
+
+        assert result.started is True
+        assert result.value == "process"
+        assert result.interrupted_during_start is True
+
+    def test_environment_interruptible_start_skips_run_bash_after_stop(
+        self, monkeypatch, tmp_path
+    ):
+        from tools.environments.local import LocalEnvironment
+        from tools.interrupt import set_interrupt
+
+        env = LocalEnvironment(cwd=str(tmp_path), timeout=5)
+        starts = []
+
+        def forbidden_start(*_args, **_kwargs):
+            starts.append(True)
+            raise AssertionError("process start must not run after Stop")
+
+        monkeypatch.setattr(env, "_run_bash", forbidden_start)
+        set_interrupt(True)
+        try:
+            result = env.execute("echo unsafe", interruptible_start=True)
+        finally:
+            set_interrupt(False)
+            env.cleanup()
+
+        assert result["returncode"] == 130
+        assert result["interrupted_before_start"] is True
+        assert starts == []
+
+    def test_interruptible_execute_preserves_legacy_base_subclass_signature(self):
+        from tools.environments.base import (
+            BaseEnvironment,
+            execute_with_interruptible_start,
+        )
+
+        class LegacyEnvironment(BaseEnvironment):
+            def __init__(self):
+                self.calls = []
+
+            def execute(  # type: ignore[override] - exercises the pre-option contract
+                self,
+                command,
+                cwd="",
+                *,
+                timeout=None,
+                stdin_data=None,
+                rewrite_compound_background=True,
+                bounded_capture=False,
+            ):
+                del stdin_data, rewrite_compound_background, bounded_capture
+                self.calls.append((command, timeout, cwd))
+                return {"output": "legacy", "returncode": 0}
+
+            def cleanup(self):
+                return None
+
+        environment = LegacyEnvironment()
+        result = execute_with_interruptible_start(
+            environment,
+            "pwd",
+            timeout=5,
+            cwd="/tmp",
+            cancel_on_interrupt=False,
+        )
+
+        assert result == {"output": "legacy", "returncode": 0}
+        assert environment.calls == [("pwd", 5, "/tmp")]
+
 
 # ---------------------------------------------------------------------------
 # Unit tests: pre-tool interrupt check

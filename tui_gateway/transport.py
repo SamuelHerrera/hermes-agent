@@ -226,12 +226,18 @@ class SessionFanoutTransport:
 
         failed: list[Transport] = []
         accepted = False
+        write_error: Exception | None = None
         for transport in targets:
             try:
                 ok = bool(transport.write(obj))
-            except Exception:
-                logger.debug("session fanout transport write failed", exc_info=True)
-                ok = False
+            except Exception as exc:
+                # Concrete transports translate expected disconnects into False.
+                # An exception is therefore a programming/serialization failure:
+                # continue fanout for healthy peers, but surface it to the caller
+                # and keep the raising peer attached for diagnosis.
+                if write_error is None:
+                    write_error = exc
+                continue
             if ok:
                 accepted = True
             else:
@@ -240,10 +246,11 @@ class SessionFanoutTransport:
         if failed:
             with self._lock:
                 self._transports = [
-                    peer
-                    for peer in self._transports
+                    peer for peer in self._transports
                     if not any(peer is dead for dead in failed)
                 ]
+        if write_error is not None:
+            raise write_error
         return accepted
 
     def close(self) -> None:

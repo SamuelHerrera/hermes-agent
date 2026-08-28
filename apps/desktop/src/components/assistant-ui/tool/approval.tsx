@@ -35,14 +35,10 @@ import type { ToolPart } from './fallback-model'
 // the command, so the strip deliberately doesn't repeat it) instead of as a
 // modal overlay.
 //
-// Binding is POSITIONAL, not command-matched: the desktop `tool.start` payload
-// carries no structured args (only tool_id/name/context — see
-// tui_gateway/server.py::_on_tool_start), so we cannot join the approval to the
-// row by command string. But `approval.request` only ever fires from the
-// `terminal` / `execute_code` guards and the agent thread blocks on exactly one
-// approval at a time, so the single pending row of those tools IS the row that
-// raised it. The command/description text comes from `$approvalRequest` (the
-// event payload), which is the only place that data reliably exists.
+// Live `tool.start` payloads may omit args, so positional binding remains the
+// compatibility fallback. Rehydrated rows do carry args, though; when they do,
+// command-match before attaching controls so a stale row can never submit a
+// newer approval request from the session store.
 export const APPROVAL_TOOLS = new Set(['terminal', 'execute_code'])
 
 // Canonical gateway choices (ui-tui/src/components/prompts.tsx).
@@ -79,6 +75,16 @@ function snapshotApprovalRequest(part: ToolPart): ApprovalRequest | null {
   }
 }
 
+function toolPartCommand(part: ToolPart): string {
+  if (!part.args || typeof part.args !== 'object') {
+    return ''
+  }
+
+  const command = (part.args as Record<string, unknown>).command
+
+  return typeof command === 'string' ? command.trim() : ''
+}
+
 export const PendingToolApproval: FC<{ part: ToolPart }> = ({ part }) => {
   // The tool row lives in whichever session's transcript rendered it — read
   // THAT session's approval (works for the primary and every tile).
@@ -87,8 +93,20 @@ export const PendingToolApproval: FC<{ part: ToolPart }> = ({ part }) => {
   const storedRequest = useStore($request)
   const snapshotRequest = useMemo(() => snapshotApprovalRequest(part), [part])
   const request = storedRequest ?? snapshotRequest
+  const rowCommand = toolPartCommand(part)
 
-  if (!request || !APPROVAL_TOOLS.has(part.toolName)) {
+  const requestIdentityMismatch = Boolean(
+    storedRequest?.requestId &&
+      snapshotRequest?.requestId &&
+      storedRequest.requestId !== snapshotRequest.requestId
+  )
+
+  if (
+    !request ||
+    !APPROVAL_TOOLS.has(part.toolName) ||
+    requestIdentityMismatch ||
+    (storedRequest && rowCommand && storedRequest.command.trim() !== rowCommand)
+  ) {
     return null
   }
 

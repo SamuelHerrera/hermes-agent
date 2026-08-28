@@ -7,6 +7,7 @@ or a temp file (local).
 """
 
 import codecs
+import inspect
 import json
 import logging
 import os
@@ -20,13 +21,46 @@ import uuid
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
-from typing import IO, Callable, Iterable, Protocol
+from typing import IO, Any, Callable, Iterable, Protocol
 
 from hermes_constants import get_hermes_home
 from hermes_cli._subprocess_compat import windows_hide_flags
-from tools.interrupt import is_interrupted
+from tools.interrupt import is_interrupted, start_if_not_interrupted
 
 logger = logging.getLogger(__name__)
+
+
+def execute_with_interruptible_start(
+    environment: Any,
+    command: str,
+    **kwargs: Any,
+) -> dict:
+    """Execute with the start guard when the backend supports the new option.
+
+    Third-party environments may override ``execute`` with the pre-guard strict
+    signature. Signature inspection keeps those implementations working while
+    built-in environments opt into Stop/spawn linearization.
+    """
+    execute = environment.execute
+
+    try:
+        parameters = tuple(inspect.signature(execute).parameters.values())
+    except (TypeError, ValueError):
+        parameters = ()
+
+    accepts_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    )
+    parameter_names = {parameter.name for parameter in parameters}
+    supports_start_guard = accepts_kwargs or "interruptible_start" in parameter_names
+
+    if supports_start_guard:
+        kwargs["interruptible_start"] = True
+
+    if "cancel_on_interrupt" not in parameter_names and not accepts_kwargs:
+        kwargs.pop("cancel_on_interrupt", None)
+
+    return execute(command, **kwargs)
 
 # Opt-in debug tracing for the interrupt/activity/poll machinery.  Set
 # HERMES_DEBUG_INTERRUPT=1 to log loop entry/exit, periodic heartbeats, and
@@ -974,7 +1008,12 @@ class BaseEnvironment(ABC):
     # ------------------------------------------------------------------
 
     def _wait_for_process(
-        self, proc: ProcessHandle, timeout: int = 120, *, bounded_capture: bool = False
+        self,
+        proc: ProcessHandle,
+        timeout: int = 120,
+        *,
+        bounded_capture: bool = False,
+        cancel_on_interrupt: bool = True,
     ) -> dict:
         """Poll-based wait with interrupt checking and stdout draining.
 
@@ -1188,7 +1227,7 @@ class BaseEnvironment(ABC):
             _poll_sleep = 0.005
             while proc.poll() is None:
                 _iter_count += 1
-                if is_interrupted():
+                if cancel_on_interrupt and is_interrupted():
                     if _DEBUG_INTERRUPT:
                         logger.info(
                             "[interrupt-debug] _wait_for_process INTERRUPT DETECTED "
@@ -1404,6 +1443,8 @@ class BaseEnvironment(ABC):
         stdin_data: str | None = None,
         rewrite_compound_background: bool = True,
         bounded_capture: bool = False,
+        interruptible_start: bool = False,
+        cancel_on_interrupt: bool = True,
     ) -> dict:
         """Execute a command, return {"output": str, "returncode": int}.
 
@@ -1415,6 +1456,13 @@ class BaseEnvironment(ABC):
         full-fidelity consumers — file operations ``cat`` reads that feed
         the patch engine, code-execution RPC reads, log reads — MUST leave
         it False: truncating those corrupts data, not just display.
+
+        ``interruptible_start=True`` makes the physical ``_run_bash`` handoff
+        linearizable with Stop. User-command call sites opt in; internal reads
+        and cleanup stay available after cancellation.
+
+        ``cancel_on_interrupt=False`` is reserved for a background process's
+        short PID/registration handshake after its start has already committed.
         """
         self._before_execute()
 
@@ -1447,11 +1495,35 @@ class BaseEnvironment(ABC):
         # unless login itself is broken — then non-login is the only path.
         login = not self._snapshot_ready and not self._prefer_nonlogin
 
-        proc = self._run_bash(
-            wrapped, login=login, timeout=effective_timeout, stdin_data=effective_stdin
-        )
+        if interruptible_start:
+            start_result = start_if_not_interrupted(
+                lambda: self._run_bash(
+                    wrapped,
+                    login=login,
+                    timeout=effective_timeout,
+                    stdin_data=effective_stdin,
+                )
+            )
+            if not start_result.started:
+                return {
+                    "output": "Execution interrupted before process start.",
+                    "returncode": 130,
+                    "interrupted_before_start": True,
+                }
+            proc = start_result.value
+            assert proc is not None
+        else:
+            proc = self._run_bash(
+                wrapped,
+                login=login,
+                timeout=effective_timeout,
+                stdin_data=effective_stdin,
+            )
         result = self._wait_for_process(
-            proc, timeout=effective_timeout, bounded_capture=bounded_capture
+            proc,
+            timeout=effective_timeout,
+            bounded_capture=bounded_capture,
+            cancel_on_interrupt=cancel_on_interrupt,
         )
         self._update_cwd(result)
 

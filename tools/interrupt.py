@@ -18,6 +18,8 @@ import logging
 import os
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,23 @@ if _DEBUG_INTERRUPT:
 _interrupted_threads: set[int] = set()
 _interrupt_epochs: dict[int, int] = {}
 _lock = threading.RLock()
+_start_locks: dict[int, threading.RLock] = {}
+_T = TypeVar("_T")
+
+
+@dataclass(frozen=True)
+class StartResult(Generic[_T]):
+    """Outcome of an interrupt-linearized irreversible start."""
+
+    started: bool
+    value: _T | None = None
+    interrupted_during_start: bool = False
+
+
+def _start_lock_for(tid: int) -> threading.RLock:
+    """Return the per-execution lock that orders Stop with irreversible starts."""
+    with _lock:
+        return _start_locks.setdefault(tid, threading.RLock())
 
 
 def set_interrupt(active: bool, thread_id: int | None = None) -> None:
@@ -48,13 +67,15 @@ def set_interrupt(active: bool, thread_id: int | None = None) -> None:
     """
     tid = thread_id if thread_id is not None else threading.current_thread().ident
     assert tid is not None
-    with _lock:
-        if active:
-            _interrupted_threads.add(tid)
-            _interrupt_epochs[tid] = _interrupt_epochs.get(tid, 0) + 1
-        else:
-            _interrupted_threads.discard(tid)
-        _snapshot = set(_interrupted_threads) if _DEBUG_INTERRUPT else None
+    start_lock = _start_lock_for(tid)
+    with start_lock:
+        with _lock:
+            if active:
+                _interrupted_threads.add(tid)
+                _interrupt_epochs[tid] = _interrupt_epochs.get(tid, 0) + 1
+            else:
+                _interrupted_threads.discard(tid)
+            _snapshot = set(_interrupted_threads) if _DEBUG_INTERRUPT else None
     if _DEBUG_INTERRUPT:
         logger.info(
             "[interrupt-debug] set_interrupt(active=%s, target_tid=%s) "
@@ -91,18 +112,63 @@ def commit_if_not_interrupted(
     """
     tid = threading.current_thread().ident
     assert tid is not None
-    with _lock:
-        if tid in _interrupted_threads:
-            return False
-        epoch = _interrupt_epochs.get(tid, 0)
+    start_lock = _start_lock_for(tid)
+    with start_lock:
+        with _lock:
+            if tid in _interrupted_threads:
+                return False
+            epoch = _interrupt_epochs.get(tid, 0)
         commit()
-        if tid in _interrupted_threads or _interrupt_epochs.get(tid, 0) != epoch:
+        with _lock:
+            interrupted = (
+                tid in _interrupted_threads
+                or _interrupt_epochs.get(tid, 0) != epoch
+            )
+        if interrupted:
             if rollback is not None:
                 rollback()
             return False
         if finalize is not None:
             finalize()
         return True
+
+
+def start_if_not_interrupted(start: Callable[[], _T]) -> StartResult[_T]:
+    """Start an irreversible effect atomically with interrupt publication.
+
+    A concurrent ``set_interrupt(True, tid)`` either publishes before this
+    function acquires the target execution's start lock and prevents the
+    effect, or waits until the effect has crossed its physical start boundary.
+    Per-target locking means a slow remote start never delays Stop for an
+    unrelated session.
+    Callers must keep
+    ``start`` limited to that start operation (for example ``Popen``), never
+    the full lifetime of the process, so Stop is delayed only until startup is
+    linearized.
+
+    A same-thread/re-entrant Stop cannot race the callback because it executes
+    inside the same call stack. Its epoch is still reported so the caller can
+    enter the normal post-start cancellation path.
+    """
+    tid = threading.current_thread().ident
+    assert tid is not None
+    start_lock = _start_lock_for(tid)
+    with start_lock:
+        with _lock:
+            if tid in _interrupted_threads:
+                return StartResult(started=False)
+            epoch = _interrupt_epochs.get(tid, 0)
+        value = start()
+        with _lock:
+            interrupted = (
+                tid in _interrupted_threads
+                or _interrupt_epochs.get(tid, 0) != epoch
+            )
+        return StartResult(
+            started=True,
+            value=value,
+            interrupted_during_start=interrupted,
+        )
 
 
 def clear_current_thread_interrupt() -> None:

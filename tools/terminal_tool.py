@@ -66,7 +66,10 @@ def _redact_terminal_error_text(value: Any) -> str:
 # The terminal tool polls this during command execution so it can kill
 # long-running subprocesses immediately instead of blocking until timeout.
 # ---------------------------------------------------------------------------
-from tools.interrupt import is_interrupted, _interrupt_event  # noqa: F401 — re-exported
+from tools.interrupt import (  # noqa: F401 — _interrupt_event re-exported
+    _interrupt_event,
+    is_interrupted,
+)
 from tools.registry import tool_error
 from tools.shell_heredoc import strip_inert_heredoc_bodies
 # display_hermes_home imported lazily at call site (stale-module safety during hermes update)
@@ -3189,10 +3192,14 @@ def terminal_tool(
                         cwd=effective_cwd,
                         task_id=effective_task_id,
                         session_key=session_key,
-                        env_vars=env.env if hasattr(env, 'env') else None,
+                        env_vars=getattr(env, "env", None) or {},
                         use_pty=effective_pty,
+                        interruptible_start=True,
                     )
                 else:
+                    # Non-local backends linearize at their env.execute spawn
+                    # boundary; do not hold the start lock across polling,
+                    # registry, or checkpoint work in spawn_via_env().
                     proc_session = process_registry.spawn_via_env(
                         env=env,
                         command=command,
@@ -3200,6 +3207,8 @@ def terminal_tool(
                         task_id=effective_task_id,
                         session_key=session_key,
                     )
+                if getattr(proc_session, "completion_reason", None) == "interrupted_before_start":
+                    return _interrupted_before_execution_result(approval_note)
 
                 result_data = {
                     "output": "Background process started",
@@ -3459,7 +3468,13 @@ def terminal_tool(
                     # or retry backoff cannot start the next attempt.
                     if is_interrupted():
                         return _interrupted_before_execution_result(approval_note)
-                    result = env.execute(command, **execute_kwargs)
+                    from tools.environments.base import execute_with_interruptible_start
+
+                    result = execute_with_interruptible_start(
+                        env,
+                        command,
+                        **execute_kwargs,
+                    )
                 except Exception as e:
                     error_str = str(e).lower()
                     if "timeout" in error_str:

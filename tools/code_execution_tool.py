@@ -885,7 +885,19 @@ def _get_or_create_env(task_id: str):
         return env, env_type
 
 
-def _ship_file_to_remote(env, remote_path: str, content: str) -> None:
+def _execute_remote_command(env, command: str, **kwargs) -> dict:
+    """Execute with atomic-start support on the current environment contract.
+
+    Third-party/legacy environment doubles may predate ``interruptible_start``;
+    preserve their call shape while built-in BaseEnvironment implementations
+    receive the stronger Stop boundary.
+    """
+    from tools.environments.base import execute_with_interruptible_start
+
+    return execute_with_interruptible_start(env, command, **kwargs)
+
+
+def _ship_file_to_remote(env, remote_path: str, content: str) -> dict:
     """Write *content* to *remote_path* on the remote environment.
 
     Uses ``echo … | base64 -d`` rather than stdin piping because some
@@ -895,7 +907,8 @@ def _ship_file_to_remote(env, remote_path: str, content: str) -> None:
     """
     encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
     quoted_remote_path = shlex.quote(remote_path)
-    env.execute(
+    return _execute_remote_command(
+        env,
         f"echo '{encoded}' | base64 -d > {quoted_remote_path}",
         cwd="/",
         timeout=30,
@@ -1098,10 +1111,14 @@ def _execute_remote(
 
     try:
         # Verify Python is available on the remote
-        py_check = env.execute(
+        py_check = _execute_remote_command(
+            env,
             "command -v python3 >/dev/null 2>&1 && echo OK",
-            cwd="/", timeout=15,
+            cwd="/",
+            timeout=15,
         )
+        if py_check.get("returncode") == 130:
+            return _interrupted_before_execution_result()
         if "OK" not in py_check.get("output", ""):
             return json.dumps({
                 "status": "error",
@@ -1115,9 +1132,14 @@ def _execute_remote(
             })
 
         # Create sandbox directory on remote
-        env.execute(
-            f"mkdir -p {quoted_rpc_dir}", cwd="/", timeout=10,
+        mkdir_result = _execute_remote_command(
+            env,
+            f"mkdir -p {quoted_rpc_dir}",
+            cwd="/",
+            timeout=10,
         )
+        if mkdir_result.get("returncode") == 130:
+            return _interrupted_before_execution_result()
 
         rpc_token = secrets.token_urlsafe(32)
 
@@ -1125,8 +1147,16 @@ def _execute_remote(
         tools_src = generate_hermes_tools_module(
             list(sandbox_tools), transport="file",
         )
-        _ship_file_to_remote(env, f"{sandbox_dir}/hermes_tools.py", tools_src)
-        _ship_file_to_remote(env, f"{sandbox_dir}/script.py", code)
+        tools_ship = _ship_file_to_remote(
+            env, f"{sandbox_dir}/hermes_tools.py", tools_src
+        )
+        if tools_ship.get("returncode") == 130:
+            return _interrupted_before_execution_result()
+        script_ship = _ship_file_to_remote(
+            env, f"{sandbox_dir}/script.py", code
+        )
+        if script_ship.get("returncode") == 130:
+            return _interrupted_before_execution_result()
 
         # Wrapped so the thread inherits the turn's approval context + callbacks
         # (see tools.thread_context) — else sandbox RPC tool calls lose approval
@@ -1159,7 +1189,8 @@ def _execute_remote(
 
         if _is_interrupted():
             return _interrupted_before_execution_result()
-        script_result = env.execute(
+        script_result = _execute_remote_command(
+            env,
             f"cd {quoted_sandbox_dir} && {env_prefix} python3 script.py",
             timeout=timeout,
         )
@@ -1326,7 +1357,10 @@ def execute_code(
             "duration_seconds": 0,
         }, ensure_ascii=False)
 
-    from tools.interrupt import is_interrupted as _is_interrupted
+    from tools.interrupt import (
+        is_interrupted as _is_interrupted,
+        start_if_not_interrupted as _start_if_not_interrupted,
+    )
 
     # Approval finalization can retain a later Stop. Fail closed before any
     # local or remote executor setup begins.
@@ -1517,16 +1551,22 @@ def execute_code(
         if _is_interrupted():
             return _interrupted_before_execution_result()
 
-        proc = subprocess.Popen(
-            [_child_python, _script_path],
-            cwd=_child_cwd,
-            env=child_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-            creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
+        start_result = _start_if_not_interrupted(
+            lambda: subprocess.Popen(
+                [_child_python, _script_path],
+                cwd=_child_cwd,
+                env=child_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if _IS_WINDOWS else 0,
+            )
         )
+        if not start_result.started:
+            return _interrupted_before_execution_result()
+        proc = start_result.value
+        assert proc is not None
 
         # --- Poll loop: watch for exit, timeout, and interrupt ---
         deadline = time.monotonic() + timeout

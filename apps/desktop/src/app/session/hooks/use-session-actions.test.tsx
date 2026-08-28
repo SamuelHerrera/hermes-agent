@@ -1080,6 +1080,157 @@ describe('resumeSession failure recovery', () => {
   })
 
   it.each([
+    { label: 'identified', liveRequestId: 'approval-new', snapshotRequestId: 'approval-old' },
+    { label: 'identity-less legacy', liveRequestId: undefined, snapshotRequestId: undefined }
+  ])('does not project an approval snapshot superseded while session.activate was in flight ($label)', async ({
+    liveRequestId,
+    snapshotRequestId
+  }) => {
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: 'stored-1' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method !== 'session.activate') {
+        return {} as never
+      }
+
+      setApprovalRequest({
+        command: 'dangerous-new',
+        description: 'new approval',
+        sessionId: 'runtime-stale',
+        ...(liveRequestId ? { requestId: liveRequestId } : {})
+      })
+
+      return {
+        info: null,
+        inflight: {
+          events: [
+            {
+              payload: {
+                args: { command: 'dangerous-old' },
+                name: 'terminal',
+                tool_id: 'tool-old'
+              },
+              type: 'tool.start'
+            }
+          ],
+          streaming: true,
+          user: 'run the old command'
+        },
+        messages: [],
+        messages_omitted: true,
+        pending_prompt: {
+          event: 'approval.request',
+          payload: {
+            command: 'dangerous-old',
+            description: 'stale approval',
+            tool_id: 'tool-old',
+            ...(snapshotRequestId ? { request_id: snapshotRequestId } : {})
+          }
+        },
+        resumed: 'stored-1',
+        running: true,
+        session_id: 'runtime-stale',
+        session_key: 'stored-1',
+        status: 'waiting'
+      } as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, state) => (resumedState = state)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={{ current: new Map([['stored-1', 'runtime-stale']]) }}
+        sessionStateByRuntimeIdRef={{
+          current: new Map([['runtime-stale', createClientSessionState('stored-1')]])
+        }}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect(sessionApprovalRequest('runtime-stale').get()?.command).toBe('dangerous-new')
+    expect(sessionApprovalRequest('runtime-stale').get()?.requestId).toBe(liveRequestId)
+    expect(JSON.stringify(resumedState?.messages)).not.toContain('dangerous-old')
+  })
+
+  it.each([
+    { label: 'identified', liveRequestId: 'approval-new', snapshotRequestId: 'approval-old' },
+    { label: 'identity-less legacy', liveRequestId: undefined, snapshotRequestId: undefined }
+  ])('does not project an approval snapshot superseded while session.resume was in flight ($label)', async ({
+    liveRequestId,
+    snapshotRequestId
+  }) => {
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: 'stored-1' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method !== 'session.resume') {
+        return {} as never
+      }
+
+      setApprovalRequest({
+        command: 'dangerous-new',
+        description: 'new approval',
+        sessionId: 'runtime-cold',
+        ...(liveRequestId ? { requestId: liveRequestId } : {})
+      })
+
+      return {
+        info: null,
+        inflight: {
+          events: [
+            {
+              payload: {
+                args: { command: 'dangerous-old' },
+                name: 'terminal',
+                tool_id: 'tool-old'
+              },
+              type: 'tool.start'
+            }
+          ],
+          streaming: true,
+          user: 'run the old command'
+        },
+        messages: [],
+        pending_prompt: {
+          event: 'approval.request',
+          payload: {
+            command: 'dangerous-old',
+            description: 'stale approval',
+            tool_id: 'tool-old',
+            ...(snapshotRequestId ? { request_id: snapshotRequestId } : {})
+          }
+        },
+        resumed: 'stored-1',
+        running: true,
+        session_id: 'runtime-cold',
+        session_key: 'stored-1',
+        status: 'waiting'
+      } as never
+    })
+
+    let resumedState: ClientSessionState | undefined
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        onStateUpdate={(_sessionId, state) => (resumedState = state)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={{ current: new Map() }}
+        sessionStateByRuntimeIdRef={{ current: new Map() }}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-1', true)
+
+    expect(sessionApprovalRequest('runtime-cold').get()?.command).toBe('dangerous-new')
+    expect(sessionApprovalRequest('runtime-cold').get()?.requestId).toBe(liveRequestId)
+    expect(JSON.stringify(resumedState?.messages)).not.toContain('dangerous-old')
+  })
+
+  it.each([
     {
       clear: () => clearApprovalRequest('runtime-stale', 'stale-approval'),
       event: 'approval.request',
@@ -1862,6 +2013,55 @@ describe('resumeSession warm-cache mapping integrity', () => {
       expect.objectContaining({ omit_messages: true, session_id: 'rt-A' })
     )
     expect(runtimeIdByStoredSessionIdRef.current.get('stored-A')).toBe('rt-A')
+  })
+
+  it('preserves warm pending input when an older backend lacks session.activate', async () => {
+    const runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>> = {
+      current: new Map([['stored-A', 'rt-A']])
+    }
+
+    const state = clientState('stored-A')
+    state.needsInput = true
+
+    const sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>> = {
+      current: new Map([['rt-A', state]])
+    }
+
+    setApprovalRequest({
+      command: 'legacy pending command',
+      description: 'legacy approval',
+      requestId: 'legacy-approval',
+      sessionId: 'rt-A'
+    })
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({ messages: [], session_id: 'stored-A' } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        throw new Error('Method not found: session.activate')
+      }
+
+      if (method === 'session.usage') {
+        return { input_tokens: 3, output_tokens: 5 } as never
+      }
+
+      return {} as never
+    })
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+    render(
+      <ResumeHarness
+        onReady={ready => (resume = ready)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('stored-A', true)
+
+    expect(requestGateway.mock.calls.map(([method]) => method)).toEqual(['session.activate', 'session.usage'])
+    expect(sessionStateByRuntimeIdRef.current.get('rt-A')?.needsInput).toBe(true)
+    expect(sessionApprovalRequest('rt-A').get()?.requestId).toBe('legacy-approval')
   })
 
   it('does not hydrate a prompt returned for a different warm-cache session', async () => {

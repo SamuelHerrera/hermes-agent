@@ -95,6 +95,39 @@ describe('PendingToolApproval', () => {
     expect(container.innerHTML).toBe('')
   })
 
+  it('does not attach a newer approval to an older command row', () => {
+    setRequest('dangerous-new')
+
+    const oldPart = {
+      ...part('terminal'),
+      args: { command: 'dangerous-old' }
+    } as ToolPart
+
+    const { container } = render(<PendingToolApproval part={oldPart} />)
+
+    expect(container.innerHTML).toBe('')
+  })
+
+  it('does not attach a newer approval to an older row with the same command', () => {
+    setRequest('dangerous-same')
+
+    const oldPart = {
+      ...part('terminal'),
+      args: {
+        command: 'dangerous-same',
+        __hermes_pending_approval: {
+          command: 'dangerous-same',
+          request_id: 'approval-old',
+          session_id: 'sess-1'
+        }
+      }
+    } as ToolPart
+
+    const { container } = render(<PendingToolApproval part={oldPart} />)
+
+    expect(container.innerHTML).toBe('')
+  })
+
   it('renders nothing for tools that never raise approval', () => {
     setRequest()
     const { container } = render(<PendingToolApproval part={part('read_file')} />)

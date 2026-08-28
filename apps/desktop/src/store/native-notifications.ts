@@ -186,7 +186,14 @@ export function dispatchNativeNotification(input: NativeNotificationInput): void
     return
   }
 
-  if (throttled(`${input.kind}:${input.sessionId ?? input.tag ?? (input.global ? 'global' : '')}`, Date.now())) {
+  const requestIdentity = input.requestId ? `:${input.requestId}` : ''
+
+  if (
+    throttled(
+      `${input.kind}:${input.sessionId ?? input.tag ?? (input.global ? 'global' : '')}${requestIdentity}`,
+      Date.now()
+    )
+  ) {
     return
   }
 

@@ -191,6 +191,7 @@ import {
   resolveOauthRestAuth,
   resolveReadinessProbeAuth
 } from './native-auth-decisions'
+import { dispatchNotificationAction, nativeNotificationDedupeKey } from './native-notification-routing'
 import {
   nativeRefreshUrl,
   type NativeTokenSet,
@@ -11515,7 +11516,7 @@ const claimedAmbientCue = createEventDeduper()
 // The first caller within the window gets true; peers get false and stay quiet.
 ipcMain.handle('hermes:ambient:claim', (_event, key) => !claimedAmbientCue(String(key ?? '')))
 
-ipcMain.handle('hermes:notify', (_event, payload) => {
+ipcMain.handle('hermes:notify', (event, payload) => {
   if (!Notification.isSupported()) {
     return false
   }
@@ -11524,7 +11525,16 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
   // kind+session can arrive here twice. Collapse it at this single choke point.
   // Return true (not false): a notification for the event IS being shown by the
   // first caller, so the settings "send test" success probe stays honest.
-  if (isDuplicateNotification(`${payload?.kind ?? ''}:${payload?.sessionId ?? payload?.tag ?? ''}`)) {
+  if (
+    isDuplicateNotification(
+      nativeNotificationDedupeKey({
+        kind: payload?.kind ?? '',
+        requestId: payload?.requestId,
+        sessionId: payload?.sessionId,
+        tag: payload?.tag
+      })
+    )
+  ) {
     return true
   }
 
@@ -11551,18 +11561,10 @@ ipcMain.handle('hermes:notify', (_event, payload) => {
     }
   })
   notification.on('action', (_actionEvent, index) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      return
-    }
-
     const action = actions[index]
 
     if (action?.id) {
-      mainWindow.webContents.send('hermes:notification-action', {
-        actionId: action.id,
-        requestId: payload?.requestId,
-        sessionId: payload?.sessionId
-      })
+      dispatchNotificationAction(event.sender, payload, action.id)
     }
   })
   notification.show()

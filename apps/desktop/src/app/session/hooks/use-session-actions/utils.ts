@@ -722,6 +722,23 @@ function pendingPromptToolPayload(
   return null
 }
 
+export function withoutPendingPromptProjection(projection: SessionResumeResponse): SessionResumeResponse {
+  const pendingTool = pendingPromptToolPayload(projection)
+  const inflight = projection.inflight
+
+  if (!pendingTool || !inflight?.events?.length) {
+    return { ...projection, pending_prompt: undefined }
+  }
+
+  const events = inflight.events.filter(event => event.payload?.tool_id !== pendingTool.tool_id)
+
+  return {
+    ...projection,
+    inflight: events.length === inflight.events.length ? inflight : { ...inflight, events },
+    pending_prompt: undefined
+  }
+}
+
 function toolArgString(part: ChatMessage['parts'][number], key: string): string {
   if (part.type !== 'tool-call' || !part.args || typeof part.args !== 'object') {
     return ''

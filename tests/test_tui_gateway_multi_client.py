@@ -1,25 +1,43 @@
 """Focused behavioral coverage for shared live-session transports."""
 
 import threading
-import time
 import types
+
+import pytest
 
 from tui_gateway import server
 
 
 class _CollectingTransport:
-    def __init__(self, name: str = "", *, write_ok: bool = True):
+    def __init__(
+        self,
+        name: str = "",
+        *,
+        write_ok: bool = True,
+        written: threading.Event | None = None,
+    ):
         self.name = name
         self.write_ok = write_ok
+        self.written = written
         self.frames: list[dict] = []
         self.closed = False
 
     def write(self, obj: dict) -> bool:
         self.frames.append(obj)
+        if self.written is not None:
+            self.written.set()
         return self.write_ok
 
     def close(self) -> None:
         self.closed = True
+
+
+class _ExplodingTransport:
+    def write(self, obj: dict) -> bool:
+        raise RuntimeError("serialization bug")
+
+    def close(self) -> None:
+        return None
 
 
 def _session(agent=None, **extra):
@@ -110,6 +128,20 @@ def test_session_fanout_transport_prunes_failed_peer_without_closing_peers():
     assert fanout.count() == 0
     assert good.closed is False
     assert bad.closed is False
+
+
+def test_session_fanout_transport_surfaces_programming_errors_without_pruning_peer():
+    exploding = _ExplodingTransport()
+    good = _CollectingTransport("good")
+    fanout = server.SessionFanoutTransport(exploding, good)
+    frame = {"jsonrpc": "2.0", "method": "event"}
+
+    with pytest.raises(RuntimeError, match="serialization bug"):
+        fanout.write(frame)
+
+    assert good.frames == [frame]
+    assert fanout.contains(exploding)
+    assert fanout.contains(good)
 
 
 def test_close_transport_removes_one_fanout_peer_without_detaching(monkeypatch):
@@ -399,6 +431,7 @@ def test_session_activate_fails_closed_when_teardown_claims_generation(
     monkeypatch.setattr(server, "_live_session_payload", blocked_payload)
     server._sessions["sid-activate-race"] = session
     outcome = {}
+    activation_done = threading.Event()
 
     def activate():
         token = server.bind_transport(second)
@@ -412,6 +445,7 @@ def test_session_activate_fails_closed_when_teardown_claims_generation(
             )
         finally:
             server.reset_transport(token)
+            activation_done.set()
 
     worker = threading.Thread(target=activate)
     worker.start()
@@ -420,14 +454,15 @@ def test_session_activate_fails_closed_when_teardown_claims_generation(
         popped = server._pop_session_by_id("sid-activate-race")
         assert popped is session
         release_payload.set()
-        worker.join(timeout=2)
+        assert activation_done.wait(timeout=5)
+        worker.join(timeout=1)
 
         assert not worker.is_alive()
         assert outcome["response"]["error"]["code"] == 4001
         assert not server._session_transport_contains(session, second)
     finally:
         release_payload.set()
-        worker.join(timeout=2)
+        worker.join(timeout=5)
         server._sessions.pop("sid-activate-race", None)
 
 
@@ -647,8 +682,10 @@ def test_approval_response_is_first_wins_across_attached_peers():
 
 
 def test_pending_prompt_is_fanned_out_and_either_attached_peer_can_answer():
-    first = _CollectingTransport("first")
-    second = _CollectingTransport("second")
+    first_written = threading.Event()
+    second_written = threading.Event()
+    first = _CollectingTransport("first", written=first_written)
+    second = _CollectingTransport("second", written=second_written)
     session = _session(transport=first)
     server._attach_session_transport(session, second)
     server._sessions["sid-prompt-fanout"] = session
@@ -666,9 +703,8 @@ def test_pending_prompt_is_fanned_out_and_either_attached_peer_can_answer():
     )
     worker.start()
     try:
-        deadline = time.time() + 1.0
-        while (not first.frames or not second.frames) and time.time() < deadline:
-            time.sleep(0.01)
+        assert first_written.wait(timeout=2.0)
+        assert second_written.wait(timeout=2.0)
         request_id = second.frames[0]["params"]["payload"]["request_id"]
 
         token = server.bind_transport(second)

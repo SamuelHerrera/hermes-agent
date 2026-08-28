@@ -81,6 +81,8 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         stdin_data: str | None = None,
         rewrite_compound_background: bool = True,
         bounded_capture: bool = False,
+        interruptible_start: bool = False,
+        cancel_on_interrupt: bool = True,
     ) -> dict:
         # Managed/remote modal transports execute commands via explicit transport
         # and do not rely on shell background rewriters. Keep parameter for
@@ -100,7 +102,20 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         )
 
         try:
-            start = self._start_modal_exec(prepared)
+            if interruptible_start:
+                from tools.interrupt import start_if_not_interrupted
+
+                start_result = start_if_not_interrupted(
+                    lambda: self._start_modal_exec(prepared)
+                )
+                if not start_result.started:
+                    result = self._result(self._interrupt_output, 130)
+                    result["interrupted_before_start"] = True
+                    return result
+                start = start_result.value
+                assert start is not None
+            else:
+                start = self._start_modal_exec(prepared)
         except Exception as exc:
             return self._error_result(f"{self._unexpected_error_prefix}: {exc}")
 
@@ -123,7 +138,7 @@ class BaseModalExecutionEnvironment(BaseEnvironment):
         }
 
         while True:
-            if is_interrupted():
+            if cancel_on_interrupt and is_interrupted():
                 try:
                     self._cancel_modal_exec(start.handle)
                 except Exception:

@@ -1136,7 +1136,11 @@ def test_tui_verbose_tool_events_omit_details_when_redaction_fails(monkeypatch):
     monkeypatch.setitem(
         server._sessions,
         "redaction-test",
-        {"tool_progress_mode": "verbose", "tool_started_at": {}},
+        {
+            "history_lock": threading.RLock(),
+            "tool_progress_mode": "verbose",
+            "tool_started_at": {},
+        },
     )
 
     server._on_tool_start("redaction-test", "tool-1", "terminal", {"command": "pwd"})
@@ -2382,7 +2386,12 @@ def test_tool_start_ships_full_args(monkeypatch):
     monkeypatch.setitem(
         server._sessions,
         "args-test",
-        {"source": "desktop", "tool_progress_mode": "all", "tool_started_at": {}},
+        {
+            "history_lock": threading.RLock(),
+            "source": "desktop",
+            "tool_progress_mode": "all",
+            "tool_started_at": {},
+        },
     )
 
     server._on_tool_start("args-test", "tool-1", "terminal", {"command": long_command})

@@ -119,7 +119,8 @@ import {
   sessionMatchesStoredId,
   sessionShouldHaveTranscript,
   toBranchMessages,
-  upsertOptimisticSession
+  upsertOptimisticSession,
+  withoutPendingPromptProjection
 } from './utils'
 
 interface SessionActionsOptions {
@@ -295,17 +296,26 @@ function hasPendingPrompt(sessionId: string): boolean {
   )
 }
 
+interface PendingPromptHydration {
+  needsInput: boolean
+  snapshotAccepted: boolean
+}
+
+function pendingPromptHydration(needsInput: boolean, snapshotAccepted = false): PendingPromptHydration {
+  return { needsInput, snapshotAccepted }
+}
+
 function hydratePendingPromptFromResume(
   resumed: SessionResumeResponse,
   baseline: PendingPromptResumeBaseline | null = null
-): boolean {
+): PendingPromptHydration {
   const event = resumed.pending_prompt?.event
   const payload = resumed.pending_prompt?.payload
 
   if (!event || !payload) {
     clearPendingPromptBaseline(baseline)
 
-    return hasPendingPrompt(resumed.session_id)
+    return pendingPromptHydration(hasPendingPrompt(resumed.session_id))
   }
 
   const requestId = typeof payload.request_id === 'string' ? payload.request_id : ''
@@ -323,16 +333,16 @@ function hydratePendingPromptFromResume(
   // A live event or resolution is newer than the resume snapshot. Keep an
   // exact still-pending request, but never resurrect one that disappeared or
   // overwrite a newer request of the same kind.
-  if (stateChangedDuringResume && currentRequestId !== requestId) {
+  if (stateChangedDuringResume && (!requestId || currentRequestId !== requestId)) {
     clearPendingPromptBaseline(baseline, event, currentRequestId)
 
-    return hasPendingPrompt(resumed.session_id)
+    return pendingPromptHydration(hasPendingPrompt(resumed.session_id))
   }
 
   if (currentRequestId && requestId && currentRequestId !== requestId && currentRequestId !== previousRequestId) {
     clearPendingPromptBaseline(baseline, event, currentRequestId)
 
-    return true
+    return pendingPromptHydration(true)
   }
 
   clearPendingPromptBaseline(baseline, event, requestId)
@@ -343,7 +353,7 @@ function hydratePendingPromptFromResume(
     const choices = normalizeChoices(rawChoices)
 
     if (!requestId || !question) {
-      return hasPendingPrompt(resumed.session_id)
+      return pendingPromptHydration(hasPendingPrompt(resumed.session_id))
     }
 
     if (rawChoices != null && choices.length === 0) {
@@ -357,14 +367,14 @@ function hydratePendingPromptFromResume(
       sessionId: resumed.session_id
     })
 
-    return true
+    return pendingPromptHydration(true, true)
   }
 
   if (event === 'mcp.setup.request') {
     const server = typeof payload.server === 'string' ? payload.server : ''
 
     if (!requestId || !server) {
-      return false
+      return pendingPromptHydration(false)
     }
 
     const rawAction = typeof payload.action === 'string' ? payload.action : 'install'
@@ -377,7 +387,7 @@ function hydratePendingPromptFromResume(
       sessionId: resumed.session_id
     })
 
-    return true
+    return pendingPromptHydration(true, true)
   }
 
   if (event === 'approval.request') {
@@ -393,13 +403,13 @@ function hydratePendingPromptFromResume(
       smartDenied: payload.smart_denied === true
     })
 
-    return true
+    return pendingPromptHydration(true, true)
   }
 
   if (event === 'sudo.request' && requestId) {
     setSudoRequest({ requestId, sessionId: resumed.session_id })
 
-    return true
+    return pendingPromptHydration(true, true)
   }
 
   if (event === 'secret.request' && requestId) {
@@ -410,10 +420,10 @@ function hydratePendingPromptFromResume(
       sessionId: resumed.session_id
     })
 
-    return true
+    return pendingPromptHydration(true, true)
   }
 
-  return false
+  return pendingPromptHydration(false)
 }
 
 function hydrateDraftingToolFromResume(resumed: SessionResumeResponse): void {
@@ -1075,11 +1085,12 @@ export function useSessionActions({
               sessionStateByRuntimeIdRef.current.delete(cachedRuntimeId)
               dropSessionState(cachedRuntimeId)
             } else {
-              const pendingPromptNeedsInput = hydratePendingPromptFromResume(activated, promptBaseline)
+              const pendingPromptHydration = hydratePendingPromptFromResume(activated, promptBaseline)
+              const pendingPromptNeedsInput = pendingPromptHydration.needsInput
 
               const activatedForProjection =
-                activated.pending_prompt && !pendingPromptNeedsInput
-                  ? { ...activated, pending_prompt: undefined }
+                activated.pending_prompt && !pendingPromptHydration.snapshotAccepted
+                  ? withoutPendingPromptProjection(activated)
                   : activated
 
               hydrateDraftingToolFromResume(activated)
@@ -1274,10 +1285,13 @@ export function useSessionActions({
           return
         }
 
-        const pendingPromptNeedsInput = hydratePendingPromptFromResume(resumed, promptBaseline)
+        const pendingPromptHydration = hydratePendingPromptFromResume(resumed, promptBaseline)
+        const pendingPromptNeedsInput = pendingPromptHydration.needsInput
 
         const resumedForProjection =
-          resumed.pending_prompt && !pendingPromptNeedsInput ? { ...resumed, pending_prompt: undefined } : resumed
+          resumed.pending_prompt && !pendingPromptHydration.snapshotAccepted
+            ? withoutPendingPromptProjection(resumed)
+            : resumed
 
         hydrateDraftingToolFromResume(resumed)
         hydrateSessionTodosFromResume(resumed)
