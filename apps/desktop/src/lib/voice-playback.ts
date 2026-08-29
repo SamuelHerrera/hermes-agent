@@ -59,6 +59,7 @@ function currentState(
     audioElement,
     messageId: options?.messageId ?? null,
     sequence,
+    sessionId: options?.sessionId ?? null,
     source: options?.source ?? null,
     status
   }
@@ -66,6 +67,7 @@ function currentState(
 
 export interface VoicePlaybackOptions {
   messageId?: string | null
+  sessionId?: string | null
   source: VoicePlaybackSource
 }
 
@@ -85,6 +87,7 @@ export function stopVoicePlayback() {
     audioElement: null,
     messageId: null,
     sequence,
+    sessionId: null,
     source: null,
     status: 'idle'
   })

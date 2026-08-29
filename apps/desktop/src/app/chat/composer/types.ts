@@ -44,6 +44,8 @@ export interface ChatBarProps {
   sessionAccentColor?: string
   queueSessionKey?: string | null
   sessionId?: string | null
+  /** Chat surface scroll key (`main`, `tile:<stored-id>`, ...), used for composer dimming. */
+  threadScrollKey?: string | null
   cwd?: string | null
   onCancel: () => Promise<void> | void
   onUsageSnapshot?: (usage: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => void

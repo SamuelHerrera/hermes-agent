@@ -36,6 +36,7 @@ interface VoiceConversationOptions {
   onTranscribeAudio?: (audio: Blob) => Promise<string>
   pendingResponse: () => PendingVoiceResponse | null
   consumePendingResponse: () => void
+  sessionId?: string | null
   /** Awaited right before the mic is opened. Used to let the wake-word listener
    *  fully release the capture device first, so the two never contend. */
   beforeMicOpen?: () => Promise<void> | void
@@ -55,6 +56,7 @@ export function useVoiceConversation({
   onTranscribeAudio,
   pendingResponse,
   consumePendingResponse,
+  sessionId,
   beforeMicOpen
 }: VoiceConversationOptions) {
   const { t } = useI18n()
@@ -459,7 +461,7 @@ export function useVoiceConversation({
         // this is a safety net for read-aloud-style entries into the loop.
         ensureBargeMonitor()
 
-        const playback = playSpeechText(response.text, { source: 'voice-conversation' })
+        const playback = playSpeechText(response.text, { sessionId: sessionId ?? null, source: 'voice-conversation' })
         // playSpeechText performs its normal cleanup synchronously before
         // returning. Capture the sequence after that internal increment so
         // only a later, external stop suppresses the next listen cycle.
@@ -500,7 +502,7 @@ export function useVoiceConversation({
       ensureBargeMonitor()
 
       void (async () => {
-        const session = await startSpeechStream({ source: 'voice-conversation' })
+        const session = await startSpeechStream({ sessionId: sessionId ?? null, source: 'voice-conversation' })
 
         // The session may resolve after the loop moved on (barge, disable).
         if (responseIdRef.current !== responseId) {

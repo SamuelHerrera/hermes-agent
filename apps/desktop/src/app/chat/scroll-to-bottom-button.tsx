@@ -4,9 +4,10 @@ import { useRef } from 'react'
 import { Codicon } from '@/components/ui/codicon'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
+import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { $approvalRequest } from '@/store/prompts'
-import { $threadJumpButtonVisible, requestScrollToBottom } from '@/store/thread-scroll'
+import { $threadScrollByKey, requestScrollToBottom, threadScrollStateFor } from '@/store/thread-scroll'
 
 /**
  * Floating "jump to bottom" control. Sits centered just above the composer,
@@ -28,9 +29,12 @@ import { $threadJumpButtonVisible, requestScrollToBottom } from '@/store/thread-
  * `data-state`. `idle` (never-shown) stays silent so it can't flash on mount;
  * `in`/`out` only swap once it has actually appeared.
  */
-export function ScrollToBottomButton() {
+export function ScrollToBottomButton({ threadScrollKey = null }: { threadScrollKey?: null | string }) {
   const { t } = useI18n()
-  const visible = useStore($threadJumpButtonVisible)
+  const visible = useStoreSelector(
+    $threadScrollByKey,
+    states => threadScrollStateFor(states, threadScrollKey).jumpButtonVisible
+  )
   const request = useStore($approvalRequest)
   // Scrolled away while an approval is pending → the inline Run/Reject bar is
   // below the fold. Relabel so the user knows the session needs them, not just
@@ -59,7 +63,7 @@ export function ScrollToBottomButton() {
       data-state={state}
       onClick={() => {
         triggerHaptic('selection')
-        requestScrollToBottom()
+        requestScrollToBottom(threadScrollKey)
       }}
       style={{
         bottom: 'calc(var(--composer-measured-height) + 0.625rem)'

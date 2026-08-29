@@ -11,11 +11,13 @@ import { Codicon } from '@/components/ui/codicon'
 import { Loader } from '@/components/ui/loader'
 import { StatusPulse } from '@/components/ui/status-pulse'
 import { useI18n } from '@/i18n'
+import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
-import { $backgroundResume } from '@/store/background-delegation'
+import { backgroundResumeForSession } from '@/store/background-delegation'
 import { sessionCompacting } from '@/store/compaction'
 import { sessionAwaitingInput } from '@/store/prompts'
 import { $turnStartedAt } from '@/store/session'
+import { $subagentsBySession } from '@/store/subagents'
 import { type DraftingTool, sessionDraftingTool } from '@/store/tool-drafting'
 
 // A status line is scaffolding like any other — "Editing" while the model
@@ -149,9 +151,9 @@ export const ResponseLoadingIndicator: FC = () => {
 // chrome as the steer / slash-status lines (SystemMessage above) so it sits in
 // the thread like every other meta line. Idle-only (gated upstream). Null when
 // nothing is parked.
-export const BackgroundResumeNotice: FC = () => {
+export const BackgroundResumeNotice: FC<{ busy?: boolean; sessionId?: null | string }> = ({ busy = false, sessionId = null }) => {
   const { t } = useI18n()
-  const resume = useStore($backgroundResume)
+  const resume = useStoreSelector($subagentsBySession, bySession => backgroundResumeForSession(bySession, sessionId, busy))
 
   if (!resume) {
     return null

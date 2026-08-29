@@ -44,6 +44,7 @@ interface ThreadProps {
   onRestoreToMessage?: (messageId: string, target?: RestoreMessageTarget) => Promise<void> | void
   sessionId?: string | null
   sessionKey?: string | null
+  threadScrollKey?: string | null
 }
 
 // memo'd on purpose, and load-bearing for session-switch cost. ChatView
@@ -64,7 +65,8 @@ export const Thread = memo(function Thread({
   onDismissError,
   onRestoreToMessage,
   sessionId = null,
-  sessionKey
+  sessionKey,
+  threadScrollKey
 }: ThreadProps) {
   const { t } = useI18n()
   const copy = t.assistant.thread
@@ -158,7 +160,10 @@ export const Thread = memo(function Thread({
   // element every render defeats the bail-out and drags the whole transcript
   // into the switch's render pass. It takes no props, so one element is
   // always correct.
-  const loadingIndicator = useMemo(() => <BackgroundResumeNotice />, [])
+  const loadingIndicator = useMemo(
+    () => <BackgroundResumeNotice busy={loading === 'response'} sessionId={sessionId} />,
+    [loading, sessionId]
+  )
 
   return (
     <ThreadEditContext.Provider value={editContext}>
@@ -169,6 +174,7 @@ export const Thread = memo(function Thread({
           emptyPlaceholder={emptyPlaceholder}
           loadingIndicator={loadingIndicator}
           sessionKey={sessionKey}
+          threadScrollKey={threadScrollKey}
         />
         {loading === 'session' && <CenteredThreadSpinner />}
         <ThreadTimeline />
