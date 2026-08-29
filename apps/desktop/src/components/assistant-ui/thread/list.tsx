@@ -19,14 +19,16 @@ import { type GetTargetScrollTop, useStickToBottom } from 'use-stick-to-bottom'
 
 import { useI18n } from '@/i18n'
 import { messagePaintWeight } from '@/lib/render-weight'
+import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import {
-  $threadScrolledUp,
+  $threadScrollByKey,
   onScrollToBottomRequest,
   onThreadEditClose,
   onThreadEditOpen,
   resetThreadScroll,
-  setThreadAtBottom
+  setThreadAtBottom,
+  threadScrollStateFor
 } from '@/store/thread-scroll'
 import { isSecondaryWindow } from '@/store/windows'
 
@@ -121,6 +123,7 @@ interface ThreadMessageListProps {
   emptyPlaceholder?: ReactNode
   loadingIndicator?: ReactNode
   sessionKey?: string | null
+  threadScrollKey?: string | null
 }
 
 // Group each user message with the assistant turn(s) that follow it so the
@@ -309,7 +312,8 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
   components,
   emptyPlaceholder,
   loadingIndicator,
-  sessionKey
+  sessionKey,
+  threadScrollKey
 }) => {
   // TWO signatures, deliberately split. The STRUCTURAL one (ids/roles/count)
   // changes only when messages are added/removed/swapped — it keys the error
@@ -503,11 +507,16 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
     ? 'pt-[calc(var(--titlebar-height)+0.75rem)]'
     : 'pt-[calc(var(--titlebar-height)-0.5rem)]'
 
-  useEffect(() => setThreadAtBottom(isAtBottom), [isAtBottom])
-  useEffect(() => () => resetThreadScroll(), [])
+  useEffect(() => setThreadAtBottom(isAtBottom, threadScrollKey), [isAtBottom, threadScrollKey])
+  useEffect(() => () => resetThreadScroll(threadScrollKey), [threadScrollKey])
 
   // Floating jump button (outside this subtree) → return to the bottom.
-  useEffect(() => onScrollToBottomRequest(() => void scrollToBottom()), [scrollToBottom])
+  useEffect(() => onScrollToBottomRequest(() => void scrollToBottom(), threadScrollKey), [scrollToBottom, threadScrollKey])
+
+  const threadScrolledUp = useStoreSelector(
+    $threadScrollByKey,
+    states => threadScrollStateFor(states, threadScrollKey).scrolledUp
+  )
 
   // Waking from display: hidden (HUD mode hides the main window; OS hide does
   // the same to any window): rAF and ResizeObserver were frozen the whole
@@ -516,7 +525,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
   // leave a scrolled-up reader exactly where they were.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible' && !$threadScrolledUp.get()) {
+      if (document.visibilityState === 'visible' && !threadScrolledUp) {
         requestAnimationFrame(() => void scrollToBottom())
       }
     }
@@ -524,7 +533,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
     document.addEventListener('visibilitychange', onVisible)
 
     return () => document.removeEventListener('visibilitychange', onVisible)
-  }, [scrollToBottom])
+  }, [scrollToBottom, threadScrolledUp])
 
   const endEditHold = useCallback(() => {
     scrollRef.current?.removeAttribute('data-editing')
