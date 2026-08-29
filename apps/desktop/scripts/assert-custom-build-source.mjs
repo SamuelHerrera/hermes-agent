@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 
 import { isMain } from './utils.mjs'
 
-export const CANONICAL_BUILD_BRANCH = 'sam/local-customizations'
+export const CANONICAL_BUILD_BRANCH = 'main'
 
 const DESKTOP_ROOT = resolve(import.meta.dirname, '..')
 const REPO_ROOT = resolve(DESKTOP_ROOT, '..', '..')

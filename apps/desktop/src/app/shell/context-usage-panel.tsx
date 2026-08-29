@@ -80,7 +80,12 @@ export function ContextUsagePanel({
     [breakdown?.categories, copy]
   )
 
-  const segmentTotal = categories.reduce((sum, category) => sum + category.tokens, 0) || contextUsed || 1
+  const categoryTotal = categories.reduce((sum, category) => sum + category.tokens, 0)
+  const usedForBar = contextMax > 0 ? Math.min(contextUsed, contextMax) : contextUsed
+
+  const segmentTotal = categoryTotal && contextMax > 0 && usedForBar > 0
+    ? (categoryTotal * contextMax) / usedForBar
+    : categoryTotal || contextUsed || 1
 
   return (
     <div className="flex w-72 flex-col gap-3 p-3 text-[0.75rem]" data-slot="context-usage-panel">

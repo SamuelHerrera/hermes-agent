@@ -23,6 +23,26 @@ afterEach(() => {
 })
 
 describe('TitlebarControls', () => {
+  it('aligns the sidebar app controls flush with the pane tab row', () => {
+    render(
+      <MemoryRouter>
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByLabelText('App controls').style.top).toBe('var(--titlebar-height, 34px)')
+  })
+
+  it('leaves the aligned sidebar toolbar row visually transparent', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    expect(container.querySelector('[data-sidebar-toolbar-backdrop]')).toBeNull()
+  })
+
   it('surfaces New project in the main titlebar app controls', () => {
     render(
       <MemoryRouter>

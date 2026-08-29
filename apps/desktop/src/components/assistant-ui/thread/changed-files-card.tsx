@@ -14,6 +14,7 @@ import {
 import { DiffCount } from '@/components/ui/diff-count'
 import { FadeScroll } from '@/components/ui/fade-scroll'
 import { FileTypeIcon } from '@/components/ui/file-type-icon'
+import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode, openDesktopPath } from '@/lib/desktop-fs'
 import { displayPath } from '@/lib/display-path'
@@ -104,6 +105,7 @@ function ChangedFileRow({
 }) {
   const { t } = useI18n()
   const actionPath = useMemo(() => resolveActionPath(file.path, viewCwd), [file.path, viewCwd])
+  const actionLabel = displayPath(actionPath)
 
   const openInEditor = useCallback(() => {
     void (async () => {
@@ -124,12 +126,12 @@ function ChangedFileRow({
       actionPath={actionPath}
       onOpenChanges={() => void openReviewForPath(file.path, scopeCwd)}
       onOpenFile={openInEditor}
+      triggerLabel={actionLabel}
       viewCwd={viewCwd}
     >
       <button
         className="row-hover flex shrink-0 items-center gap-2 rounded-md px-1.5 py-1 text-left"
         onClick={openInEditor}
-        title={displayPath(actionPath)}
         type="button"
       >
         <FileTypeIcon className="shrink-0 text-(--ui-text-tertiary)" path={file.path} size="0.875rem" />
@@ -145,12 +147,14 @@ function ChangedFileContextMenu({
   children,
   onOpenChanges,
   onOpenFile,
+  triggerLabel,
   viewCwd
 }: {
   actionPath: string
   children: ReactNode
   onOpenChanges: () => void
   onOpenFile: () => void
+  triggerLabel: string
   viewCwd: null | string
 }) {
   const { t } = useI18n()
@@ -160,7 +164,9 @@ function ChangedFileContextMenu({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <Tip label={triggerLabel} side="top">
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      </Tip>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onOpenFile}>{c.openFile}</ContextMenuItem>
         <ContextMenuItem onSelect={onOpenChanges}>{c.openChanges}</ContextMenuItem>

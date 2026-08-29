@@ -90,3 +90,63 @@ export function formatRendererBoundaryReport(
 
   return stack ? `${head}\n${stack}` : head
 }
+
+const DIAGNOSTIC_REDACTED_KEYS =
+  /^(?:api[-_]?key|authorization|content|cwd|message|password|path|prompt|secret|text|token)$/i
+
+function sanitizeDiagnosticValue(value: unknown, depth = 0): unknown {
+  if (depth >= 4) {
+    return '[truncated]'
+  }
+
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    return value.slice(0, 512)
+  }
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 40).map(item => sanitizeDiagnosticValue(item, depth + 1))
+  }
+
+  if (value && typeof value === 'object') {
+    const next: Record<string, unknown> = {}
+
+    for (const [rawKey, rawValue] of Object.entries(value).slice(0, 40)) {
+      const key = rawKey.slice(0, 64)
+
+      next[key] = DIAGNOSTIC_REDACTED_KEYS.test(key)
+        ? '[redacted]'
+        : sanitizeDiagnosticValue(rawValue, depth + 1)
+    }
+
+    return next
+  }
+
+  return String(value ?? '').slice(0, 512)
+}
+
+/** Persistent UAT lifecycle telemetry from our own renderer. The payload is
+ * renderer-supplied, so clamp and redact it before desktop.log sees it. This is
+ * intentionally narrow: stable ids and state transitions, never prompts,
+ * credentials, filesystem paths, or message content. */
+export function formatRendererDiagnosticEvent(report: unknown): string {
+  const input = report && typeof report === 'object' ? (report as Record<string, unknown>) : {}
+  const asText = (value: unknown, fallback: string): string => String(value ?? fallback).slice(0, 96) || fallback
+
+  const asFiniteNumber = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0
+
+  const payload = {
+    runId: asText(input.runId, 'unknown'),
+    seq: asFiniteNumber(input.seq),
+    elapsedMs: asFiniteNumber(input.elapsedMs),
+    area: asText(input.area, 'unknown'),
+    event: asText(input.event, 'unknown'),
+    details: sanitizeDiagnosticValue(input.details ?? {})
+  }
+
+  return `[renderer uat] ${JSON.stringify(payload).slice(0, 4000)}`
+}

@@ -44,6 +44,7 @@ interface ThreadProps {
   onRestoreToMessage?: (messageId: string, target?: RestoreMessageTarget) => Promise<void> | void
   sessionId?: string | null
   sessionKey?: string | null
+  threadScrollKey?: string | null
 }
 
 // memo'd on purpose, and load-bearing for session-switch cost. ChatView
@@ -64,7 +65,8 @@ export const Thread = memo(function Thread({
   onDismissError,
   onRestoreToMessage,
   sessionId = null,
-  sessionKey
+  sessionKey,
+  threadScrollKey
 }: ThreadProps) {
   const { t } = useI18n()
   const copy = t.assistant.thread
@@ -111,6 +113,8 @@ export const Thread = memo(function Thread({
   // reach the edit composer through ThreadEditContext instead (see above).
   const callbacksRef = useRef({ onBranchInNewChat, onCancel, onDismissError, onRestoreToMessage })
   callbacksRef.current = { onBranchInNewChat, onCancel, onDismissError, onRestoreToMessage }
+  const sessionIdRef = useRef(sessionId)
+  sessionIdRef.current = sessionId
 
   // Only changes identity when one of the three values does, so Thread
   // re-renders for unrelated reasons never re-render the composer.
@@ -125,6 +129,7 @@ export const Thread = memo(function Thread({
     () => ({
       AssistantMessage: () => (
         <AssistantMessage
+          getSessionId={() => sessionIdRef.current}
           onBranchInNewChat={
             hasBranchInNewChat ? messageId => callbacksRef.current.onBranchInNewChat?.(messageId) : undefined
           }
@@ -156,9 +161,12 @@ export const Thread = memo(function Thread({
   // Stable element identity, for the same reason the component map above is
   // memoized: this is a prop of the memo'd ThreadMessageList, so a fresh
   // element every render defeats the bail-out and drags the whole transcript
-  // into the switch's render pass. It takes no props, so one element is
-  // always correct.
-  const loadingIndicator = useMemo(() => <BackgroundResumeNotice />, [])
+  // into the switch's render pass. Scope it to this runtime/busy edge so
+  // parked subagent labels do not appear in unrelated/new-session panes.
+  const loadingIndicator = useMemo(
+    () => <BackgroundResumeNotice busy={loading === 'response'} sessionId={sessionId} />,
+    [loading, sessionId]
+  )
 
   return (
     <ThreadEditContext.Provider value={editContext}>
@@ -169,6 +177,7 @@ export const Thread = memo(function Thread({
           emptyPlaceholder={emptyPlaceholder}
           loadingIndicator={loadingIndicator}
           sessionKey={sessionKey}
+          threadScrollKey={threadScrollKey}
         />
         {loading === 'session' && <CenteredThreadSpinner />}
         <ThreadTimeline />

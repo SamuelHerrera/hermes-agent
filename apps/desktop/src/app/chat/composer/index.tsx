@@ -1,6 +1,15 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import { useStore } from '@nanostores/react'
-import { type ClipboardEvent, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef } from 'react'
+import {
+  type ClipboardEvent,
+  type CSSProperties,
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef
+} from 'react'
 
 import { useHudComposerDrag } from '@/app/hud/composer-drag'
 import { composerFill, composerFloatingStrip, composerSurfaceGlass } from '@/components/chat/composer-dock'
@@ -12,6 +21,7 @@ import { PR_COMMENT_URL_RE } from '@/lib/chat-runtime'
 import { sanitizeComposerInput } from '@/lib/composer-input-sanitize'
 import { DATA_IMAGE_URL_RE } from '@/lib/embedded-images'
 import { triggerHaptic } from '@/lib/haptics'
+import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { interceptsTypedVoiceStop } from '@/lib/voice-stop-word'
 import { sessionCompacting } from '@/store/compaction'
@@ -22,7 +32,7 @@ import { $hudMode } from '@/store/hud'
 import { sessionBlockingPrompt } from '@/store/prompts'
 import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
-import { $threadScrolledUp } from '@/store/thread-scroll'
+import { $threadScrollByKey, threadScrollStateFor } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
 
@@ -90,8 +100,10 @@ export function ChatBar({
   focusKey,
   gateway,
   maxRecordingSeconds = 120,
+  sessionAccentColor,
   queueSessionKey,
   sessionId,
+  threadScrollKey,
   state,
   onCancel,
   onAddUrl,
@@ -153,7 +165,10 @@ export function ChatBar({
   const scope = useComposerScope()
   const attachments = useStore(scope.attachments.$attachments)
   const compacting = useStore(useMemo(() => sessionCompacting(sessionId ?? null), [sessionId]))
-  const scrolledUp = useStore($threadScrolledUp)
+  const scrolledUp = useStoreSelector(
+    $threadScrollByKey,
+    states => threadScrollStateFor(states, threadScrollKey).scrolledUp
+  )
   const autoSpeak = useStore($autoSpeakReplies)
   // The turn is parked on the user (clarify / approval / sudo / secret). Esc must
   // not interrupt it — there's nothing actively running to stop, and stopping
@@ -344,6 +359,26 @@ export function ChatBar({
 
   const hasComposerPayload = hasText || attachments.length > 0
   const canSubmit = busy || hasComposerPayload
+
+  const composerDockStyle = useMemo(() => {
+    const style: CSSProperties & Record<string, string> = {}
+
+    if (poppedOut) {
+      style.bottom = `${popoutPosition.bottom}px`
+      style.right = `${popoutPosition.right}px`
+      // A compact one-sentence width when floating.
+      style['--composer-popout-width'] = `${POPOUT_WIDTH_REM}rem`
+    }
+
+    if (sessionAccentColor) {
+      // Scoped to this dock so every border belonging to this chat (surface,
+      // status stack seam, queue/edit chips) inherits the same project/session
+      // hue without changing global theme inputs elsewhere in the window.
+      style['--dt-composer-ring'] = sessionAccentColor
+    }
+
+    return Object.keys(style).length > 0 ? style : undefined
+  }, [poppedOut, popoutPosition.bottom, popoutPosition.right, sessionAccentColor])
 
   // Steer only makes sense mid-turn, text-only (the gateway can't carry images
   // into a tool result) and never for a slash command (those execute inline).
@@ -1130,16 +1165,7 @@ export function ChatBar({
           // that contains the strips, the status stack, AND the composer, so
           // one measurement covers everything the thread must clear.
           ref={composerDockRef}
-          style={
-            poppedOut
-              ? {
-                  bottom: `${popoutPosition.bottom}px`,
-                  right: `${popoutPosition.right}px`,
-                  // A compact one-sentence width when floating.
-                  ['--composer-popout-width' as string]: `${POPOUT_WIDTH_REM}rem`
-                }
-              : undefined
-          }
+          style={composerDockStyle}
         >
           {/* Aligned to the composer SURFACE, which sits inside the composer's
               5px transparent grab margin — so both strips carry the same inset
@@ -1181,6 +1207,7 @@ export function ChatBar({
               ) : null
             }
             sessionId={statusSessionId}
+            threadScrollKey={threadScrollKey}
           />
           <ComposerPrimitive.Root
             className={cn(
@@ -1287,7 +1314,7 @@ export function ChatBar({
                     All four render nothing until something contributes. */}
                   <ContribSlot area={COMPOSER_AREAS.top} />
                   <VoiceActivity state={voiceActivityState} />
-                  <VoicePlaybackActivity />
+                  <VoicePlaybackActivity sessionId={sessionId ?? null} />
                   {queueEdit && editingQueuedPrompt && (
                     <div className="flex items-center justify-between gap-2 rounded-lg border border-[color-mix(in_srgb,var(--dt-composer-ring)_32%,transparent)] bg-accent/18 px-2 py-1">
                       <div className="min-w-0 text-[0.7rem] text-muted-foreground/88">

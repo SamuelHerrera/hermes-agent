@@ -135,6 +135,7 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
             disabled={disabled}
             percentLeft={percentLeft}
             percentUsed={percentUsed}
+            resetProgress={resetProgress}
             unavailable={unavailable}
             usage={usage}
           />
@@ -173,7 +174,7 @@ function UsageResetIcon({
   return (
     <svg
       aria-hidden="true"
-      className="block size-6 overflow-visible"
+      className="block size-[1.125rem] overflow-visible"
       data-critical={remaining <= 15 || undefined}
       style={CODEX_USAGE_ICON_STYLE}
       viewBox="0 0 24 24"
@@ -236,12 +237,14 @@ function UsageResetIcon({
 function CodexUsagePopoverContent({
   disabled,
   percentLeft,
+  resetProgress,
   percentUsed,
   unavailable,
   usage
 }: {
   disabled: boolean
   percentLeft: number
+  resetProgress: number
   percentUsed: number
   unavailable: boolean
   usage?: CodexUsageData | null
@@ -268,7 +271,7 @@ function CodexUsagePopoverContent({
 
   return (
     <div className="space-y-3 p-3">
-      <UsageHeader tone={percentLeft <= 10 ? 'warn' : 'ok'} value={`${formatPercent(percentLeft)} left`} />
+      <UsageHeader resetProgress={resetProgress} tone={percentLeft <= 10 ? 'warn' : 'ok'} value={`${formatPercent(percentLeft)} left`} />
 
       <div className="space-y-1.5">
         <UsageRow label="Plan" value={usage?.plan || 'Codex'} />
@@ -291,14 +294,14 @@ function CodexUsagePopoverContent({
   )
 }
 
-function UsageHeader({ tone, value }: { tone: 'ok' | 'muted' | 'warn'; value: string }) {
+function UsageHeader({ resetProgress = 0, tone, value }: { resetProgress?: number; tone: 'ok' | 'muted' | 'warn'; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <div className="flex items-center gap-1.5 font-medium text-(--ui-text-primary)">
         <UsageResetIcon
           disabled={false}
           percentLeft={tone === 'muted' ? 0 : Number.parseInt(value, 10)}
-          resetProgress={0}
+          resetProgress={resetProgress}
           unavailable={tone === 'muted'}
         />
         Codex usage

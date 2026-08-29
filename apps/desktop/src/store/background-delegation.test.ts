@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { $backgroundResume } from './background-delegation'
+import { $backgroundResume, backgroundResumeForSession } from './background-delegation'
 import { $activeSessionId, $busy } from './session'
 import { $subagentsBySession, type SubagentProgress, type SubagentStreamEntry } from './subagents'
 
@@ -61,5 +61,12 @@ describe('$backgroundResume', () => {
     $subagentsBySession.set({ s1: [sub({ id: 'a' })] })
     $activeSessionId.set(null)
     expect($backgroundResume.get()).toBeNull()
+  })
+
+  it('can resolve parked work for a non-active visible pane without leaking other sessions', () => {
+    const bySession = { s1: [sub({ id: 'a' })], s2: [sub({ id: 'b', stream: [stream('Other work')] })] }
+
+    expect(backgroundResumeForSession(bySession, 's2', false)?.activity).toBe('Other work')
+    expect(backgroundResumeForSession(bySession, 's3', false)).toBeNull()
   })
 })

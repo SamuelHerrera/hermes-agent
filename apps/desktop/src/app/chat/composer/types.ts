@@ -40,8 +40,12 @@ export interface ChatBarProps {
   state: ChatBarState
   currentUsage: UsageStats
   gateway?: HermesGateway | null
+  /** Project/session color resolved by the parent surface; tints composer borders. */
+  sessionAccentColor?: string
   queueSessionKey?: string | null
   sessionId?: string | null
+  /** Chat surface scroll key (`main`, `tile:<stored-id>`, ...), used for composer dimming. */
+  threadScrollKey?: string | null
   cwd?: string | null
   onCancel: () => Promise<void> | void
   onUsageSnapshot?: (usage: Pick<UsageStats, 'context_max' | 'context_percent' | 'context_used'>) => void

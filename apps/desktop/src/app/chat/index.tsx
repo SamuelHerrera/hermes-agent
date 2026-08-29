@@ -42,6 +42,7 @@ import {
   setCurrentUsage,
   shouldMigrateComposerScope
 } from '@/store/session'
+import { $sessionColorById, sessionColorFor } from '@/store/session-color'
 import { $sessionStates, publishSessionState } from '@/store/session-states'
 import { isAuxiliaryWindow, isWatchWindow } from '@/store/windows'
 import type { ModelOptionsResponse, UsageStats } from '@/types/hermes'
@@ -347,8 +348,20 @@ export const ChatView = memo(function ChatView({
   const lastVisibleIsUser = useStore(view.$lastVisibleIsUser)
   const selectedSessionId = useStore(view.$storedId)
   const sessions = useStore($sessions)
+  const sessionColorById = useStore($sessionColorById)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
+
+  const selectedSession = useMemo(
+    () => (selectedSessionId ? sessions.find(session => sessionMatchesStoredId(session, selectedSessionId)) : null),
+    [selectedSessionId, sessions]
+  )
+
+  const sessionAccentColor = selectedSession
+    ? sessionColorFor(selectedSession)
+    : selectedSessionId
+      ? sessionColorById[selectedSessionId]
+      : undefined
 
   // Durable composer/queue scope (lineage root) so auto-compression tip rotation
   // does not wipe an in-progress draft or orphan /queue entries. For the
@@ -456,6 +469,7 @@ export const ChatView = memo(function ChatView({
   // subagent run driven elsewhere — no composer, transcript is read-only.
   const showChatBar = !loadingSession && !resumeExhausted && !isWatchWindow()
   const threadKey = selectedSessionId || activeSessionId || (isRoutedSessionView ? location.pathname : 'new')
+  const threadScrollKey = composerScope.target
 
   const modelOptionsQuery = useQuery<ModelOptionsResponse>({
     queryKey: modelOptionsQueryKey(activeGatewayProfile, activeSessionId),
@@ -593,6 +607,7 @@ export const ChatView = memo(function ChatView({
             onRestoreToMessage={onRestoreToMessage}
             sessionId={activeSessionId}
             sessionKey={threadKey}
+            threadScrollKey={threadScrollKey}
           />
           {resumeExhausted && routedSessionId && (
             <div className="absolute inset-0 z-10 grid place-items-center bg-(--ui-chat-surface-background) px-8 py-10">
@@ -609,7 +624,7 @@ export const ChatView = memo(function ChatView({
               </ErrorState>
             </div>
           )}
-          {showChatBar && <ScrollToBottomButton />}
+          {showChatBar && <ScrollToBottomButton threadScrollKey={threadScrollKey} />}
           {/* Vibe hearts rise from the composer only when no pet is out (else
               they play on the pet). Fired by the core `reaction` event. */}
           {!petPresent && (
@@ -661,8 +676,10 @@ export const ChatView = memo(function ChatView({
               onTranscribeAudio={onTranscribeAudio}
               onUsageSnapshot={publishContextUsage}
               queueSessionKey={queueSessionKey}
+              sessionAccentColor={sessionAccentColor}
               sessionId={activeSessionId}
               state={chatBarState}
+              threadScrollKey={threadScrollKey}
             />
           </Suspense>
         )}

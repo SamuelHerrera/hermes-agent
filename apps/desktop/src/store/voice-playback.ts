@@ -7,6 +7,7 @@ export interface VoicePlaybackState {
   audioElement: HTMLAudioElement | null
   messageId: string | null
   sequence: number
+  sessionId: string | null
   source: VoicePlaybackSource | null
   status: VoicePlaybackStatus
 }
@@ -15,6 +16,7 @@ export const $voicePlayback = atom<VoicePlaybackState>({
   audioElement: null,
   messageId: null,
   sequence: 0,
+  sessionId: null,
   source: null,
   status: 'idle'
 })

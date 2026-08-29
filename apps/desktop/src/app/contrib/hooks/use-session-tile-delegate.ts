@@ -142,7 +142,7 @@ export function useSessionTileDelegate({
         hydrateSessionTodosFromResume({ ...resumed, running: resumedRunning })
 
         if (recovery.applied) {
-          hydrateSessionTodosFromMessages(runtimeId, recovery.messages)
+          hydrateSessionTodosFromMessages(runtimeId, recovery.messages, { allowActive: resumedRunning })
         }
 
         updateSessionState(

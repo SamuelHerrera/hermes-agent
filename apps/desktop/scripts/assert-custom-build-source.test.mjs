@@ -6,12 +6,12 @@ import { test } from 'vitest'
 import { validateBuildSource } from './assert-custom-build-source.mjs'
 
 const canonical = {
-  branch: 'sam/local-customizations',
+  branch: 'main',
   dirty: false,
-  expectedBranch: 'sam/local-customizations',
+  expectedBranch: 'main',
   head: 'a'.repeat(40),
   upstreamHead: 'a'.repeat(40),
-  upstreamRef: 'samuel/sam/local-customizations'
+  upstreamRef: 'samuel/main'
 }
 
 test('accepts a clean canonical branch matching its remote tracking tip', () => {
@@ -20,8 +20,8 @@ test('accepts a clean canonical branch matching its remote tracking tip', () => 
 
 test('rejects packaging from a noncanonical branch', () => {
   assert.throws(
-    () => validateBuildSource({ ...canonical, branch: 'main' }),
-    /must be built from sam\/local-customizations/
+    () => validateBuildSource({ ...canonical, branch: 'feature' }),
+    /must be built from main/
   )
 })
 
@@ -39,7 +39,7 @@ test('rejects a canonical branch without a remote tracking ref', () => {
 test('rejects a canonical branch whose HEAD does not match its remote tip', () => {
   assert.throws(
     () => validateBuildSource({ ...canonical, upstreamHead: 'b'.repeat(40) }),
-    /must exactly match samuel\/sam\/local-customizations/
+    /must exactly match samuel\/main/
   )
 })
 

@@ -50,7 +50,7 @@ export function closeWorkspaceTab(loadSessionIntoWorkspace?: (storedSessionId: s
     return hideLoneTreeTab('workspace')
   }
 
-  requestEmptyWorkspace()
+  requestEmptyWorkspace('workspace.close-tab')
   hideLoneTreeTab('workspace')
 
   return true

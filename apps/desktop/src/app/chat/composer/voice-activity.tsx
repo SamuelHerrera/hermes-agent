@@ -203,11 +203,11 @@ export function VoiceActivity({ state }: { state: VoiceActivityState }) {
   )
 }
 
-export function VoicePlaybackActivity() {
+export function VoicePlaybackActivity({ sessionId = null }: { sessionId?: null | string }) {
   const { t } = useI18n()
   const playback = useStore($voicePlayback)
 
-  if (playback.status === 'idle') {
+  if (playback.status === 'idle' || playback.sessionId !== sessionId) {
     return null
   }
 

@@ -266,6 +266,15 @@ declare global {
         message: string
         componentStack: string
       }) => void
+      /** Always-on, privacy-clamped UAT lifecycle event persisted to desktop.log. */
+      reportRendererDiagnostic?: (report: {
+        area: string
+        details?: Record<string, unknown>
+        elapsedMs: number
+        event: string
+        runId: string
+        seq: number
+      }) => void
       readDir: (path: string) => Promise<HermesReadDirResult>
       gitRoot?: (path: string) => Promise<string | null>
       // Reveal a path in the OS file manager (Finder / Explorer).

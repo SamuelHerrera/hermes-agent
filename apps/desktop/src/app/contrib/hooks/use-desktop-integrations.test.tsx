@@ -216,6 +216,20 @@ describe('useDesktopIntegrations', () => {
       expect($selectedStoredSessionId.get()).toBe('remembered-session')
       expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/remembered-session')
     })
+
+    it('restores while the initial session list is only partially populated', () => {
+      window.localStorage.setItem('hermes.desktop.lastRoute.profile.default', '/remembered-session')
+      window.localStorage.setItem('hermes.desktop.lastSessionId.profile.default', 'remembered-session')
+
+      render({
+        profileReady: true,
+        sessions: [session({ id: 'already-rehydrated', profile: 'default' })]
+      })
+
+      expect(navigate).toHaveBeenCalledWith('/remembered-session', { replace: true })
+      expect($selectedStoredSessionId.get()).toBe('remembered-session')
+      expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/remembered-session')
+    })
   })
 
   describe('ownership validation', () => {

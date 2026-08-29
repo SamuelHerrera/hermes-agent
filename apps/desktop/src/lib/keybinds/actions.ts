@@ -76,7 +76,11 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   { id: 'profile.create', category: 'profiles', defaults: [] },
 
   // ── Session ──────────────────────────────────────────────────────────────
-  { id: 'session.new', category: 'session', defaults: ['mod+n', 'shift+n'] },
+  // A fresh session stays deliberately unbound: Shift+N hijacks ordinary
+  // uppercase typing whenever focus is briefly outside an editor (notably
+  // during restore), while Cmd/Ctrl+N is easy to fire accidentally during
+  // IME/app activation. The sidebar button and Cmd/Ctrl+T remain explicit.
+  { id: 'session.new', category: 'session', defaults: [] },
   { id: 'session.newTab', category: 'session', defaults: ['mod+t'] },
   { id: 'session.newWindow', category: 'session', defaults: ['mod+shift+n'] },
   // ⌃Tab / ⌃⇧Tab — the universal tab-cycle chord. Literally Control, not Cmd

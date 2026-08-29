@@ -1,6 +1,7 @@
 import { type MutableRefObject, useEffect, useRef } from 'react'
 
 import { isNewChatRoute } from '@/app/routes'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { setResumeExhaustedSessionId } from '@/store/session'
 import { markSelectionRestore } from '@/store/session-states'
 
@@ -118,6 +119,21 @@ export function useRouteResume({
     seenGatewayStateRef.current = true
     wasGatewayOpenRef.current = gatewayOpen
 
+    logUatEvent('restore', 'route-resume.evaluated', {
+      activeSessionId,
+      bootResume: bootResumeRef.current,
+      creatingSession: creatingSessionRef.current,
+      currentView,
+      freshDraftReady,
+      gatewayBecameOpen,
+      gatewayOpen,
+      isNewChatRoute: isNewChatRoute(locationPathname),
+      pathnameChanged,
+      rememberedSessionRestorePending,
+      routedSessionId,
+      selectedStoredSessionId
+    })
+
     if (currentView !== 'chat' || !gatewayOpen) {
       return
     }
@@ -166,6 +182,13 @@ export function useRouteResume({
           markSelectionRestore()
         }
 
+        logUatEvent('restore', 'route-resume.dispatched', {
+          bootResume: bootResumeRef.current,
+          gatewayBecameOpen,
+          pathnameChanged,
+          routedSessionId,
+          stuckOnRoutedSession
+        })
         bootResumeRef.current = false
         void resumeSession(routedSessionId, true)
       }
@@ -178,6 +201,8 @@ export function useRouteResume({
       // integration effect replaces it with the remembered session route. Do not
       // let the ordinary `/` handler clear selection/messages and paint a fresh
       // "New session" draft in that gap.
+      logUatEvent('restore', 'route-new-chat.suppressed', { reason: 'remembered-restore-pending' })
+
       return
     }
 
@@ -189,6 +214,11 @@ export function useRouteResume({
     ) {
       // A fresh draft is a real navigation — any later resume homes normally.
       bootResumeRef.current = false
+      logUatEvent('restore', 'route-new-chat.fresh-draft-dispatched', {
+        activeSessionId,
+        freshDraftReady,
+        selectedStoredSessionId
+      })
       startFreshSessionDraft(true)
     }
   }, [
@@ -274,12 +304,19 @@ export function useRouteResume({
       // spinning the loader forever — resumeSession (manual Retry / reconnect /
       // reselect) clears this latch and resets the counter for a fresh cycle.
       setResumeExhaustedSessionId(routedSessionId)
+      logUatEvent('restore', 'route-resume.retry-exhausted', { routedSessionId })
 
       return
     }
 
     const attempt = retryAttemptRef.current
     const sessionId = routedSessionId as string
+
+    logUatEvent('restore', 'route-resume.retry-scheduled', {
+      attempt: attempt + 1,
+      delayMs: resumeRetryDelayMs(attempt),
+      routedSessionId: sessionId
+    })
 
     const timer = setTimeout(() => {
       // Re-check liveness at fire time: a resume may have landed while we waited.
@@ -299,6 +336,10 @@ export function useRouteResume({
       // having fired. A flapping backend could then hit MAX in a couple of
       // re-renders with far fewer than MAX real attempts. (Point 3)
       retryAttemptRef.current += 1
+      logUatEvent('restore', 'route-resume.retry-dispatched', {
+        attempt: retryAttemptRef.current,
+        routedSessionId: sessionId
+      })
       void resumeSession(sessionId, true)
     }, resumeRetryDelayMs(attempt))
 

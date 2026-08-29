@@ -266,8 +266,10 @@ function SidebarSessionRowImpl({
   // The same resolved state the row's dot paints, so the arc and the dot cannot
   // contradict each other. A selector, not a plain useStore: the map is rebuilt
   // whenever any session's status changes, but a row only repaints on its own.
+  const subagentSession = isSubagentSession(session)
   const dotState = useStoreSelector($sessionDotStateById, states => states[session.id] ?? 'idle')
   const liveTurn = hasLiveTurn(dotState)
+  const projectDotStoredSessionId = subagentSession ? null : session.id
 
   // Card header line: the workspace this belongs to — the project when it
   // resolves (same function the session color reads, so name and tint agree;
@@ -328,7 +330,7 @@ function SidebarSessionRowImpl({
       className={cn('relative z-2 flex shrink-0 items-center justify-end gap-1', card && hasBranchChildren && 'mr-7')}
       data-row-actions
     >
-      {session.archived || isSubagentSession(session) ? null : <SessionStatusIcon storedSessionId={session.id} />}
+      {session.archived || subagentSession ? null : <SessionStatusIcon storedSessionId={session.id} />}
       {!session.archived ? (
         <Button
           aria-label={r.archive}
@@ -493,13 +495,13 @@ function SidebarSessionRowImpl({
                     branchStem={branchStem}
                     className="transition-opacity group-hover/handle:opacity-0 group-focus-within/handle:opacity-0"
                     session={session}
-                    storedSessionId={session.id}
+                    storedSessionId={projectDotStoredSessionId}
                   />
                 )}
               </SidebarRowGrab>
             ) : (
               <SidebarRowLead className="overflow-hidden">
-                {lead ?? <SessionProjectDot branchStem={branchStem} session={session} storedSessionId={session.id} />}
+                {lead ?? <SessionProjectDot branchStem={branchStem} session={session} storedSessionId={projectDotStoredSessionId} />}
               </SidebarRowLead>
             )
 

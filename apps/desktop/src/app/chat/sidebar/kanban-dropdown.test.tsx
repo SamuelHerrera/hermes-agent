@@ -145,6 +145,15 @@ afterEach(() => {
 })
 
 describe('Sidebar project chrome', () => {
+  it('lets the scrolling content rail occupy the full sidebar height', () => {
+    const { container } = renderSidebar()
+    const sidebar = container.querySelector<HTMLElement>('[data-slot="sidebar"]')
+    const content = container.querySelector<HTMLElement>('[data-slot="sidebar-content"]')
+
+    expect(container.querySelector('[data-sidebar-toolbar-spacer]')).toBeNull()
+    expect(sidebar?.firstElementChild).toBe(content)
+  })
+
   it('renders the project overview directly without a redundant Projects header', () => {
     $projectScope.set(ALL_PROJECTS)
     $projectTreeLoading.set(false)

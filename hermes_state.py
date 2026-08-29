@@ -5978,6 +5978,46 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
 
         self._execute_write(_do)
 
+    def get_session_turn_lease_holder(self, session_id: str) -> Optional[dict]:
+        """Return the active cross-process turn lease for ``session_id``.
+
+        Diagnostic/admission helper for crash recovery: a disconnected desktop
+        client can leave an interrupted-turn marker while the original backend
+        thread is still running. In that case auto-continue must not launch a
+        duplicate turn; the live holder owns the eventual transcript flush and
+        marker retirement.
+
+        Expired leases and structured local holders whose PID is gone are not
+        reported as active. Reclamation still happens on the normal acquire
+        path, so this read-only helper never steals or releases a lease.
+        """
+        if not session_id:
+            return None
+        now = time.time()
+        with self._read_ctx() as conn:
+            if conn is None:
+                return None
+            conversation_id = self._session_turn_lease_key_on_conn(conn, session_id)
+            row = conn.execute(
+                "SELECT conversation_id, holder, acquired_at, expires_at "
+                "FROM session_turn_leases WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        holder = row["holder"] if isinstance(row, sqlite3.Row) else row[1]
+        expires_at = row["expires_at"] if isinstance(row, sqlite3.Row) else row[3]
+        if float(expires_at) <= now:
+            return None
+        if _compression_lock_holder_process_is_dead(str(holder or "")):
+            return None
+        return dict(row) if isinstance(row, sqlite3.Row) else {
+            "conversation_id": row[0],
+            "holder": holder,
+            "acquired_at": row[2],
+            "expires_at": expires_at,
+        }
+
     def get_compression_lock_holder(self, session_id: str) -> Optional[str]:
         """Return the current (non-expired) holder for ``session_id``, or None.
 

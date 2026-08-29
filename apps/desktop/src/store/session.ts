@@ -6,6 +6,7 @@ import type { ContextSuggestion } from '@/app/types'
 import type { HermesConnection } from '@/global'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { persistBoolean, persistString, storedBoolean, storedString } from '@/lib/storage'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { syncCronModelImpactConnection } from '@/store/cron-model-impact-scope'
 import type { SessionInfo, UsageStats } from '@/types/hermes'
 
@@ -807,11 +808,21 @@ export const markSessionRead = (sessionId: string | null | undefined) => {
 }
 
 export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
+  const previous = $selectedStoredSessionId.get()
+
   updateAtom($selectedStoredSessionId, next)
+  logUatEvent('restore', 'selected-session.set', {
+    next: $selectedStoredSessionId.get(),
+    previous
+  })
   // Opening a session clears its unread state — the user is now looking at it.
   markSessionRead($selectedStoredSessionId.get())
 
   if ($selectedStoredSessionId.get()) {
+    if ($workspaceEmptyPlaceholder.get()) {
+      logUatEvent('restore', 'workspace-placeholder.cleared', { reason: 'session-selected' })
+    }
+
     $workspaceEmptyPlaceholder.set(false)
   }
 }
@@ -819,12 +830,23 @@ export const setSelectedStoredSessionId = (next: Updater<string | null>) => {
 export function clearRememberedSessionRestorePending(): void {
   if ($rememberedSessionRestorePending.get()) {
     $rememberedSessionRestorePending.set(false)
+    logUatEvent('restore', 'remembered-session.pending-cleared', { reason: 'store-clear' })
   }
 }
 
 export const setMessages = (next: Updater<ChatMessage[]>) => updateAtom($messages, next)
 export const setFreshDraftReady = (next: Updater<boolean>) => updateAtom($freshDraftReady, next)
-export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => updateAtom($workspaceEmptyPlaceholder, next)
+
+export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => {
+  const previous = $workspaceEmptyPlaceholder.get()
+
+  updateAtom($workspaceEmptyPlaceholder, next)
+  logUatEvent('restore', 'workspace-placeholder.set', {
+    next: $workspaceEmptyPlaceholder.get(),
+    previous
+  })
+}
+
 export const setResumeFailedSessionId = (next: Updater<string | null>) => updateAtom($resumeFailedSessionId, next)
 export const setResumeExhaustedSessionId = (next: Updater<string | null>) => updateAtom($resumeExhaustedSessionId, next)
 export const setBusy = (next: Updater<boolean>) => updateAtom($busy, next)

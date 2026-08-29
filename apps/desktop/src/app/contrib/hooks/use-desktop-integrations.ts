@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { openSession } from '@/app/open-session'
 import { sessionTitle } from '@/lib/chat-runtime'
 import { storedSessionIdForNotification } from '@/lib/session-ids'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { respondToApprovalAction } from '@/store/native-notifications'
 import { openFolderAsProject } from '@/store/projects'
 import {
@@ -11,6 +12,7 @@ import {
   getRememberedRoute,
   getRememberedSessionId,
   sessionBelongsToProfile,
+  sessionMatchesStoredId,
   setRememberedRoute,
   setRememberedSessionId,
   setRememberedSessionTitle,
@@ -79,14 +81,18 @@ export function useDesktopIntegrations({
 
   const restoredRef = useRef(false)
 
-  const primeSessionRestore = (storedSessionId: string) => {
-    // Cold-start restore is re-attaching already-open UI, not a new navigation.
-    // Publish the selected id before gateway resume so chrome can paint the
-    // remembered title immediately, but skip selection homing so a persisted
-    // focused tile/panel remains fronted during boot.
-    markSelectionRestore()
-    setSelectedStoredSessionId(storedSessionId)
-  }
+  const primeSessionRestore = useCallback(
+    (storedSessionId: string) => {
+      // Cold-start restore is re-attaching already-open UI, not a new navigation.
+      // Publish the selected id before gateway resume so chrome can paint the
+      // remembered title immediately, but skip selection homing so a persisted
+      // focused tile/panel remains fronted during boot.
+      markSelectionRestore()
+      setSelectedStoredSessionId(storedSessionId)
+      logUatEvent('restore', 'remembered-session.primed', { activeProfile, storedSessionId })
+    },
+    [activeProfile]
+  )
 
   // Wait until boot has adopted the primary profile, then restore that profile's
   // navigation exactly once. The same effect owns subsequent writes so the
@@ -94,6 +100,16 @@ export function useDesktopIntegrations({
   // This ref is a one-time lifecycle latch, not a mirror of reactive atom state.
   // eslint-disable-next-line no-restricted-syntax
   useEffect(() => {
+    logUatEvent('restore', 'desktop-integrations.restore-evaluated', {
+      activeProfile,
+      isHudWindow: isHudWindow(),
+      isNewChatRoute: locationPathname === NEW_CHAT_ROUTE,
+      profileReady,
+      restored: restoredRef.current,
+      routedSessionId,
+      sessionCount: sessions.length
+    })
+
     if (!profileReady || isHudWindow()) {
       return
     }
@@ -105,18 +121,42 @@ export function useDesktopIntegrations({
         const route = getRememberedRoute(activeProfile)
         const routeSession = route ? routeSessionId(route) : null
         const last = getRememberedSessionId(activeProfile)
+        const routeSessionKnown = routeSession
+          ? sessions.some(session => sessionMatchesStoredId(session, routeSession))
+          : false
+
+        const lastSessionKnown = last ? sessions.some(session => sessionMatchesStoredId(session, last)) : false
+
+        logUatEvent('restore', 'remembered-session.read', {
+          activeProfile,
+          lastSessionId: last,
+          lastSessionKnown,
+          routeKind: routeSession ? 'session' : route === NEW_CHAT_ROUTE ? 'new-chat' : route ? 'page' : 'none',
+          routeSessionId: routeSession,
+          routeSessionKnown
+        })
 
         const restorableNonSessionRoute =
           !!route && route !== NEW_CHAT_ROUTE && !routeSession && !isOverlayView(appViewForPath(route))
 
-        // Boot adoption can publish renderer.ready before its async session
-        // refresh completes. Restore the remembered destination immediately so
-        // the shell does not paint a transient New Session tab on every restart;
-        // stale routed sessions are still cleared by the exhausted-resume guard
-        // below once the real resume path proves they are gone.
-        if (sessions.length === 0 && !restorableNonSessionRoute && (routeSession || last)) {
+        // Boot adoption can publish renderer.ready while session rehydration is
+        // still populating the list. A non-empty list is NOT authoritative: it
+        // may contain only the first couple of reattached runtimes, as observed
+        // in the restart trace that painted New Session six seconds after the
+        // correct tabs appeared. Restore an unknown remembered id optimistically;
+        // an explicitly known wrong-profile row still fails ownership below, and
+        // a genuinely stale id is cleared by the exhausted-resume guard once the
+        // real resume path proves it is gone.
+        const unresolvedRememberedSession =
+          routeSession && !routeSessionKnown ? routeSession : !routeSession && last && !lastSessionKnown ? last : null
+
+        if (!restorableNonSessionRoute && unresolvedRememberedSession) {
           restoredRef.current = true
-          primeSessionRestore(routeSession ?? last!)
+          primeSessionRestore(unresolvedRememberedSession)
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: 'session-not-yet-listed',
+            storedSessionId: unresolvedRememberedSession
+          })
           navigate(routeSession ? route! : sessionRoute(last!), { replace: true })
 
           return
@@ -136,6 +176,10 @@ export function useDesktopIntegrations({
             clearRememberedSessionRestorePending()
           }
 
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: routeSession ? 'validated-session-route' : 'validated-page-route',
+            storedSessionId: routeSession
+          })
           navigate(route, { replace: true })
 
           return
@@ -145,10 +189,18 @@ export function useDesktopIntegrations({
         // clear the stale entry so the next cold start won't re-try it.
         if (routeSession) {
           setRememberedRoute(null, activeProfile)
+          logUatEvent('restore', 'remembered-session.route-cleared', {
+            reason: 'unvalidated-session-route',
+            storedSessionId: routeSession
+          })
         }
 
         if (last && sessionBelongsToProfile(sessions, last, activeProfile)) {
           primeSessionRestore(last)
+          logUatEvent('restore', 'remembered-session.navigate', {
+            reason: 'validated-last-session',
+            storedSessionId: last
+          })
           navigate(sessionRoute(last), { replace: true })
 
           return
@@ -156,12 +208,18 @@ export function useDesktopIntegrations({
 
         if (last) {
           setRememberedSessionId(null, activeProfile)
+          logUatEvent('restore', 'remembered-session.id-cleared', {
+            reason: 'not-owned-or-missing',
+            storedSessionId: last
+          })
         }
 
         clearRememberedSessionRestorePending()
+        logUatEvent('restore', 'remembered-session.pending-cleared', { reason: 'nothing-restorable' })
       } else {
         restoredRef.current = true
         clearRememberedSessionRestorePending()
+        logUatEvent('restore', 'remembered-session.pending-cleared', { reason: 'explicit-non-default-route' })
       }
     }
 
@@ -178,7 +236,7 @@ export function useDesktopIntegrations({
     } else if (!routedSessionId && !isOverlayView(appViewForPath(locationPathname))) {
       setRememberedRoute(locationPathname, activeProfile)
     }
-  }, [activeProfile, locationPathname, navigate, profileReady, routedSessionId, sessions])
+  }, [activeProfile, locationPathname, navigate, primeSessionRestore, profileReady, routedSessionId, sessions])
 
   useEffect(() => {
     if (!profileReady || !resumeExhaustedSessionId) {

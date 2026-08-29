@@ -50,6 +50,23 @@ def test_breakdown_includes_major_categories():
     assert data["estimated_total"] > 0
 
 
+def test_breakdown_scales_categories_to_measured_context_used():
+    """Provider prompt counts and rough category estimates can differ; the
+    visible category rows should add up to the headline usage instead of
+    exceeding it and contradicting the percent-full summary."""
+    agent, parts = _make_agent(stable="system prompt", last_prompt_tokens=50_000)
+
+    with (
+        patch("agent.system_prompt.build_system_prompt_parts", return_value=parts),
+        patch("agent.model_metadata.estimate_messages_tokens_rough", return_value=150_000),
+    ):
+        data = compute_session_context_breakdown(agent, [{"role": "user", "content": "long"}])
+
+    assert data["context_used"] == 50_000
+    assert data["estimated_total"] > data["context_used"]
+    assert sum(category["tokens"] for category in data["categories"]) == data["context_used"]
+
+
 
 # ── /context renderers (pure functions over the payload) ────────────────────
 

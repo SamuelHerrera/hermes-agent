@@ -12,8 +12,8 @@ time is positive proof the turn never finished. Contract pinned here:
   is a concluded turn — its terminal frame + retained snapshot own recovery);
 * ``_maybe_schedule_auto_continue`` re-submits a fresh interrupted prompt as
   a continuation note (display_kind ``auto_continue``), refuses stale /
-  disabled / crash-looping / already-running cases, and bounds attempts via
-  the marker's attempt counter.
+  disabled / crash-looping / already-running / still-leased cases, and bounds
+  attempts via the marker's attempt counter.
 """
 
 from __future__ import annotations
@@ -338,6 +338,41 @@ def test_running_session_wins_over_continuation(emits, schedule_env, marker_home
     # Nothing left behind for the racing user turn to inherit.
     assert "_auto_continue_attempt" not in session
     assert "_auto_continue_prompt" not in session
+
+
+def test_live_durable_turn_lease_suppresses_auto_continue(
+    emits, schedule_env, marker_home, monkeypatch
+):
+    """A WS disconnect can leave the crash marker while the backend turn is
+    still alive. Do not start a duplicate auto-continue that will wait 30m and
+    surface session_turn_lease_timeout.
+    """
+    import contextlib
+
+    record_turn_start(marker_home, "session-key", "prompt")
+
+    class _DB:
+        def get_session_turn_lease_holder(self, session_id):
+            assert session_id == "session-key"
+            return {
+                "conversation_id": "session-key",
+                "holder": "pid=123:turn=session-key",
+            }
+
+    @contextlib.contextmanager
+    def _db(_session):
+        yield _DB()
+
+    monkeypatch.setattr(server, "_session_db", _db)
+
+    session = _session()
+    result = server._maybe_schedule_auto_continue("sid", session, "session-key")
+
+    assert result is None
+    assert not schedule_env
+    assert "_auto_continue_scheduled" not in session
+    # Keep the marker: the real live turn still owns its conclusion/recovery.
+    assert read_turn_marker(marker_home, "session-key") is not None
 
 
 def test_double_schedule_is_guarded(emits, schedule_env, marker_home):

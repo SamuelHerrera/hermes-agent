@@ -580,7 +580,8 @@ def _(rid, params: dict) -> dict:
 
             _schedule_agent_build(sid)
             _schedule_session_cap_enforcement()  # trim detached idle sessions over the cap
-            auto_continue = _maybe_schedule_auto_continue(sid, record, target)
+            live_detached_turn = _session_has_live_detached_turn(record)
+            auto_continue = None if live_detached_turn else _maybe_schedule_auto_continue(sid, record, target)
 
             messages = [] if omit_messages else _history_to_messages(display_history)
             payload = {
@@ -596,10 +597,10 @@ def _(rid, params: dict) -> dict:
                     profile=profile,
                 ),
                 "inflight": None,
-                "running": False,
+                "running": live_detached_turn,
                 "session_key": target,
                 "started_at": record["created_at"],
-                "status": "idle",
+                "status": "working" if live_detached_turn else "idle",
             }
             if auto_continue is not None:
                 payload["auto_continue"] = auto_continue
@@ -790,9 +791,10 @@ def _(rid, params: dict) -> dict:
         if owns_db and db is not None:
             with contextlib.suppress(Exception):
                 db.close()
+    live_detached_turn = _session_has_live_detached_turn(session) if session else False
     auto_continue = (
-        _maybe_schedule_auto_continue(sid, session, target) if session else None
-    )
+        None if live_detached_turn else _maybe_schedule_auto_continue(sid, session, target)
+    ) if session else None
     payload = {
         "session_id": sid,
         "resumed": target,
@@ -801,10 +803,10 @@ def _(rid, params: dict) -> dict:
         "messages_omitted": omit_messages,
         "info": _session_info(agent, session),
         "inflight": None,
-        "running": False,
+        "running": live_detached_turn,
         "session_key": target,
         "started_at": float(session.get("created_at") or time.time()),
-        "status": "idle",
+        "status": "working" if live_detached_turn else "idle",
     }
     if auto_continue is not None:
         payload["auto_continue"] = auto_continue

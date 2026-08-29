@@ -14,6 +14,26 @@ export interface BackgroundResume {
 
 const RUNNING = (s: SubagentProgress) => s.status === 'running' || s.status === 'queued'
 
+export function backgroundResumeForSession(
+  bySession: Record<string, SubagentProgress[]>,
+  sid: null | string,
+  busy: boolean
+): BackgroundResume | null {
+  if (busy || !sid) {
+    return null
+  }
+
+  const running = (bySession[sid] ?? []).filter(RUNNING)
+
+  if (running.length === 0) {
+    return null
+  }
+
+  const activity = (running[0]!.stream.at(-1)?.text ?? '').trim() || null
+
+  return { activity, count: running.length }
+}
+
 /**
  * "Parked" background-delegation signal for the active session.
  *
@@ -30,19 +50,5 @@ const RUNNING = (s: SubagentProgress) => s.status === 'running' || s.status === 
  */
 export const $backgroundResume = computed(
   [$subagentsBySession, $activeSessionId, $busy],
-  (bySession, sid, busy): BackgroundResume | null => {
-    if (busy || !sid) {
-      return null
-    }
-
-    const running = (bySession[sid] ?? []).filter(RUNNING)
-
-    if (running.length === 0) {
-      return null
-    }
-
-    const activity = (running[0]!.stream.at(-1)?.text ?? '').trim() || null
-
-    return { activity, count: running.length }
-  }
+  (bySession, sid, busy): BackgroundResume | null => backgroundResumeForSession(bySession, sid, busy)
 )

@@ -232,4 +232,30 @@ describe('reconcileResumeMessages — structural parts on a mid-turn switch', ()
 
     clearSessionTodos('runtime-1')
   })
+
+  it('does not restore active todos from a settled recovered journal', () => {
+    const recoveredMessages: ChatMessage[] = [
+      {
+        id: 'assistant-stream-1',
+        parts: [
+          {
+            type: 'tool-call',
+            toolCallId: 'todo-1',
+            toolName: 'todo',
+            result: {
+              todos: [
+                { id: 'a', content: 'Inspect code', status: 'completed' },
+                { id: 'b', content: 'Patch root cause', status: 'in_progress' }
+              ]
+            }
+          }
+        ],
+        pending: false,
+        role: 'assistant'
+      }
+    ]
+
+    expect(hydrateSessionTodosFromMessages('runtime-1', recoveredMessages, { allowActive: false })).toBe(false)
+    expect($todosBySession.get()['runtime-1']).toBeUndefined()
+  })
 })

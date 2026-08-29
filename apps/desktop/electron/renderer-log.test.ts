@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { attachRendererConsoleCapture, formatRendererBoundaryReport, formatRendererConsoleLine } from './renderer-log'
+import {
+  attachRendererConsoleCapture,
+  formatRendererBoundaryReport,
+  formatRendererConsoleLine,
+  formatRendererDiagnosticEvent
+} from './renderer-log'
 
 describe('formatRendererConsoleLine', () => {
   it('formats the canonical Electron 36+ details shape at error level', () => {
@@ -74,5 +79,53 @@ describe('formatRendererBoundaryReport', () => {
 
     expect(report).toBe('[renderer crash:main] [error-boundary:root] boom')
     expect(report).not.toContain('\n')
+  })
+})
+
+describe('formatRendererDiagnosticEvent', () => {
+  it('formats stable UAT lifecycle fields and structured details', () => {
+    expect(
+      formatRendererDiagnosticEvent({
+        area: 'tabs',
+        details: { paneId: 'workspace', sessionId: 'stored-1' },
+        elapsedMs: 2400,
+        event: 'fresh-draft.apply',
+        runId: 'boot-a',
+        seq: 7
+      })
+    ).toBe(
+      '[renderer uat] {"runId":"boot-a","seq":7,"elapsedMs":2400,"area":"tabs","event":"fresh-draft.apply","details":{"paneId":"workspace","sessionId":"stored-1"}}'
+    )
+  })
+
+  it('redacts content, credential, and filesystem fields from malformed renderer payloads', () => {
+    const line = formatRendererDiagnosticEvent({
+      area: 'tabs',
+      details: {
+        cwd: '/Users/samuel/private',
+        message: 'private prompt',
+        nested: { apiKey: 'secret', paneId: 'workspace' },
+        token: 'credential'
+      },
+      event: 'tree.commit'
+    })
+
+    expect(line).toContain('"paneId":"workspace"')
+    expect(line).not.toContain('/Users/samuel/private')
+    expect(line).not.toContain('private prompt')
+    expect(line).not.toContain('secret')
+    expect(line).not.toContain('credential')
+    expect(line).toContain('[redacted]')
+  })
+
+  it('clamps oversized or deeply nested payloads', () => {
+    const line = formatRendererDiagnosticEvent({
+      area: 'x'.repeat(500),
+      details: { huge: 'y'.repeat(20_000), nested: { a: { b: { c: { d: 'too deep' } } } } },
+      event: 'z'.repeat(500)
+    })
+
+    expect(line.length).toBeLessThan(5_000)
+    expect(line).not.toContain('too deep')
   })
 })

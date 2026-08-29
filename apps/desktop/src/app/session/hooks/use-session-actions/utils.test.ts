@@ -782,6 +782,29 @@ describe('preserveLocalPendingTurnMessages', () => {
     ])
   })
 
+  it('does not duplicate the optimistic prompt when a background-process notice follows it', () => {
+    const previous = [
+      msg('1-user', 'user', 'first'),
+      msg('2-assistant', 'assistant', 'first answer'),
+      msg('user-optimistic', 'user', 'clean up these branches')
+    ]
+
+    const next = [
+      msg('1-user-stored', 'user', 'first'),
+      msg('2-assistant-stored', 'assistant', 'first answer'),
+      msg('3-user-stored', 'user', 'clean up these branches'),
+      msg('4-assistant-stored', 'assistant', 'Done — branches cleaned up.'),
+      msg(
+        '5-background-notice',
+        'user',
+        '[IMPORTANT: Background process proc_123 exited (exit code None).\nCommand: build\nOutput:\n]'
+      ),
+      msg('6-assistant-stored', 'assistant', 'Already accounted for.')
+    ]
+
+    expect(preserveLocalPendingTurnMessages(next, previous)).toBe(next)
+  })
+
   // #70720: the gateway persists an attached image as a leading `@image:<path>`
   // directive line, while the local optimistic composer keeps it as separate
   // `attachmentRefs`. A naive text compare (chatMessageText a === b) therefore
