@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { clearAllPrompts, setApprovalRequest } from '@/store/prompts'
 import { $activeSessionId } from '@/store/session'
-import { onScrollToBottomRequest, resetThreadScroll, setThreadAtBottom } from '@/store/thread-scroll'
+import { $threadScrollByKey, onScrollToBottomRequest, resetThreadScroll, setThreadAtBottom } from '@/store/thread-scroll'
 
 import { ScrollToBottomButton } from './scroll-to-bottom-button'
 
@@ -15,6 +15,7 @@ function pendingApproval() {
 afterEach(() => {
   cleanup()
   clearAllPrompts()
+  $threadScrollByKey.set({})
   resetThreadScroll()
   $activeSessionId.set(null)
 })
@@ -63,5 +64,29 @@ describe('ScrollToBottomButton', () => {
 
     expect(handler).toHaveBeenCalledTimes(1)
     stop()
+  })
+
+  it('ignores another split pane scrolled away from bottom', () => {
+    setThreadAtBottom(false, 'tile:other')
+    render(<ScrollToBottomButton threadScrollKey="main" />)
+
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('fires the scoped scroll request for its own pane', () => {
+    const main = vi.fn()
+    const other = vi.fn()
+    const stopMain = onScrollToBottomRequest(main, 'main')
+    const stopOther = onScrollToBottomRequest(other, 'tile:other')
+
+    setThreadAtBottom(false, 'main')
+    render(<ScrollToBottomButton threadScrollKey="main" />)
+
+    fireEvent.click(screen.getByRole('button'))
+
+    expect(main).toHaveBeenCalledTimes(1)
+    expect(other).not.toHaveBeenCalled()
+    stopMain()
+    stopOther()
   })
 })
