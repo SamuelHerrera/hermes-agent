@@ -201,8 +201,12 @@ export function sessionAndDelegateDescendantIds(storedSessionId: string): string
 
     for (const session of rows) {
       const aliases = [session.id, session._lineage_root_id].filter((id): id is string => Boolean(id?.trim()))
-      const parentId = session.delegate_parent_session_id?.trim()
-      const belongs = aliases.some(id => family.has(id)) || Boolean(parentId && family.has(parentId))
+
+      const parentIds = [session.parent_session_id, session.delegate_parent_session_id].filter(
+        (id): id is string => Boolean(id?.trim())
+      )
+
+      const belongs = aliases.some(id => family.has(id)) || parentIds.some(id => family.has(id))
 
       if (!belongs) {
         continue

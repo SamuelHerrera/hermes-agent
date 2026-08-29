@@ -29,6 +29,7 @@ import {
   refreshWorktrees,
   resolveNewSessionCwd,
   scanAndRecordRepos,
+  sessionAndDelegateDescendantIds,
   tombstoneSessions
 } from './projects'
 
@@ -194,6 +195,93 @@ describe('resolveNewSessionCwd', () => {
     // Focused session has no workspace → fall through to configured default,
     // not the stale $currentCwd from an earlier chat.
     expect(resolveNewSessionCwd()).toBe('/home/user/configured')
+  })
+})
+
+describe('sessionAndDelegateDescendantIds', () => {
+  beforeEach(() => {
+    $projectTree.set([])
+    $sessions.set([])
+  })
+
+  afterEach(() => {
+    $projectTree.set([])
+    $sessions.set([])
+  })
+
+  it('collects cached branch and delegate descendants of an archived parent', () => {
+    const parent = {
+      archived: false,
+      cwd: '/repo',
+      ended_at: null,
+      id: 'parent-tip',
+      _lineage_root_id: 'parent-root',
+      input_tokens: 0,
+      is_active: false,
+      last_active: 30,
+      message_count: 1,
+      model: null,
+      output_tokens: 0,
+      preview: null,
+      source: 'desktop',
+      started_at: 30,
+      title: 'Parent',
+      tool_call_count: 0
+    }
+
+    const delegateChild = {
+      ...parent,
+      delegate_parent_session_id: 'parent-root',
+      id: 'delegate-child-tip',
+      _lineage_root_id: 'delegate-child-root',
+      title: 'Delegate child'
+    }
+
+    const branchGrandchild = {
+      ...parent,
+      id: 'branch-grandchild',
+      _lineage_root_id: null,
+      parent_session_id: 'delegate-child-root',
+      title: 'Branch grandchild'
+    }
+
+    const unrelated = {
+      ...parent,
+      delegate_parent_session_id: 'other-parent',
+      id: 'unrelated-child',
+      _lineage_root_id: 'unrelated-root',
+      title: 'Unrelated child'
+    }
+
+    $projectTree.set([
+      {
+        id: 'p_app',
+        label: 'App',
+        path: '/repo',
+        previewSessions: [parent, delegateChild, unrelated] as never,
+        repos: [
+          {
+            id: '/repo',
+            label: 'repo',
+            path: '/repo',
+            groups: [
+              {
+                id: '/repo::branch::main',
+                label: 'main',
+                path: '/repo',
+                sessions: [delegateChild, branchGrandchild, unrelated] as never
+              }
+            ],
+            sessionCount: 3
+          }
+        ],
+        sessionCount: 4
+      }
+    ])
+
+    expect(new Set(sessionAndDelegateDescendantIds('parent-tip'))).toEqual(
+      new Set(['parent-tip', 'parent-root', 'delegate-child-tip', 'delegate-child-root', 'branch-grandchild'])
+    )
   })
 })
 
