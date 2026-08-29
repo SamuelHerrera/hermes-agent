@@ -47,13 +47,15 @@ interface MessageActionProps {
    *  streaming delta flush (the text changes ~30×/s), which profiling showed
    *  was a large slice of per-token script time on long transcripts. */
   getMessageText: () => string
+  getSessionId: () => string | null
   onBranchInNewChat?: (messageId: string) => void
 }
 
 export const AssistantMessage: FC<{
+  getSessionId?: () => string | null
   onBranchInNewChat?: (messageId: string) => void
   onDismissError?: (messageId: string) => void
-}> = ({ onBranchInNewChat, onDismissError }) => {
+}> = ({ getSessionId = () => null, onBranchInNewChat, onDismissError }) => {
   const messageId = useAuiState(s => s.message.id)
   const messageRuntime = useMessageRuntime()
   const { t } = useI18n()
@@ -223,7 +225,12 @@ export const AssistantMessage: FC<{
         </MessagePrimitive.Error>
       </div>
       {hasVisibleText && !isInterim && (
-        <AssistantFooter getMessageText={getMessageText} messageId={messageId} onBranchInNewChat={onBranchInNewChat} />
+        <AssistantFooter
+          getMessageText={getMessageText}
+          getSessionId={getSessionId}
+          messageId={messageId}
+          onBranchInNewChat={onBranchInNewChat}
+        />
       )}
       {/* Last thing in the turn — under the action bar, the way Cursor ends a
           turn on its summary rather than burying it above the controls. */}
@@ -232,7 +239,7 @@ export const AssistantMessage: FC<{
   )
 }
 
-const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText, onBranchInNewChat }) => {
+const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText, getSessionId, onBranchInNewChat }) => {
   const { t } = useI18n()
   const copy = t.assistant.thread
 
@@ -275,7 +282,7 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
           </TooltipIconButton>
         )}
         <CopyButton appearance="icon" buttonSize="icon" label={copy.copy} text={getMessageText} />
-        <ReadAloudButton getText={getMessageText} messageId={messageId} />
+        <ReadAloudButton getSessionId={getSessionId} getText={getMessageText} messageId={messageId} />
         <ActionBarPrimitive.Reload asChild>
           <TooltipIconButton onClick={() => triggerHaptic('submit')} tooltip={copy.refresh}>
             <RefreshCwIcon className="size-3.5" />
@@ -322,7 +329,11 @@ const AssistantActionBar: FC<MessageActionProps> = ({ messageId, getMessageText,
   )
 }
 
-const ReadAloudButton: FC<{ getText: () => string; messageId: string }> = ({ getText, messageId }) => {
+const ReadAloudButton: FC<{ getSessionId: () => string | null; getText: () => string; messageId: string }> = ({
+  getSessionId,
+  getText,
+  messageId
+}) => {
   const { t } = useI18n()
   const copy = t.assistant.thread
   const voicePlayback = useStore($voicePlayback)
@@ -344,11 +355,11 @@ const ReadAloudButton: FC<{ getText: () => string; messageId: string }> = ({ get
     }
 
     try {
-      await playSpeechText(text, { messageId, source: 'read-aloud' })
+      await playSpeechText(text, { messageId, sessionId: getSessionId(), source: 'read-aloud' })
     } catch (error) {
       notifyError(error, copy.readAloudFailed)
     }
-  }, [copy.readAloudFailed, getText, messageId])
+  }, [copy.readAloudFailed, getSessionId, getText, messageId])
 
   return (
     <TooltipIconButton

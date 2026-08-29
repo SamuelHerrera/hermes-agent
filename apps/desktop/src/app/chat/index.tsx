@@ -676,10 +676,10 @@ export const ChatView = memo(function ChatView({
               onTranscribeAudio={onTranscribeAudio}
               onUsageSnapshot={publishContextUsage}
               queueSessionKey={queueSessionKey}
-              threadScrollKey={threadScrollKey}
               sessionAccentColor={sessionAccentColor}
               sessionId={activeSessionId}
               state={chatBarState}
+              threadScrollKey={threadScrollKey}
             />
           </Suspense>
         )}
