@@ -251,6 +251,7 @@ describe('useVoiceConversation playback rearm', () => {
 
     await waitFor(() =>
       expect(mocks.playSpeechText).toHaveBeenCalledWith('Fallback reply', {
+        sessionId: null,
         source: 'voice-conversation'
       })
     )
