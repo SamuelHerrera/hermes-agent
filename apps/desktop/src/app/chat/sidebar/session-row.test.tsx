@@ -248,24 +248,23 @@ describe('SidebarSessionRow running indicator', () => {
 
   const arc = (container: HTMLElement) => container.querySelector('.arc-row')
 
-  it('keeps the project dot on the left and shows running status with a tooltip on the right', () => {
+  it('wraps the project dot with the running ring on the left', () => {
     act(() => {
       setSessionColorOverride('s1', '#2f81f7')
       publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
     })
 
     const { container } = renderRow(makeSession({ title: 'Running' }))
-    const spinner = container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
     const lead = container.querySelector<HTMLElement>('[data-session-project-dot]')
+    const spinner = lead?.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
 
     expect(arc(container)).toBeNull()
     expect(lead).toBeTruthy()
     expect(lead?.querySelector('.rounded-full')).toBeTruthy()
     expect(lead?.querySelector<HTMLElement>('.rounded-full')?.style.backgroundColor).toBe('rgb(47, 129, 247)')
-    expect(lead?.querySelector('.codicon-loading')).toBeNull()
     expect(spinner).toBeTruthy()
-    expect(spinner?.closest('[data-row-actions]')).toBeTruthy()
-    expect(tipTrigger(spinner as HTMLElement)).toBeTruthy()
+    expect(spinner?.closest('[data-session-project-dot]')).toBeTruthy()
+    expect(container.querySelector('[data-row-actions] [data-session-status]')).toBeNull()
   })
 
   it('suppresses transient status for an archived session', () => {

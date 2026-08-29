@@ -126,6 +126,10 @@ function clearSettled(storedId: string) {
 }
 
 function visibleSessionPane(storedId: string): boolean {
+  if (storedId === $selectedStoredSessionId.get()) {
+    return true
+  }
+
   const tree = $layoutTree.get()
 
   if (!tree) {

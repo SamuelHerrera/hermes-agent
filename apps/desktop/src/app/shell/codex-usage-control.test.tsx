@@ -76,6 +76,8 @@ describe('CodexUsageTitlebarControl', () => {
   })
 
   it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {
+    const resetAtRaw = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+
     const { container } = render(
       <CodexUsageTitlebarControl
         usage={{
@@ -96,7 +98,9 @@ describe('CodexUsageTitlebarControl', () => {
           ],
           plan: 'Team',
           resetAt: 'Tomorrow 09:00 UTC',
+          resetAtRaw,
           resetCredits: 120,
+          resetWindowMs: 2 * 24 * 60 * 60 * 1000,
           usedPercent: 35
         }}
       />
@@ -118,6 +122,10 @@ describe('CodexUsageTitlebarControl', () => {
     expect(
       [...container.querySelectorAll('svg')].every(svg => svg.style.getPropertyValue('--codex-usage-remaining-color'))
     ).toBe(true)
+    const resetPaths = screen.getAllByTestId('codex-usage-reset-progress').map(path => path.getAttribute('d'))
+    expect(resetPaths).toHaveLength(2)
+    expect(resetPaths[0]).toMatch(/^M 12 3 A 9 9/)
+    expect(resetPaths[1]).toBe(resetPaths[0])
   })
 
   it('does not toggle the hover popover from trigger clicks and closes on blur', () => {
