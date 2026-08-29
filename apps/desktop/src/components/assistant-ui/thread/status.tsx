@@ -11,7 +11,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { Loader } from '@/components/ui/loader'
 import { StatusPulse } from '@/components/ui/status-pulse'
 import { useI18n } from '@/i18n'
-import { useStoreSelector } from '@/lib/use-session-slice'
+import { useSessionSlice } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
 import { backgroundResumeForSession } from '@/store/background-delegation'
 import { sessionCompacting } from '@/store/compaction'
@@ -153,7 +153,11 @@ export const ResponseLoadingIndicator: FC = () => {
 // nothing is parked.
 export const BackgroundResumeNotice: FC<{ busy?: boolean; sessionId?: null | string }> = ({ busy = false, sessionId = null }) => {
   const { t } = useI18n()
-  const resume = useStoreSelector($subagentsBySession, bySession => backgroundResumeForSession(bySession, sessionId, busy))
+  const subagents = useSessionSlice($subagentsBySession, sessionId)
+  const resume = useMemo(
+    () => backgroundResumeForSession(sessionId ? { [sessionId]: subagents } : {}, sessionId, busy),
+    [busy, sessionId, subagents]
+  )
 
   if (!resume) {
     return null
