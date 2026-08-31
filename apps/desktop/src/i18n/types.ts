@@ -539,6 +539,8 @@ export interface Translations {
       localServicesDesc: (manager: string, serviceName: string) => string
       localServicesUnknownManager: string
       installAlwaysOnBackend: string
+      alwaysOnBackendInstalled: string
+      alwaysOnBackendInstalledRunning: string
       restartBackend: string
       restartGateway: string
       localServicesUpdatedTitle: string

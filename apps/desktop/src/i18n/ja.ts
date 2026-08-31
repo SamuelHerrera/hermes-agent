@@ -728,6 +728,8 @@ export const ja = defineLocale({
         `Install or manage ${serviceName} with ${manager}. This keeps the local Desktop backend running even when the UI is closed.`,
       localServicesUnknownManager: 'the OS service manager',
       installAlwaysOnBackend: 'Install always-on backend',
+      alwaysOnBackendInstalled: 'Installed',
+      alwaysOnBackendInstalledRunning: 'Installed / Running',
       restartBackend: 'Restart backend',
       restartGateway: 'Restart WhatsApp gateway',
       localServicesUpdatedTitle: 'Local services updated',

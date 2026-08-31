@@ -227,6 +227,11 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   }, [])
 
   const showLocalServices = !embedded && scope === null && state.mode === 'local' && Boolean(window.hermesDesktop?.localServices)
+  const localBackendInstalled = localServices?.service.ok === true
+
+  const localBackendRunning =
+    localBackendInstalled &&
+    /(?:state\s*=\s*running|Active:\s+active\s+\(running\)|Status:\s+Running)/i.test(localServices.service.stdout || '')
 
   useEffect(() => {
     let cancelled = false
@@ -1238,15 +1243,22 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
         <div className="mb-5 grid gap-1 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
           <ListRow
             action={
-              <Button
-                disabled={localServiceBusy !== null || localServices?.descriptor.supported === false}
-                onClick={() => void runLocalServiceAction('install-backend')}
-                size="sm"
-                variant="outline"
-              >
-                {localServiceBusy === 'install-backend' ? <Loader2 className="animate-spin" /> : null}
-                {g.installAlwaysOnBackend}
-              </Button>
+              localBackendInstalled ? (
+                <Pill tone="primary">
+                  <Check className="size-3" />
+                  {localBackendRunning ? g.alwaysOnBackendInstalledRunning : g.alwaysOnBackendInstalled}
+                </Pill>
+              ) : (
+                <Button
+                  disabled={localServiceBusy !== null || localServices?.descriptor.supported === false}
+                  onClick={() => void runLocalServiceAction('install-backend')}
+                  size="sm"
+                  variant="outline"
+                >
+                  {localServiceBusy === 'install-backend' ? <Loader2 className="animate-spin" /> : null}
+                  {g.installAlwaysOnBackend}
+                </Button>
+              )
             }
             description={g.localServicesDesc(
               localServices?.descriptor.manager || g.localServicesUnknownManager,

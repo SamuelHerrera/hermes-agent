@@ -59,7 +59,14 @@ beforeEach(() => {
       serviceName: 'ai.hermes.serve',
       supported: true
     },
-    service: { action: 'status-local-backend', manager: 'launchd', message: 'running', ok: true, serviceName: 'ai.hermes.serve' }
+    service: {
+      action: 'status-local-backend',
+      manager: 'launchd',
+      message: 'running',
+      ok: true,
+      serviceName: 'ai.hermes.serve',
+      stdout: 'state = running'
+    }
   })
   installBackend.mockResolvedValue({ action: 'install-local-backend', message: 'installed', ok: true })
   restartBackend.mockResolvedValue({ action: 'restart-local-backend', message: 'restarted backend', ok: true })
@@ -111,7 +118,8 @@ describe('GatewaySettings', () => {
 
     expect(await screen.findByRole('button', { name: 'Restart backend' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Restart WhatsApp gateway' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Install always-on backend' })).toBeTruthy()
+    expect(await screen.findByText('Installed / Running')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Install always-on backend' })).toBeNull()
     expect(screen.getByText('Always-on local services')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart backend' }))
