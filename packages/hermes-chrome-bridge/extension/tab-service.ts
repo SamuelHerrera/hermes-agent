@@ -49,6 +49,7 @@ const MAX_TITLE_LENGTH = 160
 const MAX_URL_LENGTH = 512
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu
 const CARD = /\b(?:\d[ -]*?){13,19}\b/gu
+const BEARER_CREDENTIAL = /\bbearer\s+[A-Za-z0-9._~+/=-]{8,}/giu
 const ASSIGNED_SECRET = /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*[^\s,;]+/giu
 const PREFIXED_TOKEN = /\b(?:gh[pousr]_|sk[-_](?:live|test)[-_]|eyJ)[A-Za-z0-9._~-]{8,}/gu
 
@@ -68,7 +69,7 @@ function scrubText(value: string): { redacted: boolean, value: string } {
   let redacted = [...value].some(isControlCharacter)
   let safe = [...value].filter(character => !isControlCharacter(character)).join('')
 
-  for (const pattern of [EMAIL, CARD, ASSIGNED_SECRET, PREFIXED_TOKEN]) {
+  for (const pattern of [EMAIL, CARD, BEARER_CREDENTIAL, ASSIGNED_SECRET, PREFIXED_TOKEN]) {
     pattern.lastIndex = 0
 
     if (pattern.test(safe)) { redacted = true }
@@ -95,7 +96,9 @@ function isSensitivePathSegment(segment: string): boolean {
 
   if (EMAIL.test(decoded) || CARD.test(decoded) || PREFIXED_TOKEN.test(decoded)) { return true }
 
-  if (/^(?:token|secret|password|auth|session)[-_:]/iu.test(decoded)) { return true }
+  if (/^(?:api[-_ ]?key|token|secret|password|auth(?:orization)?|session|credential)[-_:=]/iu.test(decoded)) {
+    return true
+  }
 
   return decoded.length >= 20 && /[A-Za-z]/u.test(decoded) && /\d/u.test(decoded) &&
     /^[A-Za-z0-9._~-]+$/u.test(decoded)

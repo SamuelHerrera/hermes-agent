@@ -150,4 +150,27 @@ describe('safe tab service', () => {
     expect(tab?.title).not.toContain('\u0000')
     expect(tab?.titleRedacted).toBe(true)
   })
+
+  it('redacts bearer credentials and path assignments completely', () => {
+    const bearer = 'abcDEF1234567890abcDEF'
+    const pathSecret = 'shortsecret'
+
+    const tab = redactTab({
+      active: false,
+      id: 8,
+      title: `Authorization: Bearer ${bearer}`,
+      url: `https://example.test/account/token=${pathSecret}/details`,
+      windowId: 3
+    }, false)
+
+    const serialized = JSON.stringify(tab)
+
+    expect(serialized).not.toContain(bearer)
+    expect(serialized).not.toContain(pathSecret)
+    expect(tab).toMatchObject({
+      titleRedacted: true,
+      url: 'https://example.test/account/[redacted]/details',
+      urlRedacted: true
+    })
+  })
 })
