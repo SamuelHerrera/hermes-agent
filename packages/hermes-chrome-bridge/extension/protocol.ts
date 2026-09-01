@@ -1,4 +1,5 @@
-export type BridgeMethod = 'query' | 'selectTab' | 'snapshot' | 'status' | 'tabs'
+export type BridgeMethod = 'click' | 'close' | 'focus' | 'hover' | 'key' | 'navigate' | 'open' |
+  'query' | 'scroll' | 'selectTab' | 'snapshot' | 'status' | 'tabs' | 'type'
 
 export interface NativeRequest {
   arguments: Record<string, unknown>

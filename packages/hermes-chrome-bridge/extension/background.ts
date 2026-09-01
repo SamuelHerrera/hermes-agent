@@ -4,6 +4,7 @@ import {
   createConnectionController
 } from './lifecycle.js'
 import { createBridgeRequestDispatcher } from './request-dispatch.js'
+import { createTabActions } from './tab-actions.js'
 import { createTabService } from './tab-service.js'
 
 const OPT_IN_KEY = 'hermesChromeBridgeOptIn'
@@ -16,11 +17,25 @@ const tabService = createTabService({
   query: async () => chrome.tabs.query({})
 })
 
+const tabActions = createTabActions({
+  assertControllable: async tabId => tabService.assertControllable(tabId),
+  tabs: {
+    create: async options => chrome.tabs.create(options),
+    get: async tabId => chrome.tabs.get(tabId),
+    remove: async tabId => chrome.tabs.remove(tabId),
+    update: async (tabId, options) => chrome.tabs.update(tabId, options)
+  },
+  windows: {
+    update: async (windowId, options) => chrome.windows.update(windowId, options)
+  }
+})
+
 let controller: ReturnType<typeof createConnectionController>
 
 const dispatchRequest = createBridgeRequestDispatcher({
   getConnectionState: () => controller.getState().connection,
   sendTabMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+  tabActions,
   tabService
 })
 

@@ -1,10 +1,12 @@
 import type { ConnectionStatus } from './lifecycle.js'
 import type { NativeRequest, NativeResponse } from './protocol.js'
+import { TabActionError, type TabActions } from './tab-actions.js'
 import { type TabService, TabServiceError } from './tab-service.js'
 
 interface DispatcherDependencies {
   getConnectionState(): ConnectionStatus
   sendTabMessage(tabId: number, message: unknown): Promise<unknown>
+  tabActions: TabActions
   tabService: TabService
 }
 
@@ -74,11 +76,29 @@ function queryArguments(arguments_: Record<string, unknown>): {
   }
 }
 
+function validTarget(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 2_048
+}
+
+function validModifiers(value: unknown): value is Array<'alt' | 'ctrl' | 'meta' | 'shift'> {
+  if (!Array.isArray(value) || value.length > 4) { return false }
+  const allowed = new Set(['alt', 'ctrl', 'meta', 'shift'])
+
+  return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
+    new Set(value).size === value.length
+}
+
+function validDistance(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
+}
+
 async function pageResult(
   dependencies: DispatcherDependencies,
   tabId: number,
-  message: unknown
+  message: Record<string, unknown>
 ): Promise<unknown> {
+  await dependencies.tabService.assertControllable(tabId)
+
   let response: unknown
 
   try {
@@ -204,6 +224,170 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
         }
       }
 
+      if (request.method === 'open') {
+        const validKeys = Object.keys(request.arguments).every(key => key === 'active' || key === 'url')
+        const active = request.arguments.active ?? true
+
+        if (!validKeys || typeof active !== 'boolean' ||
+          (request.arguments.url !== undefined &&
+            (typeof request.arguments.url !== 'string' || request.arguments.url.length > 8_192))) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'open accepts an optional URL and boolean active flag.')
+        }
+
+        return {
+          id: request.id,
+          result: await dependencies.tabActions.open({
+            active,
+            ...(request.arguments.url === undefined ? {} : { url: request.arguments.url as string })
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'navigate') {
+        if (!exactKeys(request.arguments, ['tabId', 'url']) || !isPositiveInteger(request.arguments.tabId) ||
+          typeof request.arguments.url !== 'string' || request.arguments.url.length === 0 ||
+          request.arguments.url.length > 8_192) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'navigate requires a positive tabId and bounded URL.')
+        }
+
+        return {
+          id: request.id,
+          result: await dependencies.tabActions.navigate({
+            tabId: request.arguments.tabId,
+            url: request.arguments.url
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'focus' || request.method === 'close') {
+        if (!exactKeys(request.arguments, ['tabId']) || !isPositiveInteger(request.arguments.tabId)) {
+          return error(request.id, 'INVALID_ARGUMENTS', `${request.method} requires exactly one positive tabId.`)
+        }
+
+        const result = request.method === 'focus'
+          ? await dependencies.tabActions.focus({ tabId: request.arguments.tabId })
+          : await dependencies.tabActions.close({ tabId: request.arguments.tabId })
+
+        return { id: request.id, result, type: 'response' }
+      }
+
+      if (request.method === 'click') {
+        const validKeys = exactKeys(request.arguments, ['tabId', 'target']) ||
+          exactKeys(request.arguments, ['button', 'tabId', 'target'])
+
+        const button = request.arguments.button ?? 'left'
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || !validTarget(request.arguments.target) ||
+          (button !== 'left' && button !== 'middle' && button !== 'right')) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'click requires tabId, target, and an optional mouse button.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            button,
+            target: request.arguments.target,
+            type: 'hermes.bridge.click',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'type') {
+        const validKeys = exactKeys(request.arguments, ['tabId', 'target', 'text']) ||
+          exactKeys(request.arguments, ['submit', 'tabId', 'target', 'text'])
+
+        const submit = request.arguments.submit ?? false
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || !validTarget(request.arguments.target) ||
+          typeof request.arguments.text !== 'string' || request.arguments.text.length > 100_000 ||
+          typeof submit !== 'boolean') {
+          return error(request.id, 'INVALID_ARGUMENTS', 'type requires tabId, target, text, and an optional submit flag.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            submit,
+            target: request.arguments.target,
+            text: request.arguments.text,
+            type: 'hermes.bridge.type',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'key') {
+        const validKeys = exactKeys(request.arguments, ['key', 'tabId']) ||
+          exactKeys(request.arguments, ['key', 'modifiers', 'tabId'])
+
+        const modifiers = request.arguments.modifiers ?? []
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || typeof request.arguments.key !== 'string' ||
+          request.arguments.key.length === 0 || request.arguments.key.length > 64 || !validModifiers(modifiers)) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'key requires tabId, key, and optional unique modifiers.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            key: request.arguments.key,
+            modifiers,
+            type: 'hermes.bridge.key',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'scroll') {
+        const validKeys = Object.keys(request.arguments).every(key =>
+          key === 'deltaX' || key === 'deltaY' || key === 'tabId' || key === 'target'
+        )
+
+        const deltaX = request.arguments.deltaX ?? 0
+        const deltaY = request.arguments.deltaY ?? 0
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || !validDistance(deltaX) ||
+          !validDistance(deltaY) || (deltaX === 0 && deltaY === 0) ||
+          (request.arguments.target !== undefined && !validTarget(request.arguments.target))) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'scroll requires tabId, a bounded delta, and optional target.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            deltaX,
+            deltaY,
+            ...(request.arguments.target === undefined ? {} : { target: request.arguments.target }),
+            type: 'hermes.bridge.scroll',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'hover') {
+        if (!exactKeys(request.arguments, ['tabId', 'target']) || !isPositiveInteger(request.arguments.tabId) ||
+          !validTarget(request.arguments.target)) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'hover requires a positive tabId and target.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            target: request.arguments.target,
+            type: 'hermes.bridge.hover',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
       return error(request.id, 'METHOD_NOT_IMPLEMENTED', 'This bridge method is not implemented.')
     } catch (caught) {
       if (caught instanceof TabServiceError) {
@@ -211,6 +395,10 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
       }
 
       if (caught instanceof PageRequestError) {
+        return error(request.id, caught.code, caught.message)
+      }
+
+      if (caught instanceof TabActionError) {
         return error(request.id, caught.code, caught.message)
       }
 

@@ -21,7 +21,8 @@ import { CHROME_BRIDGE_TOOLS } from './schema.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
-  method: 'query' | 'selectTab' | 'snapshot' | 'status' | 'tabs'
+  method: 'click' | 'close' | 'focus' | 'hover' | 'key' | 'navigate' | 'open' | 'query' |
+    'scroll' | 'selectTab' | 'snapshot' | 'status' | 'tabs' | 'type'
 }
 
 export interface ChromeBridgeRequestRouter {
@@ -29,15 +30,40 @@ export interface ChromeBridgeRequestRouter {
 }
 
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
+  chrome_bridge_click: 'click',
+  chrome_bridge_close: 'close',
+  chrome_bridge_focus: 'focus',
+  chrome_bridge_hover: 'hover',
+  chrome_bridge_key: 'key',
+  chrome_bridge_navigate: 'navigate',
+  chrome_bridge_open: 'open',
   chrome_bridge_query: 'query',
+  chrome_bridge_scroll: 'scroll',
   chrome_bridge_select_tab: 'selectTab',
   chrome_bridge_snapshot: 'snapshot',
   chrome_bridge_status: 'status',
-  chrome_bridge_tabs: 'tabs'
+  chrome_bridge_tabs: 'tabs',
+  chrome_bridge_type: 'type'
 }
 
 function validPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && (value as number) > 0
+}
+
+function validTarget(value: unknown): boolean {
+  return typeof value === 'string' && value.length > 0 && value.length <= 2_048
+}
+
+function validModifiers(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 4) { return false }
+  const allowed = new Set(['alt', 'ctrl', 'meta', 'shift'])
+
+  return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
+    new Set(value).size === value.length
+}
+
+function validDistance(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
 }
 
 function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: Record<string, unknown>): boolean {
@@ -63,6 +89,60 @@ function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: R
       validPositiveInteger(arguments_.tabId) &&
       typeof arguments_.selector === 'string' && arguments_.selector.length > 0 &&
       arguments_.selector.length <= 2_048 && validLimit
+  }
+
+  if (method === 'open') {
+    const active = arguments_.active ?? true
+
+    return keys.every(key => key === 'active' || key === 'url') && typeof active === 'boolean' &&
+      (arguments_.url === undefined ||
+        (typeof arguments_.url === 'string' && arguments_.url.length <= 8_192))
+  }
+
+  if (method === 'navigate') {
+    return keys.length === 2 && validPositiveInteger(arguments_.tabId) &&
+      typeof arguments_.url === 'string' && arguments_.url.length > 0 && arguments_.url.length <= 8_192
+  }
+
+  if (method === 'focus' || method === 'close') {
+    return keys.length === 1 && validPositiveInteger(arguments_.tabId)
+  }
+
+  if (method === 'click') {
+    const button = arguments_.button ?? 'left'
+
+    return keys.every(key => key === 'button' || key === 'tabId' || key === 'target') &&
+      validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target) &&
+      (button === 'left' || button === 'middle' || button === 'right')
+  }
+
+  if (method === 'type') {
+    const submit = arguments_.submit ?? false
+
+    return keys.every(key => key === 'submit' || key === 'tabId' || key === 'target' || key === 'text') &&
+      validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target) &&
+      typeof arguments_.text === 'string' && arguments_.text.length <= 100_000 && typeof submit === 'boolean'
+  }
+
+  if (method === 'key') {
+    const modifiers = arguments_.modifiers ?? []
+
+    return keys.every(key => key === 'key' || key === 'modifiers' || key === 'tabId') &&
+      validPositiveInteger(arguments_.tabId) && typeof arguments_.key === 'string' &&
+      arguments_.key.length > 0 && arguments_.key.length <= 64 && validModifiers(modifiers)
+  }
+
+  if (method === 'scroll') {
+    const deltaX = arguments_.deltaX ?? 0
+    const deltaY = arguments_.deltaY ?? 0
+
+    return keys.every(key => key === 'deltaX' || key === 'deltaY' || key === 'tabId' || key === 'target') &&
+      validPositiveInteger(arguments_.tabId) && validDistance(deltaX) && validDistance(deltaY) &&
+      (deltaX !== 0 || deltaY !== 0) && (arguments_.target === undefined || validTarget(arguments_.target))
+  }
+
+  if (method === 'hover') {
+    return keys.length === 2 && validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target)
   }
 
   return keys.length === 0

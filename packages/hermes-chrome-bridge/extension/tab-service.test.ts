@@ -106,11 +106,15 @@ describe('safe tab service', () => {
       { id: 7, title: 'About', url: 'about:blank', windowId: 1 },
       { id: 8, title: 'Bad', url: 'not a url', windowId: 1 },
       { id: 9, title: 'Missing', windowId: 1 },
-      { id: 0, title: 'Zero', url: 'https://zero.test/', windowId: 1 }
+      { id: 0, title: 'Zero', url: 'https://zero.test/', windowId: 1 },
+      { id: 10, title: 'Local', url: 'http://localhost:3000/', windowId: 1 },
+      { id: 11, title: 'Private', url: 'http://192.168.1.5/', windowId: 1 },
+      { id: 12, title: 'Web Store', url: 'https://chromewebstore.google.com/detail/example', windowId: 1 }
     ])
 
     await expect(service.list()).resolves.toMatchObject({ count: 1 })
     await expect(service.select(2)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })
+    await expect(service.assertControllable(10)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })
     await expect(service.select(99)).rejects.toMatchObject({ code: 'TAB_NOT_FOUND' })
   })
 

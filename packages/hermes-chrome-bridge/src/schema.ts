@@ -18,6 +18,24 @@ const STATE_CHANGE_ANNOTATIONS = {
   readOnlyHint: false
 } as const
 
+const OPEN_WORLD_CHANGE_ANNOTATIONS = {
+  destructiveHint: false,
+  openWorldHint: true,
+  readOnlyHint: false
+} as const
+
+const DESTRUCTIVE_ANNOTATIONS = {
+  destructiveHint: true,
+  openWorldHint: false,
+  readOnlyHint: false
+} as const
+
+const DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS = {
+  destructiveHint: true,
+  openWorldHint: true,
+  readOnlyHint: false
+} as const
+
 export const CHROME_BRIDGE_TOOLS = [
   {
     annotations: READ_ONLY_ANNOTATIONS,
@@ -71,5 +89,136 @@ export const CHROME_BRIDGE_TOOLS = [
       type: 'object'
     },
     name: 'chrome_bridge_query'
+  },
+  {
+    annotations: OPEN_WORLD_CHANGE_ANNOTATIONS,
+    description: 'Open a public HTTP(S) URL in a new Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        active: { default: true, type: 'boolean' },
+        url: { maxLength: 8192, type: 'string' }
+      },
+      type: 'object'
+    },
+    name: 'chrome_bridge_open'
+  },
+  {
+    annotations: OPEN_WORLD_CHANGE_ANNOTATIONS,
+    description: 'Navigate a controllable Chrome tab to a public HTTP(S) URL.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        tabId: { minimum: 1, type: 'integer' },
+        url: { maxLength: 8192, minLength: 1, type: 'string' }
+      },
+      required: ['tabId', 'url'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_navigate'
+  },
+  {
+    annotations: STATE_CHANGE_ANNOTATIONS,
+    description: 'Focus a controllable Chrome tab and its window.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: { tabId: { minimum: 1, type: 'integer' } },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_focus'
+  },
+  {
+    annotations: DESTRUCTIVE_ANNOTATIONS,
+    description: 'Close a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: { tabId: { minimum: 1, type: 'integer' } },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_close'
+  },
+  {
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    description: 'Click a referenced element or CSS selector in a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        button: { default: 'left', enum: ['left', 'middle', 'right'], type: 'string' },
+        tabId: { minimum: 1, type: 'integer' },
+        target: { maxLength: 2048, minLength: 1, type: 'string' }
+      },
+      required: ['tabId', 'target'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_click'
+  },
+  {
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    description: 'Type explicit text into a non-sensitive referenced element or CSS selector.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        submit: { default: false, type: 'boolean' },
+        tabId: { minimum: 1, type: 'integer' },
+        target: { maxLength: 2048, minLength: 1, type: 'string' },
+        text: { maxLength: 100000, type: 'string' }
+      },
+      required: ['tabId', 'target', 'text'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_type'
+  },
+  {
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    description: 'Press a key in a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        key: { maxLength: 64, minLength: 1, type: 'string' },
+        modifiers: {
+          items: { enum: ['alt', 'ctrl', 'meta', 'shift'], type: 'string' },
+          maxItems: 4,
+          type: 'array',
+          uniqueItems: true
+        },
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      required: ['tabId', 'key'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_key'
+  },
+  {
+    annotations: STATE_CHANGE_ANNOTATIONS,
+    description: 'Scroll a controllable Chrome tab or referenced element by bounded deltas.',
+    inputSchema: {
+      additionalProperties: false,
+      anyOf: [{ required: ['deltaX'] }, { required: ['deltaY'] }],
+      properties: {
+        deltaX: { maximum: 100000, minimum: -100000, type: 'number' },
+        deltaY: { maximum: 100000, minimum: -100000, type: 'number' },
+        tabId: { minimum: 1, type: 'integer' },
+        target: { maxLength: 2048, minLength: 1, type: 'string' }
+      },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_scroll'
+  },
+  {
+    annotations: STATE_CHANGE_ANNOTATIONS,
+    description: 'Hover a referenced element or CSS selector in a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        tabId: { minimum: 1, type: 'integer' },
+        target: { maxLength: 2048, minLength: 1, type: 'string' }
+      },
+      required: ['tabId', 'target'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_hover'
   }
 ] as const satisfies readonly Tool[]

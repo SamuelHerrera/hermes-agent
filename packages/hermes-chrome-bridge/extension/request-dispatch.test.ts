@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { createBridgeRequestDispatcher } from './request-dispatch.js'
+import { TabServiceError } from './tab-service.js'
 
 function setup() {
   const sendTabMessage = vi.fn<(tabId: number, message: unknown) => Promise<unknown>>(async () => ({
@@ -10,6 +11,7 @@ function setup() {
   }))
 
   const tabService = {
+    assertControllable: vi.fn(async () => undefined),
     getSelectedTabId: vi.fn(() => 9 as number | undefined),
     list: vi.fn(async () => ({
       count: 1,
@@ -31,13 +33,21 @@ function setup() {
     select: vi.fn(async (tabId: number) => ({ selectedTabId: tabId }))
   }
 
+  const tabActions = {
+    close: vi.fn(async ({ tabId }: { tabId: number }) => ({ closed: true as const, tabId })),
+    focus: vi.fn(async ({ tabId }: { tabId: number }) => ({ focused: true as const, tabId })),
+    navigate: vi.fn(async ({ tabId }: { tabId: number, url: string }) => ({ navigated: true as const, tabId })),
+    open: vi.fn(async () => ({ opened: true as const, tabId: 22 }))
+  }
+
   const dispatch = createBridgeRequestDispatcher({
     getConnectionState: () => 'connected',
     sendTabMessage,
+    tabActions,
     tabService
   })
 
-  return { dispatch, sendTabMessage, tabService }
+  return { dispatch, sendTabMessage, tabActions, tabService }
 }
 
 describe('background bridge request dispatch', () => {
@@ -161,6 +171,89 @@ describe('background bridge request dispatch', () => {
 
     expect(malformed).toMatchObject({ error: { code: 'INVALID_PAGE_RESPONSE' } })
     expect(JSON.stringify(malformed)).not.toContain('must not leak')
+  })
+
+  it('rejects guessed non-controllable tab IDs before sending page messages', async () => {
+    const { dispatch, sendTabMessage, tabService } = setup()
+    tabService.assertControllable.mockRejectedValueOnce(
+      new TabServiceError('TAB_NOT_CONTROLLABLE', 'The requested tab is not controllable.')
+    )
+
+    await expect(dispatch({
+      arguments: { selector: 'button', tabId: 99 },
+      id: 'guarded',
+      method: 'query',
+      type: 'request'
+    })).resolves.toMatchObject({ error: { code: 'TAB_NOT_CONTROLLABLE' } })
+    expect(sendTabMessage).not.toHaveBeenCalled()
+  })
+
+  it('routes navigation and tab lifecycle actions through the guarded tab service', async () => {
+    const { dispatch, tabActions } = setup()
+
+    const requests = [
+      { arguments: { active: false, url: 'https://example.test/' }, id: '1', method: 'open' },
+      { arguments: { tabId: 22, url: 'https://example.test/next' }, id: '2', method: 'navigate' },
+      { arguments: { tabId: 22 }, id: '3', method: 'focus' },
+      { arguments: { tabId: 22 }, id: '4', method: 'close' }
+    ]
+
+    for (const request of requests) {
+      await expect(dispatch({ ...request, type: 'request' })).resolves.toMatchObject({ type: 'response' })
+    }
+
+    expect(tabActions.open).toHaveBeenCalledWith({ active: false, url: 'https://example.test/' })
+    expect(tabActions.navigate).toHaveBeenCalledWith({ tabId: 22, url: 'https://example.test/next' })
+    expect(tabActions.focus).toHaveBeenCalledWith({ tabId: 22 })
+    expect(tabActions.close).toHaveBeenCalledWith({ tabId: 22 })
+  })
+
+  it('routes click, type, key, scroll, and hover with strict bounded payloads', async () => {
+    const { dispatch, sendTabMessage } = setup()
+
+    const requests = [
+      { arguments: { button: 'right', tabId: 9, target: 'e1' }, id: '1', method: 'click' },
+      { arguments: { submit: true, tabId: 9, target: 'e2', text: 'explicit text' }, id: '2', method: 'type' },
+      { arguments: { key: 'Enter', modifiers: ['ctrl'], tabId: 9 }, id: '3', method: 'key' },
+      { arguments: { deltaX: 0, deltaY: 100, tabId: 9, target: 'e3' }, id: '4', method: 'scroll' },
+      { arguments: { tabId: 9, target: 'e4' }, id: '5', method: 'hover' }
+    ]
+
+    for (const request of requests) {
+      await expect(dispatch({ ...request, type: 'request' })).resolves.toMatchObject({ type: 'response' })
+    }
+
+    expect(sendTabMessage.mock.calls.map(call => call[1])).toEqual([
+      { button: 'right', target: 'e1', type: 'hermes.bridge.click', version: 1 },
+      { submit: true, target: 'e2', text: 'explicit text', type: 'hermes.bridge.type', version: 1 },
+      { key: 'Enter', modifiers: ['ctrl'], type: 'hermes.bridge.key', version: 1 },
+      { deltaX: 0, deltaY: 100, target: 'e3', type: 'hermes.bridge.scroll', version: 1 },
+      { target: 'e4', type: 'hermes.bridge.hover', version: 1 }
+    ])
+  })
+
+  it('rejects malformed mutation arguments before browser or page actions', async () => {
+    const { dispatch, sendTabMessage, tabActions } = setup()
+
+    const requests = [
+      { arguments: { active: 'yes' }, id: '1', method: 'open' },
+      { arguments: { tabId: 0, url: 'https://example.test/' }, id: '2', method: 'navigate' },
+      { arguments: { button: 'invalid', tabId: 1, target: 'e1' }, id: '3', method: 'click' },
+      { arguments: { submit: false, tabId: 1, target: 'e1', text: 'x', extra: true }, id: '4', method: 'type' },
+      { arguments: { key: '', modifiers: [], tabId: 1 }, id: '5', method: 'key' },
+      { arguments: { deltaX: 0, deltaY: 100_001, tabId: 1 }, id: '6', method: 'scroll' },
+      { arguments: { tabId: 1, target: '' }, id: '7', method: 'hover' }
+    ]
+
+    for (const request of requests) {
+      await expect(dispatch({ ...request, type: 'request' })).resolves.toMatchObject({
+        error: { code: 'INVALID_ARGUMENTS' }
+      })
+    }
+
+    expect(sendTabMessage).not.toHaveBeenCalled()
+    expect(tabActions.open).not.toHaveBeenCalled()
+    expect(tabActions.navigate).not.toHaveBeenCalled()
   })
 
   it('rejects extra arguments and unknown methods with bounded safe errors', async () => {

@@ -1,3 +1,5 @@
+import { isPublicHttpUrl } from './url-policy.js'
+
 export interface BrowserTabLike {
   active?: boolean
   id?: number
@@ -114,6 +116,12 @@ function safeUrl(raw: string): { redacted: boolean, truncated: boolean, value: s
     return undefined
   }
 
+  const policyUrl = new URL(parsed.toString())
+  policyUrl.username = ''
+  policyUrl.password = ''
+
+  if (!isPublicHttpUrl(policyUrl.toString())) { return undefined }
+
   let redacted = parsed.username.length > 0 || parsed.password.length > 0 ||
     parsed.search.length > 0 || parsed.hash.length > 0
 
@@ -162,6 +170,7 @@ export function redactTab(tab: BrowserTabLike, selected: boolean): SafeTab | und
 }
 
 export interface TabService {
+  assertControllable(tabId: number): Promise<void>
   getSelectedTabId(): number | undefined
   list(): Promise<TabListResult>
   select(tabId: number): Promise<{ selectedTabId: number }>
@@ -171,11 +180,26 @@ export function createTabService(api: TabsApiLike, options: { maxTabs?: number }
   const maxTabs = Math.max(1, Math.min(100, options.maxTabs ?? 100))
   let selectedTabId: number | undefined
 
+  async function assertControllable(tabId: number): Promise<void> {
+    let tab: BrowserTabLike
+
+    try {
+      tab = await api.get(tabId)
+    } catch {
+      throw new TabServiceError('TAB_NOT_FOUND', 'The requested tab does not exist.')
+    }
+
+    if (redactTab(tab, true) === undefined) {
+      throw new TabServiceError('TAB_NOT_CONTROLLABLE', 'The requested tab is not controllable.')
+    }
+  }
+
   api.onRemoved.addListener(tabId => {
     if (selectedTabId === tabId) { selectedTabId = undefined }
   })
 
   return {
+    assertControllable,
     getSelectedTabId: () => selectedTabId,
 
     async list(): Promise<TabListResult> {
@@ -211,17 +235,7 @@ export function createTabService(api: TabsApiLike, options: { maxTabs?: number }
     },
 
     async select(tabId: number): Promise<{ selectedTabId: number }> {
-      let tab: BrowserTabLike
-
-      try {
-        tab = await api.get(tabId)
-      } catch {
-        throw new TabServiceError('TAB_NOT_FOUND', 'The requested tab does not exist.')
-      }
-
-      if (redactTab(tab, true) === undefined) {
-        throw new TabServiceError('TAB_NOT_CONTROLLABLE', 'The requested tab is not controllable.')
-      }
+      await assertControllable(tabId)
 
       selectedTabId = tabId
 

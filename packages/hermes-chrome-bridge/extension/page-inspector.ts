@@ -31,13 +31,14 @@ export interface PageInspectionResult {
 }
 
 export class PageInspectorError extends Error {
-  public constructor(public readonly code: 'INVALID_SELECTOR', message: string) {
+  public constructor(public readonly code: 'ELEMENT_NOT_FOUND' | 'INVALID_SELECTOR', message: string) {
     super(message)
     this.name = 'PageInspectorError'
   }
 }
 
 export interface PageInspector {
+  resolve(target: string): { element: Element, ref: string, sensitive: boolean }
   query(options: { limit?: number, selector: string }): PageInspectionResult
   snapshot(options: { format: SnapshotFormat }): PageInspectionResult
 }
@@ -190,6 +191,7 @@ export function createPageInspector(
   options: { maxElements?: number } = {}
 ): PageInspector {
   const refs = new WeakMap<Element, string>()
+  const elementsByRef = new Map<string, Element>()
   let nextRef = 1
   const maximum = Math.max(1, Math.min(MAX_ELEMENTS, options.maxElements ?? MAX_ELEMENTS))
 
@@ -199,6 +201,7 @@ export function createPageInspector(
     if (existing !== undefined) { return existing }
     const ref = `e${nextRef++}`
     refs.set(element, ref)
+    elementsByRef.set(ref, element)
 
     return ref
   }
@@ -277,6 +280,27 @@ export function createPageInspector(
   }
 
   return {
+    resolve(target: string): { element: Element, ref: string, sensitive: boolean } {
+      const referenced = elementsByRef.get(target)
+
+      if (referenced !== undefined) {
+        return { element: referenced, ref: target, sensitive: isSensitive(referenced) }
+      }
+
+      let element: Element | null
+
+      try {
+        element = document.querySelector(target)
+      } catch {
+        throw new PageInspectorError('INVALID_SELECTOR', 'The provided element target is invalid.')
+      }
+
+      if (element === null || EXCLUDED_TAGS.has(element.tagName) || attribute(element, 'aria-hidden') === 'true') {
+        throw new PageInspectorError('ELEMENT_NOT_FOUND', 'The requested element was not found.')
+      }
+
+      return { element, ref: refFor(element), sensitive: isSensitive(element) }
+    },
     query: ({ limit, selector }) => inspect(selector, 'both', clampLimit(limit, maximum)),
     snapshot: ({ format }) => inspect('*', format, maximum)
   }

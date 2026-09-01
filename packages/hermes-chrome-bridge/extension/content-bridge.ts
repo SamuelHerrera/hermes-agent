@@ -1,3 +1,4 @@
+import { PageActionError, type PageActions } from './page-actions.js'
 import { type PageInspector, PageInspectorError, type SnapshotFormat } from './page-inspector.js'
 
 interface ContentBridgeResult {
@@ -22,7 +23,23 @@ function isFormat(value: unknown): value is SnapshotFormat {
   return value === 'accessibility' || value === 'dom' || value === 'both'
 }
 
-export function createContentBridgeHandler(inspector: PageInspector) {
+function validTarget(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 2_048
+}
+
+function validModifiers(value: unknown): value is Array<'alt' | 'ctrl' | 'meta' | 'shift'> {
+  if (!Array.isArray(value) || value.length > 4) { return false }
+  const allowed = new Set(['alt', 'ctrl', 'meta', 'shift'])
+
+  return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
+    new Set(value).size === value.length
+}
+
+function validDistance(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
+}
+
+export function createContentBridgeHandler(inspector: PageInspector, actions: PageActions) {
   return (message: unknown): ContentBridgeResult | undefined => {
     if (!isRecord(message) || message.version !== 1) { return undefined }
 
@@ -60,13 +77,88 @@ export function createContentBridgeHandler(inspector: PageInspector) {
           version: 1
         }
       }
+
+      if (message.type === 'hermes.bridge.click') {
+        if (!exactKeys(message, ['button', 'target', 'type', 'version']) || !validTarget(message.target) ||
+          (message.button !== 'left' && message.button !== 'middle' && message.button !== 'right')) {
+          return undefined
+        }
+
+        return {
+          result: actions.click({ button: message.button, target: message.target }),
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
+      if (message.type === 'hermes.bridge.type') {
+        if (!exactKeys(message, ['submit', 'target', 'text', 'type', 'version']) ||
+          !validTarget(message.target) || typeof message.text !== 'string' || message.text.length > 100_000 ||
+          typeof message.submit !== 'boolean') {
+          return undefined
+        }
+
+        return {
+          result: actions.type({ submit: message.submit, target: message.target, text: message.text }),
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
+      if (message.type === 'hermes.bridge.key') {
+        if (!exactKeys(message, ['key', 'modifiers', 'type', 'version']) ||
+          typeof message.key !== 'string' || message.key.length === 0 || message.key.length > 64 ||
+          !validModifiers(message.modifiers)) {
+          return undefined
+        }
+
+        return {
+          result: actions.key({ key: message.key, modifiers: message.modifiers }),
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
+      if (message.type === 'hermes.bridge.scroll') {
+        const validKeys = exactKeys(message, ['deltaX', 'deltaY', 'type', 'version']) ||
+          exactKeys(message, ['deltaX', 'deltaY', 'target', 'type', 'version'])
+
+        if (!validKeys || !validDistance(message.deltaX) || !validDistance(message.deltaY) ||
+          (message.target !== undefined && !validTarget(message.target))) {
+          return undefined
+        }
+
+        return {
+          result: actions.scroll({
+            deltaX: message.deltaX,
+            deltaY: message.deltaY,
+            ...(message.target === undefined ? {} : { target: message.target })
+          }),
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
+      if (message.type === 'hermes.bridge.hover') {
+        if (!exactKeys(message, ['target', 'type', 'version']) || !validTarget(message.target)) {
+          return undefined
+        }
+
+        return {
+          result: actions.hover({ target: message.target }),
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
     } catch (error) {
       return {
         error: {
-          code: error instanceof PageInspectorError ? error.code : 'PAGE_INSPECTION_FAILED',
-          message: error instanceof PageInspectorError
+          code: error instanceof PageInspectorError || error instanceof PageActionError
+            ? error.code
+            : 'PAGE_OPERATION_FAILED',
+          message: error instanceof PageInspectorError || error instanceof PageActionError
             ? error.message
-            : 'The page inspection request failed.'
+            : 'The page operation failed.'
         },
         type: 'hermes.bridge.error',
         version: 1

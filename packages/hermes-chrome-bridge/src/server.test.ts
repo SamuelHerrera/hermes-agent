@@ -52,7 +52,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     ])
   })
 
-  it('marks list/status read-only and selection non-destructive state-changing', async () => {
+  it('marks reads, state changes, and potentially destructive interactions accurately', async () => {
     const server = createChromeBridgeServer()
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
@@ -62,15 +62,23 @@ describe('Hermes Chrome bridge MCP server', () => {
     await client.connect(clientTransport)
     const { tools } = await client.listTools()
 
-    for (const tool of tools.filter(tool => tool.name !== 'chrome_bridge_select_tab')) {
-      expect(tool.annotations?.readOnlyHint, tool.name).toBe(true)
-      expect(tool.annotations?.destructiveHint, tool.name).toBe(false)
-      expect(tool.annotations?.openWorldHint, tool.name).toBe(false)
+    const readOnly = new Set([
+      'chrome_bridge_status', 'chrome_bridge_tabs', 'chrome_bridge_snapshot', 'chrome_bridge_query'
+    ])
+
+    for (const tool of tools) {
+      expect(tool.annotations?.readOnlyHint, tool.name).toBe(readOnly.has(tool.name))
     }
 
     expect(tools.find(tool => tool.name === 'chrome_bridge_select_tab')?.annotations).toMatchObject({
       destructiveHint: false,
       openWorldHint: false,
+      readOnlyHint: false
+    })
+    expect(tools.find(tool => tool.name === 'chrome_bridge_close')?.annotations?.destructiveHint).toBe(true)
+    expect(tools.find(tool => tool.name === 'chrome_bridge_click')?.annotations).toMatchObject({
+      destructiveHint: true,
+      openWorldHint: true,
       readOnlyHint: false
     })
   })
@@ -141,6 +149,51 @@ describe('Hermes Chrome bridge MCP server', () => {
     }
 
     expect(route).toHaveBeenCalledTimes(2)
+  })
+
+  it('validates and routes navigation and user-like interaction tools', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ ok: true })
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+
+    clients.push(client)
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const validCalls = [
+      { arguments: { active: false, url: 'https://example.test/' }, name: 'chrome_bridge_open' },
+      { arguments: { tabId: 7, url: 'https://example.test/next' }, name: 'chrome_bridge_navigate' },
+      { arguments: { tabId: 7 }, name: 'chrome_bridge_focus' },
+      { arguments: { tabId: 7 }, name: 'chrome_bridge_close' },
+      { arguments: { button: 'left', tabId: 7, target: 'e1' }, name: 'chrome_bridge_click' },
+      { arguments: { submit: false, tabId: 7, target: 'e2', text: 'explicit' }, name: 'chrome_bridge_type' },
+      { arguments: { key: 'Enter', modifiers: ['ctrl'], tabId: 7 }, name: 'chrome_bridge_key' },
+      { arguments: { deltaY: 50, tabId: 7 }, name: 'chrome_bridge_scroll' },
+      { arguments: { tabId: 7, target: 'e3' }, name: 'chrome_bridge_hover' }
+    ]
+
+    for (const call of validCalls) {
+      await expect(client.callTool(call)).resolves.not.toMatchObject({ isError: true })
+    }
+
+    expect(route).toHaveBeenCalledTimes(validCalls.length)
+
+    const invalidCalls = [
+      { arguments: { active: 'yes' }, name: 'chrome_bridge_open' },
+      { arguments: { tabId: 0, url: 'https://example.test/' }, name: 'chrome_bridge_navigate' },
+      { arguments: { button: 'other', tabId: 7, target: 'e1' }, name: 'chrome_bridge_click' },
+      { arguments: { submit: false, tabId: 7, target: 'e1' }, name: 'chrome_bridge_type' },
+      { arguments: { key: '', tabId: 7 }, name: 'chrome_bridge_key' },
+      { arguments: { deltaY: 100_001, tabId: 7 }, name: 'chrome_bridge_scroll' },
+      { arguments: { tabId: 7, target: '' }, name: 'chrome_bridge_hover' }
+    ]
+
+    for (const call of invalidCalls) {
+      await expect(client.callTool(call)).resolves.toMatchObject({ isError: true })
+    }
+
+    expect(route).toHaveBeenCalledTimes(validCalls.length)
   })
 
   it('rejects arguments that violate the advertised empty schemas', async () => {
@@ -291,7 +344,16 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
       'chrome_bridge_snapshot',
-      'chrome_bridge_query'
+      'chrome_bridge_query',
+      'chrome_bridge_open',
+      'chrome_bridge_navigate',
+      'chrome_bridge_focus',
+      'chrome_bridge_close',
+      'chrome_bridge_click',
+      'chrome_bridge_type',
+      'chrome_bridge_key',
+      'chrome_bridge_scroll',
+      'chrome_bridge_hover'
     ])
   })
 
@@ -322,7 +384,16 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
       'chrome_bridge_snapshot',
-      'chrome_bridge_query'
+      'chrome_bridge_query',
+      'chrome_bridge_open',
+      'chrome_bridge_navigate',
+      'chrome_bridge_focus',
+      'chrome_bridge_close',
+      'chrome_bridge_click',
+      'chrome_bridge_type',
+      'chrome_bridge_key',
+      'chrome_bridge_scroll',
+      'chrome_bridge_hover'
     ])
   })
 })
