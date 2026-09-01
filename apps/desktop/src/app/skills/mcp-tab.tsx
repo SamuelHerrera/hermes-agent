@@ -43,6 +43,8 @@ import { PanelAddButton, PanelEmpty } from '../overlays/panel'
 import { prettyName } from '../settings/helpers'
 import { useDeepLinkHighlight } from '../settings/use-deep-link-highlight'
 
+import { chromeBridgeHealthState } from './chrome-bridge-health'
+
 type McpServers = Record<string, Record<string, unknown>>
 
 // The editor always speaks the ecosystem's mcp.json document format — names
@@ -125,7 +127,7 @@ const probeKey = (name: string, server: Record<string, unknown> | undefined): st
 
 type Probe = McpTestResult | 'probing'
 
-type ServerStatus = 'off' | 'probing' | 'ok' | 'needs-auth' | 'error' | 'unknown'
+type ServerStatus = 'bridge-disconnected' | 'off' | 'probing' | 'ok' | 'needs-auth' | 'error' | 'unknown'
 
 function statusOf(server: Record<string, unknown>, probe: Probe | undefined): ServerStatus {
   if (!serverEnabled(server)) {
@@ -140,6 +142,10 @@ function statusOf(server: Record<string, unknown>, probe: Probe | undefined): Se
     return 'unknown'
   }
 
+  if (chromeBridgeHealthState(probe) === 'disconnected') {
+    return 'bridge-disconnected'
+  }
+
   if (probe.ok) {
     return 'ok'
   }
@@ -148,6 +154,7 @@ function statusOf(server: Record<string, unknown>, probe: Probe | undefined): Se
 }
 
 const STATUS_DOT: Record<ServerStatus, string> = {
+  'bridge-disconnected': 'bg-amber-500',
   ok: 'bg-emerald-500',
   error: 'bg-red-500',
   'needs-auth': 'bg-amber-500',
@@ -187,6 +194,9 @@ function statusLine(
 
     case 'probing':
       return m.statusConnecting
+
+    case 'bridge-disconnected':
+      return m.chromeBridgeDisconnected
 
     case 'needs-auth':
       return m.statusNeedsAuth
@@ -1084,7 +1094,7 @@ export function McpTab({ gateway }: { gateway: HermesGateway | null }) {
 // Left column: one server's config (mirrors the block under the cursor).
 // ---------------------------------------------------------------------------
 
-function ServerConfig({
+export function ServerConfig({
   authing,
   description,
   entry,
@@ -1131,6 +1141,7 @@ function ServerConfig({
     (entry.auth === 'oauth' ? status === 'needs-auth' || status === 'error' : !entry.auth && status === 'needs-auth')
 
   const summary = probe && probe !== 'probing' && probe.ok ? capabilitySummary(m, probe, entry) : null
+  const bridgeHealth = chromeBridgeHealthState(probe)
 
   return (
     // p-2 matches the list view's container so flipping list ⇄ config keeps
@@ -1186,6 +1197,39 @@ function ServerConfig({
         <p className="mt-2 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
           {description}
         </p>
+      )}
+
+      {bridgeHealth && (
+        <div className="mt-3 rounded-lg border border-(--ui-border) bg-(--ui-bg-quaternary) p-2.5">
+          <div className="flex items-start gap-2">
+            <span
+              aria-hidden="true"
+              className={cn('mt-1 size-2 shrink-0 rounded-full', bridgeHealth === 'connected' ? 'bg-emerald-500' : 'bg-amber-500')}
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-(--ui-text-primary)">
+                {bridgeHealth === 'connected' ? m.chromeBridgeConnected : m.chromeBridgeDisconnected}
+              </p>
+              <p className="mt-0.5 text-[0.68rem] leading-relaxed text-(--ui-text-tertiary)">
+                {bridgeHealth === 'connected' ? m.chromeBridgeConnectedHint : m.chromeBridgeDisconnectedHint}
+              </p>
+            </div>
+            <Button onClick={onProbe} size="xs" variant="ghost">
+              {m.chromeBridgeRefresh}
+            </Button>
+          </div>
+          {bridgeHealth === 'disconnected' && (
+            <div className="mt-2 flex justify-end">
+              <Button
+                onClick={() => void window.hermesDesktop.openExternal('https://hermes-agent.nousresearch.com/docs/user-guide/features/chrome-bridge')}
+                size="xs"
+                variant="secondary"
+              >
+                {m.chromeBridgeSetup}
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       {canAuth && saved && (

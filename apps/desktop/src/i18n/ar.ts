@@ -774,7 +774,13 @@ export const ar = defineLocale({
       name: 'الاسم',
       serverJson: 'JSON الخادم',
       remove: 'إزالة',
-      saveServer: 'حفظ الخادم'
+      saveServer: 'حفظ الخادم',
+      chromeBridgeConnected: 'Chrome متصل',
+      chromeBridgeDisconnected: 'Chrome غير متصل',
+      chromeBridgeConnectedHint: 'يمكن لـ Hermes التحكم في ملف Chrome الذي تم تفويضه صراحةً.',
+      chromeBridgeDisconnectedHint: 'افتح نافذة الإضافة المنبثقة واتصل بالجسر المحلي.',
+      chromeBridgeRefresh: 'تحديث',
+      chromeBridgeSetup: 'دليل الإعداد'
     },
     model: {
       loading: 'جار تحميل إعدادات النموذج...',

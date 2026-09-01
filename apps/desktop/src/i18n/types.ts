@@ -723,6 +723,12 @@ export interface Translations {
       statusNeedsAuth: string
       statusError: string
       statusOff: string
+      chromeBridgeConnected: string
+      chromeBridgeDisconnected: string
+      chromeBridgeConnectedHint: string
+      chromeBridgeDisconnectedHint: string
+      chromeBridgeRefresh: string
+      chromeBridgeSetup: string
       allServers: string
       authenticatedTitle: string
       authenticatedMessage: (server: string, count: number) => string

@@ -1400,6 +1400,14 @@ export interface McpServerTestResponse {
   ok: boolean
   error?: string
   tools: { name: string; description: string }[]
+  health?: {
+    chromeBridge?: {
+      bridgeConnected?: boolean
+      connected?: boolean
+      nativeConnected?: boolean
+      selectedTabId?: number
+    }
+  }
 }
 
 /** One Nous-approved MCP catalog entry from `GET /api/mcp/catalog`. */
