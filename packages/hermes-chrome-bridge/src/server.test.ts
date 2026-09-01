@@ -52,7 +52,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     ])
   })
 
-  it('marks every advertised tool as read-only and non-destructive', async () => {
+  it('marks list/status read-only and selection non-destructive state-changing', async () => {
     const server = createChromeBridgeServer()
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
@@ -62,13 +62,44 @@ describe('Hermes Chrome bridge MCP server', () => {
     await client.connect(clientTransport)
     const { tools } = await client.listTools()
 
-    expect(tools).not.toHaveLength(0)
-
-    for (const tool of tools) {
+    for (const tool of tools.filter(tool => tool.name !== 'chrome_bridge_select_tab')) {
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(true)
       expect(tool.annotations?.destructiveHint, tool.name).toBe(false)
       expect(tool.annotations?.openWorldHint, tool.name).toBe(false)
     }
+
+    expect(tools.find(tool => tool.name === 'chrome_bridge_select_tab')?.annotations).toMatchObject({
+      destructiveHint: false,
+      openWorldHint: false,
+      readOnlyHint: false
+    })
+  })
+
+  it('strictly validates and routes one positive integer tab selection', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ selectedTabId: 17 })
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+    clients.push(client)
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const selected = await client.callTool({
+      arguments: { tabId: 17 },
+      name: 'chrome_bridge_select_tab'
+    })
+
+    expect(route).toHaveBeenCalledWith({ arguments: { tabId: 17 }, method: 'selectTab' })
+    expect(JSON.parse((selected.content as Array<{ text: string }>)[0]?.text ?? 'null')).toEqual({
+      selectedTabId: 17
+    })
+
+    for (const arguments_ of [{}, { tabId: 0 }, { tabId: 1.5 }, { tabId: '17' }, { extra: true, tabId: 17 }]) {
+      const invalid = await client.callTool({ arguments: arguments_, name: 'chrome_bridge_select_tab' })
+      expect(invalid.isError).toBe(true)
+    }
+
+    expect(route).toHaveBeenCalledTimes(1)
   })
 
   it('rejects arguments that violate the advertised empty schemas', async () => {
@@ -169,9 +200,23 @@ describe('Hermes Chrome bridge MCP server', () => {
     clients.push(client)
     await server.connect(serverTransport)
     await client.connect(clientTransport)
-    const status = await client.callTool({ name: 'chrome_bridge_status' })
+    const statusCall = client.callTool({ name: 'chrome_bridge_status' })
+
+    while (messages.length === 0) { await new Promise(resolveWait => setTimeout(resolveWait, 5)) }
+    const statusRequest = messages.shift() as Record<string, unknown>
+    expect(statusRequest).toMatchObject({ arguments: {}, method: 'status', type: 'request' })
+    socket.write(`${JSON.stringify({
+      id: statusRequest.id,
+      result: { bridgeConnected: true, nativeConnected: true, selectedTabId: 11 },
+      type: 'response'
+    })}\n`)
+    const status = await statusCall
     const statusContent = status.content as Array<{ text: string }>
-    expect(JSON.parse(statusContent[0]?.text ?? 'null')).toMatchObject({ connected: true })
+    expect(JSON.parse(statusContent[0]?.text ?? 'null')).toEqual({
+      bridgeConnected: true,
+      nativeConnected: true,
+      selectedTabId: 11
+    })
 
     const tabsCall = client.callTool({ name: 'chrome_bridge_tabs' })
 
@@ -203,6 +248,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(tools.map(tool => tool.name)).toEqual([
       'chrome_bridge_status',
       'chrome_bridge_tabs',
+      'chrome_bridge_select_tab',
       'chrome_bridge_snapshot'
     ])
   })
@@ -232,6 +278,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(tools.map(tool => tool.name)).toEqual([
       'chrome_bridge_status',
       'chrome_bridge_tabs',
+      'chrome_bridge_select_tab',
       'chrome_bridge_snapshot'
     ])
   })

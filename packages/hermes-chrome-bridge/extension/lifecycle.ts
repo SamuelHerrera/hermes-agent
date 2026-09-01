@@ -1,3 +1,5 @@
+import type { NativeRequest, NativeRequestHandler } from './protocol.js'
+
 export const NATIVE_HOST_NAME = 'com.nous.hermes_chrome_bridge'
 
 export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error'
@@ -40,6 +42,7 @@ export interface ConnectionControllerDependencies {
   connectNative(hostName: string): NativePortLike
   consumeNativeDisconnectError?(): void
   readOptIn(): Promise<boolean>
+  requestHandler?: NativeRequestHandler
   timer?: TimerApi
   writeOptIn(optedIn: boolean): Promise<void>
 }
@@ -263,14 +266,32 @@ export function createConnectionController(
     }
 
     if (isRequest(message)) {
-      nativePort.postMessage({
-        error: {
-          code: 'NOT_IMPLEMENTED',
-          message: 'This bridge method is not implemented by the extension shell.'
-        },
-        id: message.id,
-        type: 'response'
-      })
+      const request = message as NativeRequest
+
+      const response = dependencies.requestHandler === undefined
+        ? Promise.resolve({
+            error: {
+              code: 'NOT_IMPLEMENTED',
+              message: 'This bridge method is not implemented by the extension shell.'
+            },
+            id: request.id,
+            type: 'response' as const
+          })
+        : dependencies.requestHandler(request)
+
+      void response
+        .then(result => {
+          if (port === nativePort) { nativePort.postMessage(result) }
+        })
+        .catch(() => {
+          if (port === nativePort) {
+            nativePort.postMessage({
+              error: { code: 'BRIDGE_ERROR', message: 'The Chrome bridge request failed.' },
+              id: request.id,
+              type: 'response'
+            })
+          }
+        })
 
       return
     }

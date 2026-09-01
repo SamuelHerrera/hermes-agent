@@ -21,7 +21,7 @@ import { CHROME_BRIDGE_TOOLS } from './schema.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
-  method: 'snapshot' | 'status' | 'tabs'
+  method: 'selectTab' | 'snapshot' | 'status' | 'tabs'
 }
 
 export interface ChromeBridgeRequestRouter {
@@ -29,6 +29,7 @@ export interface ChromeBridgeRequestRouter {
 }
 
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
+  chrome_bridge_select_tab: 'selectTab',
   chrome_bridge_snapshot: 'snapshot',
   chrome_bridge_status: 'status',
   chrome_bridge_tabs: 'tabs'
@@ -103,10 +104,17 @@ export function createChromeBridgeServer(
 
     const toolArguments = request.params.arguments ?? {}
 
-    if (Object.keys(toolArguments).length > 0) {
+    const validArguments = method === 'selectTab'
+      ? Object.keys(toolArguments).length === 1 &&
+        Number.isInteger(toolArguments.tabId) && (toolArguments.tabId as number) > 0
+      : Object.keys(toolArguments).length === 0
+
+    if (!validArguments) {
       return {
         content: [{
-          text: `Invalid arguments for ${request.params.name}: expected an empty object`,
+          text: method === 'selectTab'
+            ? `Invalid arguments for ${request.params.name}: expected exactly one positive integer tabId`
+            : `Invalid arguments for ${request.params.name}: expected an empty object`,
           type: 'text'
         }],
         isError: true

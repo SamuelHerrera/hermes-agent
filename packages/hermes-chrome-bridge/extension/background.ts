@@ -3,10 +3,27 @@ import {
   type ConnectionState,
   createConnectionController
 } from './lifecycle.js'
+import { createBridgeRequestDispatcher } from './request-dispatch.js'
+import { createTabService } from './tab-service.js'
 
 const OPT_IN_KEY = 'hermesChromeBridgeOptIn'
 
-const controller = createConnectionController({
+const tabService = createTabService({
+  get: async tabId => chrome.tabs.get(tabId),
+  onRemoved: {
+    addListener: listener => chrome.tabs.onRemoved.addListener(listener)
+  },
+  query: async () => chrome.tabs.query({})
+})
+
+let controller: ReturnType<typeof createConnectionController>
+
+const dispatchRequest = createBridgeRequestDispatcher({
+  getConnectionState: () => controller.getState().connection,
+  tabService
+})
+
+controller = createConnectionController({
   connectNative: hostName => chrome.runtime.connectNative(hostName),
   consumeNativeDisconnectError: () => { void chrome.runtime.lastError },
   readOptIn: async () => {
@@ -14,6 +31,7 @@ const controller = createConnectionController({
 
     return stored[OPT_IN_KEY] === true
   },
+  requestHandler: dispatchRequest,
   writeOptIn: async optedIn => {
     await chrome.storage.local.set({ [OPT_IN_KEY]: optedIn })
   }

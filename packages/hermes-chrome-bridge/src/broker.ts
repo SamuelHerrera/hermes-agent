@@ -28,9 +28,11 @@ export interface BrokerConfig {
 }
 
 export interface BrokerStatus {
+  bridgeConnected: boolean
   connected: boolean
   connectedAt?: string
   disconnectedAt?: string
+  nativeConnected: boolean
   updatedAt: string
   version: 1
 }
@@ -149,18 +151,19 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
 
   public status(): BrokerStatus {
     return {
+      bridgeConnected: this.activeHost !== undefined,
       connected: this.activeHost !== undefined,
       ...(this.connectedAt === undefined ? {} : { connectedAt: this.connectedAt }),
       ...(this.disconnectedAt === undefined ? {} : { disconnectedAt: this.disconnectedAt }),
+      nativeConnected: this.activeHost !== undefined,
       updatedAt: new Date().toISOString(),
       version: 1
     }
   }
 
   public async route(request: ChromeBridgeRequest): Promise<unknown> {
-    if (request.method === 'status') {return this.status()}
-
     if (this.activeHost === undefined || this.activeHost.destroyed) {
+      if (request.method === 'status') { return this.status() }
       throw new BridgeBrokerError('BRIDGE_DISCONNECTED', 'native Chrome bridge is disconnected')
     }
 

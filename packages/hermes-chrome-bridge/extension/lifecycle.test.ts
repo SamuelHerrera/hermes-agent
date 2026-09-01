@@ -186,25 +186,58 @@ describe('extension connection lifecycle', () => {
     expect(JSON.stringify(controller.getState())).not.toContain('do-not-display')
   })
 
-  it('returns a structured NOT_IMPLEMENTED response for unknown requests', async () => {
-    const { controller, ports } = setup(true)
+  it('routes a strict native request through the injected background dispatcher', async () => {
+    const requestHandler = vi.fn(async (request: {
+      arguments: Record<string, unknown>
+      id: string
+      method: string
+      type: 'request'
+    }) => ({ id: request.id, result: { count: 0 }, type: 'response' as const }))
+
+    const port = new FakePort()
+
+    const controller = createConnectionController({
+      connectNative: () => port,
+      readOptIn: async () => true,
+      requestHandler,
+      writeOptIn: async () => undefined
+    })
+
     await controller.start()
 
-    ports[0].onMessage.emit({
+    const request = { arguments: {}, id: 'request-1', method: 'tabs', type: 'request' as const }
+    port.onMessage.emit(request)
+    await vi.waitFor(() => expect(port.sent).toHaveLength(1))
+
+    expect(requestHandler).toHaveBeenCalledWith(request)
+    expect(port.sent).toEqual([{ id: 'request-1', result: { count: 0 }, type: 'response' }])
+  })
+
+  it('rejects request envelopes with extra keys before dispatch', async () => {
+    const requestHandler = vi.fn()
+
+    const port = new FakePort()
+
+    const controller = createConnectionController({
+      connectNative: () => port,
+      readOptIn: async () => true,
+      requestHandler,
+      writeOptIn: async () => undefined
+    })
+
+    await controller.start()
+
+    port.onMessage.emit({
       arguments: {},
       id: 'request-1',
       method: 'tabs',
+      secret: 'must not be reflected',
       type: 'request'
     })
 
-    expect(ports[0].sent).toEqual([{
-      error: {
-        code: 'NOT_IMPLEMENTED',
-        message: 'This bridge method is not implemented by the extension shell.'
-      },
-      id: 'request-1',
-      type: 'response'
-    }])
+    expect(requestHandler).not.toHaveBeenCalled()
+    expect(controller.getState().lastError?.code).toBe('INVALID_NATIVE_MESSAGE')
+    expect(JSON.stringify(controller.getState())).not.toContain('must not be reflected')
   })
 
   it('disconnect revokes opt-in, cancels retry, and closes the native port', async () => {

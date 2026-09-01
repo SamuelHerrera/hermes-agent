@@ -12,6 +12,12 @@ const READ_ONLY_ANNOTATIONS = {
   readOnlyHint: true
 } as const
 
+const STATE_CHANGE_ANNOTATIONS = {
+  destructiveHint: false,
+  openWorldHint: false,
+  readOnlyHint: false
+} as const
+
 export const CHROME_BRIDGE_TOOLS = [
   {
     annotations: READ_ONLY_ANNOTATIONS,
@@ -24,6 +30,19 @@ export const CHROME_BRIDGE_TOOLS = [
     description: 'List tabs exposed by the local Hermes Chrome bridge.',
     inputSchema: EMPTY_INPUT_SCHEMA,
     name: 'chrome_bridge_tabs'
+  },
+  {
+    annotations: STATE_CHANGE_ANNOTATIONS,
+    description: 'Select an existing controllable tab without focusing or activating it.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_select_tab'
   },
   {
     annotations: READ_ONLY_ANNOTATIONS,
