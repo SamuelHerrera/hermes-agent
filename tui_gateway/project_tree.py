@@ -603,7 +603,7 @@ def _is_running_session(session: dict) -> bool:
 
 
 def _project_summary_counts(sessions: Optional[list[dict]], fallback_count: int) -> dict:
-    """Split active project rows into top-level chats, child chats, and running rows."""
+    """Split active rows into top-level, child, and running top-level chats."""
     if sessions is None:
         return {
             "chatSessionCount": fallback_count,
@@ -616,7 +616,9 @@ def _project_summary_counts(sessions: Optional[list[dict]], fallback_count: int)
     return {
         "chatSessionCount": max(0, len(sessions) - child_count),
         "childSessionCount": child_count,
-        "runningSessionCount": sum(1 for session in sessions if _is_running_session(session)),
+        "runningSessionCount": sum(
+            1 for session in sessions if not _is_child_session(session) and _is_running_session(session)
+        ),
     }
 
 

@@ -1012,6 +1012,59 @@ describe('overlayProjectSummaryCounts', () => {
     expect(overlaid.runningSessionCount).toBe(0)
     expect(overlaid.sessionCount).toBe(1)
   })
+
+  it('lowers stale backend counts when a sidebar archive tombstones a known preview row', () => {
+    const keep = makeSession('/www/app', { id: 'keep' })
+    const archived = makeSession('/www/app', { id: 'archived' })
+
+    const project = projectNode({
+      chatSessionCount: 2,
+      id: 'p_app',
+      previewSessions: [keep, archived],
+      sessionCount: 2
+    })
+
+    const overlaid = overlayProjectSummaryCounts([project], [], [], () => false, new Set(['archived']))[0]
+
+    expect(overlaid.chatSessionCount).toBe(1)
+    expect(overlaid.childSessionCount).toBe(0)
+    expect(overlaid.sessionCount).toBe(1)
+  })
+
+  it('counts running top-level chats without adding their running child agents', () => {
+    const parentOne = makeSession('/www/app', { id: 'parent-one', running: true })
+    const parentTwo = makeSession('/www/app', { id: 'parent-two', running: true })
+
+    const childOne = makeSession('/www/app', {
+      delegate_parent_session_id: 'parent-one',
+      id: 'child-one',
+      parent_session_id: 'parent-one',
+      running: true,
+      source: 'subagent'
+    })
+
+    const childTwo = makeSession('/www/app', {
+      delegate_parent_session_id: 'parent-one',
+      id: 'child-two',
+      parent_session_id: 'parent-one',
+      running: true,
+      source: 'subagent'
+    })
+
+    const project = projectNode({ id: 'p_app' })
+
+    const overlaid = overlayProjectSummaryCounts(
+      [project],
+      [parentOne, parentTwo, childOne, childTwo],
+      [makeProject('p_app', ['/www/app'])],
+      () => true
+    )[0]
+
+    expect(overlaid.chatSessionCount).toBe(2)
+    expect(overlaid.childSessionCount).toBe(2)
+    expect(overlaid.runningSessionCount).toBe(2)
+    expect(overlaid.sessionCount).toBe(4)
+  })
 })
 
 describe('excludeProjectSessions', () => {

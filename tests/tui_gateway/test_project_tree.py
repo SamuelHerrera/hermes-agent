@@ -124,7 +124,9 @@ def test_project_nodes_split_top_level_child_and_running_chat_counts():
     assert project["sessionCount"] == 3
     assert project["chatSessionCount"] == 1
     assert project["childSessionCount"] == 2
-    assert project["runningSessionCount"] == 2
+    # The running metric describes top-level chats. A running child is already
+    # represented by childSessionCount and must not inflate the chat count.
+    assert project["runningSessionCount"] == 1
 
 
 def test_project_counts_can_cover_rows_beyond_the_hydrated_session_window():

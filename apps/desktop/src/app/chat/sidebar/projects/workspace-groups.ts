@@ -63,7 +63,7 @@ export interface SidebarProjectTree {
   chatSessionCount?: number
   /** Active branch/delegate child chats. */
   childSessionCount?: number
-  /** Active rows currently running, including child chats. */
+  /** Active top-level chats currently running, excluding child chats. */
   runningSessionCount?: number
   archivedSessionCount?: number
   // Tokens and spend over the same sessions `sessionCount` counts, summed by
@@ -173,13 +173,16 @@ const projectCountFields = (sessions: SessionInfo[], isRunning?: RunningPredicat
   return {
     chatSessionCount: Math.max(0, unique.length - childSessionCount),
     childSessionCount,
-    runningSessionCount: unique.filter(session => sessionIsRunning(session, isRunning)).length,
+    runningSessionCount: unique.filter(session => !isChildSession(session) && sessionIsRunning(session, isRunning)).length,
     sessionCount: unique.length
   }
 }
 
 const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
   project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))
+
+const sessionRemoved = (session: SessionInfo, removed: ReadonlySet<string>): boolean =>
+  Boolean(removed.has(session.id) || (session._lineage_root_id && removed.has(session._lineage_root_id)))
 
 /** Default-branch names that pin to the top and read as the repo's trunk. */
 const TRUNK_BRANCHES = new Set(['main', 'master', 'trunk', 'develop'])
@@ -796,7 +799,12 @@ export function overlayProjectRunningCounts(
   const seen = new Set<string>()
 
   for (const session of live) {
-    if (removed.has(session.id) || seen.has(session.id) || !sessionIsRunning(session, isRunning)) {
+    if (
+      removed.has(session.id) ||
+      seen.has(session.id) ||
+      isChildSession(session) ||
+      !sessionIsRunning(session, isRunning)
+    ) {
       continue
     }
 
@@ -862,20 +870,28 @@ export function overlayProjectSummaryCounts(
   let changed = false
 
   const next = projects.map(project => {
-    const visibleRows = [
+    const knownRows = uniqueSessions([
       ...projectSessions(project),
       ...(project.previewSessions ?? []),
       ...(liveByProject.get(project.id) ?? [])
-    ].filter(session => !removed.has(session.id))
+    ])
+
+    const removedRows = knownRows.filter(session => sessionRemoved(session, removed))
+    const visibleRows = knownRows.filter(session => !sessionRemoved(session, removed))
 
     const visibleCounts = projectCountFields(visibleRows, isRunning)
-    const sessionCount = Math.max(project.sessionCount ?? 0, visibleCounts.sessionCount)
-    const childSessionCount = Math.max(project.childSessionCount ?? 0, visibleCounts.childSessionCount)
+    const removedCounts = projectCountFields(removedRows, isRunning)
+    const previousChildCount = project.childSessionCount ?? 0
+    const previousChatCount = project.chatSessionCount ?? Math.max(0, (project.sessionCount ?? 0) - previousChildCount)
 
-    const chatSessionCount = Math.max(
-      project.chatSessionCount ?? Math.max(0, (project.sessionCount ?? 0) - (project.childSessionCount ?? 0)),
-      visibleCounts.chatSessionCount
+    const sessionCount = Math.max(visibleCounts.sessionCount, Math.max(0, (project.sessionCount ?? 0) - removedCounts.sessionCount))
+
+    const childSessionCount = Math.max(
+      visibleCounts.childSessionCount,
+      Math.max(0, previousChildCount - removedCounts.childSessionCount)
     )
+
+    const chatSessionCount = Math.max(visibleCounts.chatSessionCount, Math.max(0, previousChatCount - removedCounts.chatSessionCount))
 
     const runningSessionCount = visibleCounts.runningSessionCount
 
