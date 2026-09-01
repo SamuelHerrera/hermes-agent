@@ -100,7 +100,7 @@ export function createPageRuntimeService(): PageRuntimeService {
 
       const redactString = (value: string): string => {
         const patterns = [
-          /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
+          /\b(?:api[-_ ]?key|access[-_ ]?token|auth(?:orization)?|bearer|client[-_ ]?secret|credential|password|refresh[-_ ]?token|secret|session[-_ ]?token|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
           /\bbearer\s+[A-Za-z0-9._~-]+/giu,
           /\b(?:\d[ -]*?){13,19}\b/gu,
           /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
@@ -255,7 +255,7 @@ export function createPageRuntimeService(): PageRuntimeService {
 
         const redactString = (entry: string): string => {
           const patterns = [
-            /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
+            /\b(?:api[-_ ]?key|access[-_ ]?token|auth(?:orization)?|bearer|client[-_ ]?secret|credential|password|refresh[-_ ]?token|secret|session[-_ ]?token|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
             /\bbearer\s+[A-Za-z0-9._~-]+/giu,
             /\b(?:\d[ -]*?){13,19}\b/gu,
             /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,

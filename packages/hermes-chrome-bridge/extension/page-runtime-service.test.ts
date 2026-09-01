@@ -45,13 +45,21 @@ afterEach(() => {
 
 describe('extension-owned page runtime service', () => {
   it('redacts credential-shaped eval string values', async () => {
-    installPageGlobals('Authorization: Bearer super-secret-token')
+    installPageGlobals({
+      access: 'access_token=super-secret-token',
+      authorization: 'Authorization: Bearer super-secret-token',
+      nested: { client: 'client_secret=super-secret-token' }
+    })
     installChromeExecutor()
 
     await expect(createPageRuntimeService().eval(7, {
       source: 'document.title',
       timeoutMs: 500
-    })).resolves.toBe('[redacted]')
+    })).resolves.toEqual({
+      access: '[redacted]',
+      authorization: '[redacted]',
+      nested: { client: '[redacted]' }
+    })
   })
 
   it('redacts credential-shaped console string arguments', async () => {
@@ -60,12 +68,12 @@ describe('extension-owned page runtime service', () => {
     const service = createPageRuntimeService()
 
     await service.console(7, { limit: 10 })
-    console.error('api_key=super-secret-token')
+    console.error('api_key=super-secret-token', 'access_token=super-secret-token', 'client_secret=super-secret-token')
 
     await expect(service.console(7, { levels: ['error'], limit: 10 })).resolves.toMatchObject({
       entries: [
         {
-          arguments: ['[redacted]'],
+          arguments: ['[redacted]', '[redacted]', '[redacted]'],
           level: 'error'
         }
       ]
