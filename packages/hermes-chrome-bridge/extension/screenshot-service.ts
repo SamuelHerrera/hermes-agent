@@ -1,4 +1,5 @@
 interface ScreenshotDependencies {
+  beforeCapture?(tabId: number): Promise<void>
   captureVisibleTab(
     windowId: number,
     options: { format: 'jpeg' | 'png', quality?: number }
@@ -57,6 +58,8 @@ export function createScreenshotService(dependencies: ScreenshotDependencies): S
         restoreTabId = activeTabs.find(candidate => Number.isInteger(candidate.id))?.id
 
         if (restoreTabId !== tabId) { await dependencies.tabs.update(tabId, { active: true }) }
+
+        await dependencies.beforeCapture?.(tabId)
 
         const dataUrl = await dependencies.captureVisibleTab(tab.windowId as number, {
           format,

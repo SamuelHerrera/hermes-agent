@@ -12,6 +12,7 @@ export interface ControlIndicator {
   activity(target?: Element): void
   destroy(): void
   hide(): void
+  refresh(): void
 }
 
 const INDICATOR_ID = '__hermes_chrome_control_indicator'
@@ -30,6 +31,7 @@ export function createControlIndicator(
   let host: HTMLElement | undefined
   let root: HTMLElement | undefined
   let cursor: HTMLElement | undefined
+  let lastTarget: Element | undefined
 
   function mount(): void {
     if (host !== undefined) { return }
@@ -84,6 +86,22 @@ export function createControlIndicator(
     }
   }
 
+  function refresh(): void {
+    if (cursor === undefined || lastTarget === undefined) { return }
+
+    const bounds = lastTarget.getBoundingClientRect()
+    const width = document.defaultView?.innerWidth ?? Number.POSITIVE_INFINITY
+    const height = document.defaultView?.innerHeight ?? Number.POSITIVE_INFINITY
+
+    const position = {
+      x: Math.max(12, Math.min(Math.round(bounds.x + bounds.width / 2), width - 12)),
+      y: Math.max(12, Math.min(Math.round(bounds.y + bounds.height / 2), height - 12))
+    }
+
+    cursor.style.opacity = '1'
+    cursor.style.transform = `translate(${position.x}px, ${position.y}px)`
+  }
+
   return {
     activity(target) {
       mount()
@@ -95,17 +113,11 @@ export function createControlIndicator(
       root.style.opacity = '1'
 
       if (target === undefined) {
+        lastTarget = undefined
         cursor.style.opacity = '0'
       } else {
-        const bounds = target.getBoundingClientRect()
-
-        const position = {
-          x: Math.round(bounds.x + bounds.width / 2),
-          y: Math.round(bounds.y + bounds.height / 2)
-        }
-
-        cursor.style.opacity = '1'
-        cursor.style.transform = `translate(${position.x}px, ${position.y}px)`
+        lastTarget = target
+        refresh()
       }
 
       idleHandle = timer.setTimeout(() => {
@@ -122,12 +134,16 @@ export function createControlIndicator(
       host = undefined
       root = undefined
       cursor = undefined
+      lastTarget = undefined
     },
 
     hide() {
       clearIdle()
+      lastTarget = undefined
 
       if (host !== undefined) { host.hidden = true }
-    }
+    },
+
+    refresh
   }
 }

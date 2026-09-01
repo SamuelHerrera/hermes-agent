@@ -17,7 +17,7 @@ function setup() {
     snapshot: vi.fn(() => ({ count: 0, elements: [], format: 'both' as const, truncated: false, version: 1 as const }))
   }
 
-  const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn() }
+  const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn(), refresh: vi.fn() }
 
   const runtime = {
     console: vi.fn(async () => ({ count: 1, entries: [], truncated: false })),
@@ -116,6 +116,16 @@ describe('content bridge protocol', () => {
       type: 'hermes.bridge.result'
     })
     expect(indicator.hide).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes the indicator position before a screenshot', () => {
+    const { handler, indicator } = setup()
+
+    expect(handler({ type: 'hermes.bridge.indicator.refresh', version: 1 })).toMatchObject({
+      result: { refreshed: true },
+      type: 'hermes.bridge.result'
+    })
+    expect(indicator.refresh).toHaveBeenCalledOnce()
   })
 
   it('routes guarded eval and bounded console requests asynchronously', async () => {

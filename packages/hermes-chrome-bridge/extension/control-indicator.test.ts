@@ -50,9 +50,8 @@ describe('visible Hermes control indicator', () => {
       }
     })
 
-    const target = {
-      getBoundingClientRect: () => ({ height: 20, width: 40, x: 100, y: 50 })
-    } as Element
+    let bounds = { height: 20, width: 40, x: 100, y: 50 }
+    const target = { getBoundingClientRect: () => bounds } as Element
 
     indicator.activity(target)
 
@@ -65,6 +64,10 @@ describe('visible Hermes control indicator', () => {
     expect(host.hidden).toBe(false)
     expect(cursor?.style.transform).toContain('120px, 60px')
     expect(root?.style.opacity).toBe('1')
+
+    bounds = { ...bounds, x: 300, y: 150 }
+    indicator.refresh()
+    expect(cursor?.style.transform).toContain('320px, 160px')
 
     indicator.activity(target)
     expect(clearTimeout).toHaveBeenCalled()

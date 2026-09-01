@@ -33,6 +33,18 @@ const tabActions = createTabActions({
 })
 
 const screenshotService = createScreenshotService({
+  beforeCapture: async tabId => {
+    const refresh = chrome.tabs.sendMessage(tabId, {
+      type: 'hermes.bridge.indicator.refresh',
+      version: 1
+    }).catch(() => undefined)
+
+    await Promise.race([
+      refresh,
+      new Promise(resolve => setTimeout(resolve, 200))
+    ])
+    await new Promise(resolve => setTimeout(resolve, 75))
+  },
   captureVisibleTab: async (windowId, options) => chrome.tabs.captureVisibleTab(windowId, options),
   tabs: {
     get: async tabId => chrome.tabs.get(tabId),

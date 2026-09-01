@@ -10,17 +10,19 @@ function setup(dataUrl = 'data:image/png;base64,aGVybWVz') {
   }
 
   const captureVisibleTab = vi.fn(async () => dataUrl)
+  const beforeCapture = vi.fn(async () => undefined)
 
   return {
+    beforeCapture,
     captureVisibleTab,
-    service: createScreenshotService({ captureVisibleTab, tabs }),
+    service: createScreenshotService({ beforeCapture, captureVisibleTab, tabs }),
     tabs
   }
 }
 
 describe('bounded screenshot capture', () => {
   it('temporarily activates a target, captures, and restores the prior active tab', async () => {
-    const { captureVisibleTab, service, tabs } = setup()
+    const { beforeCapture, captureVisibleTab, service, tabs } = setup()
 
     await expect(service.capture({ format: 'png', tabId: 7 })).resolves.toMatchObject({
       bytes: 6,
@@ -28,6 +30,8 @@ describe('bounded screenshot capture', () => {
       format: 'png'
     })
     expect(tabs.update.mock.calls).toEqual([[7, { active: true }], [2, { active: true }]])
+    expect(beforeCapture).toHaveBeenCalledWith(7)
+    expect(beforeCapture.mock.invocationCallOrder[0]).toBeLessThan(captureVisibleTab.mock.invocationCallOrder[0] as number)
     expect(captureVisibleTab).toHaveBeenCalledWith(3, { format: 'png' })
   })
 

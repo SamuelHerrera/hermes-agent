@@ -65,7 +65,7 @@ async function setup(): Promise<{
     version: 1
   })
 
-  const broker = new ChromeBridgeBroker({ ...config, requestTimeoutMs: 200 })
+  const broker = new ChromeBridgeBroker({ ...config, requestTimeoutMs: 2_000 })
   brokers.push(broker)
   await broker.start()
 

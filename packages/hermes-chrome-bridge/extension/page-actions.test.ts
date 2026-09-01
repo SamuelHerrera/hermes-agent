@@ -61,7 +61,7 @@ describe('safe page actions', () => {
     const document = new FakeDocument([input])
     const inspector = createPageInspector(document as unknown as Document)
     const ref = inspector.snapshot({ format: 'both' }).elements[0]?.ref as string
-    const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn() }
+    const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn(), refresh: vi.fn() }
     const actions = createPageActions(document as unknown as Document, inspector, undefined, indicator)
 
     expect(actions.click({ button: 'left', target: ref })).toEqual({ clicked: true, ref })

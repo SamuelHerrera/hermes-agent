@@ -87,6 +87,18 @@ export function createContentBridgeHandler(
         }
       }
 
+      if (message.type === 'hermes.bridge.indicator.refresh') {
+        if (!exactKeys(message, ['type', 'version'])) { return undefined }
+
+        indicator?.refresh()
+
+        return {
+          result: { refreshed: true },
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
       if (message.type === 'hermes.bridge.eval') {
         if (!exactKeys(message, ['source', 'timeoutMs', 'type', 'version']) ||
           typeof message.source !== 'string' || message.source.length === 0 || message.source.length > 100_000 ||
