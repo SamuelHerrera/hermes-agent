@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -88,9 +89,18 @@ export async function runStdioServer(): Promise<void> {
   await server.connect(transport)
 }
 
-const isEntrypoint = process.argv[1] !== undefined
-  && import.meta.url === pathToFileURL(process.argv[1]).href
+function isEntrypoint(): boolean {
+  if (process.argv[1] === undefined) {
+    return false
+  }
 
-if (isEntrypoint) {
+  try {
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])
+  } catch {
+    return false
+  }
+}
+
+if (isEntrypoint()) {
   await runStdioServer()
 }

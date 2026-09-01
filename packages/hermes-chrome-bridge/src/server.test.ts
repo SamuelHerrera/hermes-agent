@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -7,9 +11,13 @@ import { createChromeBridgeServer } from './server.js'
 import type { ChromeBridgeRequestRouter } from './server.js'
 
 const clients: Client[] = []
+const temporaryDirectories: string[] = []
 
 afterEach(async () => {
   await Promise.all(clients.splice(0).map(async client => client.close()))
+  await Promise.all(temporaryDirectories.splice(0).map(async directory => {
+    await rm(directory, { force: true, recursive: true })
+  }))
 })
 
 describe('Hermes Chrome bridge MCP server', () => {
@@ -115,6 +123,35 @@ describe('Hermes Chrome bridge MCP server', () => {
       args: ['dist/server.js'],
       command: process.execPath,
       cwd: process.cwd(),
+      stderr: 'pipe'
+    })
+
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+    clients.push(client)
+
+    await client.connect(transport)
+    const { tools } = await client.listTools()
+
+    expect(tools.map(tool => tool.name)).toEqual([
+      'chrome_bridge_status',
+      'chrome_bridge_tabs',
+      'chrome_bridge_snapshot'
+    ])
+  })
+
+  it('initializes when invoked through an npm bin symlink', async () => {
+    const installDirectory = await mkdtemp(join(tmpdir(), 'hermes-chrome-bridge-'))
+    temporaryDirectories.push(installDirectory)
+
+    const binDirectory = join(installDirectory, 'node_modules', '.bin')
+    const binPath = join(binDirectory, 'hermes-chrome-bridge')
+    await mkdir(binDirectory, { recursive: true })
+    await symlink(resolve('dist/server.js'), binPath)
+
+    const transport = new StdioClientTransport({
+      args: [binPath],
+      command: process.execPath,
+      cwd: installDirectory,
       stderr: 'pipe'
     })
 
