@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 import {
   readRuntimeConfig,
   type RuntimeConfig,
+  type RuntimeStatus,
   writeRuntimeStatus
 } from '../src/runtime.js'
 
@@ -20,7 +21,8 @@ import {
 } from './framing.js'
 import { normalizeExtensionOrigin, PROTOCOL_VERSION } from './manifest.js'
 
-const IPC_MAX_BYTES = 1024 * 1024
+const IPC_FROM_BROKER_MAX_BYTES = HOST_TO_BROWSER_MAX_BYTES
+const IPC_TO_BROKER_MAX_BYTES = BROWSER_TO_HOST_MAX_BYTES
 
 export interface NativeMessagingHostOptions {
   chromeOrigin: string
@@ -29,6 +31,7 @@ export interface NativeMessagingHostOptions {
   input?: Readable
   output?: Writable
   reconnectDelayMs?: number
+  statusWriter?: (statusPath: string, status: RuntimeStatus) => Promise<void>
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -59,17 +62,21 @@ export class NativeMessagingHost {
   private readonly input: Readable
   private readonly output: Writable
   private readonly reconnectDelayMs: number
+  private readonly statusWriter: (statusPath: string, status: RuntimeStatus) => Promise<void>
   private broker?: Socket
   private brokerBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
   private connected = false
   private reconnectTimer?: NodeJS.Timeout
+  private statusWrites: Promise<void> = Promise.resolve()
   private stopped = false
+  private stopPromise?: Promise<void>
 
   public constructor(private readonly options: NativeMessagingHostOptions) {
     this.input = options.input ?? process.stdin
     this.output = options.output ?? process.stdout
     this.diagnostics = options.diagnostics ?? (message => process.stderr.write(`${message}\n`))
     this.reconnectDelayMs = options.reconnectDelayMs ?? 250
+    this.statusWriter = options.statusWriter ?? writeRuntimeStatus
   }
 
   public async start(): Promise<void> {
@@ -81,14 +88,17 @@ export class NativeMessagingHost {
     await this.connectOnce()
   }
 
-  public async stop(): Promise<void> {
-    if (this.stopped) {return}
+  public stop(): Promise<void> {
+    if (this.stopPromise !== undefined) {return this.stopPromise}
     this.stopped = true
 
     if (this.reconnectTimer !== undefined) {clearTimeout(this.reconnectTimer)}
+    this.connected = false
     this.broker?.destroy()
     this.broker = undefined
-    await this.updateStatus(false)
+    this.stopPromise = this.updateStatus(false)
+
+    return this.stopPromise
   }
 
   private async connectOnce(): Promise<void> {
@@ -155,16 +165,23 @@ export class NativeMessagingHost {
       ? chunk
       : Buffer.concat([this.brokerBuffer, chunk])
 
-    if (this.brokerBuffer.length > IPC_MAX_BYTES) {throw new Error('broker frame too large')}
-
     for (;;) {
       const newline = this.brokerBuffer.indexOf(0x0a)
 
-      if (newline === -1) {return}
+      if (newline === -1) {
+        if (this.brokerBuffer.length > IPC_FROM_BROKER_MAX_BYTES) {
+          throw new Error('broker frame too large')
+        }
+
+        return
+      }
+
       const line = this.brokerBuffer.subarray(0, newline)
       this.brokerBuffer = this.brokerBuffer.subarray(newline + 1)
 
       if (line.length === 0) {continue}
+
+      if (line.length > IPC_FROM_BROKER_MAX_BYTES) {throw new Error('broker frame too large')}
       let text: string
 
       try {
@@ -227,10 +244,10 @@ export class NativeMessagingHost {
 
   private sendBroker(envelope: Record<string, unknown>): void {
     if (this.broker === undefined || this.broker.destroyed) {return}
-    const bytes = Buffer.from(`${JSON.stringify(envelope)}\n`, 'utf8')
+    const bytes = Buffer.from(JSON.stringify(envelope), 'utf8')
 
-    if (bytes.length > IPC_MAX_BYTES) {throw new Error('IPC envelope exceeds size limit')}
-    this.broker.write(bytes)
+    if (bytes.length > IPC_TO_BROKER_MAX_BYTES) {throw new Error('IPC envelope exceeds size limit')}
+    this.broker.write(Buffer.concat([bytes, Buffer.from('\n')]))
   }
 
   private writeBrowserStatus(connected: boolean): void {
@@ -245,16 +262,23 @@ export class NativeMessagingHost {
     this.output.write(encodeNativeMessage(envelope, HOST_TO_BROWSER_MAX_BYTES))
   }
 
-  private async updateStatus(connected: boolean): Promise<void> {
+  private updateStatus(connected: boolean): Promise<void> {
     const now = new Date().toISOString()
-    await writeRuntimeStatus(this.config.statusPath, {
+
+    const status: RuntimeStatus = {
       connected,
       ...(connected ? { connectedAt: now } : { disconnectedAt: now }),
       updatedAt: now,
       version: PROTOCOL_VERSION
-    }).catch(() => {
-      this.diagnostics('Hermes Chrome bridge could not update connectivity status')
-    })
+    }
+
+    this.statusWrites = this.statusWrites
+      .then(async () => this.statusWriter(this.config.statusPath, status))
+      .catch(() => {
+        this.diagnostics('Hermes Chrome bridge could not update connectivity status')
+      })
+
+    return this.statusWrites
   }
 }
 

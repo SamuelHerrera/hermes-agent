@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ChromeBridgeBroker } from '../src/broker.js'
-import { type RuntimeConfig, writePrivateJson } from '../src/runtime.js'
+import { type RuntimeConfig, type RuntimeStatus, writePrivateJson } from '../src/runtime.js'
 
 import { FakeChromeProcess } from './fake-chrome.js'
 import {
@@ -140,6 +140,36 @@ describe('native messaging host', () => {
     output.end()
   })
 
+  it('supports browser responses larger than the host-to-browser request limit', async () => {
+    const { broker, configPath, input, messages, output } = await setup()
+    const diagnostics: string[] = []
+
+    const host = new NativeMessagingHost({
+      chromeOrigin: origin,
+      configPath,
+      diagnostics: message => diagnostics.push(message),
+      input,
+      output
+    })
+
+    hosts.push(host)
+    await host.start()
+    await waitFor(() => messages.shift())
+
+    const routed = broker.route({ arguments: {}, method: 'snapshot' })
+    const request = await waitFor(() => messages.shift())
+    const screenshot = 'x'.repeat(2 * 1024 * 1024)
+    input.write(encodeNativeMessage({
+      id: request.id,
+      result: { screenshot },
+      type: 'response'
+    }, BROWSER_TO_HOST_MAX_BYTES))
+
+    await expect(routed).resolves.toEqual({ screenshot })
+    expect(diagnostics).toEqual([])
+    output.end()
+  })
+
   it('supports a fake-Chrome child process roundtrip against the built native host', async () => {
     const { broker, configPath } = await setup()
 
@@ -160,6 +190,79 @@ describe('native messaging host', () => {
     const request = await chrome.receive() as Record<string, unknown>
     chrome.send({ id: request.id, result: [{ id: 12 }], type: 'response' })
     await expect(routed).resolves.toEqual([{ id: 12 }])
+  })
+
+  it('serializes rapid connectivity status updates and persists final disconnection', async () => {
+    const { broker, config, configPath } = await setup()
+    const diagnostics: string[] = []
+
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const input = new PassThrough()
+      const output = new PassThrough()
+
+      const host = new NativeMessagingHost({
+        chromeOrigin: origin,
+        configPath,
+        diagnostics: message => diagnostics.push(message),
+        input,
+        output,
+        reconnectDelayMs: 1_000
+      })
+
+      hosts.push(host)
+      await host.start()
+      await host.stop()
+      await waitFor(() => broker.status().connected ? undefined : true)
+      output.end()
+    }
+
+    const text = await readFile(config.statusPath, 'utf8')
+    expect(() => JSON.parse(text)).not.toThrow()
+    expect(JSON.parse(text)).toMatchObject({ connected: false, version: 1 })
+    expect(diagnostics).toEqual([])
+  })
+
+  it('orders status writes by invocation and waits for final persistence on stop', async () => {
+    const { configPath, input, output } = await setup()
+    const writes: boolean[] = []
+    let releaseConnected: (() => void) | undefined
+
+    const connectedBlocked = new Promise<void>(resolve => {
+      releaseConnected = resolve
+    })
+
+    const options = {
+      chromeOrigin: origin,
+      configPath,
+      diagnostics: () => undefined,
+      input,
+      output,
+      statusWriter: async (_path: string, status: RuntimeStatus) => {
+        writes.push(status.connected)
+
+        if (status.connected) {await connectedBlocked}
+      }
+    }
+
+    const host = new NativeMessagingHost(options)
+    hosts.push(host)
+    await host.start()
+    await waitFor(() => writes.length === 1 ? true : undefined)
+
+    const stopping = host.stop()
+
+    const early = await Promise.race([
+      stopping.then(() => 'stopped'),
+      new Promise(resolve => setTimeout(() => resolve('pending'), 20))
+    ])
+
+    expect(early).toBe('pending')
+    expect(writes).toEqual([true])
+
+    releaseConnected?.()
+    await stopping
+    expect(writes).toEqual([true, false])
+    output.end()
   })
 
   it('emits bounded disconnected state and reconnects while the Chrome port is alive', async () => {

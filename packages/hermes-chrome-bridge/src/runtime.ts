@@ -1,4 +1,5 @@
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -52,11 +53,18 @@ export async function ensurePrivateRuntimeDirectory(directory: string): Promise<
 }
 
 export async function writePrivateJson(path: string, value: unknown): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.tmp`
-  await writeFile(temporaryPath, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
-  await chmod(temporaryPath, 0o600)
-  await rename(temporaryPath, path)
-  await chmod(path, 0o600)
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
+    await chmod(temporaryPath, 0o600)
+    await rename(temporaryPath, path)
+    await chmod(path, 0o600)
+  } finally {
+    await unlink(temporaryPath).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {throw error}
+    })
+  }
 }
 
 export async function readRuntimeConfig(path: string): Promise<RuntimeConfig> {

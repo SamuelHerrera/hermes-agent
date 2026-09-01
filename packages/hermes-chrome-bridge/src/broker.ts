@@ -12,7 +12,8 @@ import type {
   ChromeBridgeRequestRouter
 } from './server.js'
 
-const IPC_MAX_BYTES = 1024 * 1024
+const IPC_REQUEST_MAX_BYTES = 1024 * 1024
+const IPC_RESPONSE_MAX_BYTES = 64 * 1024 * 1024
 const DEFAULT_MAX_PENDING = 32
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 2_000
 
@@ -212,18 +213,27 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       try {
         buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk])
 
-        if (buffer.length > IPC_MAX_BYTES) {
-          throw new BridgeBrokerError('INVALID_ENVELOPE', 'IPC envelope exceeds size limit')
-        }
-
         for (;;) {
           const newline = buffer.indexOf(0x0a)
+          const maxBytes = authenticated ? IPC_RESPONSE_MAX_BYTES : IPC_REQUEST_MAX_BYTES
 
-          if (newline === -1) {break}
+          if (newline === -1) {
+            if (buffer.length > maxBytes) {
+              throw new BridgeBrokerError('INVALID_ENVELOPE', 'IPC envelope exceeds size limit')
+            }
+
+            break
+          }
+
           const line = buffer.subarray(0, newline)
           buffer = buffer.subarray(newline + 1)
 
           if (line.length === 0) {continue}
+
+          if (line.length > maxBytes) {
+            throw new BridgeBrokerError('INVALID_ENVELOPE', 'IPC envelope exceeds size limit')
+          }
+
           const envelope = parseEnvelope(line)
 
           if (!authenticated) {
@@ -247,7 +257,7 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
             this.connectedAt = new Date().toISOString()
             this.send(socket, { type: 'hello.ok', version: 1 })
           } else {
-            this.handleHostEnvelope(socket, envelope)
+            this.handleHostEnvelope(envelope)
           }
         }
       } catch (error) {
@@ -278,7 +288,7 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       tokensEqual(envelope.token, this.config.token)
   }
 
-  private handleHostEnvelope(socket: Socket, envelope: Envelope): void {
+  private handleHostEnvelope(envelope: Envelope): void {
     if (envelope.type === 'event' && isObject(envelope.event)) {return}
 
     if (envelope.type !== 'response' || typeof envelope.id !== 'string') {
@@ -291,6 +301,23 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       throw new BridgeBrokerError('INVALID_ENVELOPE', 'host response has an unknown request ID')
     }
 
+    const invalidResponse = !(
+      (isObject(envelope.error) && typeof envelope.error.message === 'string') ||
+      'result' in envelope
+    )
+
+    if (invalidResponse) {
+      const error = new BridgeBrokerError(
+        'INVALID_ENVELOPE',
+        'host response has no result or error'
+      )
+
+      this.pending.delete(envelope.id)
+      clearTimeout(pending.timer)
+      pending.reject(error)
+      throw error
+    }
+
     this.pending.delete(envelope.id)
     clearTimeout(pending.timer)
 
@@ -299,11 +326,8 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
         typeof envelope.error.code === 'string' ? envelope.error.code : 'BRIDGE_ERROR',
         envelope.error.message
       ))
-    } else if ('result' in envelope) {
-      pending.resolve(envelope.result)
     } else {
-      this.rejectSocket(socket, 'INVALID_ENVELOPE', 'host response has no result or error')
-      this.disconnectHost('invalid response')
+      pending.resolve(envelope.result)
     }
   }
 
@@ -327,12 +351,12 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
   }
 
   private send(socket: Socket, envelope: Record<string, unknown>): void {
-    const encoded = Buffer.from(`${JSON.stringify(envelope)}\n`, 'utf8')
+    const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
 
-    if (encoded.length > IPC_MAX_BYTES) {
+    if (encoded.length > IPC_REQUEST_MAX_BYTES) {
       throw new BridgeBrokerError('INVALID_ENVELOPE', 'outbound IPC envelope exceeds size limit')
     }
 
-    socket.write(encoded)
+    socket.write(Buffer.concat([encoded, Buffer.from('\n')]))
   }
 }

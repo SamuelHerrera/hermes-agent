@@ -138,6 +138,54 @@ describe('authenticated local Chrome bridge broker', () => {
     host.socket.destroy()
   })
 
+  it('settles a pending request when its response has no result or error', async () => {
+    const { broker, config } = await setupBroker({ requestTimeoutMs: 1_000 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+
+    const routed = broker.route({ arguments: {}, method: 'snapshot' })
+    const request = await host.nextMessage()
+    host.send({ id: request.id, type: 'response' })
+
+    const outcome = await Promise.race([
+      routed.then(
+        () => ({ state: 'resolved' }),
+        (error: unknown) => ({ error, state: 'rejected' })
+      ),
+      new Promise(resolve => setTimeout(() => resolve({ state: 'still-pending' }), 50))
+    ])
+
+    expect(outcome).toMatchObject({
+      error: { code: 'INVALID_ENVELOPE' },
+      state: 'rejected'
+    })
+    host.socket.destroy()
+  })
+
+  it('parses concatenated valid response frames before enforcing the residual limit', async () => {
+    const { broker, config } = await setupBroker({ requestTimeoutMs: 2_000 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+
+    const firstRouted = broker.route({ arguments: {}, method: 'snapshot' })
+    const secondRouted = broker.route({ arguments: {}, method: 'snapshot' })
+    const firstRequest = await host.nextMessage()
+    const secondRequest = await host.nextMessage()
+    const result = 'x'.repeat(33 * 1024 * 1024)
+
+    const combined = Buffer.from(
+      `${JSON.stringify({ id: firstRequest.id, result, type: 'response' })}\n` +
+      `${JSON.stringify({ id: secondRequest.id, result, type: 'response' })}\n`
+    )
+
+    const serverSocket = (broker as unknown as { activeHost: Socket }).activeHost
+    serverSocket.emit('data', combined)
+
+    await expect(firstRouted).resolves.toBe(result)
+    await expect(secondRouted).resolves.toBe(result)
+    host.socket.destroy()
+  }, 10_000)
+
   it('allows only one active authenticated host and rejects malformed envelopes', async () => {
     const { broker, config } = await setupBroker()
     const first = await connectHost(config)
