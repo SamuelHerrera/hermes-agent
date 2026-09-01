@@ -1,0 +1,40 @@
+# Nous-approved MCP catalog entry.
+# Presence in this directory = approval. Merged via PR review.
+manifest_version: 1
+
+name: hermes-chrome-bridge
+description: Control an explicitly authorized Chrome profile through a local Hermes-owned extension and native host.
+source: https://github.com/NousResearch/hermes-agent/tree/main/packages/hermes-chrome-bridge
+
+transport:
+  type: stdio
+  command: npx
+  version: 0.1.0
+  args:
+    - -y
+    - --package
+    - "@hermes/chrome-bridge@0.1.0"
+    - hermes-chrome-bridge
+    - --hermes-home
+    - "${HERMES_HOME}"
+
+auth:
+  type: none
+
+post_install: |
+  The MCP server is configured, but Chrome control remains disabled until you
+  install and explicitly authorize the local extension/native host once.
+
+  Run:
+    npx -y --package @hermes/chrome-bridge@0.1.0 hermes-chrome-bridge-setup install --hermes-home "${HERMES_HOME}"
+
+  Then open chrome://extensions, enable Developer mode, choose Load unpacked,
+  and select:
+    ${HERMES_HOME}/chrome-bridge/extension
+
+  The stable extension ID is mdeahbanbmncnmkjkklglmdflkcclckg. Open its popup
+  and click Connect. Check setup and live native-host state with:
+    npx -y --package @hermes/chrome-bridge@0.1.0 hermes-chrome-bridge-setup check --hermes-home "${HERMES_HOME}"
+
+  Restart Hermes after installation so MCP tools are discovered. JavaScript
+  evaluation is destructive/open-world and remains subject to Hermes approval.

@@ -802,7 +802,8 @@ def install_entry(entry: CatalogEntry, *, enable: bool = True) -> None:
     ))
     if entry.post_install:
         print()
-        for line in entry.post_install.strip().splitlines():
+        post_install = entry.post_install.replace("${HERMES_HOME}", str(get_hermes_home()))
+        for line in post_install.strip().splitlines():
             print(color(f"  {line}", Colors.DIM))
     print()
 

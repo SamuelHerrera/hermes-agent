@@ -1,12 +1,13 @@
 {
   "name": "@hermes/chrome-bridge",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Local MCP server for the Hermes Chrome bridge",
   "type": "module",
   "bin": {
     "hermes-chrome-bridge": "dist/server.js",
-    "hermes-chrome-bridge-install-host": "dist/native/install-host.js"
+    "hermes-chrome-bridge-install-host": "dist/native/install-host.js",
+    "hermes-chrome-bridge-setup": "dist/native/setup.js"
   },
   "files": [
     "dist",

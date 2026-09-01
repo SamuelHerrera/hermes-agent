@@ -1,16 +1,18 @@
 # Hermes Chrome Bridge MCP Server
 
-A standalone local [Model Context Protocol](https://modelcontextprotocol.io/) server, authenticated Chrome native-messaging host, and Manifest V3 extension shell. The MCP server owns a private Unix-socket broker; Chrome starts the native host, which authenticates to that broker and forwards extension requests and responses.
+A standalone local [Model Context Protocol](https://modelcontextprotocol.io/) server, authenticated Chrome native-messaging host, and Manifest V3 extension. The MCP server owns a private Unix-socket broker; Chrome starts the native host, which authenticates to that broker and forwards bounded requests and responses.
 
-The extension connects only after the user clicks **Connect** in its popup. That opt-in is stored locally so the service worker can reconnect with bounded backoff after a restart or native-host disconnect. **Disconnect** revokes the stored opt-in. This shell deliberately implements no tab discovery, snapshots, or page interaction yet; unsupported bridge requests receive a structured `NOT_IMPLEMENTED` response.
+The extension connects only after the user clicks **Connect** in its popup. That opt-in is stored locally so the service worker can reconnect with bounded backoff after a restart or native-host disconnect. **Disconnect** revokes the stored opt-in and hides all control indicators.
 
 ## Tools
 
-- `chrome_bridge_status` — reports local connectivity even when Chrome is disconnected.
-- `chrome_bridge_tabs` — routes through the authenticated native host.
-- `chrome_bridge_snapshot` — routes through the authenticated native host.
+- Discovery: `chrome_bridge_status`, `chrome_bridge_tabs`, `chrome_bridge_select_tab`
+- Page state: `chrome_bridge_snapshot`, `chrome_bridge_query`
+- Tabs: `chrome_bridge_open`, `chrome_bridge_navigate`, `chrome_bridge_focus`, `chrome_bridge_close`
+- User-like actions: `chrome_bridge_click`, `chrome_bridge_type`, `chrome_bridge_key`, `chrome_bridge_scroll`, `chrome_bridge_hover`
+- Guarded diagnostics: `chrome_bridge_eval`, `chrome_bridge_console`, `chrome_bridge_screenshot`
 
-When no authenticated host is connected, routed tools return the deterministic `BRIDGE_DISCONNECTED` error.
+All page tools require an authenticated, explicitly opted-in host and a controllable public HTTP(S) tab. Private-network, local, browser-internal, Chrome Web Store, and sensitive-field paths fail closed. JavaScript evaluation is blocked whenever a password, payment, or one-time-code field is present and is advertised as destructive/open-world so Hermes approval policy applies. Tool output is bounded and credential-shaped strings are redacted.
 
 ## Development
 
@@ -37,19 +39,25 @@ npm run build --workspace @hermes/chrome-bridge
 1. Open `chrome://extensions` in a development Chrome profile.
 2. Enable **Developer mode**.
 3. Choose **Load unpacked** and select `packages/hermes-chrome-bridge/dist/extension`.
-4. The committed public manifest key gives this unpacked build the stable extension ID `mdeahbanbmncnmkjkklglmdflkcclckg`. Use that ID when installing the native host manifest.
+4. The committed public manifest key gives this unpacked build the stable extension ID `mdeahbanbmncnmkjkklglmdflkcclckg`.
 5. Open the extension popup and click **Connect** to opt in. Click **Disconnect** to revoke opt-in and stop reconnecting.
 
-The manifest uses only `nativeMessaging` and `storage`: the former opens the exact host `com.nous.hermes_chrome_bridge`, and the latter persists explicit opt-in. `<all_urls>` is a host permission because the minimal content-script ping/control shell is injected on ordinary web pages; it does not inspect or mutate page content. The shell does not request `tabs`, `activeTab`, or `scripting`, does not connect to a remote endpoint, and never reads the broker socket or authentication token directly.
+The manifest uses only `nativeMessaging` and `storage`. `<all_urls>` allows the isolated content script to inspect and act on ordinary public web pages and permits `captureVisibleTab`; the bridge does not request `debugger`, open a remote-debug port, or connect to a remote service. A static main-world script captures bounded console entries and services guarded evaluation requests. The isolated bridge validates every message and treats all page results as untrusted data. During automation, a shadow-DOM pill reading **Hermes is controlling Chrome** and a gold cursor marker remain visibly on the page, then dim after inactivity.
 
 ## Install the native host
 
-Build first, then provide the unpacked extension's exact 32-character Chrome extension ID and the explicitly resolved Hermes profile home:
+The setup command copies the built extension to a stable profile-owned path and installs the native host for the committed extension ID:
 
 ```sh
 npm run build --workspace @hermes/chrome-bridge
-node packages/hermes-chrome-bridge/dist/native/install-host.js \
-  --extension-id abcdefghijklmnopabcdefghijklmnop \
+node packages/hermes-chrome-bridge/dist/native/setup.js install \
+  --hermes-home /absolute/path/to/the/active/hermes/profile
+```
+
+Load the `extensionDirectory` printed by that command in `chrome://extensions`, open the extension popup, and click **Connect**. Check both installation and live native-host connectivity with:
+
+```sh
+node packages/hermes-chrome-bridge/dist/native/setup.js check \
   --hermes-home /absolute/path/to/the/active/hermes/profile
 ```
 
@@ -59,7 +67,7 @@ On macOS this writes the manifest to:
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.nous.hermes_chrome_bridge.json
 ```
 
-Linux uses the corresponding Chrome user manifest directory under `~/.config/google-chrome/NativeMessagingHosts/`. Windows fails closed until a signed executable launcher is available. Automated tests and package smoke checks can add `--manifest-directory /absolute/temp/path` to keep every write out of real Chrome user directories.
+Linux uses the corresponding Chrome user manifest directory under `~/.config/google-chrome/NativeMessagingHosts/`. Windows fails closed until a signed executable launcher is available. Automated tests and package smoke checks pass `--manifest-directory /absolute/temp/path` to keep every write out of real Chrome user directories.
 
 The installer creates a private runtime directory under the selected Hermes home. The runtime directory is mode `0700`; its random authentication token, config, and connectivity-only status are mode `0600`. The executable wrapper contains absolute paths to the current Node executable, built host, and runtime config, and does not depend on `PATH` or an environment-selected Node.
 
@@ -67,7 +75,16 @@ Chrome has one global native host name, `com.nous.hermes_chrome_bridge`. The sel
 
 ## MCP host configuration
 
-After installation, configure an MCP host with the same explicit profile home:
+Hermes users should install the approved catalog entry:
+
+```sh
+hermes mcp install hermes-chrome-bridge
+hermes mcp test hermes-chrome-bridge
+```
+
+The install output prints the profile-aware setup command and unpacked-extension path. `hermes mcp test` distinguishes MCP transport connectivity from the extension/native-host connection and reports the latter as connected or disconnected.
+
+Other MCP hosts can configure the built server directly with the same explicit profile home:
 
 ```json
 {
