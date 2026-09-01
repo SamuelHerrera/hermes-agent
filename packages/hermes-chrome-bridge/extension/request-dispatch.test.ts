@@ -317,7 +317,12 @@ describe('background bridge request dispatch', () => {
     const { dispatch, screenshotService, sendTabMessage } = setup()
 
     await expect(dispatch({
-      arguments: { source: 'document.title', tabId: 9, timeoutMs: 500 },
+      arguments: {
+        approvalIntent: 'explicit-user-approved-js-eval',
+        source: 'document.title',
+        tabId: 9,
+        timeoutMs: 500
+      },
       id: 'eval',
       method: 'eval',
       type: 'request'

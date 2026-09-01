@@ -87,15 +87,25 @@ export function createControlIndicator(
   }
 
   function refresh(): void {
-    if (cursor === undefined || lastTarget === undefined) { return }
+    mount()
+    clearIdle()
 
-    const bounds = lastTarget.getBoundingClientRect()
+    if (host === undefined || root === undefined || cursor === undefined) { return }
+
+    host.hidden = false
+    root.style.opacity = '1'
+
     const width = document.defaultView?.innerWidth ?? Number.POSITIVE_INFINITY
     const height = document.defaultView?.innerHeight ?? Number.POSITIVE_INFINITY
+    const bounds = lastTarget?.getBoundingClientRect()
 
     const position = {
-      x: Math.max(12, Math.min(Math.round(bounds.x + bounds.width / 2), width - 12)),
-      y: Math.max(12, Math.min(Math.round(bounds.y + bounds.height / 2), height - 12))
+      x: bounds === undefined
+        ? 24
+        : Math.max(12, Math.min(Math.round(bounds.x + bounds.width / 2), width - 12)),
+      y: bounds === undefined
+        ? 24
+        : Math.max(12, Math.min(Math.round(bounds.y + bounds.height / 2), height - 12))
     }
 
     cursor.style.opacity = '1'

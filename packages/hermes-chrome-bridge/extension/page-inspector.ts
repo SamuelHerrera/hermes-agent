@@ -94,7 +94,9 @@ function isSensitive(element: Element): boolean {
     attribute(element, 'id'),
     attribute(element, 'name'),
     attribute(element, 'aria-label'),
-    attribute(element, 'placeholder')
+    attribute(element, 'placeholder'),
+    labelledText(element),
+    referencedLabelText(element)
   ].filter((value): value is string => value !== undefined).join(' ')
 
   return type === 'password' ||
@@ -154,6 +156,32 @@ function labelledText(element: Element): string | undefined {
   const text = Array.from(labels)
     .map(label => label.textContent ?? '')
     .join(' ')
+
+  return text.length === 0 ? undefined : text
+}
+
+function referencedLabelText(element: Element): string | undefined {
+  const owner = (element as Element & { ownerDocument?: Document }).ownerDocument
+
+  if (owner === undefined) { return undefined }
+
+  const ids = attribute(element, 'aria-labelledby')?.split(/\s+/u).filter(Boolean) ?? []
+
+  const labelledBy = ids
+    .map(id => owner.getElementById(id)?.textContent ?? '')
+    .join(' ')
+
+  const id = attribute(element, 'id')
+
+  const explicit = id === undefined
+    ? ''
+    : [...owner.querySelectorAll('label[for]')]
+      .filter(label => label.getAttribute('for') === id)
+      .map(label => label.textContent ?? '')
+      .join(' ')
+
+  const wrapping = element.closest('label')?.textContent ?? ''
+  const text = `${labelledBy} ${explicit} ${wrapping}`.trim()
 
   return text.length === 0 ? undefined : text
 }

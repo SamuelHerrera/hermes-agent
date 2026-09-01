@@ -160,7 +160,8 @@ function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: R
   if (method === 'eval') {
     const timeoutMs = arguments_.timeoutMs ?? 2_000
 
-    return keys.every(key => key === 'source' || key === 'tabId' || key === 'timeoutMs') &&
+    return keys.every(key => key === 'approvalIntent' || key === 'source' || key === 'tabId' || key === 'timeoutMs') &&
+      arguments_.approvalIntent === 'explicit-user-approved-js-eval' &&
       validPositiveInteger(arguments_.tabId) && typeof arguments_.source === 'string' &&
       arguments_.source.length > 0 && arguments_.source.length <= 100_000 &&
       Number.isInteger(timeoutMs) && (timeoutMs as number) >= 100 && (timeoutMs as number) <= 10_000
@@ -199,6 +200,10 @@ function invalidArgumentsMessage(name: string, method: ChromeBridgeRequest['meth
 
   if (method === 'query') {
     return `Invalid arguments for ${name}: expected positive tabId, non-empty selector, and optional limit from 1 to 100`
+  }
+
+  if (method === 'eval') {
+    return `Invalid arguments for ${name}: expected positive tabId, bounded source, explicit eval approval intent, and optional timeout`
   }
 
   return `Invalid arguments for ${name}: expected an empty object`

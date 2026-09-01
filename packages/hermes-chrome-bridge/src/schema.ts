@@ -36,6 +36,13 @@ const DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS = {
   readOnlyHint: false
 } as const
 
+const EVAL_ANNOTATIONS = {
+  destructiveHint: true,
+  openWorldHint: true,
+  readOnlyHint: false,
+  title: 'Arbitrary JavaScript execution; requires explicit user approval'
+} as const
+
 export const CHROME_BRIDGE_TOOLS = [
   {
     annotations: READ_ONLY_ANNOTATIONS,
@@ -222,16 +229,17 @@ export const CHROME_BRIDGE_TOOLS = [
     name: 'chrome_bridge_hover'
   },
   {
-    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
-    description: 'Execute explicit JavaScript on a public, non-sensitive Chrome page with bounded structured output.',
+    annotations: EVAL_ANNOTATIONS,
+    description: 'Execute explicit JavaScript on a public, non-sensitive Chrome page with bounded structured output. Requires explicit per-call user approval for arbitrary JavaScript execution.',
     inputSchema: {
       additionalProperties: false,
       properties: {
+        approvalIntent: { const: 'explicit-user-approved-js-eval', type: 'string' },
         source: { maxLength: 100000, minLength: 1, type: 'string' },
         tabId: { minimum: 1, type: 'integer' },
         timeoutMs: { default: 2000, maximum: 10000, minimum: 100, type: 'integer' }
       },
-      required: ['tabId', 'source'],
+      required: ['tabId', 'source', 'approvalIntent'],
       type: 'object'
     },
     name: 'chrome_bridge_eval'

@@ -213,7 +213,15 @@ describe('Hermes Chrome bridge MCP server', () => {
     await client.connect(clientTransport)
 
     const validCalls = [
-      { arguments: { source: 'document.title', tabId: 7, timeoutMs: 500 }, name: 'chrome_bridge_eval' },
+      {
+        arguments: {
+          approvalIntent: 'explicit-user-approved-js-eval',
+          source: 'document.title',
+          tabId: 7,
+          timeoutMs: 500
+        },
+        name: 'chrome_bridge_eval'
+      },
       { arguments: { levels: ['error'], limit: 10, tabId: 7 }, name: 'chrome_bridge_console' },
       { arguments: { format: 'jpeg', quality: 80, tabId: 7 }, name: 'chrome_bridge_screenshot' }
     ]

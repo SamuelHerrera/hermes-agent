@@ -25,11 +25,11 @@ const brokers: ChromeBridgeBroker[] = []
 
 const origin = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop/'
 
-async function waitFor<T>(read: () => T | undefined, timeoutMs = 1_000): Promise<T> {
+async function waitFor<T>(read: () => Promise<T | undefined> | T | undefined, timeoutMs = 1_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
 
   for (;;) {
-    const value = read()
+    const value = await read()
 
     if (value !== undefined) {return value}
 
@@ -133,7 +133,12 @@ describe('native messaging host', () => {
     await expect(routed).resolves.toEqual([{ id: 9 }])
     expect(diagnostics).toEqual([])
 
-    const status = JSON.parse(await readFile((host.config).statusPath, 'utf8')) as Record<string, unknown>
+    const status = await waitFor(async () => {
+      const current = JSON.parse(await readFile((host.config).statusPath, 'utf8')) as Record<string, unknown>
+
+      return current.connected === true ? current : undefined
+    })
+
     expect(status).toMatchObject({ connected: true, version: 1 })
     expect(status).not.toHaveProperty('token')
     expect(status).not.toHaveProperty('origin')

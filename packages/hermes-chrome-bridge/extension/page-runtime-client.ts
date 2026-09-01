@@ -1,3 +1,4 @@
+import { runtimeChannelAuth } from './page-runtime-channel.js'
 import type { ConsoleLevel } from './page-runtime-core.js'
 
 export const MAIN_REQUEST_EVENT = '__hermesChromeBridgeMainRequest'
@@ -68,30 +69,37 @@ export function createPageRuntimeClient(window: Window): PageRuntimeClient {
           return
         }
 
-        if (!isRecord(response) || response.id !== id || typeof response.ok !== 'boolean') { return }
+        if (!isRecord(response) || response.id !== id || typeof response.ok !== 'boolean' ||
+          typeof response.auth !== 'string') { return }
 
-        if (response.ok) {
-          finish(() => resolve(response.result))
+        const { auth, ...signedResponse } = response
 
-          return
-        }
+        void runtimeChannelAuth(signedResponse).then(expectedAuth => {
+          if (auth !== expectedAuth) { return }
 
-        const responseError = response.error
+          if (response.ok) {
+            finish(() => resolve(response.result))
 
-        if (!isRecord(responseError) || typeof responseError.code !== 'string' ||
-          typeof responseError.message !== 'string') {
-          finish(() => reject(new PageRuntimeClientError('INVALID_RUNTIME_RESPONSE', 'The page runtime response is invalid.')))
+            return
+          }
 
-          return
-        }
+          const responseError = response.error
 
-        const errorCode = responseError.code
-        const errorMessage = responseError.message
+          if (!isRecord(responseError) || typeof responseError.code !== 'string' ||
+            typeof responseError.message !== 'string') {
+            finish(() => reject(new PageRuntimeClientError('INVALID_RUNTIME_RESPONSE', 'The page runtime response is invalid.')))
 
-        finish(() => reject(new PageRuntimeClientError(
-          errorCode.slice(0, 80),
-          errorMessage.slice(0, 500)
-        )))
+            return
+          }
+
+          const errorCode = responseError.code
+          const errorMessage = responseError.message
+
+          finish(() => reject(new PageRuntimeClientError(
+            errorCode.slice(0, 80),
+            errorMessage.slice(0, 500)
+          )))
+        }).catch(() => undefined)
       }
 
       const timeout = setTimeout(() => {

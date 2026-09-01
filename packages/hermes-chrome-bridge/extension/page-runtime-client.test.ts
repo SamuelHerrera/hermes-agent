@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { runtimeChannelAuth } from './page-runtime-channel.js'
 import {
   createPageRuntimeClient,
   MAIN_REQUEST_EVENT,
@@ -28,11 +29,15 @@ describe('isolated-to-main page runtime client', () => {
       const request = JSON.parse((event as DetailEvent).detail) as { id: string, kind: string }
       const result = request.kind === 'eval' ? { title: 'Test' } : { count: 1, entries: [], truncated: false }
 
-      window.dispatchEvent(new DetailEvent(MAIN_RESPONSE_EVENT, JSON.stringify({
+      const response = {
         id: request.id,
         ok: true,
         result
-      })))
+      }
+
+      void runtimeChannelAuth(response).then(auth => {
+        window.dispatchEvent(new DetailEvent(MAIN_RESPONSE_EVENT, JSON.stringify({ ...response, auth })))
+      })
     })
     const client = createPageRuntimeClient(window as unknown as Window)
 
@@ -45,11 +50,15 @@ describe('isolated-to-main page runtime client', () => {
     window.addEventListener(MAIN_REQUEST_EVENT, event => {
       const request = JSON.parse((event as DetailEvent).detail) as { id: string }
 
-      window.dispatchEvent(new DetailEvent(MAIN_RESPONSE_EVENT, JSON.stringify({
+      const response = {
         error: { code: 'SENSITIVE_PAGE', message: 'Evaluation is blocked.' },
         id: request.id,
         ok: false
-      })))
+      }
+
+      void runtimeChannelAuth(response).then(auth => {
+        window.dispatchEvent(new DetailEvent(MAIN_RESPONSE_EVENT, JSON.stringify({ ...response, auth })))
+      })
     })
     const client = createPageRuntimeClient(window as unknown as Window)
 

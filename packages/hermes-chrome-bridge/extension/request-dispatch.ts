@@ -474,16 +474,21 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
       }
 
       if (request.method === 'eval') {
-        const validKeys = exactKeys(request.arguments, ['source', 'tabId']) ||
-          exactKeys(request.arguments, ['source', 'tabId', 'timeoutMs'])
+        const validKeys = exactKeys(request.arguments, ['approvalIntent', 'source', 'tabId']) ||
+          exactKeys(request.arguments, ['approvalIntent', 'source', 'tabId', 'timeoutMs'])
 
         const timeoutMs = request.arguments.timeoutMs ?? 2_000
 
-        if (!validKeys || !isPositiveInteger(request.arguments.tabId) ||
+        if (!validKeys || request.arguments.approvalIntent !== 'explicit-user-approved-js-eval' ||
+          !isPositiveInteger(request.arguments.tabId) ||
           typeof request.arguments.source !== 'string' || request.arguments.source.length === 0 ||
           request.arguments.source.length > 100_000 || !Number.isInteger(timeoutMs) ||
           (timeoutMs as number) < 100 || (timeoutMs as number) > 10_000) {
-          return error(request.id, 'INVALID_ARGUMENTS', 'eval requires tabId, bounded source, and optional timeout.')
+          return error(
+            request.id,
+            'INVALID_ARGUMENTS',
+            'eval requires tabId, bounded source, explicit eval approval intent, and optional timeout.'
+          )
         }
 
         return {
