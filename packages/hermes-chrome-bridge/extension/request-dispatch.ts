@@ -1,10 +1,12 @@
 import type { ConnectionStatus } from './lifecycle.js'
 import type { NativeRequest, NativeResponse } from './protocol.js'
+import { ScreenshotError, type ScreenshotService } from './screenshot-service.js'
 import { TabActionError, type TabActions } from './tab-actions.js'
 import { type TabService, TabServiceError } from './tab-service.js'
 
 interface DispatcherDependencies {
   getConnectionState(): ConnectionStatus
+  screenshotService: ScreenshotService
   sendTabMessage(tabId: number, message: unknown): Promise<unknown>
   tabActions: TabActions
   tabService: TabService
@@ -86,6 +88,13 @@ function validModifiers(value: unknown): value is Array<'alt' | 'ctrl' | 'meta' 
 
   return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
     new Set(value).size === value.length
+}
+
+function validConsoleLevels(value: unknown): value is Array<'debug' | 'error' | 'info' | 'log' | 'warn'> {
+  const allowed = new Set(['debug', 'error', 'info', 'log', 'warn'])
+
+  return Array.isArray(value) && value.length <= 5 &&
+    value.every(level => typeof level === 'string' && allowed.has(level)) && new Set(value).size === value.length
 }
 
 function validDistance(value: unknown): value is number {
@@ -388,6 +397,88 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
         }
       }
 
+      if (request.method === 'eval') {
+        const validKeys = exactKeys(request.arguments, ['source', 'tabId']) ||
+          exactKeys(request.arguments, ['source', 'tabId', 'timeoutMs'])
+
+        const timeoutMs = request.arguments.timeoutMs ?? 2_000
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) ||
+          typeof request.arguments.source !== 'string' || request.arguments.source.length === 0 ||
+          request.arguments.source.length > 100_000 || !Number.isInteger(timeoutMs) ||
+          (timeoutMs as number) < 100 || (timeoutMs as number) > 10_000) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'eval requires tabId, bounded source, and optional timeout.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            source: request.arguments.source,
+            timeoutMs,
+            type: 'hermes.bridge.eval',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'console') {
+        const validKeys = Object.keys(request.arguments).every(key =>
+          key === 'levels' || key === 'limit' || key === 'tabId'
+        )
+
+        const levels = request.arguments.levels ?? ['debug', 'error', 'info', 'log', 'warn']
+        const limit = request.arguments.limit ?? 50
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || !validConsoleLevels(levels) ||
+          !Number.isInteger(limit) || (limit as number) < 1 || (limit as number) > 200) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'console requires tabId and optional bounded levels and limit.')
+        }
+
+        return {
+          id: request.id,
+          result: await pageResult(dependencies, request.arguments.tabId, {
+            levels,
+            limit,
+            timeoutMs: 2_000,
+            type: 'hermes.bridge.console',
+            version: 1
+          }),
+          type: 'response'
+        }
+      }
+
+      if (request.method === 'screenshot') {
+        const validKeys = Object.keys(request.arguments).every(key =>
+          key === 'format' || key === 'quality' || key === 'tabId'
+        )
+
+        const format = request.arguments.format ?? 'png'
+
+        if (!validKeys || !isPositiveInteger(request.arguments.tabId) || (format !== 'jpeg' && format !== 'png') ||
+          (request.arguments.quality !== undefined &&
+            (!Number.isInteger(request.arguments.quality) || (request.arguments.quality as number) < 1 ||
+              (request.arguments.quality as number) > 100 || format !== 'jpeg'))) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'screenshot requires tabId and valid format and quality.')
+        }
+
+        await pageResult(dependencies, request.arguments.tabId, {
+          active: true,
+          type: 'hermes.bridge.indicator',
+          version: 1
+        })
+
+        return {
+          id: request.id,
+          result: await dependencies.screenshotService.capture({
+            format,
+            ...(request.arguments.quality === undefined ? {} : { quality: request.arguments.quality as number }),
+            tabId: request.arguments.tabId
+          }),
+          type: 'response'
+        }
+      }
+
       return error(request.id, 'METHOD_NOT_IMPLEMENTED', 'This bridge method is not implemented.')
     } catch (caught) {
       if (caught instanceof TabServiceError) {
@@ -399,6 +490,10 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
       }
 
       if (caught instanceof TabActionError) {
+        return error(request.id, caught.code, caught.message)
+      }
+
+      if (caught instanceof ScreenshotError) {
         return error(request.id, caught.code, caught.message)
       }
 

@@ -22,9 +22,13 @@ describe('built MV3 extension artifacts', () => {
       permissions: ['nativeMessaging', 'storage']
     })
     expect(manifest.permissions).not.toEqual(expect.arrayContaining(['activeTab', 'tabs', 'scripting']))
-    expect(manifest).toHaveProperty('content_scripts')
+    expect(manifest.content_scripts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ js: ['main-world.js'], run_at: 'document_start', world: 'MAIN' }),
+      expect.objectContaining({ js: ['content-script.js'], run_at: 'document_idle' })
+    ]))
     await expect(stat(join(outputDirectory, 'background.js'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'content-script.js'))).resolves.toBeDefined()
+    await expect(stat(join(outputDirectory, 'main-world.js'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'popup.js'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'popup.html'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'popup.css'))).resolves.toBeDefined()

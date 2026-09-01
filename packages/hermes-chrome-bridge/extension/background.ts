@@ -5,6 +5,7 @@ import {
   createConnectionController
 } from './lifecycle.js'
 import { createBridgeRequestDispatcher } from './request-dispatch.js'
+import { createScreenshotService } from './screenshot-service.js'
 import { createTabActions } from './tab-actions.js'
 import { createTabService } from './tab-service.js'
 
@@ -31,10 +32,20 @@ const tabActions = createTabActions({
   }
 })
 
+const screenshotService = createScreenshotService({
+  captureVisibleTab: async (windowId, options) => chrome.tabs.captureVisibleTab(windowId, options),
+  tabs: {
+    get: async tabId => chrome.tabs.get(tabId),
+    query: async options => chrome.tabs.query(options),
+    update: async (tabId, options) => chrome.tabs.update(tabId, options)
+  }
+})
+
 let controller: ReturnType<typeof createConnectionController>
 
 const dispatchRequest = createBridgeRequestDispatcher({
   getConnectionState: () => controller.getState().connection,
+  screenshotService,
   sendTabMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message),
   tabActions,
   tabService

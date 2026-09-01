@@ -1,6 +1,7 @@
 import type { ControlIndicator } from './control-indicator.js'
 import { PageActionError, type PageActions } from './page-actions.js'
 import { type PageInspector, PageInspectorError, type SnapshotFormat } from './page-inspector.js'
+import { type PageRuntimeClient, PageRuntimeClientError } from './page-runtime-client.js'
 
 interface ContentBridgeResult {
   error?: { code: string, message: string }
@@ -40,12 +41,35 @@ function validDistance(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
 }
 
+function validConsoleLevels(value: unknown): value is Array<'debug' | 'error' | 'info' | 'log' | 'warn'> {
+  const allowed = new Set(['debug', 'error', 'info', 'log', 'warn'])
+
+  return Array.isArray(value) && value.length <= 5 &&
+    value.every(level => typeof level === 'string' && allowed.has(level)) && new Set(value).size === value.length
+}
+
+async function runtimeResult(request: Promise<unknown>): Promise<ContentBridgeResult> {
+  try {
+    return { result: await request, type: 'hermes.bridge.result', version: 1 }
+  } catch (error) {
+    return {
+      error: {
+        code: error instanceof PageRuntimeClientError ? error.code : 'PAGE_RUNTIME_FAILED',
+        message: error instanceof PageRuntimeClientError ? error.message : 'The page runtime request failed.'
+      },
+      type: 'hermes.bridge.error',
+      version: 1
+    }
+  }
+}
+
 export function createContentBridgeHandler(
   inspector: PageInspector,
   actions: PageActions,
-  indicator?: ControlIndicator
+  indicator?: ControlIndicator,
+  runtime?: PageRuntimeClient
 ) {
-  return (message: unknown): ContentBridgeResult | undefined => {
+  return (message: unknown): ContentBridgeResult | Promise<ContentBridgeResult> | undefined => {
     if (!isRecord(message) || message.version !== 1) { return undefined }
 
     try {
@@ -61,6 +85,56 @@ export function createContentBridgeHandler(
           type: 'hermes.bridge.result',
           version: 1
         }
+      }
+
+      if (message.type === 'hermes.bridge.eval') {
+        if (!exactKeys(message, ['source', 'timeoutMs', 'type', 'version']) ||
+          typeof message.source !== 'string' || message.source.length === 0 || message.source.length > 100_000 ||
+          !Number.isInteger(message.timeoutMs) || (message.timeoutMs as number) < 100 ||
+          (message.timeoutMs as number) > 10_000) {
+          return undefined
+        }
+
+        if (runtime === undefined) {
+          return {
+            error: { code: 'PAGE_RUNTIME_UNAVAILABLE', message: 'The page runtime is unavailable.' },
+            type: 'hermes.bridge.error',
+            version: 1
+          }
+        }
+
+        indicator?.activity()
+
+        return runtimeResult(runtime.eval({ source: message.source, timeoutMs: message.timeoutMs as number }))
+      }
+
+      if (message.type === 'hermes.bridge.console') {
+        const validKeys = Object.keys(message).every(key =>
+          key === 'levels' || key === 'limit' || key === 'timeoutMs' || key === 'type' || key === 'version'
+        )
+
+        const levels = message.levels ?? ['debug', 'error', 'info', 'log', 'warn']
+        const limit = message.limit ?? 50
+
+        if (!validKeys || !validConsoleLevels(levels) || !Number.isInteger(limit) ||
+          (limit as number) < 1 || (limit as number) > 200 || !Number.isInteger(message.timeoutMs) ||
+          (message.timeoutMs as number) < 100 || (message.timeoutMs as number) > 10_000) {
+          return undefined
+        }
+
+        if (runtime === undefined) {
+          return {
+            error: { code: 'PAGE_RUNTIME_UNAVAILABLE', message: 'The page runtime is unavailable.' },
+            type: 'hermes.bridge.error',
+            version: 1
+          }
+        }
+
+        return runtimeResult(runtime.console({
+          levels,
+          limit: limit as number,
+          timeoutMs: message.timeoutMs as number
+        }))
       }
 
       if (message.type === 'hermes.bridge.snapshot') {

@@ -40,14 +40,24 @@ function setup() {
     open: vi.fn(async () => ({ opened: true as const, tabId: 22 }))
   }
 
+  const screenshotService = {
+    capture: vi.fn(async ({ format, tabId }: { format: 'jpeg' | 'png', tabId: number }) => ({
+      bytes: 6,
+      dataUrl: `data:image/${format};base64,aGVybWVz`,
+      format,
+      tabId
+    }))
+  }
+
   const dispatch = createBridgeRequestDispatcher({
     getConnectionState: () => 'connected',
+    screenshotService,
     sendTabMessage,
     tabActions,
     tabService
   })
 
-  return { dispatch, sendTabMessage, tabActions, tabService }
+  return { dispatch, screenshotService, sendTabMessage, tabActions, tabService }
 }
 
 describe('background bridge request dispatch', () => {
@@ -254,6 +264,44 @@ describe('background bridge request dispatch', () => {
     expect(sendTabMessage).not.toHaveBeenCalled()
     expect(tabActions.open).not.toHaveBeenCalled()
     expect(tabActions.navigate).not.toHaveBeenCalled()
+  })
+
+  it('routes guarded eval, console, and screenshot requests with bounded payloads', async () => {
+    const { dispatch, screenshotService, sendTabMessage } = setup()
+
+    await expect(dispatch({
+      arguments: { source: 'document.title', tabId: 9, timeoutMs: 500 },
+      id: 'eval',
+      method: 'eval',
+      type: 'request'
+    })).resolves.toMatchObject({ id: 'eval', type: 'response' })
+    await expect(dispatch({
+      arguments: { levels: ['error'], limit: 10, tabId: 9 },
+      id: 'console',
+      method: 'console',
+      type: 'request'
+    })).resolves.toMatchObject({ id: 'console', type: 'response' })
+    await expect(dispatch({
+      arguments: { format: 'jpeg', quality: 80, tabId: 9 },
+      id: 'screenshot',
+      method: 'screenshot',
+      type: 'request'
+    })).resolves.toMatchObject({ result: { bytes: 6, format: 'jpeg' } })
+
+    expect(sendTabMessage).toHaveBeenCalledWith(9, {
+      source: 'document.title',
+      timeoutMs: 500,
+      type: 'hermes.bridge.eval',
+      version: 1
+    })
+    expect(sendTabMessage).toHaveBeenCalledWith(9, {
+      levels: ['error'],
+      limit: 10,
+      timeoutMs: 2_000,
+      type: 'hermes.bridge.console',
+      version: 1
+    })
+    expect(screenshotService.capture).toHaveBeenCalledWith({ format: 'jpeg', quality: 80, tabId: 9 })
   })
 
   it('rejects extra arguments and unknown methods with bounded safe errors', async () => {

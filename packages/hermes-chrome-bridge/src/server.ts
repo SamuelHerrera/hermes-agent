@@ -21,8 +21,9 @@ import { CHROME_BRIDGE_TOOLS } from './schema.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
-  method: 'click' | 'close' | 'focus' | 'hover' | 'key' | 'navigate' | 'open' | 'query' |
-    'scroll' | 'selectTab' | 'snapshot' | 'status' | 'tabs' | 'type'
+  method: 'click' | 'close' | 'console' | 'eval' | 'focus' | 'hover' | 'key' | 'navigate' |
+    'open' | 'query' | 'screenshot' | 'scroll' | 'selectTab' | 'snapshot' | 'status' | 'tabs' |
+    'type'
 }
 
 export interface ChromeBridgeRequestRouter {
@@ -32,12 +33,15 @@ export interface ChromeBridgeRequestRouter {
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
   chrome_bridge_click: 'click',
   chrome_bridge_close: 'close',
+  chrome_bridge_console: 'console',
+  chrome_bridge_eval: 'eval',
   chrome_bridge_focus: 'focus',
   chrome_bridge_hover: 'hover',
   chrome_bridge_key: 'key',
   chrome_bridge_navigate: 'navigate',
   chrome_bridge_open: 'open',
   chrome_bridge_query: 'query',
+  chrome_bridge_screenshot: 'screenshot',
   chrome_bridge_scroll: 'scroll',
   chrome_bridge_select_tab: 'selectTab',
   chrome_bridge_snapshot: 'snapshot',
@@ -59,6 +63,14 @@ function validModifiers(value: unknown): boolean {
   const allowed = new Set(['alt', 'ctrl', 'meta', 'shift'])
 
   return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
+    new Set(value).size === value.length
+}
+
+function validConsoleLevels(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 5) { return false }
+  const allowed = new Set(['debug', 'error', 'info', 'log', 'warn'])
+
+  return value.every(level => typeof level === 'string' && allowed.has(level)) &&
     new Set(value).size === value.length
 }
 
@@ -143,6 +155,34 @@ function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: R
 
   if (method === 'hover') {
     return keys.length === 2 && validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target)
+  }
+
+  if (method === 'eval') {
+    const timeoutMs = arguments_.timeoutMs ?? 2_000
+
+    return keys.every(key => key === 'source' || key === 'tabId' || key === 'timeoutMs') &&
+      validPositiveInteger(arguments_.tabId) && typeof arguments_.source === 'string' &&
+      arguments_.source.length > 0 && arguments_.source.length <= 100_000 &&
+      Number.isInteger(timeoutMs) && (timeoutMs as number) >= 100 && (timeoutMs as number) <= 10_000
+  }
+
+  if (method === 'console') {
+    const levels = arguments_.levels ?? ['debug', 'error', 'info', 'log', 'warn']
+    const limit = arguments_.limit ?? 50
+
+    return keys.every(key => key === 'levels' || key === 'limit' || key === 'tabId') &&
+      validPositiveInteger(arguments_.tabId) && validConsoleLevels(levels) && Number.isInteger(limit) &&
+      (limit as number) >= 1 && (limit as number) <= 200
+  }
+
+  if (method === 'screenshot') {
+    const format = arguments_.format ?? 'png'
+
+    return keys.every(key => key === 'format' || key === 'quality' || key === 'tabId') &&
+      validPositiveInteger(arguments_.tabId) && (format === 'jpeg' || format === 'png') &&
+      (arguments_.quality === undefined ||
+        (format === 'jpeg' && Number.isInteger(arguments_.quality) &&
+          (arguments_.quality as number) >= 1 && (arguments_.quality as number) <= 100))
   }
 
   return keys.length === 0

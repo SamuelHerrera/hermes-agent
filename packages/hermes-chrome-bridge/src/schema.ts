@@ -220,5 +220,59 @@ export const CHROME_BRIDGE_TOOLS = [
       type: 'object'
     },
     name: 'chrome_bridge_hover'
+  },
+  {
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    description: 'Execute explicit JavaScript on a public, non-sensitive Chrome page with bounded structured output.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        source: { maxLength: 100000, minLength: 1, type: 'string' },
+        tabId: { minimum: 1, type: 'integer' },
+        timeoutMs: { default: 2000, maximum: 10000, minimum: 100, type: 'integer' }
+      },
+      required: ['tabId', 'source'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_eval'
+  },
+  {
+    annotations: READ_ONLY_ANNOTATIONS,
+    description: 'Read a bounded, redacted ring of console entries captured from a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        levels: {
+          items: { enum: ['debug', 'error', 'info', 'log', 'warn'], type: 'string' },
+          maxItems: 5,
+          type: 'array',
+          uniqueItems: true
+        },
+        limit: { default: 50, maximum: 200, minimum: 1, type: 'integer' },
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_console'
+  },
+  {
+    annotations: READ_ONLY_ANNOTATIONS,
+    description: 'Capture a bounded screenshot from a controllable Chrome tab with the Hermes indicator visible.',
+    inputSchema: {
+      additionalProperties: false,
+      allOf: [{
+        if: { required: ['quality'] },
+        then: { properties: { format: { const: 'jpeg' } }, required: ['format'] }
+      }],
+      properties: {
+        format: { default: 'png', enum: ['jpeg', 'png'], type: 'string' },
+        quality: { maximum: 100, minimum: 1, type: 'integer' },
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      required: ['tabId'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_screenshot'
   }
 ] as const satisfies readonly Tool[]

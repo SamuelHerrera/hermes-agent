@@ -19,7 +19,18 @@ function setup() {
 
   const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn() }
 
-  return { actions, handler: createContentBridgeHandler(inspector, actions, indicator), indicator, inspector }
+  const runtime = {
+    console: vi.fn(async () => ({ count: 1, entries: [], truncated: false })),
+    eval: vi.fn(async () => ({ title: 'Test' }))
+  }
+
+  return {
+    actions,
+    handler: createContentBridgeHandler(inspector, actions, indicator, runtime),
+    indicator,
+    inspector,
+    runtime
+  }
 }
 
 describe('content bridge protocol', () => {
@@ -57,16 +68,16 @@ describe('content bridge protocol', () => {
     expect(inspector.query).not.toHaveBeenCalled()
   })
 
-  it('routes strict user-like action messages without echoing typed text', () => {
+  it('routes strict user-like action messages without echoing typed text', async () => {
     const { actions, handler } = setup()
 
-    const responses = [
+    const responses = await Promise.all([
       handler({ button: 'left', target: 'e1', type: 'hermes.bridge.click', version: 1 }),
       handler({ submit: false, target: 'e1', text: 'safe', type: 'hermes.bridge.type', version: 1 }),
       handler({ key: 'Enter', modifiers: ['ctrl'], type: 'hermes.bridge.key', version: 1 }),
       handler({ deltaX: 0, deltaY: 50, type: 'hermes.bridge.scroll', version: 1 }),
       handler({ target: 'e1', type: 'hermes.bridge.hover', version: 1 })
-    ]
+    ].map(async response => response))
 
     expect(actions.click).toHaveBeenCalledWith({ button: 'left', target: 'e1' })
     expect(actions.type).toHaveBeenCalledWith({ submit: false, target: 'e1', text: 'safe' })
@@ -105,5 +116,25 @@ describe('content bridge protocol', () => {
       type: 'hermes.bridge.result'
     })
     expect(indicator.hide).toHaveBeenCalledOnce()
+  })
+
+  it('routes guarded eval and bounded console requests asynchronously', async () => {
+    const { handler, runtime } = setup()
+
+    await expect(handler({
+      source: 'document.title',
+      timeoutMs: 500,
+      type: 'hermes.bridge.eval',
+      version: 1
+    })).resolves.toMatchObject({ result: { title: 'Test' } })
+    await expect(handler({
+      levels: ['error'],
+      limit: 10,
+      timeoutMs: 500,
+      type: 'hermes.bridge.console',
+      version: 1
+    })).resolves.toMatchObject({ result: { count: 1 } })
+    expect(runtime.eval).toHaveBeenCalledWith({ source: 'document.title', timeoutMs: 500 })
+    expect(runtime.console).toHaveBeenCalledWith({ levels: ['error'], limit: 10, timeoutMs: 500 })
   })
 })

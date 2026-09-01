@@ -63,7 +63,8 @@ describe('Hermes Chrome bridge MCP server', () => {
     const { tools } = await client.listTools()
 
     const readOnly = new Set([
-      'chrome_bridge_status', 'chrome_bridge_tabs', 'chrome_bridge_snapshot', 'chrome_bridge_query'
+      'chrome_bridge_status', 'chrome_bridge_tabs', 'chrome_bridge_snapshot', 'chrome_bridge_query',
+      'chrome_bridge_console', 'chrome_bridge_screenshot'
     ])
 
     for (const tool of tools) {
@@ -77,6 +78,11 @@ describe('Hermes Chrome bridge MCP server', () => {
     })
     expect(tools.find(tool => tool.name === 'chrome_bridge_close')?.annotations?.destructiveHint).toBe(true)
     expect(tools.find(tool => tool.name === 'chrome_bridge_click')?.annotations).toMatchObject({
+      destructiveHint: true,
+      openWorldHint: true,
+      readOnlyHint: false
+    })
+    expect(tools.find(tool => tool.name === 'chrome_bridge_eval')?.annotations).toMatchObject({
       destructiveHint: true,
       openWorldHint: true,
       readOnlyHint: false
@@ -187,6 +193,41 @@ describe('Hermes Chrome bridge MCP server', () => {
       { arguments: { key: '', tabId: 7 }, name: 'chrome_bridge_key' },
       { arguments: { deltaY: 100_001, tabId: 7 }, name: 'chrome_bridge_scroll' },
       { arguments: { tabId: 7, target: '' }, name: 'chrome_bridge_hover' }
+    ]
+
+    for (const call of invalidCalls) {
+      await expect(client.callTool(call)).resolves.toMatchObject({ isError: true })
+    }
+
+    expect(route).toHaveBeenCalledTimes(validCalls.length)
+  })
+
+  it('validates guarded eval, console, and screenshot tools', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ ok: true })
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+
+    clients.push(client)
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const validCalls = [
+      { arguments: { source: 'document.title', tabId: 7, timeoutMs: 500 }, name: 'chrome_bridge_eval' },
+      { arguments: { levels: ['error'], limit: 10, tabId: 7 }, name: 'chrome_bridge_console' },
+      { arguments: { format: 'jpeg', quality: 80, tabId: 7 }, name: 'chrome_bridge_screenshot' }
+    ]
+
+    for (const call of validCalls) {
+      await expect(client.callTool(call)).resolves.not.toMatchObject({ isError: true })
+    }
+
+    expect(route).toHaveBeenCalledTimes(validCalls.length)
+
+    const invalidCalls = [
+      { arguments: { source: '', tabId: 7 }, name: 'chrome_bridge_eval' },
+      { arguments: { levels: ['private'], tabId: 7 }, name: 'chrome_bridge_console' },
+      { arguments: { format: 'png', quality: 80, tabId: 7 }, name: 'chrome_bridge_screenshot' }
     ]
 
     for (const call of invalidCalls) {
@@ -353,7 +394,10 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_type',
       'chrome_bridge_key',
       'chrome_bridge_scroll',
-      'chrome_bridge_hover'
+      'chrome_bridge_hover',
+      'chrome_bridge_eval',
+      'chrome_bridge_console',
+      'chrome_bridge_screenshot'
     ])
   })
 
@@ -393,7 +437,10 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_type',
       'chrome_bridge_key',
       'chrome_bridge_scroll',
-      'chrome_bridge_hover'
+      'chrome_bridge_hover',
+      'chrome_bridge_eval',
+      'chrome_bridge_console',
+      'chrome_bridge_screenshot'
     ])
   })
 })
