@@ -1,8 +1,8 @@
 # Hermes Chrome Bridge MCP Server
 
-A standalone local [Model Context Protocol](https://modelcontextprotocol.io/) server plus an authenticated Chrome native-messaging host. The MCP server owns a private Unix-socket broker; Chrome starts the native host, which authenticates to that broker and forwards extension requests and responses.
+A standalone local [Model Context Protocol](https://modelcontextprotocol.io/) server, authenticated Chrome native-messaging host, and Manifest V3 extension shell. The MCP server owns a private Unix-socket broker; Chrome starts the native host, which authenticates to that broker and forwards extension requests and responses.
 
-The MV3 extension is not included yet. Task 3 will add it; the native host and `FakeChromeProcess` harness are ready for extension integration tests.
+The extension connects only after the user clicks **Connect** in its popup. That opt-in is stored locally so the service worker can reconnect with bounded backoff after a restart or native-host disconnect. **Disconnect** revokes the stored opt-in. This shell deliberately implements no tab discovery, snapshots, or page interaction yet; unsupported bridge requests receive a structured `NOT_IMPLEMENTED` response.
 
 ## Tools
 
@@ -22,9 +22,25 @@ npm run check --workspace @hermes/chrome-bridge
 npm start --workspace @hermes/chrome-bridge -- --hermes-home /absolute/path/to/profile-home
 ```
 
-`check` type-checks and lints both `src/**` and `native/**`, builds `dist/server.js` without moving the MCP entrypoint, builds the native host under `dist/native/`, and runs the framing, broker, fake-Chrome, installer, and MCP integration tests.
+`check` type-checks and lints `src/**`, `native/**`, and `extension/**`; builds `dist/server.js` without moving the MCP entrypoint; builds the native host under `dist/native/`; creates the unpacked extension under `dist/extension/`; and runs the executable lifecycle, artifact, framing, broker, fake-Chrome, installer, and MCP integration tests.
 
 Both MCP and Chrome native messaging reserve stdout for protocol frames. Diagnostics go to stderr and never include raw page or user content.
+
+## Build and load the extension for development
+
+Build the package, then load the generated directory rather than the TypeScript source:
+
+```sh
+npm run build --workspace @hermes/chrome-bridge
+```
+
+1. Open `chrome://extensions` in a development Chrome profile.
+2. Enable **Developer mode**.
+3. Choose **Load unpacked** and select `packages/hermes-chrome-bridge/dist/extension`.
+4. The committed public manifest key gives this unpacked build the stable extension ID `mdeahbanbmncnmkjkklglmdflkcclckg`. Use that ID when installing the native host manifest.
+5. Open the extension popup and click **Connect** to opt in. Click **Disconnect** to revoke opt-in and stop reconnecting.
+
+The manifest uses only `nativeMessaging` and `storage`: the former opens the exact host `com.nous.hermes_chrome_bridge`, and the latter persists explicit opt-in. `<all_urls>` is a host permission because the minimal content-script ping/control shell is injected on ordinary web pages; it does not inspect or mutate page content. The shell does not request `tabs`, `activeTab`, or `scripting`, does not connect to a remote endpoint, and never reads the broker socket or authentication token directly.
 
 ## Install the native host
 

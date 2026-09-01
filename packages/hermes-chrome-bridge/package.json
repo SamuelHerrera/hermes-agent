@@ -13,21 +13,23 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.native.json",
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.native.json && node scripts/build-extension.mjs",
     "check": "npm run typecheck && npm run lint && npm run build && npm run test",
     "install-host": "node dist/native/install-host.js",
-    "lint": "eslint src/ native/",
-    "lint:fix": "eslint src/ native/ --fix",
+    "lint": "eslint src/ native/ extension/ scripts/",
+    "lint:fix": "eslint src/ native/ extension/ scripts/ --fix",
     "prepare": "npm run build",
     "start": "node dist/server.js",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.native.check.json"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.native.check.json && tsc -p tsconfig.extension.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0"
   },
   "devDependencies": {
+    "@types/chrome": "0.2.7",
     "@types/node": "22.20.1",
+    "esbuild": "0.28.2",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   },
