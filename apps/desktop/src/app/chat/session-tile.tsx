@@ -244,6 +244,7 @@ export function SessionTilePane({ storedSessionId }: { storedSessionId: string }
   const runtimeId = tile?.runtimeId ?? null
   const gatewayOpen = useStore($gatewayState) === 'open'
   const resumingRef = useRef(false)
+  const previousGatewayOpenRef = useRef(gatewayOpen)
   const view = useMemo(() => buildTileView(storedSessionId), [storedSessionId])
 
   // A tab-strip "+"/⌘T tab is created UNLISTED — its session stays out of
@@ -296,10 +297,17 @@ export function SessionTilePane({ storedSessionId }: { storedSessionId: string }
   // Same gating as the primary's route resume (use-route-resume): never fire
   // session.resume before the gateway is OPEN. Persisted tiles mount at boot
   // while it's still connecting — an ungated resume rejected there and
-  // latched every restored tile into the error card.
+  // latched every restored tile into the error card. A closed -> open
+  // transition also re-activates an existing runtime: the backend binds event
+  // fanout to the current WebSocket, so retaining the cached id without an RPC
+  // makes an otherwise-running tile appear frozen after reconnect.
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
-    if (!gatewayOpen || runtimeId || tile?.error || resumingRef.current) {
+    const reconnected = gatewayOpen && previousGatewayOpenRef.current === false
+
+    previousGatewayOpenRef.current = gatewayOpen
+
+    if (!gatewayOpen || (runtimeId && !reconnected) || tile?.error || resumingRef.current) {
       return
     }
 

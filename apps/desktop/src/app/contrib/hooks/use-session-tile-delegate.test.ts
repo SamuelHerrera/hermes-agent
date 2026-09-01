@@ -58,7 +58,11 @@ const todoToolMessage = (toolCallId = 'todo-1'): ChatMessage => ({
 
 function renderTile(
   requestGateway: ReturnType<typeof vi.fn>,
-  updateSessionState: (sessionId: string, updater: (state: ClientSessionState) => ClientSessionState) => void = vi.fn()
+  updateSessionState: (sessionId: string, updater: (state: ClientSessionState) => ClientSessionState) => void = vi.fn(),
+  cache: {
+    runtimeIdByStoredSessionId?: Map<string, string>
+    sessionStateByRuntimeId?: Map<string, ClientSessionState>
+  } = {}
 ) {
   renderHook(() =>
     useSessionTileDelegate({
@@ -67,8 +71,8 @@ function renderTile(
       executeSlashCommand: vi.fn(async () => undefined) as never,
       removeSession: vi.fn(async () => undefined),
       requestGateway: requestGateway as never,
-      runtimeIdByStoredSessionIdRef: { current: new Map() },
-      sessionStateByRuntimeIdRef: { current: new Map() },
+      runtimeIdByStoredSessionIdRef: { current: cache.runtimeIdByStoredSessionId ?? new Map() },
+      sessionStateByRuntimeIdRef: { current: cache.sessionStateByRuntimeId ?? new Map() },
       updateSessionState: updateSessionState as never
     })
   )
@@ -129,6 +133,99 @@ describe('useSessionTileDelegate resumeTile', () => {
       profile: 'default',
       omit_messages: true
     })
+  })
+
+  it('re-activates a cached tile runtime so a reconnected socket receives live events', async () => {
+    setSessions([row({ id: 'stored-live', profile: 'default' })])
+
+    const cachedState = createClientSessionState('stored-live')
+
+    cachedState.awaitingResponse = true
+    cachedState.busy = true
+
+    const restored: ClientSessionState[] = []
+
+    const updateSessionState = vi.fn(
+      (_sessionId: string, updater: (state: ClientSessionState) => ClientSessionState) => {
+        restored.push(updater(cachedState))
+      }
+    )
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        return {
+          messages: [],
+          running: false,
+          session_id: 'runtime-live',
+          session_key: 'stored-live'
+        } as never
+      }
+
+      throw new Error(`unexpected ${method}`)
+    })
+
+    renderTile(requestGateway, updateSessionState, {
+      runtimeIdByStoredSessionId: new Map([['stored-live', 'runtime-live']]),
+      sessionStateByRuntimeId: new Map([['runtime-live', cachedState]])
+    })
+
+    const runtimeId = await sessionTileDelegate()!.resumeTile('stored-live')
+
+    expect(requestGateway).toHaveBeenCalledTimes(1)
+    expect(requestGateway).toHaveBeenCalledWith('session.activate', {
+      cols: 96,
+      omit_messages: true,
+      session_id: 'runtime-live'
+    })
+    expect(runtimeId).toBe('runtime-live')
+    expect(restored[0]).toMatchObject({ awaitingResponse: false, busy: false })
+  })
+
+  it('falls through to a cold resume when a cached tile runtime died with the backend', async () => {
+    setSessions([row({ id: 'stored-restarted', profile: 'default' })])
+
+    const cachedState = createClientSessionState('stored-restarted')
+    cachedState.busy = true
+
+    const runtimeIdByStoredSessionId = new Map([['stored-restarted', 'runtime-dead']])
+    const sessionStateByRuntimeId = new Map([['runtime-dead', cachedState]])
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.activate') {
+        throw new Error('Session not found: runtime-dead')
+      }
+
+      if (method === 'session.resume') {
+        return {
+          messages: [],
+          resumed: 'stored-restarted',
+          running: false,
+          session_id: 'runtime-recovered'
+        } as never
+      }
+
+      return {} as never
+    })
+
+    renderTile(requestGateway, vi.fn(), {
+      runtimeIdByStoredSessionId,
+      sessionStateByRuntimeId
+    })
+
+    const runtimeId = await sessionTileDelegate()!.resumeTile('stored-restarted')
+
+    expect(requestGateway).toHaveBeenNthCalledWith(1, 'session.activate', {
+      cols: 96,
+      omit_messages: true,
+      session_id: 'runtime-dead'
+    })
+    expect(requestGateway).toHaveBeenNthCalledWith(2, 'session.resume', {
+      cols: 96,
+      omit_messages: true,
+      profile: 'default',
+      session_id: 'stored-restarted'
+    })
+    expect(runtimeId).toBe('runtime-recovered')
   })
 
   it('rebuilds the composer task list for a cold restored tile from resume events', async () => {

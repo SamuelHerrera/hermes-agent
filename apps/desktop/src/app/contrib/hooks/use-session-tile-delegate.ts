@@ -2,8 +2,9 @@ import { useEffect } from 'react'
 
 import { getLatestSessionMessages, PROMPT_SUBMIT_REQUEST_TIMEOUT_MS } from '@/hermes'
 import { toChatMessages } from '@/lib/chat-messages'
+import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { recoverInFlightTurnJournal } from '@/lib/inflight-turn-journal'
-import { publishSessionState, setSessionTileDelegate } from '@/store/session-states'
+import { dropSessionState, publishSessionState, setSessionTileDelegate } from '@/store/session-states'
 import type { SessionResumeResponse } from '@/types/hermes'
 
 import type { usePromptActions } from '../../session/hooks/use-prompt-actions'
@@ -13,6 +14,7 @@ import {
   applyRuntimeInfo,
   hydrateSessionTodosFromMessages,
   hydrateSessionTodosFromResume,
+  isSessionGoneError,
   resolveSessionProfile
 } from '../../session/hooks/use-session-actions/utils'
 import type { useSessionStateCache } from '../../session/hooks/use-session-state-cache'
@@ -103,21 +105,98 @@ export function useSessionTileDelegate({
         const existing = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
         const cached = existing ? sessionStateByRuntimeIdRef.current.get(existing) : undefined
 
-        if (existing && cached?.storedSessionId === storedSessionId) {
-          publishSessionState(existing, cached)
+        // Resolve the owning profile before binding or re-activating a runtime.
+        // A tile can open a session from any profile, not just the active one.
+        const profile = await resolveSessionProfile(storedSessionId)
+        const prefetchPromise = getLatestSessionMessages(storedSessionId, profile).catch(() => null)
 
-          return existing
+        if (existing && cached?.storedSessionId === storedSessionId) {
+          try {
+            // A renderer reconnect does not prove this runtime still exists: an
+            // always-on backend restart re-mints every runtime id while Desktop's
+            // cache survives. Re-activate first so the live session transport is
+            // rebound on an ordinary socket reconnect, and fall through to a
+            // durable session.resume when the old backend/runtime died.
+            const activated = await requestGateway<SessionResumeResponse>('session.activate', {
+              session_id: existing,
+              cols: 96,
+              omit_messages: true
+            })
+
+            const activatedStoredId = activated.session_key || activated.resumed
+
+            if (activatedStoredId && activatedStoredId !== storedSessionId) {
+              runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
+              sessionStateByRuntimeIdRef.current.delete(existing)
+              dropSessionState(existing)
+            } else {
+              const running = Boolean(activated.running ?? activated.info?.running)
+              const persisted = await prefetchPromise
+
+              const baseMessages =
+                !running && persisted ? toChatMessages(persisted.messages) : cached.messages
+
+              const hasLiveProjection = Boolean(activated.inflight || activated.queued || activated.pending_prompt)
+
+              const projectedMessages = hasLiveProjection
+                ? appendLiveSessionProjection(baseMessages, activated)
+                : baseMessages
+
+              const recovery = recoverInFlightTurnJournal(storedSessionId, projectedMessages, {
+                keepPending: running
+              })
+
+              const runtimeInfo = applyRuntimeInfo(activated.info, { foreground: false })
+
+              hydrateSessionTodosFromResume({ ...activated, running })
+
+              if (recovery.applied) {
+                hydrateSessionTodosFromMessages(existing, recovery.messages, { allowActive: running })
+              }
+
+              updateSessionState(
+                existing,
+                state => ({
+                  ...state,
+                  ...(runtimeInfo ?? {}),
+                  adoptedRunningTurn: state.adoptedRunningTurn || running,
+                  awaitingResponse: running && !recovery.applied,
+                  busy: running,
+                  messages: recovery.messages,
+                  ...(recovery.applied
+                    ? {
+                        sawAssistantPayload: true,
+                        streamId: running ? recovery.streamId : null,
+                        turnStartedAt: running
+                          ? (recovery.turnStartedAt ?? state.turnStartedAt ?? Date.now())
+                          : null
+                      }
+                    : { streamId: running ? state.streamId : null, turnStartedAt: running ? state.turnStartedAt : null })
+                }),
+                storedSessionId
+              )
+
+              return existing
+            }
+          } catch (error) {
+            if (isMissingRpcMethod(error)) {
+              publishSessionState(existing, cached)
+
+              return existing
+            }
+
+            if (!isSessionGoneError(error)) {
+              throw error
+            }
+
+            runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
+            sessionStateByRuntimeIdRef.current.delete(existing)
+            dropSessionState(existing)
+          }
         }
 
-        // Resolve the owning profile before binding a runtime. A tile can open a
-        // session from any profile, not just the active one; resuming (or
-        // reading messages) without a profile lets the gateway fall back to the
-        // launch-profile DB and fork the conversation into the wrong profile —
-        // the same cross-profile bleed the recovery resumes had (#67603).
-        const profile = await resolveSessionProfile(storedSessionId)
-
         const [prefetch, resumed] = await Promise.all([
-          getLatestSessionMessages(storedSessionId, profile).catch(() => null),
+          prefetchPromise,
           requestGateway<SessionResumeResponse>('session.resume', {
             session_id: storedSessionId,
             cols: 96,

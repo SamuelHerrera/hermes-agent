@@ -7,9 +7,9 @@ time is positive proof the turn never finished. Contract pinned here:
 
 * the marker module round-trips, prunes stale entries, and tolerates a
   corrupt sidecar;
-* ``_run_prompt_submit`` writes the marker before the turn and clears it in
-  the ``finally`` on both the success and exception paths (a handled failure
-  is a concluded turn — its terminal frame + retained snapshot own recovery);
+* ``_run_prompt_submit`` writes the marker before the turn and clears it only
+  on terminal-frame paths (a handled failure is concluded; process shutdown
+  before a terminal frame keeps the marker for recovery);
 * ``_maybe_schedule_auto_continue`` re-submits a fresh interrupted prompt as
   a continuation note (display_kind ``auto_continue``), refuses stale /
   disabled / crash-looping / already-running / still-leased cases, and bounds
@@ -167,6 +167,30 @@ def test_handled_failure_still_clears_marker(emits, turn_env, marker_home):
     server._run_prompt_submit("rid", "sid", session, "do the thing")
 
     assert read_turn_marker(marker_home, "session-key") is None
+
+
+def test_process_shutdown_before_terminal_frame_keeps_marker(
+    emits, turn_env, marker_home
+):
+    """A service restart can unwind the turn thread through ``finally`` without
+    delivering a terminal frame. That is an interrupted turn, not a handled
+    failure, so the next ``session.resume`` must still have its crash marker."""
+
+    def _shutdown(message, **kwargs):
+        raise SystemExit("backend restarting")
+
+    agent = types.SimpleNamespace(
+        session_id="session-key",
+        run_conversation=_shutdown,
+        clear_interrupt=lambda: None,
+    )
+    session = _session(agent=agent, running=True)
+
+    with pytest.raises(SystemExit, match="backend restarting"):
+        server._run_prompt_submit("rid", "sid", session, "do the thing")
+
+    assert not any(event == "message.complete" for event, _sid, _payload in emits)
+    assert read_turn_marker(marker_home, "session-key") is not None
 
 
 def test_continuation_turn_records_attempt_and_original_prompt(

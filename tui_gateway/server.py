@@ -11123,9 +11123,11 @@ def _run_prompt_submit(
                 session["last_active"] = time.time()
                 if not turn_error_retained:
                     _clear_inflight_turn(session)
-            # Backstop for turns that never reached a terminal frame (the
-            # frame paths retire the marker as they emit).
-            _retire_turn_marker(session, marker_key)
+            # Terminal-frame paths retire the marker immediately before emit.
+            # If control reached ``finally`` without one (for example SIGTERM
+            # while an always-on backend is restarting), the turn did NOT
+            # conclude from the client's perspective. Keep its marker so the
+            # next session.resume can auto-continue it.
             session.pop("_auto_continue_scheduled", None)
             _emit_settled_session_info(sid, session, agent)
 
