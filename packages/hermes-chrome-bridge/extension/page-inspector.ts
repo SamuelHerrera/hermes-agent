@@ -186,6 +186,12 @@ function booleanState(element: Element, property: 'checked' | 'disabled' | 'sele
   return undefined
 }
 
+function isEligible(element: Element): boolean {
+  return !EXCLUDED_TAGS.has(element.tagName) &&
+    attribute(element, 'aria-hidden') !== 'true' &&
+    attribute(element, 'data-hermes-chrome-control') !== 'true'
+}
+
 export function createPageInspector(
   document: Document,
   options: { maxElements?: number } = {}
@@ -264,9 +270,7 @@ export function createPageInspector(
       throw new PageInspectorError('INVALID_SELECTOR', 'The provided selector is invalid.')
     }
 
-    const eligible = matched.filter(element =>
-      !EXCLUDED_TAGS.has(element.tagName) && attribute(element, 'aria-hidden') !== 'true'
-    )
+    const eligible = matched.filter(isEligible)
 
     const elements = eligible.slice(0, limit).map(element => serialize(element, format))
 
@@ -295,7 +299,7 @@ export function createPageInspector(
         throw new PageInspectorError('INVALID_SELECTOR', 'The provided element target is invalid.')
       }
 
-      if (element === null || EXCLUDED_TAGS.has(element.tagName) || attribute(element, 'aria-hidden') === 'true') {
+      if (element === null || !isEligible(element)) {
         throw new PageInspectorError('ELEMENT_NOT_FOUND', 'The requested element was not found.')
       }
 

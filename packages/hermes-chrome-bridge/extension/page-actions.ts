@@ -1,3 +1,4 @@
+import type { ControlIndicator } from './control-indicator.js'
 import { type PageInspector, PageInspectorError } from './page-inspector.js'
 
 export class PageActionError extends Error {
@@ -78,7 +79,8 @@ function translate(error: unknown): never {
 export function createPageActions(
   document: Document,
   inspector: PageInspector,
-  pageWindow?: Window
+  pageWindow?: Window,
+  indicator?: ControlIndicator
 ): PageActions {
   const resolve = (target: string) => {
     try {
@@ -93,6 +95,8 @@ export function createPageActions(
       try {
         const resolved = resolve(target)
         const clickable = resolved.element as HTMLElement
+
+        indicator?.activity(resolved.element)
 
         if (button === 'left' && typeof clickable.click === 'function') {
           clickable.click()
@@ -114,6 +118,8 @@ export function createPageActions(
       try {
         const resolved = resolve(target)
 
+        indicator?.activity(resolved.element)
+
         resolved.element.dispatchEvent(mouseEventFor(document, 'mouseover'))
         resolved.element.dispatchEvent(mouseEventFor(document, 'mousemove'))
 
@@ -133,6 +139,8 @@ export function createPageActions(
       if (target === null) {
         throw new PageActionError('ELEMENT_NOT_FOUND', 'No page element can receive the key action.')
       }
+
+      indicator?.activity(target)
 
       const continueDefault = target.dispatchEvent(keyboardEventFor(document, 'keydown', key, modifiers))
 
@@ -167,6 +175,7 @@ export function createPageActions(
           throw new PageActionError('ACTION_FAILED', 'The page cannot be scrolled.')
         }
 
+        indicator?.activity()
         scrollingContext.scrollBy(options)
 
         return { scrolled: true }
@@ -180,6 +189,7 @@ export function createPageActions(
           throw new PageActionError('ACTION_FAILED', 'The requested element cannot be scrolled.')
         }
 
+        indicator?.activity(resolved.element)
         scrollable.scrollBy(options)
 
         return { ref: resolved.ref, scrolled: true }
@@ -200,6 +210,7 @@ export function createPageActions(
           throw new PageActionError('SENSITIVE_FIELD', 'Typing into this sensitive field is blocked.')
         }
 
+        indicator?.activity(resolved.element)
         const editable = resolved.element as HTMLElement & { value?: unknown }
 
         if (typeof editable.focus === 'function') { editable.focus() }

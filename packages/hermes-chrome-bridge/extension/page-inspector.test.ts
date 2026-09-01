@@ -143,4 +143,17 @@ describe('safe page inspector', () => {
       expect((error as Error).message).not.toContain('!!!invalid')
     }
   })
+
+  it('excludes the Hermes control overlay from page snapshots', () => {
+    const overlay = new FakeElement({
+      attributes: { 'data-hermes-chrome-control': 'true' },
+      tagName: 'DIV'
+    })
+
+    const button = new FakeElement({ tagName: 'BUTTON', text: 'Continue' })
+    const inspector = createPageInspector(new FakeDocument([overlay, button]) as unknown as Document)
+
+    expect(inspector.snapshot({ format: 'both' }).elements).toHaveLength(1)
+    expect(inspector.snapshot({ format: 'both' }).elements[0]?.text).toBe('Continue')
+  })
 })

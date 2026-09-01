@@ -1,4 +1,5 @@
 import { isTrustedPopupCommand } from './background-policy.js'
+import { hideControlIndicators } from './indicator-notifier.js'
 import {
   type ConnectionState,
   createConnectionController
@@ -57,8 +58,21 @@ function safeResponse(state: ConnectionState): { state: ConnectionState } {
   return { state }
 }
 
+let bridgeWasConnected = false
+
 controller.subscribe(state => {
   void chrome.runtime.sendMessage({ state, type: 'bridge.state' }).catch(() => undefined)
+
+  const connected = state.connection === 'connected'
+
+  if (bridgeWasConnected && !connected) {
+    void hideControlIndicators({
+      query: async () => chrome.tabs.query({}),
+      sendMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message)
+    })
+  }
+
+  bridgeWasConnected = connected
 })
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

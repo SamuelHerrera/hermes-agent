@@ -17,7 +17,9 @@ function setup() {
     snapshot: vi.fn(() => ({ count: 0, elements: [], format: 'both' as const, truncated: false, version: 1 as const }))
   }
 
-  return { actions, handler: createContentBridgeHandler(inspector, actions), inspector }
+  const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn() }
+
+  return { actions, handler: createContentBridgeHandler(inspector, actions, indicator), indicator, inspector }
 }
 
 describe('content bridge protocol', () => {
@@ -93,5 +95,15 @@ describe('content bridge protocol', () => {
     expect(actions.key).not.toHaveBeenCalled()
     expect(actions.scroll).not.toHaveBeenCalled()
     expect(actions.hover).not.toHaveBeenCalled()
+  })
+
+  it('hides the indicator when bridge control disconnects', () => {
+    const { handler, indicator } = setup()
+
+    expect(handler({ active: false, type: 'hermes.bridge.indicator', version: 1 })).toMatchObject({
+      result: { active: false },
+      type: 'hermes.bridge.result'
+    })
+    expect(indicator.hide).toHaveBeenCalledOnce()
   })
 })

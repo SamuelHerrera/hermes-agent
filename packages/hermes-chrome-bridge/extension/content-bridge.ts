@@ -1,3 +1,4 @@
+import type { ControlIndicator } from './control-indicator.js'
 import { PageActionError, type PageActions } from './page-actions.js'
 import { type PageInspector, PageInspectorError, type SnapshotFormat } from './page-inspector.js'
 
@@ -39,11 +40,29 @@ function validDistance(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
 }
 
-export function createContentBridgeHandler(inspector: PageInspector, actions: PageActions) {
+export function createContentBridgeHandler(
+  inspector: PageInspector,
+  actions: PageActions,
+  indicator?: ControlIndicator
+) {
   return (message: unknown): ContentBridgeResult | undefined => {
     if (!isRecord(message) || message.version !== 1) { return undefined }
 
     try {
+      if (message.type === 'hermes.bridge.indicator') {
+        if (!exactKeys(message, ['active', 'type', 'version']) || typeof message.active !== 'boolean') {
+          return undefined
+        }
+
+        if (message.active) { indicator?.activity() } else { indicator?.hide() }
+
+        return {
+          result: { active: message.active },
+          type: 'hermes.bridge.result',
+          version: 1
+        }
+      }
+
       if (message.type === 'hermes.bridge.snapshot') {
         if (!exactKeys(message, ['format', 'type', 'version']) || !isFormat(message.format)) {
           return undefined

@@ -1,4 +1,5 @@
 import { createContentBridgeHandler } from './content-bridge.js'
+import { createControlIndicator } from './control-indicator.js'
 import { createPageActions } from './page-actions.js'
 import { createPageInspector } from './page-inspector.js'
 
@@ -12,10 +13,12 @@ function isPing(message: unknown): message is { type: 'hermes.bridge.ping'; vers
 }
 
 const inspector = createPageInspector(document)
+const indicator = createControlIndicator(document)
 
 const handleContentRequest = createContentBridgeHandler(
   inspector,
-  createPageActions(document, inspector, window)
+  createPageActions(document, inspector, window, indicator),
+  indicator
 )
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
