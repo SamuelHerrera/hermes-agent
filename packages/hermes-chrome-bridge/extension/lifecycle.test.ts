@@ -53,6 +53,18 @@ function setup(initialOptIn = false) {
   return { connectNative, controller, ports, readStoredOptIn: () => optedIn }
 }
 
+function deferred<T>() {
+  let reject!: (reason?: unknown) => void
+  let resolve!: (value: T | PromiseLike<T>) => void
+
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+
+  return { promise, reject, resolve }
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
 })
@@ -103,6 +115,23 @@ describe('extension connection lifecycle', () => {
       optedIn: true,
       retry: { attempt: 0, scheduled: false }
     })
+  })
+
+  it('posts exactly one strict bridge.connected event after ready and never before opt-in', async () => {
+    const { controller, ports } = setup(false)
+    await controller.start()
+    expect(ports).toHaveLength(0)
+
+    await controller.connect()
+    expect(ports[0].sent).toEqual([])
+
+    ports[0].onMessage.emit({ connected: true, type: 'bridge.ready', version: 1 })
+    ports[0].onMessage.emit({ connected: true, type: 'bridge.ready', version: 1 })
+
+    expect(ports[0].sent).toEqual([{
+      event: { type: 'bridge.connected', version: 1 },
+      type: 'event'
+    }])
   })
 
   it('reports a safe error and applies capped exponential backoff after disconnects', async () => {
@@ -194,5 +223,143 @@ describe('extension connection lifecycle', () => {
     })
     await vi.runAllTimersAsync()
     expect(ports).toHaveLength(1)
+  })
+
+  it('ignores a stale startup false read that resolves after connect', async () => {
+    const startup = deferred<boolean>()
+    const ports: FakePort[] = []
+
+    const controller = createConnectionController({
+      connectNative: () => {
+        const port = new FakePort()
+        ports.push(port)
+
+        return port
+      },
+      readOptIn: () => startup.promise,
+      writeOptIn: async () => undefined
+    })
+
+    const starting = controller.start()
+    await controller.connect()
+    startup.resolve(false)
+    await starting
+
+    expect(ports).toHaveLength(1)
+    expect(ports[0].disconnected).toBe(false)
+    expect(controller.getState()).toMatchObject({ connection: 'connecting', optedIn: true })
+  })
+
+  it('ignores a stale startup true read after an explicit disconnect', async () => {
+    const startup = deferred<boolean>()
+    const connectNative = vi.fn(() => new FakePort())
+
+    const controller = createConnectionController({
+      connectNative,
+      readOptIn: () => startup.promise,
+      writeOptIn: async () => undefined
+    })
+
+    const starting = controller.start()
+    await controller.disconnect()
+    startup.resolve(true)
+    await starting
+
+    expect(connectNative).not.toHaveBeenCalled()
+    expect(controller.getState()).toEqual({
+      connection: 'disconnected',
+      optedIn: false,
+      retry: { attempt: 0, scheduled: false }
+    })
+  })
+
+  it('keeps the newer disconnect when an older slow connect persistence completes', async () => {
+    const connectWrite = deferred<void>()
+    const disconnectWrite = deferred<void>()
+    const writes: boolean[] = []
+    const connectNative = vi.fn(() => new FakePort())
+
+    const controller = createConnectionController({
+      connectNative,
+      readOptIn: async () => false,
+      writeOptIn: value => {
+        writes.push(value)
+
+        return value ? connectWrite.promise : disconnectWrite.promise
+      }
+    })
+
+    await controller.start()
+
+    const connecting = controller.connect()
+    await vi.waitFor(() => expect(writes).toEqual([true]))
+    const disconnecting = controller.disconnect()
+    expect(controller.getState().optedIn).toBe(false)
+    expect(writes).toEqual([true])
+
+    connectWrite.resolve()
+    await connecting
+    await vi.waitFor(() => expect(writes).toEqual([true, false]))
+    disconnectWrite.resolve()
+    await disconnecting
+
+    expect(connectNative).not.toHaveBeenCalled()
+    expect(controller.getState().optedIn).toBe(false)
+  })
+
+  it('disconnects immediately and stays opted out when persistence rejects', async () => {
+    const writeFailure = deferred<void>()
+    const ports: FakePort[] = []
+
+    const controller = createConnectionController({
+      connectNative: () => {
+        const port = new FakePort()
+        ports.push(port)
+
+        return port
+      },
+      readOptIn: async () => true,
+      writeOptIn: async value => {
+        if (!value) {
+          await writeFailure.promise
+          throw new Error('sensitive storage detail')
+        }
+      }
+    })
+
+    await controller.start()
+
+    const disconnecting = controller.disconnect()
+    expect(ports[0].disconnected).toBe(true)
+    expect(controller.getState()).toEqual({
+      connection: 'disconnected',
+      optedIn: false,
+      retry: { attempt: 0, scheduled: false }
+    })
+
+    writeFailure.resolve()
+    await expect(disconnecting).rejects.toThrow('sensitive storage detail')
+    expect(controller.getState().optedIn).toBe(false)
+    await vi.runAllTimersAsync()
+    expect(ports).toHaveLength(1)
+  })
+
+  it('consumes native runtime lastError without exposing its detail', async () => {
+    const consumeNativeDisconnectError = vi.fn()
+    const port = new FakePort()
+
+    const controller = createConnectionController({
+      connectNative: () => port,
+      consumeNativeDisconnectError,
+      readOptIn: async () => true,
+      writeOptIn: async () => undefined
+    })
+
+    await controller.start()
+
+    port.onDisconnect.emit()
+
+    expect(consumeNativeDisconnectError).toHaveBeenCalledOnce()
+    expect(controller.getState().lastError?.message).toBe('The Hermes native host disconnected.')
   })
 })

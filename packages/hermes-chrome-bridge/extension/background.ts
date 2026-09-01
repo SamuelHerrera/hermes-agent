@@ -1,3 +1,4 @@
+import { isTrustedPopupCommand } from './background-policy.js'
 import {
   type ConnectionState,
   createConnectionController
@@ -5,20 +6,9 @@ import {
 
 const OPT_IN_KEY = 'hermesChromeBridgeOptIn'
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-function isPopupCommand(value: unknown): value is { type: 'bridge.connect' | 'bridge.disconnect' | 'bridge.status' } {
-  return isRecord(value) && Object.keys(value).length === 1 && (
-    value.type === 'bridge.connect' ||
-    value.type === 'bridge.disconnect' ||
-    value.type === 'bridge.status'
-  )
-}
-
 const controller = createConnectionController({
   connectNative: hostName => chrome.runtime.connectNative(hostName),
+  consumeNativeDisconnectError: () => { void chrome.runtime.lastError },
   readOptIn: async () => {
     const stored = await chrome.storage.local.get(OPT_IN_KEY)
 
@@ -37,8 +27,13 @@ controller.subscribe(state => {
   void chrome.runtime.sendMessage({ state, type: 'bridge.state' }).catch(() => undefined)
 })
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
-  if (!isPopupCommand(message)) { return false }
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (!isTrustedPopupCommand(
+    message,
+    sender,
+    chrome.runtime.id,
+    chrome.runtime.getURL('popup.html')
+  )) { return false }
 
   if (message.type === 'bridge.status') {
     sendResponse(safeResponse(controller.getState()))
@@ -59,4 +54,4 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
   return true
 })
 
-void controller.start()
+void controller.start().catch(() => undefined)

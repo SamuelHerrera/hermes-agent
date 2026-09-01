@@ -38,6 +38,7 @@ interface TimerApi {
 
 export interface ConnectionControllerDependencies {
   connectNative(hostName: string): NativePortLike
+  consumeNativeDisconnectError?(): void
   readOptIn(): Promise<boolean>
   timer?: TimerApi
   writeOptIn(optedIn: boolean): Promise<void>
@@ -107,6 +108,9 @@ export function createConnectionController(
 
   const listeners = new Set<(state: ConnectionState) => void>()
   const ignoredDisconnects = new WeakSet<NativePortLike>()
+  const readyPorts = new WeakSet<NativePortLike>()
+  let intentGeneration = 0
+  let persistenceQueue: Promise<void> = Promise.resolve()
   let port: NativePortLike | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -139,11 +143,26 @@ export function createConnectionController(
     const closing = port
     port = undefined
     ignoredDisconnects.add(closing)
-    closing.disconnect()
+
+    try {
+      closing.disconnect()
+    } catch {
+      // The port is already detached locally; Chrome may report it as closed.
+    }
   }
 
-  const connectNow = (): void => {
-    if (!state.optedIn) { return }
+  const persistOptIn = (optedIn: boolean): Promise<void> => {
+    const write = persistenceQueue
+      .catch(() => undefined)
+      .then(async () => dependencies.writeOptIn(optedIn))
+
+    persistenceQueue = write.catch(() => undefined)
+
+    return write
+  }
+
+  const connectNow = (generation: number): void => {
+    if (generation !== intentGeneration || !state.optedIn) { return }
     cancelRetry()
     closePort()
     replaceState({
@@ -171,6 +190,8 @@ export function createConnectionController(
       handleNativeMessage(nextPort, message)
     })
     nextPort.onDisconnect.addListener(() => {
+      dependencies.consumeNativeDisconnectError?.()
+
       if (ignoredDisconnects.delete(nextPort) || port !== nextPort || !state.optedIn) { return }
       scheduleError({
         code: 'NATIVE_HOST_DISCONNECTED',
@@ -182,11 +203,12 @@ export function createConnectionController(
   const scheduleError = (error: SafeError): void => {
     if (!state.optedIn) { return }
     cancelRetry()
+    const generation = intentGeneration
     const attempt = state.retry.attempt + 1
     const nextDelayMs = Math.min(INITIAL_RETRY_DELAY_MS * 2 ** (attempt - 1), MAX_RETRY_DELAY_MS)
     retryTimer = timer.setTimeout(() => {
       retryTimer = undefined
-      connectNow()
+      connectNow(generation)
     }, nextDelayMs)
     replaceState({
       connection: 'error',
@@ -220,6 +242,14 @@ export function createConnectionController(
         retry: { attempt: 0, scheduled: false }
       })
 
+      if (!readyPorts.has(nativePort)) {
+        readyPorts.add(nativePort)
+        nativePort.postMessage({
+          event: { type: 'bridge.connected', version: 1 },
+          type: 'event'
+        })
+      }
+
       return
     }
 
@@ -250,25 +280,29 @@ export function createConnectionController(
 
   return {
     async connect(): Promise<void> {
-      await dependencies.writeOptIn(true)
+      const generation = ++intentGeneration
+      await persistOptIn(true)
+
+      if (generation !== intentGeneration) { return }
       cancelRetry()
       replaceState({
         connection: 'disconnected',
         optedIn: true,
         retry: { attempt: 0, scheduled: false }
       })
-      connectNow()
+      connectNow(generation)
     },
 
     async disconnect(): Promise<void> {
-      await dependencies.writeOptIn(false)
+      ++intentGeneration
       cancelRetry()
-      closePort()
       replaceState({
         connection: 'disconnected',
         optedIn: false,
         retry: { attempt: 0, scheduled: false }
       })
+      closePort()
+      await persistOptIn(false)
     },
 
     getState(): ConnectionState {
@@ -276,14 +310,17 @@ export function createConnectionController(
     },
 
     async start(): Promise<void> {
+      const generation = intentGeneration
       const optedIn = await dependencies.readOptIn()
+
+      if (generation !== intentGeneration) { return }
       replaceState({
         connection: 'disconnected',
         optedIn,
         retry: { attempt: 0, scheduled: false }
       })
 
-      if (optedIn) { connectNow() }
+      if (optedIn) { connectNow(generation) }
     },
 
     subscribe(listener: (state: ConnectionState) => void): () => void {
