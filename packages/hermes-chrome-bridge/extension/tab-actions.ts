@@ -45,6 +45,14 @@ function positiveTabId(value: unknown): value is number {
 }
 
 export function createTabActions(dependencies: TabActionsDependencies): TabActions {
+  const openedTabs = new Map<number, number | undefined>()
+
+  const assertAuthorized = async (tabId: number): Promise<void> => {
+    if (!openedTabs.has(tabId)) {
+      await dependencies.assertControllable(tabId)
+    }
+  }
+
   return {
     async close({ tabId }) {
       if (!positiveTabId(tabId)) {
@@ -52,8 +60,9 @@ export function createTabActions(dependencies: TabActionsDependencies): TabActio
       }
 
       try {
-        await dependencies.assertControllable(tabId)
+        await assertAuthorized(tabId)
         await dependencies.tabs.remove(tabId)
+        openedTabs.delete(tabId)
 
         return { closed: true, tabId }
       } catch {
@@ -66,21 +75,36 @@ export function createTabActions(dependencies: TabActionsDependencies): TabActio
         throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab action is invalid.')
       }
 
+      let windowId: number | undefined
+
       try {
-        await dependencies.assertControllable(tabId)
-        const tab = await dependencies.tabs.get(tabId)
+        await assertAuthorized(tabId)
+        const openedWindowId = openedTabs.get(tabId)
+        const tab = openedTabs.has(tabId) ? undefined : await dependencies.tabs.get(tabId)
+        windowId = openedWindowId ?? tab?.windowId
 
-        if (!Number.isInteger(tab.windowId)) {
-          throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab action failed.')
+        if (!openedTabs.has(tabId) && !Number.isInteger(windowId)) {
+          throw new Error('missing window')
         }
-
-        await dependencies.windows.update(tab.windowId as number, { focused: true })
-        await dependencies.tabs.update(tabId, { active: true })
-
-        return { focused: true, tabId }
       } catch {
-        throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab action failed.')
+        throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab is unavailable.')
       }
+
+      try {
+        await dependencies.tabs.update(tabId, { active: true })
+      } catch {
+        throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab could not be activated.')
+      }
+
+      if (Number.isInteger(windowId)) {
+        try {
+          await dependencies.windows.update(windowId as number, { focused: true })
+        } catch {
+          // Activating the tab is sufficient when the OS refuses to raise the window.
+        }
+      }
+
+      return { focused: true, tabId }
     },
 
     async navigate({ tabId, url }) {
@@ -91,7 +115,7 @@ export function createTabActions(dependencies: TabActionsDependencies): TabActio
       const target = safeNavigationUrl(url)
 
       try {
-        await dependencies.assertControllable(tabId)
+        await assertAuthorized(tabId)
         await dependencies.tabs.update(tabId, { url: target })
 
         return { navigated: true, tabId }
@@ -112,6 +136,8 @@ export function createTabActions(dependencies: TabActionsDependencies): TabActio
         if (!positiveTabId(tab.id)) {
           throw new TabActionError('TAB_ACTION_FAILED', 'The requested tab action failed.')
         }
+
+        openedTabs.set(tab.id, Number.isInteger(tab.windowId) ? tab.windowId : undefined)
 
         return { opened: true, tabId: tab.id }
       } catch (error) {

@@ -462,11 +462,7 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
           return error(request.id, 'INVALID_ARGUMENTS', 'screenshot requires tabId and valid format and quality.')
         }
 
-        await pageResult(dependencies, request.arguments.tabId, {
-          active: true,
-          type: 'hermes.bridge.indicator',
-          version: 1
-        })
+        await dependencies.tabService.assertControllable(request.arguments.tabId)
 
         return {
           id: request.id,

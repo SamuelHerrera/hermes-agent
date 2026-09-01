@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync } from 'node:fs'
-import { cp, mkdir, readFile, rm } from 'node:fs/promises'
+import { access, cp, mkdir, readFile, rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,12 +14,12 @@ import { HOST_NAME, nativeManifestPath } from './manifest.js'
 export const STABLE_EXTENSION_ID = 'mdeahbanbmncnmkjkklglmdflkcclckg'
 
 export interface InstallChromeBridgeSetupOptions {
-  builtHostPath: string
   extensionSource: string
   hermesHome?: string
   manifestDirectory?: string
   nodePath?: string
   platform?: NodeJS.Platform
+  runtimeSourceDirectory: string
   userHome?: string
 }
 
@@ -59,6 +59,7 @@ export async function installChromeBridgeSetup(
 ): Promise<ChromeBridgeSetupResult> {
   const hermesHome = resolveHermesHome(options.hermesHome)
   const extensionSource = resolve(options.extensionSource)
+  const runtimeSourceDirectory = resolve(options.runtimeSourceDirectory)
   const sourceManifest = await regularJsonFile(join(extensionSource, 'manifest.json'))
 
   if (sourceManifest?.manifest_version !== 3) {
@@ -66,13 +67,16 @@ export async function installChromeBridgeSetup(
   }
 
   const extensionDirectory = join(hermesHome, 'chrome-bridge', 'extension')
+  const runtimeDirectory = join(hermesHome, 'chrome-bridge', 'runtime')
 
   await rm(extensionDirectory, { force: true, recursive: true })
+  await rm(runtimeDirectory, { force: true, recursive: true })
   await mkdir(dirname(extensionDirectory), { recursive: true })
   await cp(extensionSource, extensionDirectory, { recursive: true })
+  await cp(runtimeSourceDirectory, runtimeDirectory, { recursive: true })
 
   const nativeHost = await installNativeHost({
-    builtHostPath: options.builtHostPath,
+    builtHostPath: join(runtimeDirectory, 'native', 'host.js'),
     extensionId: STABLE_EXTENSION_ID,
     hermesHome,
     manifestDirectory: options.manifestDirectory,
@@ -100,10 +104,22 @@ export async function checkChromeBridgeSetup(options: {
   const hostManifest = await regularJsonFile(manifestPath)
   const status = await regularJsonFile(join(runtimeDirectoryFor(hermesHome), 'status.json'))
   const extensionInstalled = extensionManifest?.manifest_version === 3
+  const nativeHostPath = typeof hostManifest?.path === 'string' ? hostManifest.path : undefined
+  let nativeHostPathExists = false
+
+  if (nativeHostPath !== undefined) {
+    try {
+      await access(nativeHostPath)
+      nativeHostPathExists = true
+    } catch {
+      nativeHostPathExists = false
+    }
+  }
 
   const nativeHostInstalled = hostManifest?.name === HOST_NAME &&
     Array.isArray(hostManifest.allowed_origins) &&
-    hostManifest.allowed_origins.includes(`chrome-extension://${STABLE_EXTENSION_ID}/`)
+    hostManifest.allowed_origins.includes(`chrome-extension://${STABLE_EXTENSION_ID}/`) &&
+    nativeHostPathExists
 
   const nativeConnected = status?.connected === true && status.version === 1
 
@@ -132,10 +148,10 @@ async function runCli(): Promise<void> {
 
   if (command === 'install') {
     const result = await installChromeBridgeSetup({
-      builtHostPath: fileURLToPath(new URL('./host.js', import.meta.url)),
       extensionSource: fileURLToPath(new URL('../extension', import.meta.url)),
       hermesHome,
-      manifestDirectory
+      manifestDirectory,
+      runtimeSourceDirectory: fileURLToPath(new URL('..', import.meta.url))
     })
 
     process.stdout.write(`${JSON.stringify({

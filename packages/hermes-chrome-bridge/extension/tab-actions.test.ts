@@ -34,7 +34,7 @@ describe('safe tab navigation actions', () => {
       tabId: 21
     })
     expect(tabs.update).toHaveBeenCalledWith(21, { url: 'http://example.test/next' })
-    expect(assertControllable).toHaveBeenCalledWith(21)
+    expect(assertControllable).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -74,6 +74,24 @@ describe('safe tab navigation actions', () => {
     await expect(actions.close({ tabId: 21 })).resolves.toEqual({ closed: true, tabId: 21 })
     expect(tabs.remove).toHaveBeenCalledWith(21)
     expect(assertControllable).toHaveBeenCalledTimes(2)
+  })
+
+  it('can immediately focus a tab created by the bridge before Chrome reports its final URL', async () => {
+    const { actions, assertControllable, tabs } = setup()
+
+    const opened = await actions.open({ active: false, url: 'https://example.test/' })
+    await actions.focus({ tabId: opened.tabId })
+
+    expect(assertControllable).not.toHaveBeenCalled()
+    expect(tabs.update).toHaveBeenCalledWith(21, { active: true })
+  })
+
+  it('keeps the tab active when the OS refuses to raise its window', async () => {
+    const { actions, tabs, windows } = setup()
+    windows.update.mockRejectedValueOnce(new Error('window focus denied'))
+
+    await expect(actions.focus({ tabId: 21 })).resolves.toEqual({ focused: true, tabId: 21 })
+    expect(tabs.update).toHaveBeenCalledWith(21, { active: true })
   })
 
   it('maps browser failures to safe deterministic errors', async () => {

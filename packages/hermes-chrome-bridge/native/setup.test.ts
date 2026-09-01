@@ -24,14 +24,18 @@ async function fixture() {
   const extensionSource = join(root, 'built-extension')
   const hermesHome = join(root, 'hermes-home')
   const manifestDirectory = join(root, 'native-manifests')
-  const builtHostPath = join(root, 'host.js')
+  const runtimeSourceDirectory = join(root, 'built-runtime')
+  const builtHostPath = join(runtimeSourceDirectory, 'native', 'host.js')
 
   await mkdir(extensionSource, { recursive: true })
+  await mkdir(join(runtimeSourceDirectory, 'native'), { recursive: true })
+  await mkdir(join(runtimeSourceDirectory, 'src'), { recursive: true })
   await writeFile(join(extensionSource, 'manifest.json'), JSON.stringify({ manifest_version: 3 }))
   await writeFile(join(extensionSource, 'background.js'), '/* built */')
   await writeFile(builtHostPath, '/* host */')
+  await writeFile(join(runtimeSourceDirectory, 'src', 'runtime.js'), '/* runtime */')
 
-  return { builtHostPath, extensionSource, hermesHome, manifestDirectory, root }
+  return { extensionSource, hermesHome, manifestDirectory, root, runtimeSourceDirectory }
 }
 
 describe('Chrome bridge setup CLI core', () => {
@@ -50,6 +54,9 @@ describe('Chrome bridge setup CLI core', () => {
       manifest_version: 3
     })
     expect(result.nativeHost.manifestPath.startsWith(paths.manifestDirectory)).toBe(true)
+    expect(await readFile(result.nativeHost.wrapperPath, 'utf8')).toContain(
+      join(paths.hermesHome, 'chrome-bridge', 'runtime', 'native', 'host.js')
+    )
 
     await expect(checkChromeBridgeSetup({
       extensionDirectory: result.extensionDirectory,
