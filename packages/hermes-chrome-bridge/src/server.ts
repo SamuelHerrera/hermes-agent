@@ -56,8 +56,20 @@ export function createChromeBridgeServer(
       }
     }
 
+    const toolArguments = request.params.arguments ?? {}
+
+    if (Object.keys(toolArguments).length > 0) {
+      return {
+        content: [{
+          text: `Invalid arguments for ${request.params.name}: expected an empty object`,
+          type: 'text'
+        }],
+        isError: true
+      }
+    }
+
     const result = await router.route({
-      arguments: request.params.arguments ?? {},
+      arguments: toolArguments,
       method
     })
 

@@ -43,9 +43,76 @@ describe('Hermes Chrome bridge MCP server', () => {
     ])
   })
 
+  it('marks every advertised tool as read-only and non-destructive', async () => {
+    const server = createChromeBridgeServer()
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+    clients.push(client)
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const { tools } = await client.listTools()
+
+    expect(tools).not.toHaveLength(0)
+
+    for (const tool of tools) {
+      expect(tool.annotations?.readOnlyHint, tool.name).toBe(true)
+      expect(tool.annotations?.destructiveHint, tool.name).toBe(false)
+      expect(tool.annotations?.openWorldHint, tool.name).toBe(false)
+    }
+  })
+
+  it('rejects arguments that violate the advertised empty schemas', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({
+      connected: false
+    })
+
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+    clients.push(client)
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const result = await client.callTool({
+      arguments: { unexpected: true },
+      name: 'chrome_bridge_status'
+    })
+
+    expect(route).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    expect(result.content).toEqual([
+      {
+        text: 'Invalid arguments for chrome_bridge_status: expected an empty object',
+        type: 'text'
+      }
+    ])
+  })
+
+  it('returns a tool error for unknown tool names', async () => {
+    const server = createChromeBridgeServer()
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+    clients.push(client)
+
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const result = await client.callTool({ name: 'not_a_bridge_tool' })
+
+    expect(result.isError).toBe(true)
+    expect(result.content).toEqual([
+      {
+        text: 'Unknown tool: not_a_bridge_tool',
+        type: 'text'
+      }
+    ])
+  })
+
   it('initializes over stdio and advertises the bridge tools', async () => {
     const transport = new StdioClientTransport({
-      args: ['--import', 'tsx', 'src/server.ts'],
+      args: ['dist/server.js'],
       command: process.execPath,
       cwd: process.cwd(),
       stderr: 'pipe'

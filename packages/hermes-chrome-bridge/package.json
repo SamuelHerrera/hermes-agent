@@ -13,9 +13,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
+    "check": "npm run typecheck && npm run lint && npm run build && npm run test",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
+    "prepare": "npm run build",
     "start": "node dist/server.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -25,7 +26,6 @@
   },
   "devDependencies": {
     "@types/node": "22.20.1",
-    "tsx": "4.23.13",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   },

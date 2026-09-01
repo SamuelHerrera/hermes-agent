@@ -17,9 +17,11 @@ From the repository root:
 ```sh
 npm install
 npm run check --workspace @hermes/chrome-bridge
-npm run build --workspace @hermes/chrome-bridge
 npm start --workspace @hermes/chrome-bridge
 ```
+
+`npm install` prepares the executable, and `check` rebuilds it before running
+the stdio integration test against `dist/server.js`.
 
 The server uses stdio for MCP messages. Keep stdout reserved for the protocol; diagnostics, if added later, must go to stderr.
 
