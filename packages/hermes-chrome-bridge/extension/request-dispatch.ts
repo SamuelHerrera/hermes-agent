@@ -1,4 +1,5 @@
 import type { ConnectionStatus } from './lifecycle.js'
+import { type PageRuntimeService, PageRuntimeServiceError } from './page-runtime-service.js'
 import type { NativeRequest, NativeResponse } from './protocol.js'
 import { ScreenshotError, type ScreenshotService } from './screenshot-service.js'
 import { TabActionError, type TabActions } from './tab-actions.js'
@@ -6,6 +7,7 @@ import { type TabService, TabServiceError } from './tab-service.js'
 
 interface DispatcherDependencies {
   getConnectionState(): ConnectionStatus
+  pageRuntimeService?: PageRuntimeService
   screenshotService: ScreenshotService
   sendTabMessage(tabId: number, message: unknown): Promise<unknown>
   tabActions: TabActions
@@ -192,6 +194,14 @@ async function pageResult(
   }
 
   throw new PageRequestError('INVALID_PAGE_RESPONSE', 'The selected tab returned an invalid response.')
+}
+
+function runtimeError(id: string, error_: unknown): NativeResponse {
+  if (error_ instanceof PageRuntimeServiceError) {
+    return error(id, error_.code, error_.message)
+  }
+
+  return error(id, 'PAGE_RUNTIME_FAILED', 'The page runtime request failed.')
 }
 
 async function pageInspectionResult(
@@ -491,15 +501,21 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
           )
         }
 
-        return {
-          id: request.id,
-          result: await pageResult(dependencies, request.arguments.tabId, {
-            source: request.arguments.source,
-            timeoutMs,
-            type: 'hermes.bridge.eval',
-            version: 1
-          }),
-          type: 'response'
+        if (dependencies.pageRuntimeService === undefined) {
+          return error(request.id, 'PAGE_RUNTIME_UNAVAILABLE', 'The page runtime is unavailable.')
+        }
+
+        try {
+          return {
+            id: request.id,
+            result: await dependencies.pageRuntimeService.eval(request.arguments.tabId, {
+              source: request.arguments.source,
+              timeoutMs: timeoutMs as number
+            }),
+            type: 'response'
+          }
+        } catch (error_) {
+          return runtimeError(request.id, error_)
         }
       }
 
@@ -516,16 +532,21 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
           return error(request.id, 'INVALID_ARGUMENTS', 'console requires tabId and optional bounded levels and limit.')
         }
 
-        return {
-          id: request.id,
-          result: await pageResult(dependencies, request.arguments.tabId, {
-            levels,
-            limit,
-            timeoutMs: 2_000,
-            type: 'hermes.bridge.console',
-            version: 1
-          }),
-          type: 'response'
+        if (dependencies.pageRuntimeService === undefined) {
+          return error(request.id, 'PAGE_RUNTIME_UNAVAILABLE', 'The page runtime is unavailable.')
+        }
+
+        try {
+          return {
+            id: request.id,
+            result: await dependencies.pageRuntimeService.console(request.arguments.tabId, {
+              levels,
+              limit: limit as number
+            }),
+            type: 'response'
+          }
+        } catch (error_) {
+          return runtimeError(request.id, error_)
         }
       }
 

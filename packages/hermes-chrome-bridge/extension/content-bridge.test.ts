@@ -19,17 +19,11 @@ function setup() {
 
   const indicator = { activity: vi.fn(), destroy: vi.fn(), hide: vi.fn(), refresh: vi.fn() }
 
-  const runtime = {
-    console: vi.fn(async () => ({ count: 1, entries: [], truncated: false })),
-    eval: vi.fn(async () => ({ title: 'Test' }))
-  }
-
   return {
     actions,
-    handler: createContentBridgeHandler(inspector, actions, indicator, runtime),
+    handler: createContentBridgeHandler(inspector, actions, indicator),
     indicator,
-    inspector,
-    runtime
+    inspector
   }
 }
 
@@ -128,23 +122,21 @@ describe('content bridge protocol', () => {
     expect(indicator.refresh).toHaveBeenCalledOnce()
   })
 
-  it('routes guarded eval and bounded console requests asynchronously', async () => {
-    const { handler, runtime } = setup()
+  it('does not expose eval or console through page-observable content messages', () => {
+    const { handler } = setup()
 
-    await expect(handler({
+    expect(handler({
       source: 'document.title',
       timeoutMs: 500,
       type: 'hermes.bridge.eval',
       version: 1
-    })).resolves.toMatchObject({ result: { title: 'Test' } })
-    await expect(handler({
+    })).toBeUndefined()
+    expect(handler({
       levels: ['error'],
       limit: 10,
       timeoutMs: 500,
       type: 'hermes.bridge.console',
       version: 1
-    })).resolves.toMatchObject({ result: { count: 1 } })
-    expect(runtime.eval).toHaveBeenCalledWith({ source: 'document.title', timeoutMs: 500 })
-    expect(runtime.console).toHaveBeenCalledWith({ levels: ['error'], limit: 10, timeoutMs: 500 })
+    })).toBeUndefined()
   })
 })

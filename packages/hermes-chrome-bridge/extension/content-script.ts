@@ -2,7 +2,6 @@ import { createContentBridgeHandler } from './content-bridge.js'
 import { createControlIndicator } from './control-indicator.js'
 import { createPageActions } from './page-actions.js'
 import { createPageInspector } from './page-inspector.js'
-import { createPageRuntimeClient } from './page-runtime-client.js'
 
 function isPing(message: unknown): message is { type: 'hermes.bridge.ping'; version: 1 } {
   if (message === null || typeof message !== 'object' || Array.isArray(message)) { return false }
@@ -15,13 +14,11 @@ function isPing(message: unknown): message is { type: 'hermes.bridge.ping'; vers
 
 const inspector = createPageInspector(document)
 const indicator = createControlIndicator(document)
-const runtime = createPageRuntimeClient(window)
 
 const handleContentRequest = createContentBridgeHandler(
   inspector,
   createPageActions(document, inspector, window, indicator),
-  indicator,
-  runtime
+  indicator
 )
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {

@@ -204,7 +204,7 @@ describe('Hermes Chrome bridge MCP server', () => {
 
   it('validates guarded eval, console, and screenshot tools', async () => {
     const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ ok: true })
-    const server = createChromeBridgeServer({ route })
+    const server = createChromeBridgeServer({ route }, { allowEval: true })
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
     const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
 

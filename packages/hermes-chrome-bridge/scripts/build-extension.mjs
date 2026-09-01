@@ -18,7 +18,6 @@ await build({
   entryPoints: {
     background: join(sourceDirectory, 'background.ts'),
     'content-script': join(sourceDirectory, 'content-script.ts'),
-    'main-world': join(sourceDirectory, 'main-world.ts'),
     popup: join(sourceDirectory, 'popup.ts')
   },
   format: 'esm',

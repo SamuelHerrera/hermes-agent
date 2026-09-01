@@ -59,15 +59,21 @@ function setup() {
     }))
   }
 
+  const pageRuntimeService = {
+    console: vi.fn(async () => ({ count: 1, entries: [], truncated: false })),
+    eval: vi.fn(async () => ({ title: 'Test' }))
+  }
+
   const dispatch = createBridgeRequestDispatcher({
     getConnectionState: () => 'connected',
+    pageRuntimeService,
     screenshotService,
     sendTabMessage,
     tabActions,
     tabService
   })
 
-  return { dispatch, screenshotService, sendTabMessage, tabActions, tabService }
+  return { dispatch, pageRuntimeService, screenshotService, sendTabMessage, tabActions, tabService }
 }
 
 describe('background bridge request dispatch', () => {
@@ -314,7 +320,7 @@ describe('background bridge request dispatch', () => {
   })
 
   it('routes guarded eval, console, and screenshot requests with bounded payloads', async () => {
-    const { dispatch, screenshotService, sendTabMessage } = setup()
+    const { dispatch, pageRuntimeService, screenshotService } = setup()
 
     await expect(dispatch({
       arguments: {
@@ -340,18 +346,13 @@ describe('background bridge request dispatch', () => {
       type: 'request'
     })).resolves.toMatchObject({ result: { bytes: 6, format: 'jpeg' } })
 
-    expect(sendTabMessage).toHaveBeenCalledWith(9, {
+    expect(pageRuntimeService.eval).toHaveBeenCalledWith(9, {
       source: 'document.title',
-      timeoutMs: 500,
-      type: 'hermes.bridge.eval',
-      version: 1
+      timeoutMs: 500
     })
-    expect(sendTabMessage).toHaveBeenCalledWith(9, {
+    expect(pageRuntimeService.console).toHaveBeenCalledWith(9, {
       levels: ['error'],
-      limit: 10,
-      timeoutMs: 2_000,
-      type: 'hermes.bridge.console',
-      version: 1
+      limit: 10
     })
     expect(screenshotService.capture).toHaveBeenCalledWith({ format: 'jpeg', quality: 80, tabId: 9 })
   })

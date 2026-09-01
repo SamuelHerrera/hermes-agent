@@ -19,16 +19,15 @@ describe('built MV3 extension artifacts', () => {
       background: { service_worker: 'background.js', type: 'module' },
       host_permissions: ['<all_urls>'],
       manifest_version: 3,
-      permissions: ['nativeMessaging', 'storage']
+      permissions: ['nativeMessaging', 'scripting', 'storage']
     })
-    expect(manifest.permissions).not.toEqual(expect.arrayContaining(['activeTab', 'tabs', 'scripting']))
+    expect(manifest.permissions).not.toEqual(expect.arrayContaining(['activeTab', 'tabs']))
     expect(manifest.content_scripts).toEqual(expect.arrayContaining([
-      expect.objectContaining({ js: ['main-world.js'], run_at: 'document_start', world: 'MAIN' }),
       expect.objectContaining({ js: ['content-script.js'], run_at: 'document_idle' })
     ]))
     await expect(stat(join(outputDirectory, 'background.js'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'content-script.js'))).resolves.toBeDefined()
-    await expect(stat(join(outputDirectory, 'main-world.js'))).resolves.toBeDefined()
+
     await expect(stat(join(outputDirectory, 'popup.js'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'popup.html'))).resolves.toBeDefined()
     await expect(stat(join(outputDirectory, 'popup.css'))).resolves.toBeDefined()

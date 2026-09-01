@@ -30,6 +30,10 @@ export interface ChromeBridgeRequestRouter {
   route(request: ChromeBridgeRequest): Promise<unknown>
 }
 
+export interface ChromeBridgeServerOptions {
+  allowEval?: boolean
+}
+
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
   chrome_bridge_click: 'click',
   chrome_bridge_close: 'close',
@@ -255,7 +259,8 @@ export async function createDefaultRouter(options: {
 }
 
 export function createChromeBridgeServer(
-  router: ChromeBridgeRequestRouter = disconnectedRouter
+  router: ChromeBridgeRequestRouter = disconnectedRouter,
+  options: ChromeBridgeServerOptions = {}
 ): Server {
   const server = new Server(
     { name: 'hermes-chrome-bridge', version: '0.1.0' },
@@ -289,6 +294,16 @@ export function createChromeBridgeServer(
       }
     }
 
+    if (method === 'eval' && options.allowEval !== true) {
+      return {
+        content: [{
+          text: 'chrome_bridge_eval requires the Chrome Bridge server to be started with explicit eval approval enabled.',
+          type: 'text'
+        }],
+        isError: true
+      }
+    }
+
     try {
       const result = await router.route({
         arguments: toolArguments,
@@ -314,7 +329,11 @@ export function createChromeBridgeServer(
 
 export async function runStdioServer(options: { hermesHome?: string } = {}): Promise<void> {
   const handle = await createDefaultRouter(options)
-  const server = createChromeBridgeServer(handle.router)
+
+  const server = createChromeBridgeServer(handle.router, {
+    allowEval: cliAllowEval(process.argv.slice(2))
+  })
+
   const transport = new StdioServerTransport()
   server.onclose = () => void handle.close()
 
@@ -330,6 +349,10 @@ function cliHermesHome(args: string[]): string | undefined {
   if (value === undefined) {throw new Error('--hermes-home requires an absolute path')}
 
   return value
+}
+
+function cliAllowEval(args: string[]): boolean {
+  return args.includes('--allow-eval')
 }
 
 function isEntrypoint(): boolean {

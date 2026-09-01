@@ -6,6 +6,7 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxc/nMs86odPyWhOja1x0r1mnBtOXPa+As2Blon3AqCrhGHgu7xKDcivQGeG1Eu6LrSbYPrhpdOFeNNeIZni7R5dUtB2eO7V7WTgdWpig1Oh81EDLqsITNuWm85v8zok0Vpe9SazREt9rz9lhDNwxADjHgS1SoOjREvij89jx8CbE73OJKH2X88fvZhXT9r67jodRDsvTDM5+RbhXTi6D44Ihv0Ppe+ci2BQDu+BDhklDLQ1vcUPVXmnIzb6whXKzm1eviFjqDkMLIJT+6Vy97RNaOdPF02IjhCegBln+jccqeGYz8s3QlGK0p6VZ9AkR6Hd+FUVZLxGDUgrpSCTVQwIDAQAB",
   "permissions": [
     "nativeMessaging",
+    "scripting",
     "storage"
   ],
   "host_permissions": [
@@ -20,16 +21,6 @@
     "default_title": "Hermes Chrome Bridge"
   },
   "content_scripts": [
-    {
-      "matches": [
-        "<all_urls>"
-      ],
-      "js": [
-        "main-world.js"
-      ],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
     {
       "matches": [
         "<all_urls>"

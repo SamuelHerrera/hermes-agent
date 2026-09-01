@@ -42,7 +42,7 @@ npm run build --workspace @hermes/chrome-bridge
 4. The committed public manifest key gives this unpacked build the stable extension ID `mdeahbanbmncnmkjkklglmdflkcclckg`.
 5. Open the extension popup and click **Connect** to opt in. Click **Disconnect** to revoke opt-in and stop reconnecting.
 
-The manifest uses only `nativeMessaging` and `storage`. `<all_urls>` allows the isolated content script to inspect and act on ordinary public web pages and permits `captureVisibleTab`; the bridge does not request `debugger`, open a remote-debug port, or connect to a remote service. A static main-world script captures bounded console entries and services guarded evaluation requests. The isolated bridge validates every message and treats all page results as untrusted data. During automation, a shadow-DOM pill reading **Hermes is controlling Chrome** and a gold cursor marker remain visibly on the page, then dim after inactivity.
+The manifest uses `nativeMessaging`, `scripting`, and `storage`. `<all_urls>` allows the isolated content script to inspect and act on ordinary public web pages and permits `captureVisibleTab`; the bridge does not request `debugger`, open a remote-debug port, or connect to a remote service. Guarded evaluation and console access run through extension-owned `chrome.scripting.executeScript` calls instead of page-observable response events. The isolated bridge validates every message and treats all page results as untrusted data. During automation, a shadow-DOM pill reading **Hermes is controlling Chrome** and a gold cursor marker remain visibly on the page, then dim after inactivity.
 
 ## Install the native host
 
