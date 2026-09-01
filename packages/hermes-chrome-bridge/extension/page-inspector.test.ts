@@ -119,6 +119,55 @@ describe('safe page inspector', () => {
     expect(inspector.snapshot({ format: 'both' }).elements[0]).toMatchObject({ sensitive: true })
   })
 
+  it('suppresses every text channel for credential and payment controls', () => {
+    const controls = [
+      new FakeElement({
+        attributes: { name: 'api_key' },
+        tagName: 'input',
+        text: 'api-key-text-secret',
+        value: 'api-key-value-secret'
+      }),
+      new FakeElement({
+        attributes: { autocomplete: 'billing cc-exp' },
+        tagName: 'input',
+        text: 'expiry-text-secret',
+        value: '12/34'
+      }),
+      new FakeElement({
+        attributes: { name: 'password' },
+        tagName: 'textarea',
+        text: 'textarea-secret',
+        value: 'textarea-secret'
+      })
+    ]
+
+    const inspector = createPageInspector(new FakeDocument(controls) as unknown as Document)
+    const snapshot = inspector.snapshot({ format: 'both' })
+    const serialized = JSON.stringify(snapshot)
+
+    expect(snapshot.elements).toHaveLength(3)
+    expect(snapshot.elements.every(element => element.sensitive === true)).toBe(true)
+    expect(snapshot.elements.every(element => element.text === undefined && element.name === undefined)).toBe(true)
+    expect(snapshot.elements.every(element => element.value === '[redacted]')).toBe(true)
+    expect(serialized).not.toContain('api-key-text-secret')
+    expect(serialized).not.toContain('api-key-value-secret')
+    expect(serialized).not.toContain('expiry-text-secret')
+    expect(serialized).not.toContain('12/34')
+    expect(serialized).not.toContain('textarea-secret')
+  })
+
+  it('rejects unbounded or malformed page-provided roles', () => {
+    const valid = new FakeElement({ attributes: { role: 'button' }, tagName: 'div' })
+    const oversized = new FakeElement({ attributes: { role: `button${'x'.repeat(300)}` }, tagName: 'div' })
+    const malformed = new FakeElement({ attributes: { role: 'button\nsecret=value' }, tagName: 'div' })
+    const inspector = createPageInspector(new FakeDocument([valid, oversized, malformed]) as unknown as Document)
+    const elements = inspector.snapshot({ format: 'accessibility' }).elements
+
+    expect(elements[0]?.role).toBe('button')
+    expect(elements[1]?.role).toBeUndefined()
+    expect(elements[2]?.role).toBeUndefined()
+  })
+
   it('bounds results and reports invalid selectors without leaking selector text', () => {
     const elements = Array.from({ length: 5 }, (_, index) => new FakeElement({
       tagName: 'button',

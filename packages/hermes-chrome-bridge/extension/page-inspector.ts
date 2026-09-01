@@ -50,6 +50,8 @@ const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu
 const CARD = /\b(?:\d[ -]*?){13,19}\b/gu
 const ASSIGNED_SECRET = /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*[^\s,;]+/giu
 const PREFIXED_TOKEN = /\b(?:gh[pousr]_|sk[-_](?:live|test)[-_]|eyJ)[A-Za-z0-9._~-]{8,}/gu
+const SENSITIVE_IDENTITY = /(?:api[-_ ]?(?:key|token)|access[-_ ]?token|auth(?:orization)?|bearer|client[-_ ]?secret|credential|password|passcode|secret|token|one[-_ ]?time|2fa|otp|card|cc[-_ ]?(?:csc|cvv|exp|number)|cvv|cvc|security[-_ ]?code|expiry|expiration)/iu
+const ROLE_LIST = /^[a-z][a-z0-9-]{0,63}(?:\s+[a-z][a-z0-9-]{0,63})*$/u
 
 function clampLimit(value: number | undefined, maximum: number): number {
   if (value === undefined) { return maximum }
@@ -80,7 +82,13 @@ function attribute(element: Element, name: string): string | undefined {
 
 function isSensitive(element: Element): boolean {
   const type = attribute(element, 'type')?.toLowerCase()
-  const autocomplete = attribute(element, 'autocomplete')?.toLowerCase()
+  const autocomplete = attribute(element, 'autocomplete')?.toLowerCase().trim() ?? ''
+  const autocompleteTokens = autocomplete.split(/\s+/u)
+
+  const isControl = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ||
+    element.tagName === 'SELECT' || attribute(element, 'contenteditable') === 'true'
+
+  if (!isControl) { return false }
 
   const identity = [
     attribute(element, 'id'),
@@ -90,18 +98,21 @@ function isSensitive(element: Element): boolean {
   ].filter((value): value is string => value !== undefined).join(' ')
 
   return type === 'password' ||
-    autocomplete === 'current-password' ||
-    autocomplete === 'new-password' ||
-    autocomplete === 'one-time-code' ||
-    autocomplete === 'cc-number' ||
-    autocomplete === 'cc-csc' ||
-    /(?:password|passcode|one[-_ ]?time|2fa|otp|card|cvv|cvc|security code)/iu.test(identity)
+    autocompleteTokens.some(token => token === 'current-password' || token === 'new-password' ||
+      token === 'one-time-code' || token === 'username' || token.startsWith('cc-')) ||
+    SENSITIVE_IDENTITY.test(identity)
 }
 
 function inferRole(element: Element): string | undefined {
   const explicit = attribute(element, 'role')
 
-  if (explicit !== undefined && explicit.length > 0) { return explicit }
+  if (explicit !== undefined) {
+    const normalized = explicit.toLowerCase().replaceAll(/\s+/gu, ' ').trim()
+
+    if (normalized.length > 0 && normalized.length <= MAX_TEXT_LENGTH && ROLE_LIST.test(normalized)) {
+      return normalized
+    }
+  }
 
   const type = attribute(element, 'type')?.toLowerCase()
 
@@ -220,7 +231,7 @@ export function createPageInspector(
       ref: refFor(element)
     }
 
-    if (format !== 'accessibility') {
+    if (!sensitive && format !== 'accessibility') {
       result.tag = element.tagName.toLowerCase()
       const text = redactText(element.textContent ?? '')
 
@@ -229,7 +240,7 @@ export function createPageInspector(
 
     if (format !== 'dom') {
       const role = inferRole(element)
-      const name = accessibleName(element)
+      const name = sensitive ? undefined : accessibleName(element)
 
       if (role !== undefined) { result.role = role }
 

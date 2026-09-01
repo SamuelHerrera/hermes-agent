@@ -101,6 +101,67 @@ function validDistance(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
 }
 
+const PAGE_ELEMENT_KEYS = new Set([
+  'boundingBox', 'checked', 'disabled', 'expanded', 'name', 'ref', 'role', 'selected',
+  'sensitive', 'tag', 'text', 'value'
+])
+
+const MAX_PAGE_ELEMENTS = 500
+const MAX_PAGE_TEXT = 240
+const MAX_PAGE_COORDINATE = 100_000_000
+const PAGE_ROLE = /^[a-z][a-z0-9-]{0,63}(?:\s+[a-z][a-z0-9-]{0,63})*$/u
+const PAGE_TAG = /^[a-z][a-z0-9-]{0,63}$/u
+const PAGE_REF = /^e[1-9]\d{0,15}$/u
+
+function validBoundedString(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_PAGE_TEXT
+}
+
+function validOptionalBoolean(record: Record<string, unknown>, key: string): boolean {
+  return record[key] === undefined || typeof record[key] === 'boolean'
+}
+
+function validBoundingBox(value: unknown): boolean {
+  if (!isRecord(value) || !exactKeys(value, ['height', 'width', 'x', 'y'])) { return false }
+
+  return ['height', 'width', 'x', 'y'].every(key =>
+    typeof value[key] === 'number' && Number.isFinite(value[key]) &&
+    Math.abs(value[key] as number) <= MAX_PAGE_COORDINATE
+  ) && (value.height as number) >= 0 && (value.width as number) >= 0
+}
+
+function validPageElement(value: unknown): boolean {
+  if (!isRecord(value) || !Object.keys(value).every(key => PAGE_ELEMENT_KEYS.has(key)) ||
+    !validBoundingBox(value.boundingBox) || typeof value.ref !== 'string' || !PAGE_REF.test(value.ref) ||
+    !validOptionalBoolean(value, 'checked') || !validOptionalBoolean(value, 'disabled') ||
+    !validOptionalBoolean(value, 'expanded') || !validOptionalBoolean(value, 'selected') ||
+    !validOptionalBoolean(value, 'sensitive')) {
+    return false
+  }
+
+  if ((value.name !== undefined && !validBoundedString(value.name)) ||
+    (value.text !== undefined && !validBoundedString(value.text)) ||
+    (value.value !== undefined && !validBoundedString(value.value)) ||
+    (value.role !== undefined && (typeof value.role !== 'string' || !PAGE_ROLE.test(value.role))) ||
+    (value.tag !== undefined && (typeof value.tag !== 'string' || !PAGE_TAG.test(value.tag)))) {
+    return false
+  }
+
+  return value.sensitive !== true ||
+    (value.name === undefined && value.text === undefined && value.value === '[redacted]')
+}
+
+function validPageInspectionResult(value: unknown, expectedFormat: 'accessibility' | 'both' | 'dom'): boolean {
+  if (!isRecord(value) || !exactKeys(value, ['count', 'elements', 'format', 'truncated', 'version']) ||
+    !Number.isInteger(value.count) || (value.count as number) < 0 || (value.count as number) > MAX_PAGE_ELEMENTS ||
+    !Array.isArray(value.elements) || value.elements.length !== value.count || value.elements.length > MAX_PAGE_ELEMENTS ||
+    value.format !== expectedFormat || typeof value.truncated !== 'boolean' || value.version !== 1) {
+    return false
+  }
+
+  return value.elements.every(validPageElement)
+}
+
 async function pageResult(
   dependencies: DispatcherDependencies,
   tabId: number,
@@ -131,6 +192,21 @@ async function pageResult(
   }
 
   throw new PageRequestError('INVALID_PAGE_RESPONSE', 'The selected tab returned an invalid response.')
+}
+
+async function pageInspectionResult(
+  dependencies: DispatcherDependencies,
+  tabId: number,
+  message: Record<string, unknown>,
+  expectedFormat: 'accessibility' | 'both' | 'dom'
+): Promise<unknown> {
+  const result = await pageResult(dependencies, tabId, message)
+
+  if (!validPageInspectionResult(result, expectedFormat)) {
+    throw new PageRequestError('INVALID_PAGE_RESPONSE', 'The selected tab returned an invalid response.')
+  }
+
+  return result
 }
 
 export function createBridgeRequestDispatcher(dependencies: DispatcherDependencies) {
@@ -205,11 +281,11 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
 
         return {
           id: request.id,
-          result: await pageResult(dependencies, tabId, {
+          result: await pageInspectionResult(dependencies, tabId, {
             format: arguments_.format,
             type: 'hermes.bridge.snapshot',
             version: 1
-          }),
+          }, arguments_.format),
           type: 'response'
         }
       }
@@ -223,12 +299,12 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
 
         return {
           id: request.id,
-          result: await pageResult(dependencies, arguments_.tabId, {
+          result: await pageInspectionResult(dependencies, arguments_.tabId, {
             ...(arguments_.limit === undefined ? {} : { limit: arguments_.limit }),
             selector: arguments_.selector,
             type: 'hermes.bridge.query',
             version: 1
-          }),
+          }, 'both'),
           type: 'response'
         }
       }

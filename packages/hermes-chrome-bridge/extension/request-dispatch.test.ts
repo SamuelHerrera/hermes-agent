@@ -4,11 +4,21 @@ import { createBridgeRequestDispatcher } from './request-dispatch.js'
 import { TabServiceError } from './tab-service.js'
 
 function setup() {
-  const sendTabMessage = vi.fn<(tabId: number, message: unknown) => Promise<unknown>>(async () => ({
-    result: { count: 1, elements: [{ ref: 'e1' }], format: 'both', truncated: false, version: 1 },
-    type: 'hermes.bridge.result',
-    version: 1
-  }))
+  const sendTabMessage = vi.fn<(tabId: number, message: unknown) => Promise<unknown>>(async (_tabId, message) => {
+    const request = message as { format?: 'accessibility' | 'both' | 'dom', type?: string }
+
+    return {
+      result: {
+        count: 1,
+        elements: [{ boundingBox: { height: 10, width: 20, x: 1, y: 2 }, ref: 'e1' }],
+        format: request.type === 'hermes.bridge.snapshot' ? request.format : 'both',
+        truncated: false,
+        version: 1
+      },
+      type: 'hermes.bridge.result',
+      version: 1
+    }
+  })
 
   const tabService = {
     assertControllable: vi.fn(async () => undefined),
@@ -181,6 +191,43 @@ describe('background bridge request dispatch', () => {
 
     expect(malformed).toMatchObject({ error: { code: 'INVALID_PAGE_RESPONSE' } })
     expect(JSON.stringify(malformed)).not.toContain('must not leak')
+  })
+
+  it('strictly validates complete page inspection results', async () => {
+    const malformedResults = [
+      {
+        count: 1,
+        elements: [{ boundingBox: { height: 10, width: 20, x: 1, y: 2 }, ref: 'e1', secret: 'must not leak' }],
+        format: 'both', truncated: false, version: 1
+      },
+      {
+        count: 1,
+        elements: [{ boundingBox: { height: -1, width: 20, x: 1, y: 2 }, ref: 'e1' }],
+        format: 'both', truncated: false, version: 1
+      },
+      {
+        count: 1,
+        elements: [{ boundingBox: { height: 10, width: 20, x: 1, y: 2 }, ref: 'e1', role: 'x'.repeat(241) }],
+        format: 'both', truncated: false, version: 1
+      },
+      {
+        count: 2,
+        elements: [{ boundingBox: { height: 10, width: 20, x: 1, y: 2 }, ref: 'e1' }],
+        format: 'both', truncated: false, version: 1
+      }
+    ]
+
+    for (const [index, result] of malformedResults.entries()) {
+      const { dispatch, sendTabMessage } = setup()
+      sendTabMessage.mockResolvedValueOnce({ result, type: 'hermes.bridge.result', version: 1 })
+
+      const response = await dispatch({
+        arguments: {}, id: `strict-${index}`, method: 'snapshot', type: 'request'
+      })
+
+      expect(response).toMatchObject({ error: { code: 'INVALID_PAGE_RESPONSE' } })
+      expect(JSON.stringify(response)).not.toContain('must not leak')
+    }
   })
 
   it('rejects guessed non-controllable tab IDs before sending page messages', async () => {
