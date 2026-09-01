@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": [
+    "native/**/*.ts",
+    "src/runtime.ts"
+  ],
+  "exclude": ["**/*.test.ts"]
+}

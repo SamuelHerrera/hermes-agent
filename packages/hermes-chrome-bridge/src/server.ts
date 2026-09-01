@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { realpathSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -10,6 +11,12 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
 
+import { BridgeBrokerError, ChromeBridgeBroker } from './broker.js'
+import {
+  readRuntimeConfig,
+  resolveHermesHome,
+  runtimeDirectoryFor
+} from './runtime.js'
 import { CHROME_BRIDGE_TOOLS } from './schema.js'
 
 export interface ChromeBridgeRequest {
@@ -28,11 +35,48 @@ const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
 }
 
 const disconnectedRouter: ChromeBridgeRequestRouter = {
-  route: async request => ({
-    connected: false,
-    method: request.method,
-    reason: 'native Chrome bridge is not connected'
-  })
+  route: async request => {
+    if (request.method === 'status') {
+      return {
+        connected: false,
+        updatedAt: new Date().toISOString(),
+        version: 1
+      }
+    }
+
+    throw new BridgeBrokerError(
+      'BRIDGE_DISCONNECTED',
+      'native Chrome bridge is disconnected'
+    )
+  }
+}
+
+export interface DefaultRouterHandle {
+  close: () => Promise<void>
+  router: ChromeBridgeRequestRouter
+}
+
+export async function createDefaultRouter(options: {
+  hermesHome?: string
+} = {}): Promise<DefaultRouterHandle> {
+  const hermesHome = resolveHermesHome(options.hermesHome)
+  const configPath = join(runtimeDirectoryFor(hermesHome), 'config.json')
+  let config
+
+  try {
+    config = await readRuntimeConfig(configPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { close: async () => undefined, router: disconnectedRouter }
+    }
+
+    throw error
+  }
+
+  const broker = new ChromeBridgeBroker(config)
+  await broker.start()
+
+  return { close: async () => broker.close(), router: broker }
 }
 
 export function createChromeBridgeServer(
@@ -69,24 +113,47 @@ export function createChromeBridgeServer(
       }
     }
 
-    const result = await router.route({
-      arguments: toolArguments,
-      method
-    })
+    try {
+      const result = await router.route({
+        arguments: toolArguments,
+        method
+      })
 
-    return {
-      content: [{ text: JSON.stringify(result), type: 'text' }]
+      return {
+        content: [{ text: JSON.stringify(result), type: 'text' }]
+      }
+    } catch (error) {
+      const code = error instanceof BridgeBrokerError ? error.code : 'BRIDGE_ERROR'
+      const message = error instanceof Error ? error.message : 'Chrome bridge request failed'
+
+      return {
+        content: [{ text: JSON.stringify({ code, message }), type: 'text' }],
+        isError: true
+      }
     }
   })
 
   return server
 }
 
-export async function runStdioServer(): Promise<void> {
-  const server = createChromeBridgeServer()
+export async function runStdioServer(options: { hermesHome?: string } = {}): Promise<void> {
+  const handle = await createDefaultRouter(options)
+  const server = createChromeBridgeServer(handle.router)
   const transport = new StdioServerTransport()
+  server.onclose = () => void handle.close()
 
   await server.connect(transport)
+}
+
+function cliHermesHome(args: string[]): string | undefined {
+  const index = args.indexOf('--hermes-home')
+
+  if (index === -1) {return undefined}
+  const value = args[index + 1]
+
+  if (value === undefined) {throw new Error('--hermes-home requires an absolute path')}
+
+  return value
 }
 
 function isEntrypoint(): boolean {
@@ -102,5 +169,5 @@ function isEntrypoint(): boolean {
 }
 
 if (isEntrypoint()) {
-  await runStdioServer()
+  await runStdioServer({ hermesHome: cliHermesHome(process.argv.slice(2)) })
 }
