@@ -20,6 +20,8 @@ interface ScriptSuccessResult {
   __hermesChromeBridgeResult: unknown
 }
 
+const RUNTIME_TIMEOUT_CODE = 'RUNTIME_TIMEOUT'
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -41,18 +43,38 @@ function unwrapScriptResult(value: unknown): unknown {
   throw new PageRuntimeServiceError('INVALID_RUNTIME_RESPONSE', 'The page runtime response is invalid.')
 }
 
+function timeoutAfter(timeoutMs: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new PageRuntimeServiceError(RUNTIME_TIMEOUT_CODE, 'The page runtime request timed out.'))
+    }, Math.max(100, Math.min(10_000, timeoutMs)))
+  })
+}
+
 export function createPageRuntimeService(): PageRuntimeService {
-  async function execute(tabId: number, function_: (...arguments_: never[]) => unknown, args: unknown[]): Promise<unknown> {
+  async function execute(
+    tabId: number,
+    function_: (...arguments_: never[]) => unknown,
+    args: unknown[],
+    timeoutMs: number
+  ): Promise<unknown> {
     let result
 
     try {
-      result = await chrome.scripting.executeScript({
-        args,
-        func: function_ as never,
-        target: { tabId },
-        world: 'MAIN'
-      })
-    } catch {
+      result = await Promise.race([
+        chrome.scripting.executeScript({
+          args,
+          func: function_ as never,
+          target: { tabId },
+          world: 'MAIN'
+        }),
+        timeoutAfter(timeoutMs)
+      ])
+    } catch (error) {
+      if (error instanceof PageRuntimeServiceError) {
+        throw error
+      }
+
       throw new PageRuntimeServiceError('PAGE_RUNTIME_FAILED', 'The page runtime request failed.')
     }
 
@@ -76,10 +98,28 @@ export function createPageRuntimeService(): PageRuntimeService {
 
       const allowedLevels: ConsoleLevel[] = ['debug', 'error', 'info', 'log', 'warn']
 
+      const redactString = (value: string): string => {
+        const patterns = [
+          /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
+          /\bbearer\s+[A-Za-z0-9._~-]+/giu,
+          /\b(?:\d[ -]*?){13,19}\b/gu,
+          /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
+          /\b(?:gh[pousr]_|sk[-_](?:live|test)[-_]|eyJ)[A-Za-z0-9._~-]{8,}/gu
+        ]
+
+        let redacted = value
+
+        for (const pattern of patterns) {
+          redacted = redacted.replace(pattern, '[redacted]')
+        }
+
+        return redacted.slice(0, 10_000)
+      }
+
       const sanitize = (value: unknown, depth = 0): unknown => {
         if (value === null || typeof value === 'boolean' || typeof value === 'number') { return value }
 
-        if (typeof value === 'string') { return value.slice(0, 10_000) }
+        if (typeof value === 'string') { return redactString(value) }
 
         if (typeof value === 'bigint') { return value.toString() }
 
@@ -93,7 +133,7 @@ export function createPageRuntimeService(): PageRuntimeService {
         const output: Record<string, unknown> = {}
 
         for (const [key, entry] of Object.entries(value).slice(0, 50)) {
-          output[key.slice(0, 200)] = /(?:api.?key|authorization|cookie|credential|password|secret|session|token)/iu.test(key)
+          output[redactString(key).slice(0, 200)] = /(?:api.?key|authorization|cookie|credential|password|secret|session|token)/iu.test(key)
             ? '[redacted]'
             : sanitize(entry, depth + 1)
         }
@@ -145,7 +185,7 @@ export function createPageRuntimeService(): PageRuntimeService {
           truncated: entries.length > selected.length
         }
       }
-    }, [options.levels, options.limit]),
+    }, [options.levels, options.limit], 2_000),
     eval: async (tabId, options) => execute(tabId, async function runtimeEval(sourceInput: never): Promise<ScriptErrorResult | ScriptSuccessResult> {
       const source = sourceInput as string
 
@@ -213,9 +253,29 @@ export function createPageRuntimeService(): PageRuntimeService {
       try {
         const value = await Reflect.apply(window.eval, window, [source])
 
+        const redactString = (entry: string): string => {
+          const patterns = [
+            /\b(?:api[-_ ]?key|authorization|bearer|password|secret|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+/giu,
+            /\bbearer\s+[A-Za-z0-9._~-]+/giu,
+            /\b(?:\d[ -]*?){13,19}\b/gu,
+            /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu,
+            /\b(?:gh[pousr]_|sk[-_](?:live|test)[-_]|eyJ)[A-Za-z0-9._~-]{8,}/gu
+          ]
+
+          let redacted = entry
+
+          for (const pattern of patterns) {
+            redacted = redacted.replace(pattern, '[redacted]')
+          }
+
+          return redacted.slice(0, 10_000)
+        }
+
         const sanitized = JSON.parse(JSON.stringify(value, (key, entry) => (
           /(?:api.?key|authorization|cookie|credential|password|secret|session|token)/iu.test(key)
             ? '[redacted]'
+            : typeof entry === 'string'
+              ? redactString(entry)
             : entry
         ))) as unknown
 
@@ -229,6 +289,6 @@ export function createPageRuntimeService(): PageRuntimeService {
       } catch {
         return { __hermesChromeBridgeError: { code: 'EVAL_FAILED', message: 'Evaluation failed.' } }
       }
-    }, [options.source])
+    }, [options.source], options.timeoutMs)
   }
 }
