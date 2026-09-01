@@ -46,8 +46,30 @@ export const CHROME_BRIDGE_TOOLS = [
   },
   {
     annotations: READ_ONLY_ANNOTATIONS,
-    description: 'Capture an accessibility snapshot from the active Chrome tab.',
-    inputSchema: EMPTY_INPUT_SCHEMA,
+    description: 'Capture a bounded, redacted accessibility or DOM snapshot from a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        format: { default: 'both', enum: ['accessibility', 'dom', 'both'], type: 'string' },
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      type: 'object'
+    },
     name: 'chrome_bridge_snapshot'
+  },
+  {
+    annotations: READ_ONLY_ANNOTATIONS,
+    description: 'Query bounded, redacted page metadata with a CSS selector in a controllable Chrome tab.',
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        limit: { default: 20, maximum: 100, minimum: 1, type: 'integer' },
+        selector: { maxLength: 2048, minLength: 1, type: 'string' },
+        tabId: { minimum: 1, type: 'integer' }
+      },
+      required: ['tabId', 'selector'],
+      type: 'object'
+    },
+    name: 'chrome_bridge_query'
   }
 ] as const satisfies readonly Tool[]

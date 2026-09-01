@@ -20,6 +20,7 @@ let controller: ReturnType<typeof createConnectionController>
 
 const dispatchRequest = createBridgeRequestDispatcher({
   getConnectionState: () => controller.getState().connection,
+  sendTabMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message),
   tabService
 })
 

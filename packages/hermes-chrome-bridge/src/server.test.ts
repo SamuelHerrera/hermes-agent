@@ -102,6 +102,47 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(route).toHaveBeenCalledTimes(1)
   })
 
+  it('validates and routes bounded snapshot and query arguments', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ count: 0 })
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'chrome-bridge-test', version: '0.1.0' })
+
+    clients.push(client)
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+
+    const snapshot = await client.callTool({
+      arguments: { format: 'both', tabId: 7 },
+      name: 'chrome_bridge_snapshot'
+    })
+
+    const query = await client.callTool({
+      arguments: { limit: 20, selector: 'button.primary', tabId: 7 },
+      name: 'chrome_bridge_query'
+    })
+
+    expect(snapshot.isError).not.toBe(true)
+    expect(query.isError).not.toBe(true)
+    expect(route).toHaveBeenNthCalledWith(1, {
+      arguments: { format: 'both', tabId: 7 }, method: 'snapshot'
+    })
+    expect(route).toHaveBeenNthCalledWith(2, {
+      arguments: { limit: 20, selector: 'button.primary', tabId: 7 }, method: 'query'
+    })
+
+    for (const call of [
+      { arguments: { format: 'invalid' }, name: 'chrome_bridge_snapshot' },
+      { arguments: { selector: '', tabId: 7 }, name: 'chrome_bridge_query' },
+      { arguments: { limit: 101, selector: 'button', tabId: 7 }, name: 'chrome_bridge_query' },
+      { arguments: { selector: 'button', tabId: 0 }, name: 'chrome_bridge_query' }
+    ]) {
+      await expect(client.callTool(call)).resolves.toMatchObject({ isError: true })
+    }
+
+    expect(route).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects arguments that violate the advertised empty schemas', async () => {
     const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({
       connected: false
@@ -249,7 +290,8 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
-      'chrome_bridge_snapshot'
+      'chrome_bridge_snapshot',
+      'chrome_bridge_query'
     ])
   })
 
@@ -279,7 +321,8 @@ describe('Hermes Chrome bridge MCP server', () => {
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
-      'chrome_bridge_snapshot'
+      'chrome_bridge_snapshot',
+      'chrome_bridge_query'
     ])
   })
 })

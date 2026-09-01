@@ -21,7 +21,7 @@ import { CHROME_BRIDGE_TOOLS } from './schema.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
-  method: 'selectTab' | 'snapshot' | 'status' | 'tabs'
+  method: 'query' | 'selectTab' | 'snapshot' | 'status' | 'tabs'
 }
 
 export interface ChromeBridgeRequestRouter {
@@ -29,10 +29,59 @@ export interface ChromeBridgeRequestRouter {
 }
 
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
+  chrome_bridge_query: 'query',
   chrome_bridge_select_tab: 'selectTab',
   chrome_bridge_snapshot: 'snapshot',
   chrome_bridge_status: 'status',
   chrome_bridge_tabs: 'tabs'
+}
+
+function validPositiveInteger(value: unknown): boolean {
+  return Number.isInteger(value) && (value as number) > 0
+}
+
+function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: Record<string, unknown>): boolean {
+  const keys = Object.keys(arguments_)
+
+  if (method === 'selectTab') {
+    return keys.length === 1 && validPositiveInteger(arguments_.tabId)
+  }
+
+  if (method === 'snapshot') {
+    const format = arguments_.format ?? 'both'
+
+    return keys.every(key => key === 'format' || key === 'tabId') &&
+      (format === 'accessibility' || format === 'dom' || format === 'both') &&
+      (arguments_.tabId === undefined || validPositiveInteger(arguments_.tabId))
+  }
+
+  if (method === 'query') {
+    const validLimit = arguments_.limit === undefined ||
+      (Number.isInteger(arguments_.limit) && (arguments_.limit as number) > 0 && (arguments_.limit as number) <= 100)
+
+    return keys.every(key => key === 'limit' || key === 'selector' || key === 'tabId') &&
+      validPositiveInteger(arguments_.tabId) &&
+      typeof arguments_.selector === 'string' && arguments_.selector.length > 0 &&
+      arguments_.selector.length <= 2_048 && validLimit
+  }
+
+  return keys.length === 0
+}
+
+function invalidArgumentsMessage(name: string, method: ChromeBridgeRequest['method']): string {
+  if (method === 'selectTab') {
+    return `Invalid arguments for ${name}: expected exactly one positive integer tabId`
+  }
+
+  if (method === 'snapshot') {
+    return `Invalid arguments for ${name}: expected optional positive tabId and format accessibility, dom, or both`
+  }
+
+  if (method === 'query') {
+    return `Invalid arguments for ${name}: expected positive tabId, non-empty selector, and optional limit from 1 to 100`
+  }
+
+  return `Invalid arguments for ${name}: expected an empty object`
 }
 
 const disconnectedRouter: ChromeBridgeRequestRouter = {
@@ -103,18 +152,12 @@ export function createChromeBridgeServer(
     }
 
     const toolArguments = request.params.arguments ?? {}
-
-    const validArguments = method === 'selectTab'
-      ? Object.keys(toolArguments).length === 1 &&
-        Number.isInteger(toolArguments.tabId) && (toolArguments.tabId as number) > 0
-      : Object.keys(toolArguments).length === 0
+    const validArguments = validToolArguments(method, toolArguments)
 
     if (!validArguments) {
       return {
         content: [{
-          text: method === 'selectTab'
-            ? `Invalid arguments for ${request.params.name}: expected exactly one positive integer tabId`
-            : `Invalid arguments for ${request.params.name}: expected an empty object`,
+          text: invalidArgumentsMessage(request.params.name, method),
           type: 'text'
         }],
         isError: true
