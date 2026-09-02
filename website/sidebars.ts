@@ -169,6 +169,7 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-codex',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-computer-use',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent',
+                    'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-merge-reconciler',
                     'user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-opencode',
                   ],
                 },
@@ -194,6 +195,15 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/bundled/creative/creative-sketch',
                     'user-guide/skills/bundled/creative/creative-songwriting-and-ai-music',
                     'user-guide/skills/bundled/creative/creative-touchdesigner-mcp',
+                  ],
+                },
+                {
+                  type: 'category',
+                  label: 'devops',
+                  key: 'skills-bundled-devops',
+                  collapsed: true,
+                  items: [
+                    'user-guide/skills/bundled/devops/devops-sdlc-review',
                   ],
                 },
                 {
@@ -347,6 +357,7 @@ const sidebars: SidebarsConfig = {
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-antigravity-cli',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-blackbox',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-grok',
+                    'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-hermes-chrome-bridge',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-honcho',
                     'user-guide/skills/optional/autonomous-ai-agents/autonomous-ai-agents-openhands',
                   ],
@@ -595,6 +606,7 @@ const sidebars: SidebarsConfig = {
                   key: 'skills-optional-software-development',
                   collapsed: true,
                   items: [
+                    'user-guide/skills/optional/software-development/software-development-ast-grep',
                     'user-guide/skills/optional/software-development/software-development-code-wiki',
                     'user-guide/skills/optional/software-development/software-development-rest-graphql-debug',
                     'user-guide/skills/optional/software-development/software-development-subagent-driven-development',
@@ -607,6 +619,7 @@ const sidebars: SidebarsConfig = {
                   collapsed: true,
                   items: [
                     'user-guide/skills/optional/web-development/web-development-cloudflare-temporary-deploy',
+                    'user-guide/skills/optional/web-development/web-development-har-derived-api-client',
                     'user-guide/skills/optional/web-development/web-development-page-agent',
                   ],
                 },
@@ -700,6 +713,7 @@ const sidebars: SidebarsConfig = {
         'integrations/providers',
         'integrations/buzz',
         'user-guide/features/mcp',
+        'user-guide/features/chrome-bridge',
         'user-guide/features/acp',
         'user-guide/features/provider-routing',
         'user-guide/features/fallback-providers',

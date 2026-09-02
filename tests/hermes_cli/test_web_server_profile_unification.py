@@ -166,6 +166,37 @@ class TestProfileScopedMcp:
         )
         assert resp.json()["ok"] is True
 
+    def test_mcp_test_surfaces_chrome_bridge_health(
+        self, client, isolated_profiles, monkeypatch
+    ):
+        import hermes_cli.mcp_config as mcp_config
+
+        (isolated_profiles["worker_beta"] / "config.yaml").write_text(
+            "mcp_servers:\n  hermes-chrome-bridge:\n    command: node\n",
+            encoding="utf-8",
+        )
+
+        def fake_probe(name, config, connect_timeout=30, details=None):
+            assert details is not None
+            details["chrome_bridge_status"] = {
+                "bridgeConnected": False,
+                "nativeConnected": False,
+            }
+            return [("chrome_bridge_status", "status")]
+
+        monkeypatch.setattr(mcp_config, "_probe_single_server", fake_probe)
+
+        response = client.post(
+            "/api/mcp/servers/hermes-chrome-bridge/test",
+            params={"profile": "worker_beta"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["health"]["chromeBridge"] == {
+            "bridgeConnected": False,
+            "nativeConnected": False,
+        }
+
 
 class TestProfileScopedModel:
     def test_model_set_main_scoped(self, client, isolated_profiles):

@@ -302,6 +302,28 @@ class TestMcpTest:
         assert "Connected" in out
         assert "Tools discovered: 2" in out
 
+    def test_test_reports_chrome_bridge_native_disconnect(self, tmp_path, capsys, monkeypatch):
+        _seed_config(tmp_path, {
+            "hermes-chrome-bridge": {"command": "npx", "args": ["bridge@1.0.0"]},
+        })
+
+        def mock_probe(name, config, **kwargs):
+            kwargs["details"]["chrome_bridge_status"] = {
+                "bridgeConnected": False,
+                "nativeConnected": False,
+            }
+            return [("chrome_bridge_status", "Status")]
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", mock_probe
+        )
+        from hermes_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="hermes-chrome-bridge"))
+        out = capsys.readouterr().out
+        assert "Connected" in out
+        assert "Chrome bridge: disconnected" in out
+
     def test_probe_uses_configured_connect_timeout(self, monkeypatch):
         """OAuth-capable probes must not hard-code a short 30s timeout."""
         import asyncio
@@ -339,6 +361,48 @@ class TestMcpTest:
         assert captured["inner_timeout"] == 300.0
         assert captured["outer_timeout"] == 310.0
         assert captured["shutdown"] is True
+
+    def test_probe_collects_chrome_bridge_status(self, monkeypatch):
+        import asyncio
+        from types import SimpleNamespace
+
+        from hermes_cli import mcp_config
+        import tools.mcp_tool as mcp_tool
+
+        class FakeSession:
+            async def call_tool(self, name, arguments):
+                assert name == "chrome_bridge_status"
+                assert arguments == {}
+                return SimpleNamespace(content=[SimpleNamespace(
+                    text='{"bridgeConnected": false, "nativeConnected": false}'
+                )])
+
+        class FakeServer:
+            _tools = [SimpleNamespace(name="chrome_bridge_status", description="Status")]
+            initialize_result = SimpleNamespace(capabilities=SimpleNamespace(
+                prompts=None, resources=None
+            ))
+            session = FakeSession()
+
+            async def shutdown(self):
+                pass
+
+        async def fake_connect(name, config):
+            return FakeServer()
+
+        def fake_run_on_mcp_loop(coro, timeout):
+            return asyncio.run(coro)
+
+        monkeypatch.setattr(mcp_tool, "_ensure_mcp_loop", lambda: None)
+        monkeypatch.setattr(mcp_tool, "_stop_mcp_loop_if_idle", lambda: None)
+        monkeypatch.setattr(mcp_tool, "_connect_server", fake_connect)
+        monkeypatch.setattr(mcp_tool, "_run_on_mcp_loop", fake_run_on_mcp_loop)
+
+        details = {}
+        tools = mcp_config._probe_single_server("bridge", {}, details=details)
+
+        assert tools == [("chrome_bridge_status", "Status")]
+        assert details["chrome_bridge_status"]["nativeConnected"] is False
 
 
 # ---------------------------------------------------------------------------

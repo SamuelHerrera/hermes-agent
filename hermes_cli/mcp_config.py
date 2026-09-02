@@ -9,6 +9,7 @@ configuration in ~/.hermes/config.yaml under the ``mcp_servers`` key.
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -322,6 +323,24 @@ def _probe_single_server(
                     desc = desc[:77] + "..."
                 tools_found.append((t.name, desc))
             if details is not None:
+                if any(name == "chrome_bridge_status" for name, _ in tools_found):
+                    try:
+                        status_result = await server.session.call_tool(
+                            "chrome_bridge_status", arguments={}
+                        )
+                        for item in getattr(status_result, "content", []) or []:
+                            text = getattr(item, "text", None)
+                            if not isinstance(text, str):
+                                continue
+                            parsed = json.loads(text)
+                            if isinstance(parsed, dict):
+                                details["chrome_bridge_status"] = parsed
+                                break
+                    except Exception:
+                        # Status is an optional capability probe; normal MCP
+                        # discovery remains successful when it is unavailable.
+                        pass
+
                 # Gate the capability probes exactly like runtime utility-tool
                 # registration (tools.mcp_tool._select_utility_schemas):
                 #   1. honour the user's tools.prompts / tools.resources config
@@ -763,8 +782,9 @@ def cmd_mcp_test(args):
 
     # Attempt connection
     start = time.monotonic()
+    details: Dict[str, Any] = {}
     try:
-        tools = _probe_single_server(name, cfg)
+        tools = _probe_single_server(name, cfg, details=details)
         elapsed_ms = (time.monotonic() - start) * 1000
     except Exception as exc:
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -773,6 +793,13 @@ def cmd_mcp_test(args):
 
     _success(f"Connected ({elapsed_ms:.0f}ms)")
     _success(f"Tools discovered: {len(tools)}")
+
+    chrome_status = details.get("chrome_bridge_status")
+    if isinstance(chrome_status, dict):
+        if chrome_status.get("bridgeConnected") is True and chrome_status.get("nativeConnected") is True:
+            _success("Chrome bridge: connected")
+        else:
+            _warning("Chrome bridge: disconnected (open the extension popup and click Connect)")
 
     if tools:
         print()

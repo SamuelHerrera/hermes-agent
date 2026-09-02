@@ -28,6 +28,7 @@ import type {
   LogsResponse,
   McpCatalogResponse,
   McpServerSummary,
+  McpServerTestResponse,
   MemoryProviderConfig,
   MemoryProviderOAuthStatus,
   MemoryStatusResponse,
@@ -1093,10 +1094,7 @@ export function setSkillEnabled(
   })
 }
 
-export interface McpTestResult {
-  ok: boolean
-  error?: string
-  tools: { name: string; description: string }[]
+export interface McpTestResult extends McpServerTestResponse {
   /** Capability counts (absent on older backends / failed probes). */
   prompts?: number
   resources?: number

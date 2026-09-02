@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hermes Chrome Bridge</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">Hermes Chrome Bridge</p>
+      <h1 id="status" data-state="disconnected">disconnected</h1>
+      <p id="detail">Connect only when you want Hermes to use this bridge.</p>
+      <div class="actions">
+        <button id="connect" type="button">Connect</button>
+        <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>
+      </div>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

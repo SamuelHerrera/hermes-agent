@@ -205,7 +205,24 @@ class TestInstall:
         assert servers["demo"]["args"] == ["-y", "demo-mcp"]
         assert servers["demo"]["enabled"] is True
 
+    def test_post_install_expands_active_hermes_home(
+        self, catalog_dir, capsys, monkeypatch, tmp_path
+    ):
+        _write_manifest(
+            catalog_dir,
+            "demo",
+            _basic_manifest(post_install="Run setup --hermes-home ${HERMES_HOME}"),
+        )
 
+        from hermes_cli import mcp_catalog
+
+        active_home = tmp_path / "active-profile"
+        monkeypatch.setattr(mcp_catalog, "get_hermes_home", lambda: active_home)
+        mcp_catalog.install_entry(_entry("demo"), enable=True)
+
+        out = capsys.readouterr().out
+        assert f"Run setup --hermes-home {active_home}" in out
+        assert "${HERMES_HOME}" not in out
 
     def test_install_with_api_key_prompts_and_saves(self, catalog_dir, monkeypatch):
         body = _basic_manifest(

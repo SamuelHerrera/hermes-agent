@@ -210,12 +210,17 @@ async def test_mcp_server(name: str, profile: Optional[str] = None):
             "error": "OAuth authentication required — no token found.",
             "tools": [],
         }
-    return {
+    response = {
         "ok": True,
         "tools": [{"name": t, "description": d} for t, d in tools],
         "prompts": details.get("prompts", 0),
         "resources": details.get("resources", 0),
     }
+    chrome_bridge_status = details.get("chrome_bridge_status")
+    if isinstance(chrome_bridge_status, dict):
+        response["health"] = {"chromeBridge": chrome_bridge_status}
+
+    return response
 
 
 @router.post("/api/mcp/servers/{name}/auth")
