@@ -745,6 +745,13 @@ export function usePromptActions({
 
           if (result?.status === 'redirected') {
             triggerHaptic('submit')
+            notify({
+              id: 'composer-steer-feedback',
+              kind: 'success',
+              message: 'Steered current run',
+              detail: 'Inserted before the redirected reply.',
+              durationMs: 3000
+            })
 
             return true
           }
@@ -754,6 +761,12 @@ export function usePromptActions({
             // active reply, so retain the optimistic row at the tail.
             moveOptimisticMessageToEnd()
             triggerHaptic('submit')
+            notify({
+              id: 'composer-queue-feedback',
+              kind: 'info',
+              message: 'Queued for next turn',
+              durationMs: 3000
+            })
 
             return true
           }

@@ -192,6 +192,12 @@ export function useComposerQueue({
     clearDraft()
     scope.attachments.clear()
     triggerHaptic('selection')
+    notify({
+      id: 'composer-queue-feedback',
+      kind: 'info',
+      message: 'Queued for next turn',
+      durationMs: 3000
+    })
 
     return true
   }, [activeQueueSessionKey, attachments, clearDraft, draftRef, scope.attachments])

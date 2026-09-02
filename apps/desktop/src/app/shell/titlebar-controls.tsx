@@ -677,16 +677,25 @@ export function TitlebarControls({
   const visibleExpandableToolbarItems = expandableToolbarItems.filter(item => visibleExpandableToolbarIds.has(item.id))
   const visibleCoreToolbarItems = coreToolbarItems.filter(item => visibleCoreToolbarIds.has(item.id))
 
-  const overflowOptionalToolbarTools = [...expandableToolbarItems, ...coreToolbarItems].flatMap(item =>
-    item.kind === 'tool' && !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id) ? [item.tool] : []
+  const toolbarItems = [...expandableToolbarItems, ...coreToolbarItems]
+
+  const isToolbarItemOverflowed = (item: ToolbarInlineItem) =>
+    !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id)
+
+  const overflowOptionalToolbarTools = toolbarItems.flatMap(item =>
+    item.kind === 'tool' && item.id !== 'settings' && isToolbarItemOverflowed(item) ? [item.tool] : []
   )
 
+  const overflowSettingsTool = toolbarItems.find(
+    item => item.kind === 'tool' && item.id === 'settings' && isToolbarItemOverflowed(item)
+  )
+
+  if (overflowSettingsTool?.kind === 'tool') {
+    overflowOptionalToolbarTools.push(overflowSettingsTool.tool)
+  }
+
   const overflowStatusbarItems = [
-    ...[...expandableToolbarItems, ...coreToolbarItems].flatMap(item =>
-      item.kind === 'statusbar' && !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id)
-        ? [item.item]
-        : []
-    ),
+    ...toolbarItems.flatMap(item => (item.kind === 'statusbar' && isToolbarItemOverflowed(item) ? [item.item] : [])),
     ...alwaysOverflowStatusbarItems
   ]
 

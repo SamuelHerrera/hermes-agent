@@ -78,6 +78,7 @@ import {
   deleteSelectionInEditor,
   insertComposerContentsAtCaret,
   normalizeComposerEditorDom,
+  renderComposerContentsPreservingCaret,
   RICH_INPUT_SLOT
 } from './rich-editor'
 import { useComposerScope } from './scope'
@@ -473,6 +474,14 @@ export function ChatBar({
     if (nextDraft !== draftRef.current) {
       draftRef.current = nextDraft
       setComposerText(nextDraft)
+    }
+
+    // Repaint the contenteditable from the same lightweight markdown/chip DOM
+    // used for restored drafts and sent user bubbles. This keeps **bold**,
+    // `code`, *emphasis* and ~~strike~~ visible while typing without changing
+    // the plain text submitted to the backend.
+    if (document.activeElement === editor) {
+      renderComposerContentsPreservingCaret(editor, nextDraft)
     }
 
     window.setTimeout(refreshTrigger, 0)

@@ -200,7 +200,7 @@ export const zhHant = defineLocale({
     showRightSidebar: '顯示右側邊欄',
     muteHaptics: '靜音觸感回饋',
     unmuteHaptics: '開啟觸感回饋',
-    openSettings: '開啟設定',
+    openSettings: '設定',
     openStarmap: '開啟記憶圖譜'
   },
 

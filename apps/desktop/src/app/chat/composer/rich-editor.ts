@@ -16,6 +16,7 @@ import {
   slashIconElement
 } from '@/components/assistant-ui/directive-text'
 import { referenceKind, referenceRe } from '@/components/assistant-ui/reference-kinds'
+import { type InlineMarkdownKind, tokenizeInlineMarkdown } from '@/lib/inline-markdown'
 
 import { slashCommandMatches, type SlashCommandScanOptions } from './slash-refs'
 
@@ -159,6 +160,40 @@ export function slashChipElement(command: string, kind: SlashChipKind, label?: s
   return chip
 }
 
+const COMPOSER_MARKDOWN_STYLE_CLASS: Record<InlineMarkdownKind, string> = {
+  code: 'rounded bg-[color-mix(in_srgb,currentColor_8%,transparent)] px-1 py-px font-mono text-[0.92em]',
+  em: 'italic',
+  strike: 'line-through decoration-current/55',
+  strong: 'font-semibold'
+}
+
+function appendMarkdownText(target: DocumentFragment | HTMLElement, text: string) {
+  for (const token of tokenizeInlineMarkdown(text)) {
+    if (token.kind === 'text') {
+      target.append(document.createTextNode(token.text))
+
+      continue
+    }
+
+    const wrapper = document.createElement('span')
+    const open = document.createElement('span')
+    const body = document.createElement('span')
+    const close = document.createElement('span')
+
+    wrapper.dataset.mdInline = token.kind
+    wrapper.className = COMPOSER_MARKDOWN_STYLE_CLASS[token.kind]
+    open.dataset.mdMarker = token.kind
+    close.dataset.mdMarker = token.kind
+    open.className = 'text-muted-foreground/45'
+    close.className = 'text-muted-foreground/45'
+    open.textContent = token.markerOpen
+    body.textContent = token.text
+    close.textContent = token.markerClose
+    wrapper.append(open, body, close)
+    target.append(wrapper)
+  }
+}
+
 function appendTextWithBreaks(target: DocumentFragment | HTMLElement, text: string) {
   const lines = text.split('\n')
 
@@ -168,7 +203,7 @@ function appendTextWithBreaks(target: DocumentFragment | HTMLElement, text: stri
     }
 
     if (line) {
-      target.append(document.createTextNode(line))
+      appendMarkdownText(target, line)
     }
   })
 }
@@ -230,6 +265,13 @@ export function renderComposerContents(target: HTMLElement, text: string, option
   // The other writer that reshapes the editor root: painting a restored draft
   // in clears the marker, clearing back to '' sets it.
   markEditorEmptiness(target)
+}
+
+export function renderComposerContentsPreservingCaret(target: HTMLElement, text: string, options?: SlashCommandScanOptions) {
+  const offset = caretOffsetInEditor(target)
+
+  renderComposerContents(target, text, options)
+  placeCaretAtOffset(target, Math.min(offset, text.length))
 }
 
 /** Caret range when the selection lives inside `editor`; else null. */

@@ -200,7 +200,7 @@ export const zh: Translations = {
     showRightSidebar: '显示右侧栏',
     muteHaptics: '关闭触感反馈',
     unmuteHaptics: '开启触感反馈',
-    openSettings: '打开设置',
+    openSettings: '设置',
     openStarmap: '打开记忆图谱',
     enterHud: 'HUD 模式',
     exitHud: '退出 HUD 模式',

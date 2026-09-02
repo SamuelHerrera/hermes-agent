@@ -8,6 +8,7 @@ import {
   normalizeComposerEditorDom,
   refChipElement,
   renderComposerContents,
+  renderComposerContentsPreservingCaret,
   replaceBeforeCaret,
   RICH_INPUT_SLOT
 } from './rich-editor'
@@ -34,6 +35,59 @@ describe('renderComposerContents', () => {
     expect(editor.textContent).toContain('<img src=x onerror=alert(1)>')
     expect(editor.textContent).toContain('<b>raw</b>')
     expect(composerPlainText(editor)).toBe('@file:`<img src=x onerror=alert(1)>` <b>raw</b>')
+  })
+
+  it('styles lightweight markdown without changing submitted text', () => {
+    const editor = document.createElement('div')
+    editor.dataset.slot = RICH_INPUT_SLOT
+
+    renderComposerContents(editor, '**bold** *em* ~~gone~~ `code`')
+
+    expect(editor.querySelector('[data-md-inline="strong"]')?.textContent).toBe('**bold**')
+    expect(editor.querySelector('[data-md-inline="em"]')?.textContent).toBe('*em*')
+    expect(editor.querySelector('[data-md-inline="strike"]')?.textContent).toBe('~~gone~~')
+    expect(editor.querySelector('[data-md-inline="code"]')?.textContent).toBe('`code`')
+    expect(composerPlainText(editor)).toBe('**bold** *em* ~~gone~~ `code`')
+  })
+
+  it('does not markdown-style directive quoting inside composer refs', () => {
+    const editor = document.createElement('div')
+    editor.dataset.slot = RICH_INPUT_SLOT
+
+    renderComposerContents(editor, 'see @file:`apps/desktop/a b.ts` and `npm test`')
+
+    expect(editor.querySelectorAll('[data-ref-kind="file"]').length).toBe(1)
+    expect(editor.querySelector('[data-md-inline="code"]')?.textContent).toBe('`npm test`')
+    expect(composerPlainText(editor)).toBe('see @file:`apps/desktop/a b.ts` and `npm test`')
+  })
+
+  it('can live-repaint markdown while preserving the caret offset', () => {
+    const editor = document.createElement('div')
+    editor.dataset.slot = RICH_INPUT_SLOT
+    document.body.append(editor)
+    editor.textContent = '**bold** tail'
+
+    const text = editor.firstChild!
+    const selection = window.getSelection()!
+    const range = document.createRange()
+
+    range.setStart(text, 6)
+    range.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(range)
+
+    renderComposerContentsPreservingCaret(editor, '**bold** tail')
+
+    expect(composerPlainText(editor).slice(0, 6)).toBe('**bold')
+    expect(editor.querySelector('[data-md-inline="strong"]')?.textContent).toBe('**bold**')
+
+    const after = window.getSelection()?.getRangeAt(0).cloneRange()
+    const probe = document.createRange()
+
+    probe.selectNodeContents(editor)
+    probe.setEnd(after!.startContainer, after!.startOffset)
+    expect(probe.toString()).toBe('**bold')
+    editor.remove()
   })
 
   it('hydrates a committed leading slash command back to its pill', () => {

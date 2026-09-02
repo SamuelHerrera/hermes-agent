@@ -41,6 +41,7 @@ import {
   placeCaretEnd,
   refChipElement,
   renderComposerContents,
+  renderComposerContentsPreservingCaret,
   replaceBeforeCaret,
   RICH_INPUT_SLOT
 } from '@/app/chat/composer/rich-editor'
@@ -231,6 +232,10 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
       if (nextDraft !== draftRef.current) {
         draftRef.current = nextDraft
         aui.composer().setText(nextDraft)
+      }
+
+      if (document.activeElement === editor) {
+        renderComposerContentsPreservingCaret(editor, nextDraft, { trailingCommitted: true })
       }
 
       return nextDraft

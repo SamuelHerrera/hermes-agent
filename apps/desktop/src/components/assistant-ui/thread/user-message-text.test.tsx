@@ -53,6 +53,14 @@ describe('a sent reference renders as the chip the composer showed', () => {
     expect(screen.queryByTitle('apps/desktop/a b.ts')).not.toBeNull()
   })
 
+  it('renders lightweight emphasis like the composer preview', () => {
+    render(<UserMessageText text="**bold** *em* ~~gone~~" />)
+
+    expect(document.querySelector('[data-slot="aui_user-inline-strong"]')?.textContent).toBe('bold')
+    expect(document.querySelector('[data-slot="aui_user-inline-em"]')?.textContent).toBe('em')
+    expect(document.querySelector('[data-slot="aui_user-inline-strike"]')?.textContent).toBe('gone')
+  })
+
   it('leaves a fenced block alone', () => {
     render(<UserMessageText text={'before\n```ts\nconst x = 1\n```\nafter'} />)
 

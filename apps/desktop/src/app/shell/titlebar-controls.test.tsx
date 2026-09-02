@@ -101,7 +101,7 @@ describe('TitlebarControls', () => {
     )
 
     expect(screen.queryByRole('button', { name: 'Open Command Center' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Open settings' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
 
     const more = screen.getByRole('button', { name: 'More app actions' })
     const appControls = screen.getByLabelText('App controls')
@@ -134,9 +134,12 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
-    expect(await screen.findByRole('menuitem', { name: 'Open settings' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'kanban:approval-bridge' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'kanban:count' })).toBeNull()
+
+    const menuItems = screen.getAllByRole('menuitem')
+    expect(menuItems.at(-1)?.textContent).toContain('Settings')
   })
 
   it('reveals lower-priority toolbar actions when the sidebar is widened', () => {

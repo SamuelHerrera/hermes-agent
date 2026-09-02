@@ -126,9 +126,8 @@ interface ThreadMessageListProps {
   threadScrollKey?: string | null
 }
 
-// Group each user message with the assistant turn(s) that follow it so the
-// human bubble can `position: sticky` against the scroller across its whole
-// turn (see StickyHumanMessageContainer in thread.tsx).
+// Group each user message with the assistant turn(s) that follow it so
+// virtualization keeps whole conversation turns intact.
 export function buildGroups(signature: string): MessageGroup[] {
   if (!signature) {
     return []
@@ -495,13 +494,6 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
   // hide the titlebar tool cluster + session header, but the OS traffic lights
   // still sit in the top-left, so reserve the titlebar gap above the transcript.
   const secondaryWindow = isSecondaryWindow()
-  // NB: CSS calc() requires whitespace around the +/- operator. This string is
-  // assigned verbatim to the --sticky-human-top inline style below (it does not
-  // go through Tailwind, which would auto-space it), so the spaces are load-
-  // bearing — without them the declaration is invalid, gets dropped, and the
-  // sticky user bubble falls back to its ~4px default and slides under the OS
-  // traffic lights.
-  const secondaryTitlebarGap = 'calc(var(--titlebar-height) + 0.75rem)'
 
   const threadContentTopPad = secondaryWindow
     ? 'pt-[calc(var(--titlebar-height)+0.75rem)]'
@@ -689,8 +681,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
       className="relative min-h-0 max-w-full overflow-hidden contain-[layout_paint]"
       style={
         {
-          height: clampToComposer ? 'var(--thread-viewport-height)' : '100%',
-          ...(secondaryWindow ? { '--sticky-human-top': secondaryTitlebarGap } : {})
+          height: clampToComposer ? 'var(--thread-viewport-height)' : '100%'
         } as CSSProperties
       }
     >

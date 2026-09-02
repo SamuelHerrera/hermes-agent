@@ -2,7 +2,7 @@ import type { FC } from 'react'
 import { Fragment, useMemo } from 'react'
 
 import { DirectiveContent } from '@/components/assistant-ui/directive-text'
-import { referenceRe } from '@/components/assistant-ui/reference-kinds'
+import { tokenizeInlineMarkdown } from '@/lib/inline-markdown'
 import { cn } from '@/lib/utils'
 
 // User messages should render the bare-minimum of markdown: backtick `code`
@@ -25,45 +25,9 @@ interface InlineSegment {
   text: string
 }
 
-interface InlineCodeSegment {
-  kind: 'inline-code'
-  code: string
-}
-
-interface InlineTextSegment {
-  kind: 'inline-text'
-  text: string
-}
-
 type TopSegment = FenceSegment | InlineSegment
-type InlineNode = InlineCodeSegment | InlineTextSegment
 
 const FENCE_RE = /```([^\n`]*)\n([\s\S]*?)```/g
-
-// Greedy backtick run length so ``code with `backticks` inside`` works.
-const INLINE_CODE_RE = /(`+)([^`\n][\s\S]*?)\1/g
-
-// A directive's value is BACKTICK-QUOTED whenever it needs to be (`@url:`
-// always, and any path with a space), so the inline-code scanner would claim
-// those backticks first and split one reference into a bare `@url:` plus a code
-// span — the composer's chip, flattened on send. Directives win: this is syntax
-// the composer wrote, not something the user typed as code.
-
-/** Inline-code matches that don't overlap a directive, so a quoted directive
- *  value reaches DirectiveContent whole. */
-function inlineCodeOutsideDirectives(text: string): RegExpMatchArray[] {
-  const directives = Array.from(text.matchAll(referenceRe())).map(match => ({
-    start: match.index ?? 0,
-    end: (match.index ?? 0) + match[0].length
-  }))
-
-  return Array.from(text.matchAll(INLINE_CODE_RE)).filter(match => {
-    const start = match.index ?? 0
-    const end = start + match[0].length
-
-    return !directives.some(directive => start < directive.end && end > directive.start)
-  })
-}
 
 function splitFences(text: string): TopSegment[] {
   const segments: TopSegment[] = []
@@ -89,28 +53,6 @@ function splitFences(text: string): TopSegment[] {
   }
 
   return segments
-}
-
-function splitInlineCode(text: string): InlineNode[] {
-  const nodes: InlineNode[] = []
-  let cursor = 0
-
-  for (const match of inlineCodeOutsideDirectives(text)) {
-    const start = match.index ?? 0
-
-    if (start > cursor) {
-      nodes.push({ kind: 'inline-text', text: text.slice(cursor, start) })
-    }
-
-    nodes.push({ kind: 'inline-code', code: match[2] })
-    cursor = start + match[0].length
-  }
-
-  if (cursor < text.length) {
-    nodes.push({ kind: 'inline-text', text: text.slice(cursor) })
-  }
-
-  return nodes
 }
 
 interface UserMessageTextProps {
@@ -147,21 +89,33 @@ export const UserMessageText: FC<UserMessageTextProps> = ({ className, text }) =
 }
 
 const InlineSegmentView: FC<{ text: string }> = ({ text }) => {
-  const nodes = useMemo(() => splitInlineCode(text), [text])
+  const nodes = useMemo(() => tokenizeInlineMarkdown(text), [text])
 
   return (
     // styles.css bidi hook (#44150); whitespace-pre-line makes each line its own
     // UAX#9 paragraph so it resolves direction independently.
     <span className="wrap-anywhere block whitespace-pre-line" data-slot="aui_user-inline-text">
       {nodes.map((node, nodeIndex) =>
-        node.kind === 'inline-code' ? (
+        node.kind === 'code' ? (
           <code
             className="mx-px rounded bg-[color-mix(in_srgb,currentColor_8%,transparent)] px-1 py-px font-mono text-[0.92em]"
             data-slot="aui_user-inline-code"
             key={`code-${nodeIndex}`}
           >
-            {node.code}
+            {node.text}
           </code>
+        ) : node.kind === 'strong' ? (
+          <strong className="font-semibold text-foreground" data-slot="aui_user-inline-strong" key={`strong-${nodeIndex}`}>
+            {node.text}
+          </strong>
+        ) : node.kind === 'em' ? (
+          <em className="italic" data-slot="aui_user-inline-em" key={`em-${nodeIndex}`}>
+            {node.text}
+          </em>
+        ) : node.kind === 'strike' ? (
+          <del className="line-through decoration-current/55" data-slot="aui_user-inline-strike" key={`strike-${nodeIndex}`}>
+            {node.text}
+          </del>
         ) : (
           // Pass plain-text bits through DirectiveContent so @file:/@url: chips
           // still render. DirectiveContent already preserves whitespace.

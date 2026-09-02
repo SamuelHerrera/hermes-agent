@@ -92,6 +92,19 @@ function Harness({ onEdit }: { onEdit: (message: AppendMessage) => Promise<void>
   )
 }
 
+describe('user message layout', () => {
+  it('renders user bubbles in normal flow instead of sticky positioning', async () => {
+    render(<Harness onEdit={vi.fn(async () => {})} />)
+
+    const root = await screen.findByText('edit me please').then(node =>
+      node.closest('[data-slot="aui_user-message-root"]')
+    )
+
+    expect(root?.className).toContain('relative')
+    expect(root?.className.split(/\s+/)).not.toContain('sticky')
+  })
+})
+
 // Regression for the desktop "editing a message, clicking the arrow does
 // nothing — I have to click revert" report.
 //

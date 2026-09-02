@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hermes Omarchy Chat Layout Mockups</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      color-scheme: dark;
+      --bg: #050607;
+      --chrome: #0b0d10;
+      --panel: #101318;
+      --panel2: #141820;
+      --line: rgba(255,255,255,.09);
+      --line2: rgba(255,255,255,.16);
+      --muted: #7b8491;
+      --text: #d6dbe3;
+      --bright: #f4f7fb;
+      --green: #68e07f;
+      --orange: #f5a85c;
+      --red: #ff646d;
+      --blue: #74a7ff;
+      --purple: #b38cff;
+      --yellow: #e6d16b;
+    }
+    body { margin:0; background:radial-gradient(circle at 50% -20%, #18202a 0, var(--bg) 42%); color:var(--text); font: 12px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .page { min-height:100vh; padding:22px; display:grid; gap:18px; }
+    .intro { max-width:1120px; margin:auto; width:100%; display:grid; gap:12px; }
+    h1 { margin:0; font-size:22px; font-weight:650; letter-spacing:-.02em; color:var(--bright); }
+    .sub { color:var(--muted); font-size:13px; max-width:880px; }
+    .variants { display:flex; gap:8px; flex-wrap:wrap; }
+    .variants button { border:1px solid var(--line); background:#0e1116; color:var(--text); border-radius:999px; padding:7px 12px; cursor:pointer; }
+    .variants button.active { color:#061008; background:var(--green); border-color:transparent; }
+    .mock { width:min(1180px, 100%); height:720px; margin:auto; border:1px solid var(--line2); border-radius:18px; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.55); background:#050607; display:grid; grid-template-rows:34px 1fr; }
+    .topbar { -webkit-app-region: drag; display:grid; grid-template-columns:190px 1fr 210px; align-items:center; gap:10px; padding:0 12px; background:linear-gradient(#0b0d10,#080a0d); border-bottom:1px solid var(--line); }
+    .traffic { display:flex; align-items:center; gap:7px; color:var(--muted); }
+    .dot { width:10px; height:10px; border-radius:99px; background:#333; }.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+    .deskbar { justify-self:start; display:flex; gap:5px; }
+    .desk { height:19px; min-width:32px; display:grid; place-items:center; padding:0 8px; border:1px solid var(--line); border-radius:7px; color:var(--muted); background:#101318; }
+    .desk.on { color:var(--bright); border-color:color-mix(in srgb, var(--green) 55%, transparent); box-shadow: inset 0 -1px var(--green); }
+    .minimap { justify-self:center; width:min(470px, 92%); height:19px; border:1px solid var(--line); border-radius:999px; position:relative; background:linear-gradient(90deg,#11151b,#0b0e13); overflow:hidden; }
+    .mini-screen { position:absolute; top:4px; bottom:4px; border-radius:99px; background:#343b46; opacity:.9; }
+    .mini-screen.chat { background:var(--blue); }.mini-screen.term{background:var(--green)}.mini-screen.web{background:var(--purple)}.mini-screen.plan{background:var(--orange)}
+    .viewport { position:absolute; top:2px; bottom:2px; left:34%; width:31%; border:1px solid rgba(255,255,255,.8); border-radius:999px; background:rgba(255,255,255,.08); box-shadow:0 0 0 999px rgba(0,0,0,.18); }
+    .mode { justify-self:end; display:flex; align-items:center; gap:8px; color:var(--muted); }.toggle{width:42px;height:20px;border-radius:99px;background:#162018;border:1px solid rgba(104,224,127,.35);position:relative}.toggle:after{content:"";position:absolute;width:16px;height:16px;right:2px;top:1px;border-radius:99px;background:var(--green)}
+    .shell { display:grid; grid-template-columns:196px 1fr; min-height:0; }
+    .sidebar { border-right:1px solid var(--line); background:#07090b; overflow:hidden; padding:8px; display:grid; grid-template-rows:auto 1fr; gap:8px; }
+    .side-tools { display:flex; gap:6px; color:var(--muted); }.side-tools span{width:20px;height:20px;display:grid;place-items:center;border-radius:6px;background:#101318;border:1px solid var(--line)}
+    .sessions { overflow:hidden; display:grid; gap:6px; align-content:start; }.group{color:var(--muted);font-weight:650;margin-top:5px}.row{display:grid;grid-template-columns:10px 1fr auto;gap:6px;align-items:center;padding:7px 6px;border-radius:8px;color:#aeb6c2}.row.active{background:#161b22;color:var(--bright);outline:1px solid rgba(255,255,255,.08)}.pin{width:6px;height:6px;border-radius:99px;background:var(--orange)}.meta{color:var(--muted);font-size:10px}
+    .workspace { min-width:0; min-height:0; overflow:hidden; background:#080a0c; position:relative; }
+    .canvas { height:100%; min-width:0; overflow:auto; scrollbar-color:#343b46 transparent; }
+    .strip { display:flex; height:100%; min-width:max-content; gap:10px; padding:10px; }
+    .screen { width:420px; min-width:420px; display:grid; grid-template-rows:29px 1fr; border:1px solid var(--line2); border-radius:12px; overflow:hidden; background:var(--panel); box-shadow:0 10px 30px rgba(0,0,0,.25); }
+    .screen.wide { width:560px; min-width:560px; }.screen.narrow { width:300px; min-width:300px; }
+    .winhead { display:flex; align-items:center; gap:7px; padding:0 9px; background:#11151b; border-bottom:1px solid var(--line); cursor:grab; user-select:none; }
+    .grip{color:var(--muted); letter-spacing:-2px}.title{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.badge{margin-left:auto;color:var(--muted);font-size:10px}.close{color:var(--muted)}
+    .content { min-height:0; overflow:hidden; background:linear-gradient(180deg,#0d1015,#080a0c); }
+    .chat { height:100%; display:grid; grid-template-rows:1fr auto; }.msgs{padding:14px;display:grid;gap:10px;align-content:start}.bubble{border:1px solid var(--line);background:#131821;border-radius:10px;padding:10px}.thought{color:var(--muted);font-size:11px}.composer{margin:10px;border:1px solid rgba(255,100,109,.35);background:#0c0f14;border-radius:10px;padding:9px;color:#b7bec9}
+    .code { font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; color:#a9b4c2; padding:13px; white-space:pre; }.code b{color:var(--green);font-weight:500}.code em{color:var(--orange);font-style:normal}.terminal{font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;padding:12px;color:#9bdba7}.terminal .prompt{color:var(--green)}
+    .columns { display:grid; grid-template-columns:repeat(2, minmax(260px,1fr)); grid-auto-rows: minmax(240px,1fr); gap:10px; padding:10px; height:100%; overflow:auto; }
+    .columns .screen { width:auto; min-width:0; min-height:240px; }
+    .rail-note { position:absolute; right:13px; bottom:12px; color:var(--muted); background:#0e1117cc; border:1px solid var(--line); border-radius:8px; padding:7px 9px; backdrop-filter: blur(8px); }
+    .mock[data-variant="desktops"] .workspace { display:grid; grid-template-rows:1fr 28px; }
+    .pager { display:flex; align-items:center; justify-content:center; gap:9px; border-top:1px solid var(--line); background:#0b0d10; color:var(--muted); }
+    .pager span { width:36px; height:5px; border-radius:99px; background:#303743; }.pager span.on { background:var(--green); }
+    .desktop-canvas { min-width:0; overflow:hidden; padding:10px; display:grid; grid-template-columns:1fr 360px; gap:10px; }
+    .stack { display:grid; grid-template-rows:1fr 220px; gap:10px; min-width:0; }
+    .stack .screen, .desktop-canvas > .screen { width:auto; min-width:0; }
+    .hidden { display:none; }
+    @media (max-width: 900px) { .mock{height:760px}.topbar{grid-template-columns:1fr}.traffic,.mode{display:none}.shell{grid-template-columns:1fr}.sidebar{display:none}.screen{width:330px;min-width:330px}.minimap{width:90%} }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="intro">
+      <h1>Hermes Desktop — Omarchy-style alternate layout</h1>
+      <div class="sub">Goal: keep the existing pane system, but add a toggleable mode where tabs become draggable window headers, all active chat/screens can sit side-by-side on a horizontally scrollable canvas, and the app header becomes desktop switcher + minimap.</div>
+      <div class="variants" role="tablist">
+        <button class="active" data-pick="strip">A · Continuous horizontal workspace</button>
+        <button data-pick="desktops">B · Desktops + focused viewport</button>
+        <button data-pick="matrix">C · Dense tiled matrix</button>
+      </div>
+    </section>
+
+    <section class="mock" data-variant="strip" id="strip">
+      <div class="topbar">
+        <div class="traffic"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="deskbar"><span class="desk on">1</span><span class="desk">2</span><span class="desk">3</span><span class="desk">+</span></div></div>
+        <div class="minimap" aria-label="horizontal minimap"><span class="mini-screen chat" style="left:4%;width:16%"></span><span class="mini-screen term" style="left:23%;width:11%"></span><span class="mini-screen web" style="left:38%;width:20%"></span><span class="mini-screen plan" style="left:64%;width:27%"></span><span class="viewport"></span></div>
+        <div class="mode"><span>Tabs</span><span class="toggle"></span><b>Windows</b></div>
+      </div>
+      <div class="shell"><aside class="sidebar"><div class="side-tools"><span>☰</span><span>⋮</span><span>◉</span><span>+</span></div><div class="sessions"><div class="group">hermes-agent</div><div class="row active"><span class="pin"></span><span>Implement togglable Omarchy layout</span><span class="meta">59k</span></div><div class="row"><span class="pin"></span><span>Investigate chat bubble positioning</span><span class="meta">646k</span></div><div class="row"><span class="pin"></span><span>Markdown style cleanup</span><span class="meta">140k</span></div><div class="group">edu-dir-astro</div><div class="row"><span class="pin" style="background:var(--blue)"></span><span>Check branch mismatch</span><span class="meta">9.2M</span></div></div></aside><div class="workspace"><div class="canvas"><div class="strip"><article class="screen wide"><div class="winhead"><span class="grip">⠿</span><span class="title">Chat · Implement togglable Omarchy layout</span><span class="badge">GPT-5.5 · 59k</span><span class="close">×</span></div><div class="content chat"><div class="msgs"><div class="bubble">I want a second layout like Omarchy: remove tabs, keep all panels open, add draggable headers.</div><div class="thought">Thought briefly › inspected pane shell / tab strip / app header.</div><div class="bubble">Feature direction: tabs become windows on a scrollable desktop canvas.</div></div><div class="composer">+ Refine the request <span style="float:right;color:var(--muted)">⌘↵</span></div></div></article><article class="screen narrow"><div class="winhead"><span class="grip">⠿</span><span class="title">Terminal</span><span class="badge">running</span></div><div class="content terminal"><span class="prompt">~/hermes-agent</span> npm run check<br/>✓ typecheck<br/>✓ vitest pane shell<br/><br/><span class="prompt">desktop 1</span> active viewport: 34–65%</div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Code · tree-group.tsx</span><span class="badge">drag header</span></div><div class="content code"><b>function</b> TreeGroup() {<br/>  <em>// today:</em> PaneTabStrip + active body<br/>  <em>// omarchy:</em> WindowHeader + mounted body<br/>  return &lt;PaneWindow /&gt;<br/>}<br/><br/>layoutMode: tabbed | desktop<br/>desktopId: main | qa | …</div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Plan / Tasks</span><span class="badge">3 phases</span></div><div class="content"><div class="msgs"><div class="bubble">1. Presentation-only shell mode toggle.</div><div class="bubble">2. Desktops + hotkeys + header minimap.</div><div class="bubble">3. Persistence, reorder, accessibility, tests.</div></div></div></article></div></div><div class="rail-note">⌘1–⌘4 desktops · ⇧wheel horizontal scroll · drag headers to reorder</div></div></div>
+    </section>
+
+    <section class="mock hidden" data-variant="desktops" id="desktops">
+      <div class="topbar"><div class="traffic"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="deskbar"><span class="desk">1 Chat</span><span class="desk on">2 Build</span><span class="desk">3 Docs</span><span class="desk">+</span></div></div><div class="minimap"><span class="mini-screen chat" style="left:8%;width:24%"></span><span class="mini-screen term" style="left:36%;width:18%"></span><span class="mini-screen web" style="left:60%;width:28%"></span><span class="viewport" style="left:26%;width:42%"></span></div><div class="mode"><b>Desktop 2</b><span class="toggle"></span><span>Omarchy</span></div></div>
+      <div class="shell"><aside class="sidebar"><div class="side-tools"><span>☰</span><span>⌘K</span><span>+</span></div><div class="sessions"><div class="group">Desktops</div><div class="row"><span class="pin" style="background:var(--green)"></span><span>1 · Chat review</span><span class="meta">3 panes</span></div><div class="row active"><span class="pin" style="background:var(--orange)"></span><span>2 · Build/debug</span><span class="meta">4 panes</span></div><div class="row"><span class="pin" style="background:var(--purple)"></span><span>3 · Docs/research</span><span class="meta">2 panes</span></div></div></aside><div class="workspace"><div class="desktop-canvas"><div class="stack"><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Code · tree-group.tsx</span><span class="badge">drag header</span></div><div class="content code"><b>function</b> TreeGroup() {<br/>  <em>// today:</em> PaneTabStrip + active body<br/>  <em>// omarchy:</em> WindowHeader + mounted body<br/>  return &lt;PaneWindow /&gt;<br/>}<br/><br/>layoutMode: tabbed | desktop<br/>desktopId: main | qa | …</div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Terminal · verification</span><span class="badge">live</span></div><div class="content terminal"><span class="prompt">$</span> npm run check<br/>src/components/pane-shell/tree/...<br/>✓ layout mode store<br/>✓ hotkey desktop switch<br/>✓ minimap range math</div></article></div><article class="screen wide"><div class="winhead"><span class="grip">⠿</span><span class="title">Chat · Implement togglable Omarchy layout</span><span class="badge">GPT-5.5 · 59k</span><span class="close">×</span></div><div class="content chat"><div class="msgs"><div class="bubble">I want a second layout like Omarchy: remove tabs, keep all panels open, add draggable headers.</div><div class="thought">Thought briefly › inspected pane shell / tab strip / app header.</div><div class="bubble">Feature direction: tabs become windows on a scrollable desktop canvas.</div></div><div class="composer">+ Refine the request <span style="float:right;color:var(--muted)">⌘↵</span></div></div></article></div><div class="pager"><span></span><span class="on"></span><span></span></div></div></div>
+    </section>
+
+    <section class="mock hidden" data-variant="matrix" id="matrix">
+      <div class="topbar"><div class="traffic"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><div class="deskbar"><span class="desk on">main</span><span class="desk">qa</span><span class="desk">ship</span></div></div><div class="minimap"><span class="mini-screen chat" style="left:5%;width:13%"></span><span class="mini-screen chat" style="left:22%;width:13%"></span><span class="mini-screen term" style="left:39%;width:13%"></span><span class="mini-screen web" style="left:56%;width:13%"></span><span class="mini-screen plan" style="left:73%;width:18%"></span><span class="viewport" style="left:2%;width:60%"></span></div><div class="mode"><span>Layout density</span><b>Matrix</b></div></div>
+      <div class="shell"><aside class="sidebar"><div class="side-tools"><span>☰</span><span>⌘B</span><span>+</span></div><div class="sessions"><div class="group">Open windows</div><div class="row active"><span class="pin"></span><span>Chat: Omarchy layout</span><span class="meta">live</span></div><div class="row"><span class="pin" style="background:var(--green)"></span><span>Terminal: tests</span><span class="meta">run</span></div><div class="row"><span class="pin" style="background:var(--purple)"></span><span>Preview: mockups</span><span class="meta">html</span></div></div></aside><div class="workspace"><div class="columns"><article class="screen wide"><div class="winhead"><span class="grip">⠿</span><span class="title">Chat · Implement togglable Omarchy layout</span><span class="badge">GPT-5.5 · 59k</span><span class="close">×</span></div><div class="content chat"><div class="msgs"><div class="bubble">I want a second layout like Omarchy: remove tabs, keep all panels open, add draggable headers.</div><div class="thought">Thought briefly › inspected pane shell / tab strip / app header.</div><div class="bubble">Feature direction: tabs become windows on a scrollable desktop canvas.</div></div><div class="composer">+ Refine the request <span style="float:right;color:var(--muted)">⌘↵</span></div></div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Code · tree-group.tsx</span><span class="badge">drag header</span></div><div class="content code"><b>function</b> TreeGroup() {<br/>  <em>// today:</em> PaneTabStrip + active body<br/>  <em>// omarchy:</em> WindowHeader + mounted body<br/>  return &lt;PaneWindow /&gt;<br/>}<br/><br/>layoutMode: tabbed | desktop<br/>desktopId: main | qa | …</div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Terminal · verification</span><span class="badge">live</span></div><div class="content terminal"><span class="prompt">$</span> npm run check<br/>src/components/pane-shell/tree/...<br/>✓ layout mode store<br/>✓ hotkey desktop switch<br/>✓ minimap range math</div></article><article class="screen"><div class="winhead"><span class="grip">⠿</span><span class="title">Plan / Tasks</span><span class="badge">3 phases</span></div><div class="content"><div class="msgs"><div class="bubble">1. Presentation-only shell mode toggle.</div><div class="bubble">2. Desktops + hotkeys + header minimap.</div><div class="bubble">3. Persistence, reorder, accessibility, tests.</div></div></div></article></div></div></div>
+    </section>
+  </main>
+
+  <script>
+    const buttons = [...document.querySelectorAll('[data-pick]')];
+    const mocks = [...document.querySelectorAll('.mock')];
+    buttons.forEach(btn => btn.addEventListener('click', () => {
+      buttons.forEach(b => b.classList.toggle('active', b === btn));
+      mocks.forEach(m => m.classList.toggle('hidden', m.id !== btn.dataset.pick));
+    }));
+  </script>
+</body>
+</html>

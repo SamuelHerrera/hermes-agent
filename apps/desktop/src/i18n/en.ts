@@ -205,7 +205,7 @@ export const en: Translations = {
     showRightSidebar: 'Show right sidebar',
     muteHaptics: 'Mute haptics',
     unmuteHaptics: 'Unmute haptics',
-    openSettings: 'Open settings',
+    openSettings: 'Settings',
     openStarmap: 'Open memory graph',
     enterHud: 'HUD mode',
     exitHud: 'Exit HUD mode',

@@ -2187,6 +2187,7 @@ describe('usePromptActions submit / queue drain semantics', () => {
 describe('usePromptActions redirectPrompt', () => {
   afterEach(() => {
     cleanup()
+    clearNotifications()
     vi.restoreAllMocks()
   })
 
@@ -2215,6 +2216,11 @@ describe('usePromptActions redirectPrompt', () => {
     expect((capturedStates.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
       role: 'user',
       parts: [{ type: 'text', text: 'nudge the run' }]
+    })
+    expect($notifications.get().at(0)).toMatchObject({
+      id: 'composer-steer-feedback',
+      message: 'Steered current run',
+      detail: 'Inserted before the redirected reply.'
     })
   })
 
@@ -2279,6 +2285,10 @@ describe('usePromptActions redirectPrompt', () => {
     expect((capturedStates.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
       role: 'user',
       parts: [{ type: 'text', text: 'build-window nudge' }]
+    })
+    expect($notifications.get().at(0)).toMatchObject({
+      id: 'composer-queue-feedback',
+      message: 'Queued for next turn'
     })
   })
 

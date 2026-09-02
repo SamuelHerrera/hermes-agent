@@ -1328,10 +1328,6 @@ body.guest-pointer-lock :is(webview, iframe) {
   text-align: left;
 }
 
-[data-slot='aui_user-message-root'] {
-  top: var(--sticky-human-top);
-}
-
 [data-slot='aui_user-message-root'],
 [data-slot='aui_edit-composer-root'] {
   --human-msg-line-height: 1.3;
@@ -1346,10 +1342,10 @@ body.guest-pointer-lock :is(webview, iframe) {
   line-height: var(--human-msg-line-height);
 }
 
-/* Sticky human bubbles clamp to ~2 lines with a soft bottom fade so a long
-   prompt doesn't dominate the viewport. The clamp lifts only in the edit
-   composer; expanding on read-only :focus-within ran on mousedown (before the
-   swap) and fought stick-to-bottom when parked at the bottom. */
+/* Human bubbles clamp to ~2 lines with a soft bottom fade so a long prompt
+   doesn't dominate the viewport. The clamp lifts only in the edit composer;
+   expanding on read-only :focus-within ran on mousedown (before the swap) and
+   fought stick-to-bottom when parked at the bottom. */
 .sticky-human-clamp {
   cursor: pointer;
   max-height: calc(4 * var(--human-msg-line-height) * var(--conversation-text-font-size) + 0.15rem);
@@ -1362,8 +1358,8 @@ body.guest-pointer-lock :is(webview, iframe) {
 }
 
 /* Stick-to-bottom owns scrollTop while following. Once escaped, native anchoring
-   is safe and keeps sticky human edits from shoving the viewport; data-editing
-   enables that path before React swaps in the inline editor. */
+   is safe and keeps human edits from shoving the viewport; data-editing enables
+   that path before React swaps in the inline editor. */
 [data-slot='aui_thread-viewport'] {
   overflow-anchor: none;
 }
@@ -2585,10 +2581,6 @@ button[data-slot='aui_msg-reactions'] svg {
 
 [data-hud-shell] [data-slot='aui_user-message-root'] {
   background: transparent !important;
-  /* Not sticky in HUD mode: the band is a short log, and a pinned bubble
-     spends a third of it on a line you already read. Static rows scroll away
-     like everything else (the app keeps its sticky behavior — this is the
-     HUD's call, not a global one). */
   position: static !important;
 }
 
