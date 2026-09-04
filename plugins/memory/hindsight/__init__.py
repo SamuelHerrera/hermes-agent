@@ -41,6 +41,7 @@ import sys
 import threading
 import time
 
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -338,7 +339,26 @@ def _run_sync(coro, timeout: float = _DEFAULT_TIMEOUT):
     future = safe_schedule_threadsafe(coro, loop)
     if future is None:
         raise RuntimeError("Hindsight loop unavailable")
-    return future.result(timeout=timeout)
+    try:
+        return future.result(timeout=timeout)
+    except Exception:
+        # ``future.result(timeout=...)`` only gives up the synchronous waiter;
+        # it does not cancel the coroutine already accepted by the loop. A
+        # timed-out Hindsight request can otherwise keep the shared loop/client
+        # busy after the tool has reported failure, making later wrapper calls
+        # time out even while direct HTTP requests from a fresh process work.
+        future.cancel()
+        raise
+
+
+def _format_hindsight_exception(exc: Exception, *, timeout: float | int | None = None) -> str:
+    """Return a useful one-line message for Hindsight tool failures."""
+    if isinstance(exc, FutureTimeoutError):
+        if timeout:
+            return f"timed out after {timeout:g}s"
+        return "timed out"
+    text = str(exc).strip()
+    return text or type(exc).__name__
 
 
 # ---------------------------------------------------------------------------
@@ -1516,6 +1536,13 @@ class HindsightMemoryProvider(MemoryProvider):
         client = self._get_client()
         try:
             return self._run_sync(operation(client))
+        except FutureTimeoutError:
+            # A timeout means the synchronous caller abandoned a request that
+            # was already scheduled on the shared Hindsight loop. Drop the
+            # cached client so the next operation creates a fresh aiohttp
+            # session instead of reusing a potentially wedged one.
+            self._client = None
+            raise
         except Exception as exc:
             if not self._is_retriable_embedded_connection_error(exc):
                 raise
@@ -2304,8 +2331,9 @@ class HindsightMemoryProvider(MemoryProvider):
                 logger.debug("Tool hindsight_retain: success")
                 return json.dumps({"result": "Memory stored successfully."})
             except Exception as e:
-                logger.warning("hindsight_retain failed: %s", e, exc_info=True)
-                return tool_error(f"Failed to store memory: {e}")
+                detail = _format_hindsight_exception(e, timeout=self._timeout)
+                logger.warning("hindsight_retain failed: %s", detail, exc_info=True)
+                return tool_error(f"Failed to store memory: {detail}")
 
         elif tool_name == "hindsight_recall":
             query = args.get("query", "")
@@ -2331,8 +2359,9 @@ class HindsightMemoryProvider(MemoryProvider):
                 lines = [f"{i}. {r.text}" for i, r in enumerate(resp.results, 1)]
                 return json.dumps({"result": "\n".join(lines)})
             except Exception as e:
-                logger.warning("hindsight_recall failed: %s", e, exc_info=True)
-                return tool_error(f"Failed to search memory: {e}")
+                detail = _format_hindsight_exception(e, timeout=self._timeout)
+                logger.warning("hindsight_recall failed: %s", detail, exc_info=True)
+                return tool_error(f"Failed to search memory: {detail}")
 
         elif tool_name == "hindsight_reflect":
             query = args.get("query", "")
@@ -2349,8 +2378,9 @@ class HindsightMemoryProvider(MemoryProvider):
                 logger.debug("Tool hindsight_reflect: response_len=%d", len(resp.text or ""))
                 return json.dumps({"result": resp.text or "No relevant memories found."})
             except Exception as e:
-                logger.warning("hindsight_reflect failed: %s", e, exc_info=True)
-                return tool_error(f"Failed to reflect: {e}")
+                detail = _format_hindsight_exception(e, timeout=self._timeout)
+                logger.warning("hindsight_reflect failed: %s", detail, exc_info=True)
+                return tool_error(f"Failed to reflect: {detail}")
 
         return tool_error(f"Unknown tool: {tool_name}")
 

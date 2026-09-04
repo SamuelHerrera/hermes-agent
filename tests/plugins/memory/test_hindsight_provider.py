@@ -11,6 +11,7 @@ import re
 import stat
 import sys
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -23,8 +24,10 @@ from plugins.memory.hindsight import (
     RECALL_SCHEMA,
     REFLECT_SCHEMA,
     RETAIN_SCHEMA,
+    _format_hindsight_exception,
     _load_config,
     _load_simple_env,
+    _run_sync,
     _build_embedded_profile_env,
     _normalize_observation_scopes,
     _normalize_retain_tags,
@@ -506,6 +509,47 @@ class TestToolHandlers:
         assert provider._client is second_client
         first_client.arecall.assert_called_once()
         second_client.arecall.assert_called_once()
+
+    def test_run_sync_cancels_scheduled_operation_on_timeout(self, monkeypatch):
+        future = MagicMock()
+        future.result.side_effect = FutureTimeoutError()
+
+        monkeypatch.setattr("plugins.memory.hindsight._get_loop", lambda: object())
+        monkeypatch.setattr(
+            "agent.async_utils.safe_schedule_threadsafe",
+            lambda coro, loop: future,
+        )
+
+        with pytest.raises(FutureTimeoutError):
+            _run_sync(object(), timeout=0.01)
+
+        future.cancel.assert_called_once()
+
+    def test_timed_out_operation_drops_cached_client(self, provider, monkeypatch):
+        client = provider._client
+        monkeypatch.setattr(provider, "_run_sync", MagicMock(side_effect=FutureTimeoutError()))
+
+        with pytest.raises(FutureTimeoutError):
+            provider._run_hindsight_operation(lambda _client: object())
+
+        assert provider._client is None
+        assert client is not None
+
+    def test_tool_timeout_error_mentions_timeout_budget(self, provider, monkeypatch):
+        monkeypatch.setattr(
+            provider,
+            "_run_hindsight_operation",
+            MagicMock(side_effect=FutureTimeoutError()),
+        )
+
+        result = json.loads(provider.handle_tool_call(
+            "hindsight_recall", {"query": "dark mode"}
+        ))
+
+        assert result["error"] == "Failed to search memory: timed out after 120s"
+
+    def test_format_hindsight_exception_falls_back_to_type_name(self):
+        assert _format_hindsight_exception(RuntimeError()) == "RuntimeError"
 
 
 # ---------------------------------------------------------------------------
