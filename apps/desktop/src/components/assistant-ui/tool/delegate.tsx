@@ -9,6 +9,7 @@ import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { SCAFFOLD_LABEL_CLASS, SCAFFOLD_META_CLASS } from '@/components/chat/scaffold-row'
 import { FadeText } from '@/components/ui/fade-text'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { useI18n } from '@/i18n'
 import { AlertCircle, CheckCircle2 } from '@/lib/icons'
 import { displayModelName } from '@/lib/model-status-label'
@@ -109,10 +110,10 @@ function DelegateRowView({ row }: { row: DelegateRow }) {
           <ToolRunTicker>
             {activity.map((text, index) => (
               <FadeText
-                className={cn(SCAFFOLD_LABEL_CLASS, 'text-(--conversation-scaffold-meta)', live && 'shimmer')}
+                className={cn(SCAFFOLD_LABEL_CLASS, 'text-(--conversation-scaffold-meta)')}
                 key={`${row.id}:${index}`}
               >
-                {text}
+                {live ? <ShimmerPulse pulseKey={text}>{text}</ShimmerPulse> : text}
               </FadeText>
             ))}
           </ToolRunTicker>

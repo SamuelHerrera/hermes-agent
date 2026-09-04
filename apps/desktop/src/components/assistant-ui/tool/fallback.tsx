@@ -32,6 +32,7 @@ import { DisclosureCaret } from '@/components/ui/disclosure-caret'
 import { FadeText } from '@/components/ui/fade-text'
 import { FileTypeIcon } from '@/components/ui/file-type-icon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
@@ -309,7 +310,7 @@ function ToolTitle({
       {isPending && titleAction ? (
         <>
           {titleAction.prefix}
-          <span className="shimmer">{titleAction.text}</span>
+          <ShimmerPulse pulseKey={titleAction.text}>{titleAction.text}</ShimmerPulse>
           {titleAction.suffix}
         </>
       ) : (
@@ -804,7 +805,7 @@ function ToolRunHeader({
     <div data-conversation-scaffold="" data-tool-summary="">
       <ScaffoldRow onToggle={onToggle} open={open}>
         <FadeText className={cn(SCAFFOLD_LABEL_CLASS, 'truncate')}>
-          {live ? <span className="shimmer">{summary}</span> : summary}
+          {live ? <ShimmerPulse pulseKey={summary}>{summary}</ShimmerPulse> : summary}
         </FadeText>
       </ScaffoldRow>
     </div>

@@ -109,9 +109,40 @@ Pause CSS animation timelines for descendants of `data-pane-hidden`. The pane st
 
 The packaged-app behavior test passed. In the post-change isolated probe, 12 hidden shimmer labels fell from the pre-change 4.54% renderer average (3.8% median) to 0.87% average (0.1% median); the one 10% sample was a transient at condition setup. GPU-process CPU was 0.77% average, close to the adjacent 0.56% and 0.53% static controls. Visible animations are deliberately unaffected.
 
+## Step 2c — Bound visible shimmer animations
+
+**Status:** implemented; packaged production dogfood pending.
+
+### Problem
+
+After restarting the hidden-pane build with five active leases, the installed renderer still averaged 44.99% CPU and the GPU process averaged 38.12% CPU over 20 seconds while a visible turn was active. The normal and 200-turn synthetic Markdown streams remained within one slow frame over their 10.8-second windows, so replacing Markdown rendering before addressing the known infinite visible animation cost would not follow the strongest evidence.
+
+`tw-shimmer` animates text background position forever. Live tool titles, tool summaries, reasoning labels, delegation activity, artifacts, the Agents pane, and pet-generation status all used the unbounded class. A 15-second isolated production comparison with 12 labels measured:
+
+| Shimmer state | GPU-process CPU avg / median | Renderer CPU avg / median |
+|---|---:|---:|
+| Static before | 0.23% / 0.2% | 0.05% / 0.0% |
+| Infinite shimmer | 16.00% / 16.1% | 17.08% / 14.7% |
+| One finite shimmer sweep | 3.32% / 0.7% | 4.47% / 0.2% |
+| Static after | 1.73% / 1.1% | 1.34% / 0.4% |
+
+The finite run includes its initial visible sweep; after that sweep, median process CPU returned close to the static controls instead of remaining continuously elevated.
+
+### Change
+
+Add a shared `ShimmerPulse` primitive that preserves the same shimmer appearance but forces one iteration with a stable finished state. A meaningful `pulseKey` remounts the span and replays one sweep when activity text changes. Route every application shimmer call site through the bounded primitive. Existing glyph spinners, elapsed timers, progress bars, and changing labels continue to communicate liveness after the sweep completes.
+
+### Acceptance criteria
+
+- No application status uses the raw infinite `shimmer` class directly.
+- A shimmer performs one sweep, then its animation timeline finishes.
+- New activity can replay one sweep by changing `pulseKey`.
+- Caller classes and visual color variants remain intact.
+- Renderer/GPU-process CPU can return near static levels between visible activity changes.
+
 ## Step 3 — Reduce visible Markdown reparse cost
 
-**Status:** pending Step 2b production validation.
+**Status:** pending Step 2c production validation.
 
 ### Problem
 

@@ -9,6 +9,7 @@ import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { SCAFFOLD_LABEL_CLASS } from '@/components/chat/scaffold-row'
 import { Codicon } from '@/components/ui/codicon'
 import { Loader } from '@/components/ui/loader'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { StatusPulse } from '@/components/ui/status-pulse'
 import { useI18n } from '@/i18n'
 import { useSessionSlice } from '@/lib/use-session-slice'
@@ -48,8 +49,10 @@ const StatusRow: FC<{ children: ReactNode; label: string } & React.ComponentProp
 // Fixed label while auto-compaction runs — decoupled from backend status text.
 const COMPACTION_LABEL = 'Summarizing thread'
 
-const HintText: FC<{ children: ReactNode }> = ({ children }) => (
-  <span className={cn(SCAFFOLD_LABEL_CLASS, 'shimmer min-w-0 flex-1 truncate')}>{children}</span>
+const HintText: FC<{ children: string }> = ({ children }) => (
+  <ShimmerPulse className={cn(SCAFFOLD_LABEL_CLASS, 'min-w-0 flex-1 truncate')} pulseKey={children}>
+    {children}
+  </ShimmerPulse>
 )
 
 /** These indicators render inside whichever transcript mounted them, so every
@@ -173,7 +176,9 @@ export const BackgroundResumeNotice: FC<{ busy?: boolean; sessionId?: null | str
       role="status"
     >
       <Codicon className="text-muted-foreground/55" name="sync" size="0.75rem" />
-      <span className="shimmer min-w-0 truncate">{label}</span>
+      <ShimmerPulse className="min-w-0 truncate" pulseKey={label}>
+        {label}
+      </ShimmerPulse>
     </div>
   )
 }

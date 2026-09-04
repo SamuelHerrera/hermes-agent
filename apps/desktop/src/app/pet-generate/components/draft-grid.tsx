@@ -1,6 +1,7 @@
 import { PixelEggSprite } from '@/components/pet/pixel-egg-sprite'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
 import { PawPrint } from '@/lib/icons'
@@ -40,9 +41,11 @@ export function DraftGrid({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between text-[length:var(--conversation-caption-font-size)] text-(--ui-text-tertiary)">
-        <span className={cn(generating && 'shimmer shimmer-color-primary opacity-40', !generating && 'invisible')}>
-          {copy.generating}
-        </span>
+        {generating ? (
+          <ShimmerPulse className="shimmer-color-primary opacity-40">{copy.generating}</ShimmerPulse>
+        ) : (
+          <span className="invisible">{copy.generating}</span>
+        )}
         <span className="tabular-nums">
           {Math.min(drafts.length, VARIANT_COUNT)}/{VARIANT_COUNT}
         </span>

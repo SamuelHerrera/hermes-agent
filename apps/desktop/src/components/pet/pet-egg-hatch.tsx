@@ -10,6 +10,7 @@
 import { PixelEggSprite } from '@/components/pet/pixel-egg-sprite'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 
 interface PetEggHatchProps {
   subtitle?: string
@@ -49,8 +50,10 @@ export function PetEggHatch({ subtitle, onCancel, cancelLabel }: PetEggHatchProp
       </div>
 
       {subtitle && (
-        <p className="shimmer shimmer-color-primary whitespace-nowrap text-center text-[length:var(--conversation-caption-font-size)] leading-snug text-(--ui-text-tertiary)">
-          {subtitle}
+        <p className="whitespace-nowrap text-center text-[length:var(--conversation-caption-font-size)] leading-snug text-(--ui-text-tertiary)">
+          <ShimmerPulse className="shimmer-color-primary" pulseKey={subtitle}>
+            {subtitle}
+          </ShimmerPulse>
         </p>
       )}
 

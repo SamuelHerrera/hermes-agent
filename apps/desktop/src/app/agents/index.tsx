@@ -7,6 +7,7 @@ import { usePaneVisible } from '@/components/pane-shell/pane-visibility'
 import { Codicon } from '@/components/ui/codicon'
 import { FadeText } from '@/components/ui/fade-text'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { type Translations, useI18n } from '@/i18n'
 import { compactNumber } from '@/lib/format'
 import { AlertCircle, CheckCircle2 } from '@/lib/icons'
@@ -332,14 +333,18 @@ function SubagentRow({ node, depth = 0, nowMs }: { node: SubagentNode; depth?: n
       >
         <span className="mt-0.5 flex h-[1.1rem] shrink-0 items-center">{statusGlyph(node.status, t.agents)}</span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span
-            className={cn(
-              'wrap-anywhere text-[0.82rem] font-medium leading-[1.1rem] text-foreground/90 transition-colors group-hover:text-foreground',
-              running && 'shimmer text-foreground/65'
-            )}
-          >
-            {node.goal}
-          </span>
+          {running ? (
+            <ShimmerPulse
+              className="wrap-anywhere text-[0.82rem] font-medium leading-[1.1rem] text-foreground/65 transition-colors group-hover:text-foreground"
+              pulseKey={node.goal}
+            >
+              {node.goal}
+            </ShimmerPulse>
+          ) : (
+            <span className="wrap-anywhere text-[0.82rem] font-medium leading-[1.1rem] text-foreground/90 transition-colors group-hover:text-foreground">
+              {node.goal}
+            </span>
+          )}
           {subtitle.length > 0 ? (
             <FadeText className="text-[0.66rem] leading-[1.05rem] text-muted-foreground/65">
               {subtitle.join(' · ')}

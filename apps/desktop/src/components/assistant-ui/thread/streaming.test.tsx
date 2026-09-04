@@ -588,6 +588,8 @@ describe('assistant-ui streaming renderer', () => {
     const ui = within(container)
     const thinkingToggle = ui.getByRole('button', { name: /thinking/i })
 
+    expect((container.querySelector('.shimmer') as HTMLElement).style.animationIterationCount).toBe('1')
+
     if (thinkingToggle.getAttribute('aria-expanded') !== 'true') {
       fireEvent.click(thinkingToggle)
     }

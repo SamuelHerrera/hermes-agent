@@ -6,6 +6,7 @@ import { useEffect, useMemo } from 'react'
 import { useSessionView } from '@/app/chat/session-view'
 import { CodeCardIcon } from '@/components/chat/code-card'
 import { WIDGET_SHELL_CLASS } from '@/components/chat/widget-shell'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { useI18n } from '@/i18n'
 import type { ArtifactDetection } from '@/lib/artifact-detect'
 import { codiconForLanguage } from '@/lib/markdown-code'
@@ -110,14 +111,18 @@ export function ArtifactCard({ code, detection, streaming = false }: ArtifactCar
         <CodeCardIcon className="text-[1rem]" name={detectionIcon(detection)} />
       </span>
       <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            'block truncate text-[length:var(--conversation-text-font-size)] font-medium text-foreground',
-            streaming && 'shimmer text-foreground/55'
-          )}
-        >
-          {title}
-        </span>
+        {streaming ? (
+          <ShimmerPulse
+            className="block truncate text-[length:var(--conversation-text-font-size)] font-medium text-foreground/55"
+            pulseKey={title}
+          >
+            {title}
+          </ShimmerPulse>
+        ) : (
+          <span className="block truncate text-[length:var(--conversation-text-font-size)] font-medium text-foreground">
+            {title}
+          </span>
+        )}
         <span className="block truncate text-[length:var(--conversation-tool-font-size)] text-muted-foreground">
           {streaming
             ? copy.generating(lineCount)

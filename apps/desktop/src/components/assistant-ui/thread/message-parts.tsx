@@ -16,6 +16,7 @@ import { formatElapsed, useElapsedSeconds, useMeasuredDuration } from '@/compone
 import { ActivityTimerText } from '@/components/chat/activity-timer-text'
 import { GeneratedImage } from '@/components/chat/generated-image-result'
 import { SCAFFOLD_LABEL_CLASS, SCAFFOLD_META_CLASS, ScaffoldRow } from '@/components/chat/scaffold-row'
+import { ShimmerPulse } from '@/components/ui/shimmer-pulse'
 import { useI18n } from '@/i18n'
 import { generatedImageFromResult } from '@/lib/generated-images'
 import { separateGluedReasoningBlocks } from '@/lib/reasoning-blocks'
@@ -182,7 +183,11 @@ const ThinkingDisclosure: FC<{
       ref={enterRef}
     >
       <ScaffoldRow onToggle={() => setUserOpen(!open)} open={open}>
-        <span className={cn(SCAFFOLD_LABEL_CLASS, pending && 'shimmer')}>{thoughtLabel}</span>
+        {pending ? (
+          <ShimmerPulse className={SCAFFOLD_LABEL_CLASS}>{thoughtLabel}</ShimmerPulse>
+        ) : (
+          <span className={SCAFFOLD_LABEL_CLASS}>{thoughtLabel}</span>
+        )}
         {pending && <ActivityTimerText className={SCAFFOLD_META_CLASS} seconds={elapsed} />}
       </ScaffoldRow>
       {open && (

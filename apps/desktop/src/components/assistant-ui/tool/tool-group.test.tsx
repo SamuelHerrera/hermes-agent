@@ -522,6 +522,9 @@ describe('live tool run', () => {
     expect(await screen.findByText('Running 2 commands')).toBeTruthy()
     expect(container.querySelector('[data-tool-ticker]')).not.toBeNull()
     expect(container.querySelector('[data-tool-summary] button[aria-expanded]')).toBeNull()
+    expect((container.querySelector('[data-tool-summary] .shimmer') as HTMLElement).style.animationIterationCount).toBe(
+      '1'
+    )
   })
 
   // The ticker is a one-line window, so a row opened inside it had its output
