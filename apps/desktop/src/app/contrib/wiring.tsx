@@ -20,11 +20,8 @@ import { FindBar } from '@/components/find-bar'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
-import {
-  hideLoneTreeTab,
-  parkEmptyWorkspaceHost,
-  registerPaneCloser
-} from '@/components/pane-shell/tree/store'
+import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows/store'
+import { hideLoneTreeTab, parkEmptyWorkspaceHost, registerPaneCloser } from '@/components/pane-shell/tree/store'
 import { FloatingPet } from '@/components/pet/floating-pet'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
 import { emitGatewayEvent } from '@/contrib/events'
@@ -67,6 +64,7 @@ import {
   $resumeFailedSessionId,
   $selectedStoredSessionId,
   $sessions,
+  $workspaceEmptyPlaceholder,
   sessionMatchesStoredId,
   sessionPinId,
   setAwaitingResponse,
@@ -898,6 +896,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // it — Cursor-style. Every click opens a fresh "New session" tab (multiple
   // empty tabs are fine since none touch the session list).
   const openNewSessionTab = useCallback(() => {
+    if ($layoutSurfaceMode.get() === 'scroll-windows' && $workspaceEmptyPlaceholder.get()) {
+      setWorkspaceEmptyPlaceholder(false)
+    }
+
     void openNewSessionTile('center', { listed: false, source: 'tab-strip-or-keybind' })
   }, [openNewSessionTile])
 

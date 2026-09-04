@@ -11,6 +11,17 @@ import { allPaneIds, group, groupLeafIds, split } from '@/components/pane-shell/
 import { LayoutTreeRoot } from '@/components/pane-shell/tree/renderer'
 import type { DoubleTapContext } from '@/components/pane-shell/tree/renderer/drag-session'
 import {
+  $layoutSurfaceMode,
+  cycleScrollWindowFocus,
+  cycleScrollWorkspace,
+  SCROLL_WINDOW_WORKSPACE_IDS,
+  ScrollWindowsMinimap,
+  ScrollWindowsWorkspaceChips,
+  setActiveScrollWorkspace,
+  setLayoutSurfaceMode,
+  toggleLayoutSurfaceMode
+} from '@/components/pane-shell/tree/scroll-windows'
+import {
   $layoutTree,
   bindPaneVisibility,
   bindTreeSideVisibility,
@@ -36,7 +47,17 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { registry } from '@/contrib/registry'
 import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { NEW_SESSION_TITLE, sessionTitle as storedSessionTitle } from '@/lib/chat-runtime'
-import { Download, FileText, FolderOpen, GitCompare, LayoutDashboard, PanelBottom, Terminal, Upload, Zap } from '@/lib/icons'
+import {
+  Download,
+  FileText,
+  FolderOpen,
+  GitCompare,
+  LayoutDashboard,
+  PanelBottom,
+  Terminal,
+  Upload,
+  Zap
+} from '@/lib/icons'
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { setYoloEnabled } from '@/lib/yolo-session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
@@ -74,11 +95,7 @@ import type { SessionDragPayload } from '../chat/composer/inline-refs'
 import { watchPreviewTiles } from '../chat/preview-tile'
 import { watchRouteTiles } from '../chat/route-tile'
 import { startSessionDrag } from '../chat/session-drag'
-import {
-  stackSessionTilesIntoMain,
-  watchSessionTiles,
-  WorkspaceTabMenu
-} from '../chat/session-tile'
+import { stackSessionTilesIntoMain, watchSessionTiles, WorkspaceTabMenu } from '../chat/session-tile'
 import { SessionTabAttentionDot, SessionTabLead } from '../chat/subagent-session-icon'
 import { HudShell } from '../hud/hud-shell'
 import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
@@ -114,7 +131,6 @@ const RESTORING_SESSION_TITLE = 'Restoring session'
 // the contribution (new title) and a fresh closure would remount the chat.
 const renderWorkspacePane = () => <WiredPane part="chatRoutes" />
 
-
 function storedRowForPaneTitle(selected: string | null) {
   if (!selected) {
     return null
@@ -134,7 +150,6 @@ function storedRowForPaneTitle(selected: string | null) {
     null
   )
 }
-
 
 // Boot-hidden panes mount behind display:none (instant-toggle contract) — defer
 // them to idle so they're off the first-paint path, warm before reveal.
@@ -284,6 +299,87 @@ registry.registerMany([
     get: () => $layoutEditMode.get(),
     set: enabled => $layoutEditMode.set(enabled)
   }),
+  {
+    id: 'layout.surface.toggle',
+    area: KEYBINDS_AREA,
+    data: {
+      id: 'layout.surface.toggle',
+      label: 'Toggle scroll-window layout',
+      defaults: [],
+      run: toggleLayoutSurfaceMode
+    } satisfies KeybindContribution
+  },
+  {
+    id: 'scrollWindows.workspace.next',
+    area: KEYBINDS_AREA,
+    data: {
+      id: 'scrollWindows.workspace.next',
+      label: 'Scroll windows: next workspace',
+      defaults: [],
+      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWorkspace(1)
+    } satisfies KeybindContribution
+  },
+  {
+    id: 'scrollWindows.workspace.previous',
+    area: KEYBINDS_AREA,
+    data: {
+      id: 'scrollWindows.workspace.previous',
+      label: 'Scroll windows: previous workspace',
+      defaults: [],
+      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWorkspace(-1)
+    } satisfies KeybindContribution
+  },
+  ...SCROLL_WINDOW_WORKSPACE_IDS.map(id => ({
+    id: `scrollWindows.workspace.${id}`,
+    area: KEYBINDS_AREA,
+    data: {
+      id: `scrollWindows.workspace.${id}`,
+      label: `Scroll windows: switch to workspace ${id}`,
+      defaults: [],
+      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && setActiveScrollWorkspace(id)
+    } satisfies KeybindContribution
+  })),
+  {
+    id: 'scrollWindows.window.next',
+    area: KEYBINDS_AREA,
+    data: {
+      id: 'scrollWindows.window.next',
+      label: 'Scroll windows: focus next window',
+      defaults: [],
+      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWindowFocus(1)
+    } satisfies KeybindContribution
+  },
+  {
+    id: 'scrollWindows.window.previous',
+    area: KEYBINDS_AREA,
+    data: {
+      id: 'scrollWindows.window.previous',
+      label: 'Scroll windows: focus previous window',
+      defaults: [],
+      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWindowFocus(-1)
+    } satisfies KeybindContribution
+  },
+  paletteToggle({
+    id: 'layout.surface.scrollWindows',
+    label: 'Toggle scroll-window layout',
+    action: 'layout.surface.toggle',
+    icon: LayoutDashboard,
+    keywords: ['layout', 'surface', 'scroll windows', 'workspace', 'minimap', 'omarchy'],
+    get: () => $layoutSurfaceMode.get() === 'scroll-windows',
+    set: enabled => setLayoutSurfaceMode(enabled ? 'scroll-windows' : 'tabbed')
+  }),
+  {
+    id: 'scrollWindows.minimap',
+    area: 'titleBar.center',
+    order: 10,
+    render: () => <ScrollWindowsMinimap />
+  },
+  {
+    id: 'scrollWindows.workspaces',
+    area: 'titleBar.right',
+    order: 20,
+    render: () => <ScrollWindowsWorkspaceChips />
+  },
   // The agent's write -> see loop: rescan <hermes home>/desktop-plugins
   // without relaunching (same-id reloads dispose the previous incarnation).
   {
@@ -809,16 +905,14 @@ export function ContribController() {
               />
               <TitlebarSlot
                 area="titleBar.right"
-                className="pointer-events-auto absolute z-10 flex w-max items-center gap-2 [-webkit-app-region:no-drag]"
+                className="pointer-events-auto absolute top-1/2 z-10 flex w-max -translate-y-1/2 items-center gap-0 [-webkit-app-region:no-drag]"
                 style={{
-                  right:
-                    'max(calc(var(--workspace-right, 0px) + 0.5rem), calc(var(--titlebar-tools-right, 0.75rem) + 4 * var(--titlebar-control-size, 24px) + 0.5rem))'
+                  right: 'var(--titlebar-tools-right, 0.75rem)'
                 }}
               />
             </div>
 
             <LayoutTreeRoot />
-
           </div>
         </ShellContextMenu>
       </ContribWiring>
