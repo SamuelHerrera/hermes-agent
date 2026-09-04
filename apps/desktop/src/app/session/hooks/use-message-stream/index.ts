@@ -30,6 +30,7 @@ import { setSessionTodos } from '@/store/todos'
 import type { ClientSessionState } from '../../../types'
 
 import { useGatewayEventHandler } from './gateway-event'
+import { upsertStreamMessage } from './stream-message'
 import { completionErrorText, delegateTaskPayloads, MAX_STREAM_FLUSH_GAP_MS, STREAM_DELTA_FLUSH_MS } from './utils'
 
 interface MessageStreamOptions {
@@ -102,30 +103,22 @@ export function useMessageStream({
           const streamId = state.streamId ?? nextStreamMessageId('assistant-stream')
           const groupId = state.pendingBranchGroup ?? undefined
           const prev = state.messages
-          let nextMessages: ChatMessage[]
-
-          if (!prev.some(m => m.id === streamId)) {
-            nextMessages = [
-              ...prev,
-              {
+          const nextMessages = upsertStreamMessage(
+            prev,
+            streamId,
+            () => ({
                 id: streamId,
                 role: 'assistant',
                 parts: seed(),
                 pending: true,
                 branchGroupId: groupId
-              }
-            ]
-          } else {
-            nextMessages = prev.map(m =>
-              m.id === streamId
-                ? {
-                    ...m,
-                    parts: transform(m.parts, m),
-                    pending: opts.pending ? opts.pending(m) : true
-                  }
-                : m
-            )
-          }
+              }),
+            message => ({
+              ...message,
+              parts: transform(message.parts, message),
+              pending: opts.pending ? opts.pending(message) : true
+            })
+          )
 
           return {
             ...state,

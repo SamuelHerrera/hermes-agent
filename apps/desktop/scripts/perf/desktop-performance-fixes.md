@@ -14,7 +14,7 @@ The baseline and evidence are in [`desktop-cpu-gpu-investigation.md`](./desktop-
 
 ## Step 1 — Replace infinite session-status spinners
 
-**Status:** implemented as the initial checkpoint.
+**Status:** implemented, dogfooded, and visually corrected.
 
 ### Problem
 
@@ -22,14 +22,19 @@ A working session used an infinite one-second CSS rotation in every sidebar row 
 
 ### Change
 
-Replace the rotating Codicon ring in `LoadingProjectDot` with the existing shared `StatusPulse` mechanism:
+Replace the infinite rotation with the existing shared `StatusPulse` mechanism:
 
 - retain the stable project-color dot;
-- retain a visible accent ring around it;
-- briefly pulse the ring once every five seconds;
+- retain the original 0.75rem Codicon glyph geometry rather than substituting a heavier CSS border ring;
+- briefly pulse the glyph once every five seconds;
 - synchronize all status pulses through one scheduler;
 - let the existing pause controller stop animations while the window is hidden, minimized, or unfocused;
-- render no `codicon-modifier-spin` for a working or stalled session.
+- render no `codicon-modifier-spin` for a working or stalled session;
+- apply the same finite treatment to the project-summary sync arrows, which were the two remaining permanent rotations seen after the first restart.
+
+### First restart observation
+
+With five active leases after restart, a 15-second sample measured the renderer at 51.5% CPU average (24.4–128.9%) and the GPU helper at 15.5% average (6.4–20.7%). This is lower than the earlier baseline, but the workloads are not identical, so it is evidence of progress rather than a controlled before/after result. The renderer remained materially busy, which supports continuing to Step 2.
 
 ### Acceptance criteria
 
@@ -41,13 +46,13 @@ Replace the rotating Codicon ring in `LoadingProjectDot` with the existing share
 
 ## Step 2 — Make streaming-tail replacement O(1)
 
-**Status:** pending dogfood results from Step 1.
+**Status:** implemented; production dogfood pending.
 
 ### Problem
 
 Every stream flush first scans the full message array and then maps the full array to replace the item identified by `streamId`. Long sessions multiply this work across concurrent streams.
 
-### Proposed change
+### Change
 
 Introduce a tested immutable tail-update helper:
 
@@ -57,6 +62,8 @@ Introduce a tested immutable tail-update helper:
 4. Preserve object and array identity when the transform is a no-op.
 
 Do not assume the stream is always last without retaining the recovery path; interim boundaries and tool segments can change message shape.
+
+The helper now takes the O(1) tail path for normal token flushes, performs one reverse scan for unusual non-tail streams, appends absent streams, and preserves the existing array when an updater returns the existing message. The full `use-message-stream` suite covers the integration path.
 
 ### Acceptance criteria
 
