@@ -128,6 +128,7 @@ export default {
     // stress, but not the typical number. No raw autolink (avoids DNS/link-embed
     // noise unrelated to render cost).
     const chunk = opts.chunk ?? 'A streamed sentence with **bold**, `code`, and ordinary prose like a normal reply.\n\n'
+    const prefix = opts.prefix ?? ''
     const real = Boolean(opts.real)
     const historyTurns = Number(opts.historyTurns ?? 0)
     const historySettleMs = Number(opts.historySettleMs ?? 1500)
@@ -197,7 +198,7 @@ export default {
     } else {
       // Synthetic path: drive $messages directly. No LLM, no credits.
       await cdp.eval(
-        `window.__PERF_DRIVE__.stream({ chunk: ${JSON.stringify(chunk)}, intervalMs: ${intervalMs}, totalTokens: ${tokens}, flushMinMs: ${flushMinMs} })`
+        `window.__PERF_DRIVE__.stream({ chunk: ${JSON.stringify(chunk)}, intervalMs: ${intervalMs}, prefix: ${JSON.stringify(prefix)}, totalTokens: ${tokens}, flushMinMs: ${flushMinMs} })`
       )
       await sleep(200)
       await cdp.eval('window.__MO__.arm()')

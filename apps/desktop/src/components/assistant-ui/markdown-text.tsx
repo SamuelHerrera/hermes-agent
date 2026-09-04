@@ -57,6 +57,7 @@ import { ArtifactCard } from './artifact-card'
 import { SessionRefLink } from './directive-text'
 import { detectEmbed, extractAlert, MarkdownAlert, RichCodeBlock, UrlEmbed } from './embeds'
 import { ResizableMarkdownTable, ResizableMarkdownTh } from './markdown-table'
+import { useStreamingTextCadence } from './streaming-text-cadence'
 
 // Math rendering plugin (KaTeX). Configured once at module scope — the
 // plugin is stateless beyond its internal cache so re-creating per-render
@@ -639,7 +640,7 @@ function HugeTextFallback({ containerClassName, text }: { containerClassName?: s
   )
 }
 
-function MarkdownTextSurface({
+function MarkdownTextSurfaceInner({
   containerClassName,
   containerProps,
   defer,
@@ -803,6 +804,20 @@ function MarkdownTextSurface({
         preprocess={preprocessWithTailRepair}
       />
     </ErrorBoundary>
+  )
+}
+
+const MemoizedMarkdownTextSurface = memo(MarkdownTextSurfaceInner)
+
+function MarkdownTextSurface(props: MarkdownTextSurfaceProps) {
+  const { status, text } = useMessagePartText()
+  const isStreaming = status.type === 'running'
+  const visibleText = useStreamingTextCadence(text, isStreaming)
+
+  return (
+    <TextMessagePartProvider isRunning={isStreaming} text={visibleText}>
+      <MemoizedMarkdownTextSurface {...props} />
+    </TextMessagePartProvider>
   )
 }
 

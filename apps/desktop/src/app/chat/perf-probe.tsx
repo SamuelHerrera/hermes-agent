@@ -35,7 +35,12 @@ declare global {
     }
     __PERF_DRIVE__?: {
       /** Inject an assistant message and grow it by `chunk` every `intervalMs`. Returns a stop handle. */
-      stream: (opts?: { chunk?: string; intervalMs?: number; totalTokens?: number }) => SyntheticDriverHandle
+      stream: (opts?: {
+        chunk?: string
+        intervalMs?: number
+        prefix?: string
+        totalTokens?: number
+      }) => SyntheticDriverHandle
       /**
        * Replace the transcript with `turns` synthetic user/assistant pairs of
        * realistic mixed markdown, then resolve with the ms elapsed from the
@@ -303,6 +308,7 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
     stream: ({
       chunk = 'word ',
       intervalMs = 16,
+      prefix = '',
       totalTokens = 400,
       // Mimic `use-message-stream.scheduleDeltaFlush` — batch token deltas
       // into at-most one $messages update every `flushMinMs` ms, exactly as
@@ -311,7 +317,7 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
       // rate would feel like. Set to 0 to bypass and apply every token
       // immediately (worst-case).
       flushMinMs = 0
-    }: { chunk?: string; intervalMs?: number; totalTokens?: number; flushMinMs?: number } = {}) => {
+    }: { chunk?: string; intervalMs?: number; prefix?: string; totalTokens?: number; flushMinMs?: number } = {}) => {
       activeHandle?.stop()
       const current = $messages.get()
 
@@ -326,7 +332,7 @@ if (typeof window !== 'undefined' && !window.__PERF_DRIVE__) {
         {
           id: msgId,
           role: 'assistant',
-          parts: [{ type: 'text', text: '' }],
+          parts: [{ type: 'text', text: prefix }],
           timestamp: Date.now(),
           pending: true
         }

@@ -142,19 +142,24 @@ Add a shared `ShimmerPulse` primitive that preserves the same shimmer appearance
 
 ## Step 3 — Reduce visible Markdown reparse cost
 
-**Status:** pending Step 2c production validation.
+**Status:** implemented; packaged production dogfood pending.
 
 ### Problem
 
-The open Markdown block grows throughout a streamed answer. Streamdown reparses and rerenders that growing block on each visible flush; code fences are the worst case.
+The open Markdown block grows throughout a streamed answer. Existing tail repair, incremental block splitting, and deferred Shiki work already prevent several full-history costs, but Streamdown still parses and reconciles the current growing block at the transport flush cadence. A source-mapped development CPU profile attributed the dominant JavaScript self-time to Micromark tokenization (`create-tokenizer.js`), with additional Markdown preprocessing and artifact-detection scans.
 
-### Proposed investigation and change
+### Change
 
-- Capture a production CDP CPU profile for prose and fenced-code streams separately.
-- Confirm whether parse, syntax highlighting, or React reconciliation dominates.
-- Keep settled blocks memoized and isolate only the unfinished tail.
-- Consider a lower visual update cadence for expensive unfinished blocks while preserving immediate terminal-state flushes.
-- Never delay storage or gateway ingestion merely to reduce paint cadence.
+Keep the transport/store path unchanged and cap only the rendered Markdown cadence for a small append to a running message larger than 8 KiB. The visible surface coalesces to the latest text every 66 ms; ordinary short streams remain immediate. Final content, non-append rewrites, and catch-up jumps larger than 4 KiB bypass the buffer so completion and a tab revealed after background work appear immediately.
+
+The perf driver now accepts an initial prefix so an open fenced-code stream can be compared with identical growing prose. In a three-run interleaved production A/B using the same 600-token TypeScript fence and 33 ms transport flush:
+
+| Mode | DOM mutations median | Renderer JS self-time median |
+|---|---:|---:|
+| Unbounded visible cadence | 295 | 840.6 ms |
+| 66 ms visible cadence after 8 KiB | 178 | 444.0 ms |
+
+That is 39.7% fewer DOM mutations and 47.2% less renderer JavaScript self-time. Both modes had zero frames over 33 ms and frame p95 at or below 16.9 ms in the interleaved run, so the reduced parse cadence did not introduce measurable stalls. Earlier non-interleaved frame samples varied with system load and are not used for the conclusion.
 
 ### Acceptance criteria
 
