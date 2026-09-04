@@ -1,7 +1,9 @@
+import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useNavigate } from 'react-router'
 
 import { hasTextSelection } from '@/components/assistant-ui/thread/user-message'
+import { $layoutSurfaceMode, toggleLayoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows'
 import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
 import { useI18n } from '@/i18n'
 import { isEditableTarget } from '@/lib/keybinds/combo'
@@ -27,6 +29,7 @@ import { navigateToWorkspacePage, NEW_CHAT_ROUTE, SETTINGS_ROUTE } from '../rout
 export function ShellContextMenu({ children }: { children: React.ReactNode }) {
   const { t } = useI18n()
   const navigate = useNavigate()
+  const layoutSurfaceMode = useStore($layoutSurfaceMode)
 
   const items = (kit: MenuKit) => (
     <>
@@ -47,6 +50,11 @@ export function ShellContextMenu({ children }: { children: React.ReactNode }) {
         onSelect: openCommandPalette
       })}
       <kit.Separator />
+      {renderActionItem(kit, {
+        icon: 'layout',
+        label: layoutSurfaceMode === 'scroll-windows' ? 'Use tabbed layout' : 'Use scroll-window layout',
+        onSelect: toggleLayoutSurfaceMode
+      })}
       {renderActionItem(kit, {
         icon: 'layout-statusbar',
         label: t.keybinds.actions['view.toggleStatusbar'],

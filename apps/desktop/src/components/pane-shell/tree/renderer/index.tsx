@@ -25,6 +25,8 @@ import { type ReactNode, useEffect } from 'react'
 
 import { useLayoutEditHotkey } from '../../edit-mode'
 import { publishWorkspaceGeometry } from '../../geometry'
+import { $layoutSurfaceMode } from '../scroll-windows/store'
+import { ScrollWindowWorkspace } from '../scroll-windows/workspace'
 import { $layoutTree, trackActiveTreeGroup } from '../store'
 import { ZoneEditor } from '../zone-editor'
 
@@ -35,6 +37,7 @@ import { TreeNode } from './tree-node'
 
 export function LayoutTreeRoot({ children }: { children?: ReactNode }) {
   const tree = useStore($layoutTree)
+  const layoutSurfaceMode = useStore($layoutSurfaceMode)
 
   useLayoutEditHotkey(true)
   // Track the interacted zone so ⌘W closes the right tab even when nothing is
@@ -72,12 +75,18 @@ export function LayoutTreeRoot({ children }: { children?: ReactNode }) {
           display: none;
         }
       `}</style>
-      <TreeNode node={tree} root rootRow={tree.type === 'split' && tree.orientation === 'row'} />
-      <NarrowOverlays />
-      {/* Non-tiling panes: fixed cards above the tree, outside every zone. */}
-      <FloatingPanes />
-      <TreeEditBar />
-      <ZoneEditor />
+      {layoutSurfaceMode === 'tabbed' ? (
+        <>
+          <TreeNode node={tree} root rootRow={tree.type === 'split' && tree.orientation === 'row'} />
+          <NarrowOverlays />
+          {/* Non-tiling panes: fixed cards above the tree, outside every zone. */}
+          <FloatingPanes />
+          <TreeEditBar />
+          <ZoneEditor />
+        </>
+      ) : (
+        <ScrollWindowWorkspace />
+      )}
       {children}
     </div>
   )
