@@ -35,7 +35,10 @@ const continuousSpinner = (container: HTMLElement) => container.querySelector<HT
 
 const normalDot = (container: HTMLElement) => container.querySelector('span[aria-hidden="true"].rounded-full')
 const loadingRing = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-session-status="working"]')
-const livePulse = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-session-live-pulse]')
+const livePulse = (container: HTMLElement) => container.querySelector<SVGCircleElement>('[data-session-live-pulse]')
+
+const liveProjectDot = (container: HTMLElement) =>
+  container.querySelector<SVGCircleElement>('[data-session-project-dot-shape]')
 
 describe('SessionStatusDot running icon', () => {
   it('shows a finite live pulse instead of a continuous spinner while a session is running', () => {
@@ -47,10 +50,12 @@ describe('SessionStatusDot running icon', () => {
 
     expect(continuousSpinner(container)).toBeNull()
     expect(livePulse(container)).toBeTruthy()
-    expect(livePulse(container)?.querySelector('.codicon-circle-large-outline')).toBeTruthy()
-    expect(livePulse(container)?.querySelector('.codicon-loading')).toBeNull()
+    expect(livePulse(container)?.ownerSVGElement).toBe(liveProjectDot(container)?.ownerSVGElement)
+    expect(livePulse(container)?.getAttribute('cx')).toBe(liveProjectDot(container)?.getAttribute('cx'))
+    expect(livePulse(container)?.getAttribute('cy')).toBe(liveProjectDot(container)?.getAttribute('cy'))
+    expect(container.querySelector('.codicon-circle-large-outline')).toBeNull()
     expect(ring?.classList.contains('size-3')).toBe(true)
-    expect(normalDot(container)).toBeTruthy()
+    expect(liveProjectDot(container)).toBeTruthy()
   })
 
   it('does not show a live pulse for a settled session', () => {
@@ -87,10 +92,12 @@ describe('session tab attention treatment', () => {
     expect(lead.container.querySelector('[data-session-project-dot] [data-session-status="working"]')).toBeTruthy()
     expect(continuousSpinner(lead.container)).toBeNull()
     expect(livePulse(lead.container)).toBeTruthy()
-    expect(livePulse(lead.container)?.querySelector('.codicon-circle-large-outline')).toBeTruthy()
-    expect(livePulse(lead.container)?.querySelector('.codicon-loading')).toBeNull()
+    expect(livePulse(lead.container)?.ownerSVGElement).toBe(liveProjectDot(lead.container)?.ownerSVGElement)
+    expect(livePulse(lead.container)?.getAttribute('cx')).toBe(liveProjectDot(lead.container)?.getAttribute('cx'))
+    expect(livePulse(lead.container)?.getAttribute('cy')).toBe(liveProjectDot(lead.container)?.getAttribute('cy'))
+    expect(lead.container.querySelector('.codicon-circle-large-outline')).toBeNull()
     expect(tabRing?.classList.contains('size-3')).toBe(true)
-    expect(normalDot(lead.container)).toBeTruthy()
+    expect(liveProjectDot(lead.container)).toBeTruthy()
 
     const attention = render(<SessionTabAttentionDot storedSessionId="s1" />)
 

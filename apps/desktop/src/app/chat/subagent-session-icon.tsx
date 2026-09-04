@@ -15,6 +15,7 @@ export interface SubagentSessionIconProps {
 }
 
 export interface SessionTabLeadProps {
+  fallbackColor?: null | string
   session: null | SessionInfo | undefined
   storedSessionId: null | string
 }
@@ -22,11 +23,11 @@ export interface SessionTabLeadProps {
 /** A tab has a stable leading identity glyph: subagents keep the robot, every
  * other session keeps the project/session color dot. Live loading wraps that
  * dot; settled attention stays on the tab's trailing edge. */
-export function SessionTabLead({ session, storedSessionId }: SessionTabLeadProps) {
+export function SessionTabLead({ fallbackColor, session, storedSessionId }: SessionTabLeadProps) {
   return isSubagentSession(session) ? (
     <SubagentSessionIcon session={session} storedSessionId={storedSessionId} />
   ) : (
-    <SessionProjectDot session={session} storedSessionId={storedSessionId} />
+    <SessionProjectDot fallbackColor={fallbackColor} session={session} storedSessionId={storedSessionId} />
   )
 }
 

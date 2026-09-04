@@ -864,8 +864,10 @@ export function useSessionActions({
         const runtimeInfo = applyRuntimeInfo(created.info, { foreground: false })
         updateSessionState(created.session_id, state => (runtimeInfo ? { ...state, ...runtimeInfo } : state), stored)
 
-        openSessionTile(stored, dir)
-        patchSessionTile(stored, { runtimeId: created.session_id })
+        openSessionTile(stored, dir, undefined, undefined, {
+          runtimeId: created.session_id,
+          workspaceCwd: runtimeInfo?.cwd ?? options?.cwd?.trim()
+        })
 
         if (dir === 'center' && runtimeInfo?.cwd) {
           setCurrentCwdTransient(runtimeInfo.cwd)

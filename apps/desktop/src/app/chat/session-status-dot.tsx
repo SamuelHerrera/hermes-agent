@@ -1,7 +1,7 @@
 import { useStore } from '@nanostores/react'
 
 import { Codicon } from '@/components/ui/codicon'
-import { StatusPulse } from '@/components/ui/status-pulse'
+import { useStatusPulseRef } from '@/components/ui/status-pulse'
 import { Tip } from '@/components/ui/tooltip'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
@@ -166,6 +166,7 @@ function LoadingProjectDot({
 }) {
   const variant = DOT_VARIANTS[state]
   const label = variant.ariaLabel?.(r)
+  const pulseRef = useStatusPulseRef<SVGCircleElement>('opacity')
 
   return (
     <span
@@ -175,15 +176,25 @@ function LoadingProjectDot({
       role={variant.role}
       title={variant.title?.(r) ?? label}
     >
-      <StatusPulse
-        aria-hidden="true"
-        className="absolute inset-0 grid place-items-center"
-        data-session-live-pulse
-        kind="opacity"
-      >
-        <Codicon className="block leading-none" name="circle-large-outline" size="0.75rem" />
-      </StatusPulse>
-      <ProjectColorDot color={color} />
+      <svg aria-hidden="true" className="block size-full overflow-visible" viewBox="0 0 12 12">
+        <circle
+          cx="6"
+          cy="6"
+          data-session-live-pulse
+          data-session-live-ring
+          fill="none"
+          r="5.5"
+          ref={pulseRef}
+          stroke="currentColor"
+        />
+        <circle
+          cx="6"
+          cy="6"
+          data-session-project-dot-shape
+          fill={color ?? 'var(--ui-text-quaternary)'}
+          r="2"
+        />
+      </svg>
     </span>
   )
 }
@@ -203,6 +214,8 @@ export interface SessionStatusDotProps {
    *  project color even for a session older than the paginated recents page
    *  (which has no `$sessionColorById` entry). */
   session?: null | SessionInfo
+  /** Project tint supplied by a draft tab before it has a listed session row. */
+  fallbackColor?: null | string
   /** TUI-style tree stem for a branched session (`└─ ` / `├─ `). */
   branchStem?: string
   /** Applied to the OUTER wrapper (stem + dot) — e.g. hover-fade on the
@@ -212,17 +225,23 @@ export interface SessionStatusDotProps {
 
 export type SessionProjectDotProps = Pick<
   SessionStatusDotProps,
-  'branchStem' | 'className' | 'session' | 'storedSessionId'
+  'branchStem' | 'className' | 'fallbackColor' | 'session' | 'storedSessionId'
 >
 
 /** Project/session identity, with live-turn motion wrapped around the color dot. */
-export function SessionProjectDot({ session, storedSessionId, branchStem, className }: SessionProjectDotProps) {
+export function SessionProjectDot({
+  session,
+  storedSessionId,
+  branchStem,
+  className,
+  fallbackColor
+}: SessionProjectDotProps) {
   const { t } = useI18n()
   const r = t.sidebar.row
 
   useStore($sessionColorById)
 
-  const color = sessionColorFor(session) ?? null
+  const color = sessionColorFor(session) ?? fallbackColor ?? null
 
   const dotState = useStoreSelector($sessionDotStateById, states =>
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'idle'

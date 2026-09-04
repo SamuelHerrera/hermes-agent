@@ -35,7 +35,7 @@ import { NEW_SESSION_TITLE, sessionTitle } from '@/lib/chat-runtime'
 import { $draftTitles, createComposerAttachmentScope, draftTitleFor, draftTitleIn } from '@/store/composer'
 import { $pinnedSessionIds, pinSession, unpinSession } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
-import { $projectTree } from '@/store/projects'
+import { $projectTree, projectColorForCwd } from '@/store/projects'
 import { sessionAwaitingInput } from '@/store/prompts'
 import {
   $gatewayState,
@@ -588,8 +588,15 @@ const watchSessionTilePanes = paneMirror<SessionTile>({
   // state sits at the tab's trailing edge so it cannot hide the project color.
   tabLead: storedSessionId => {
     const stored = tileStoredRow(storedSessionId)
+    const workspaceCwd = $sessionTiles.get().find(tile => tile.storedSessionId === storedSessionId)?.workspaceCwd
 
-    return <SessionTabLead session={stored} storedSessionId={storedSessionId} />
+    return (
+      <SessionTabLead
+        fallbackColor={stored || !workspaceCwd ? null : projectColorForCwd(workspaceCwd)}
+        session={stored}
+        storedSessionId={storedSessionId}
+      />
+    )
   },
   tabTrailing: storedSessionId => <SessionTabAttentionDot storedSessionId={storedSessionId} />,
   // Until the first turn lists a row there is no title to register, so the tab

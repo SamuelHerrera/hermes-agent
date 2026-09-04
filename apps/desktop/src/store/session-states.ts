@@ -440,6 +440,9 @@ export interface SessionTile {
   preview?: boolean
   /** Last known non-draft tab title, persisted so restart does not flash "New session". */
   workspaceTabTitle?: string
+  /** Creation workspace for an unlisted draft. Kept in memory until the first
+   * persisted session row can authoritatively provide its project identity. */
+  workspaceCwd?: string
 }
 
 // Tiles are persisted PER PROFILE: a session belongs to one profile, and the
@@ -706,7 +709,8 @@ export function openSessionTile(
   storedSessionId: string,
   dir: TileDock = 'right',
   anchor?: string,
-  before?: null | string
+  before?: null | string,
+  initial?: Pick<SessionTile, 'runtimeId' | 'workspaceCwd'>
 ) {
   logUatEvent('tabs', 'session-tile.open.requested', {
     anchor: anchor ?? null,
@@ -722,7 +726,7 @@ export function openSessionTile(
     return
   }
 
-  placeSessionTile(storedSessionId, dir, anchor, before)
+  placeSessionTile(storedSessionId, dir, anchor, before, initial)
 }
 
 /** Move the primary workspace session into a real session tile. This is the
@@ -746,7 +750,13 @@ export function detachWorkspaceSessionToTile(
   hideLoneTreeTab('workspace')
 }
 
-function placeSessionTile(storedSessionId: string, dir: TileDock, anchor?: string, before?: null | string) {
+function placeSessionTile(
+  storedSessionId: string,
+  dir: TileDock,
+  anchor?: string,
+  before?: null | string,
+  initial?: Pick<SessionTile, 'runtimeId' | 'workspaceCwd'>
+) {
   const tiles = $sessionTiles.get()
 
   const dock = anchor ?? focusedSessionTabAnchor() ?? undefined
@@ -760,7 +770,7 @@ function placeSessionTile(storedSessionId: string, dir: TileDock, anchor?: strin
   })
 
   if (!tiles.some(t => t.storedSessionId === storedSessionId)) {
-    saveTiles([...tiles, { anchor: dock, before, dir, storedSessionId }], 'session-tile.open')
+    saveTiles([...tiles, { anchor: dock, before, dir, storedSessionId, ...initial }], 'session-tile.open')
     // Adoption is async via the registry — order sync runs after the move path
     // below; a brand-new tile's strip slot is already in `before`.
 

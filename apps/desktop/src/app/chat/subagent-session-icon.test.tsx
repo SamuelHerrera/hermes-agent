@@ -54,3 +54,15 @@ describe('SessionTabLead subagent indicator', () => {
     expect(container.querySelectorAll('.codicon-loading.codicon-modifier-spin')).toHaveLength(0)
   })
 })
+
+describe('SessionTabLead draft project identity', () => {
+  it('uses the project fallback color before the draft has a session row', () => {
+    const { container } = render(
+      <SessionTabLead fallbackColor="#4a9eff" session={undefined} storedSessionId="draft" />
+    )
+
+    expect(container.querySelector<HTMLElement>('[data-session-project-dot] .rounded-full')?.style.backgroundColor).toBe(
+      'rgb(74, 158, 255)'
+    )
+  })
+})

@@ -2764,7 +2764,11 @@ describe('selectSidebarItem', () => {
 
     await waitFor(() =>
       expect($sessionTiles.get()).toEqual([
-        expect.objectContaining({ runtimeId: 'runtime-new', storedSessionId: 'stored-new' })
+        expect.objectContaining({
+          runtimeId: 'runtime-new',
+          storedSessionId: 'stored-new',
+          workspaceCwd: '/new-chat'
+        })
       ])
     )
     expect(requestGateway).toHaveBeenCalledWith('session.create', expect.any(Object))

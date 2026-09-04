@@ -375,6 +375,15 @@ export function projectIdForCwd(cwd: string): null | string {
   return best
 }
 
+/** The current project tint for a workspace path. Draft session tabs have a
+ * cwd before they have a listed session row, so they resolve through the same
+ * live project-tree membership used by the sidebar instead of painting grey. */
+export function projectColorForCwd(cwd: string): null | string {
+  const projectId = projectIdForCwd(cwd)
+
+  return projectId ? ($projectTree.get().find(project => project.id === projectId)?.color ?? null) : null
+}
+
 // The display NAME of the explicit, named project owning `cwd` (longest path
 // match), or null when the cwd sits in no named project. The status bar reads
 // this to label the workspace by project instead of the bare cwd leaf. We skip

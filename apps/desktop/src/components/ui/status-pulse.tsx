@@ -84,17 +84,8 @@ export interface StatusPulseProps extends Omit<ComponentProps<'span'>, 'ref'> {
   opacity?: number
 }
 
-/**
- * A finite status pulse with a real sleep between plays.
- *
- * Continuous CSS animations keep Chromium producing frames and recalculating
- * styles for an otherwise motionless Desktop window. Drive the same visual
- * cue directly so React stays out of the loop and the renderer/compositor can
- * sleep between pulses. Optional children keep the exact geometry of an
- * existing status glyph while this wrapper owns only its finite opacity beat.
- */
-export function StatusPulse({ kind, opacity = 1, ...props }: StatusPulseProps) {
-  const ref = useRef<HTMLSpanElement>(null)
+export function useStatusPulseRef<T extends Element>(kind: StatusPulseProps['kind'], opacity = 1) {
+  const ref = useRef<T>(null)
 
   useEffect(() => {
     const element = ref.current
@@ -138,6 +129,21 @@ export function StatusPulse({ kind, opacity = 1, ...props }: StatusPulseProps) {
       cancel()
     }
   }, [kind, opacity])
+
+  return ref
+}
+
+/**
+ * A finite status pulse with a real sleep between plays.
+ *
+ * Continuous CSS animations keep Chromium producing frames and recalculating
+ * styles for an otherwise motionless Desktop window. Drive the same visual
+ * cue directly so React stays out of the loop and the renderer/compositor can
+ * sleep between pulses. Optional children keep the exact geometry of an
+ * existing status glyph while this wrapper owns only its finite opacity beat.
+ */
+export function StatusPulse({ kind, opacity = 1, ...props }: StatusPulseProps) {
+  const ref = useStatusPulseRef<HTMLSpanElement>(kind, opacity)
 
   return <span {...props} ref={ref} />
 }

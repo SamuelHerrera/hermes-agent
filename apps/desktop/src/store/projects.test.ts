@@ -22,6 +22,7 @@ import {
   exitProjectScope,
   openProjectCreate,
   pickProjectFolder,
+  projectColorForCwd,
   projectIdForCwd,
   projectNameForCwd,
   refreshProjects,
@@ -335,6 +336,12 @@ describe('projectNameForCwd', () => {
 
     expect(projectIdForCwd('c:/repos/app/src')).toBe('p_win')
     expect(projectNameForCwd('c:/repos/app/src')).toBe('Windows app')
+  })
+
+  it('resolves a draft tab tint from its workspace before a session row exists', () => {
+    $projectTree.set([treeNode({ color: '#4a9eff', id: 'p_web', label: 'Website', path: '/repos/website' })])
+
+    expect(projectColorForCwd('/repos/website/src/app')).toBe('#4a9eff')
   })
 
   it('ignores auto-projects and the No-project bucket (no named identity)', () => {

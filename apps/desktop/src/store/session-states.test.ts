@@ -220,6 +220,30 @@ describe('completion unread state for visible session tabs', () => {
   })
 })
 
+describe('new draft session tile identity', () => {
+  beforeEach(() => {
+    $sessionTiles.set([])
+    $selectedStoredSessionId.set('primary')
+  })
+
+  it('publishes the workspace and runtime in the first visible tile snapshot', () => {
+    const snapshots: Array<readonly SessionTile[]> = []
+    const unlisten = $sessionTiles.listen(tiles => snapshots.push(tiles))
+
+    openSessionTile('draft', 'center', 'workspace', undefined, {
+      runtimeId: 'runtime-draft',
+      workspaceCwd: '/repos/website'
+    })
+    unlisten()
+
+    expect(snapshots.find(tiles => tiles.length > 0)?.[0]).toMatchObject({
+      runtimeId: 'runtime-draft',
+      storedSessionId: 'draft',
+      workspaceCwd: '/repos/website'
+    })
+  })
+})
+
 describe('workspace tab drag detaches the main session', () => {
   beforeEach(() => {
     $layoutTree.set(group(['workspace'], { active: 'workspace', id: 'main' }))
