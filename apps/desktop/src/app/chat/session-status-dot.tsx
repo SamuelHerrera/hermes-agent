@@ -44,7 +44,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Accent ring — the turn is running. Its finite shared pulse is the only
+  // Accent circle — the turn is running. Its finite shared pulse is the only
   // moving session treatment; settled states return to a normal dot.
   working: {
     ariaLabel: r => r.sessionRunning,
@@ -52,7 +52,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     icon: 'loading',
     role: 'status'
   },
-  // Muted accent ring — still authoritatively running, but nothing has
+  // Muted accent circle — still authoritatively running, but nothing has
   // arrived for the watchdog window. Motion stays because the turn is alive;
   // opacity is what says it has gone quiet.
   stalled: {
@@ -99,7 +99,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
 // Sidebar rows keep project identity on the left. Most transient state moves to
 // a compact icon on the right, where its tooltip can explain the distinction
 // without replacing the user's chosen project/session color. Live turns are the
-// exception: the loading ring wraps the project dot itself so the moving cue and
+// exception: the outline circle wraps the project dot itself so the moving cue and
 // the color identity read as one marker.
 const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconVariant> = {
   'needs-input': {
@@ -181,7 +181,7 @@ function LoadingProjectDot({
         data-session-live-pulse
         kind="opacity"
       >
-        <Codicon className="block leading-none" name="loading" size="0.75rem" />
+        <Codicon className="block leading-none" name="circle-large-outline" size="0.75rem" />
       </StatusPulse>
       <ProjectColorDot color={color} />
     </span>
@@ -326,7 +326,7 @@ export function SessionAttentionDot({ className, storedSessionId }: SessionAtten
  * the live state (via `$sessionDotStateById`, already reduced to one mutually
  * exclusive answer) and the color (override → project, via `sessionColorFor`).
  * An idle session shows its project color; a live turn wraps that color with a
- * loading ring; other active states own the dot with their semantic color so an
+ * outline circle; other active states own the dot with their semantic color so an
  * attention cue is never masked by the tint.
  */
 export function SessionStatusDot({ storedSessionId, session, branchStem, className }: SessionStatusDotProps) {

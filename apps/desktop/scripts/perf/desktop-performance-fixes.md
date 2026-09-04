@@ -25,7 +25,7 @@ A working session used an infinite one-second CSS rotation in every sidebar row 
 Replace the infinite rotation with the existing shared `StatusPulse` mechanism:
 
 - retain the stable project-color dot;
-- retain the original 0.75rem Codicon glyph geometry rather than substituting a heavier CSS border ring;
+- use a full 0.75rem Codicon outline circle rather than freezing the open `loading` arc or substituting a heavier CSS border ring;
 - briefly pulse the glyph once every five seconds;
 - synchronize all status pulses through one scheduler;
 - let the existing pause controller stop animations while the window is hidden, minimized, or unfocused;
