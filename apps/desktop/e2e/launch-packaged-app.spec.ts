@@ -46,6 +46,40 @@ test('renderer loads and shows DOM content', async () => {
   expect(childCount).toBeGreaterThan(0)
 })
 
+test('inactive kept-alive panes pause CSS animations', async () => {
+  const page = fixture!.page
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+
+  const states = await page
+    .evaluate(() => {
+      const fixtureRoot = document.createElement('div')
+      fixtureRoot.innerHTML = `
+        <div data-pane-hidden><span id="hidden-animation" class="shimmer">Hidden work</span></div>
+        <div><span id="visible-animation" class="shimmer">Visible work</span></div>
+      `
+      document.body.appendChild(fixtureRoot)
+
+      const hidden = document.getElementById('hidden-animation')!
+      const visible = document.getElementById('visible-animation')!
+      const result = {
+        hiddenName: getComputedStyle(hidden).animationName,
+        hiddenState: getComputedStyle(hidden).animationPlayState,
+        visibleName: getComputedStyle(visible).animationName,
+        visibleState: getComputedStyle(visible).animationPlayState,
+      }
+
+      fixtureRoot.remove()
+
+      return result
+    })
+    .finally(() => page.emulateMedia({ reducedMotion: 'reduce' }))
+
+  expect(states.hiddenName).not.toBe('none')
+  expect(states.visibleName).toBe(states.hiddenName)
+  expect(states.visibleState).toBe('running')
+  expect(states.hiddenState).toBe('paused')
+})
+
 test('HUD composer remains fully inside the transparent window', async () => {
   const hudPagePromise = fixture!.app.waitForEvent('window')
 

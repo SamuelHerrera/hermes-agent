@@ -36,6 +36,19 @@ Replace the infinite rotation with the existing shared `StatusPulse` mechanism:
 
 With five active leases after restart, a 15-second sample measured the renderer at 51.5% CPU average (24.4–128.9%) and the GPU helper at 15.5% average (6.4–20.7%). This is lower than the earlier baseline, but the workloads are not identical, so it is evidence of progress rather than a controlled before/after result. The renderer remained materially busy, which supports continuing to Step 2.
 
+### Current-build controlled validation
+
+A fresh isolated production build was sampled for 20 seconds per condition with 12 indicators. The final full outline circle and its five-second finite pulse were measured separately from the old infinite loading rotation:
+
+| Indicator state | GPU-process CPU | Renderer CPU |
+|---|---:|---:|
+| Static full circles, before | 0.44% | 0.08% |
+| Infinite loading rotation | 9.13% | 6.71% |
+| Static full circles, after | 1.06% | 0.50% |
+| Full circles with finite pulse | 1.64% | 0.85% |
+
+The finite pulse used about 82% less GPU-process CPU and 87% less renderer CPU than permanent rotation in this controlled run. Its average overhead over the immediately preceding static control was 0.58 and 0.35 percentage points respectively. This confirms that retaining a complete circle while eliminating infinite rotation is worthwhile; the earlier stationary open-arc glyph was only a visual regression and had no performance justification.
+
 ### Acceptance criteria
 
 - Running and stalled sessions remain clearly distinguishable from idle sessions.
@@ -71,9 +84,34 @@ The helper now takes the O(1) tail path for normal token flushes, performs one r
 - The common tail path does not execute `Array.prototype.some` or `Array.prototype.map` across history.
 - The multitab performance scenario shows lower renderer self-time as transcript depth increases.
 
+## Step 2b — Pause animation work in inactive kept-alive panes
+
+**Status:** implemented and validated in a packaged-app/runtime production build.
+
+### Problem
+
+Inactive tabs remain mounted under `visibility: hidden` to preserve layout and scroll state. Their JavaScript glyph spinners already subscribe to `PaneVisibleContext`, but CSS animations continue advancing below the canonical `data-pane-hidden` marker. This includes live transcript shimmer effects in every hidden running session.
+
+Two isolated production measurements established the cost:
+
+- 12 visible shimmer labels used 13.55–17.31% GPU-process CPU and 12.46–19.53% renderer CPU, versus roughly 0.2–0.6% GPU-process and 0.03–0.41% renderer CPU in adjacent static controls.
+- Merely hiding the same 12 shimmers with `visibility: hidden` reduced paint/compositor cost but still used 4.54% renderer CPU, versus 0.11% in the preceding static control.
+
+### Change
+
+Pause CSS animation timelines for descendants of `data-pane-hidden`. The pane stays mounted and keeps its dimensions exactly as before; removing the marker when the tab becomes active resumes its animations. Visible-pane animation behavior is unchanged.
+
+### Acceptance criteria
+
+- Packaged-app computed styles report `animation-play-state: paused` below a hidden pane and `running` for the same visible animation.
+- Hidden-pane animation CPU returns near the static control in the isolated production probe.
+- Switching back to a kept-alive tab restores its visible animation normally.
+
+The packaged-app behavior test passed. In the post-change isolated probe, 12 hidden shimmer labels fell from the pre-change 4.54% renderer average (3.8% median) to 0.87% average (0.1% median); the one 10% sample was a transient at condition setup. GPU-process CPU was 0.77% average, close to the adjacent 0.56% and 0.53% static controls. Visible animations are deliberately unaffected.
+
 ## Step 3 — Reduce visible Markdown reparse cost
 
-**Status:** pending Step 2.
+**Status:** pending Step 2b production validation.
 
 ### Problem
 
