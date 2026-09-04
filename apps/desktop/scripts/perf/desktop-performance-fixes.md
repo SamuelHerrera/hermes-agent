@@ -12,6 +12,29 @@ Ship one independently measurable fix at a time. After each step:
 
 The baseline and evidence are in [`desktop-cpu-gpu-investigation.md`](./desktop-cpu-gpu-investigation.md).
 
+## Resume checkpoint — 2026-09-04
+
+Samuel is extended-dogfooding the installed `/Applications/Hermes.app` before profiling continues. The app was packaged from, pushed at, and restarted after commit `a826dc8797` (`perf(desktop): throttle long markdown renders`). That build includes the complete optimization sequence:
+
+- `d68936c6c9` — finite live-session status pulses;
+- `9b93a86cd8` and `4396f77d74` — preserve the intended full-circle status geometry;
+- `ad4c4d3007` — indexed/O(1) common streaming-message replacement;
+- `bba7059500` — pause animations in hidden kept-alive panes;
+- `068ffd9ae2` — replace indefinite shimmers with bounded replayable sweeps;
+- `a826dc8797` — reduce long running Markdown render cadence without delaying ingestion or final state.
+
+The last controlled interleaved production A/B reduced long fenced-code DOM mutations from a median 295 to 178 and renderer JavaScript self-time from 840.6 ms to 444.0 ms, with zero frames over 33 ms in either condition. This is controlled evidence for the specific render path, not a prediction of whole-app savings.
+
+When work resumes:
+
+1. Ask Samuel what changed during the dogfood period: perceived stutter, renderer memory growth, and whether any background/minimized turn stalled.
+2. Verify the installed commit and rediscover current process IDs; never reuse PIDs from this investigation.
+3. Measure renderer CPU/RSS, GPU-helper CPU, Desktop main/backend, Hindsight, active session count, and frame-time evidence separately. Do not attribute whole-system or Hindsight load to Electron.
+4. If renderer RSS still grows materially, continue with Step 4 heap snapshots and retained-path analysis. If RSS is stable but idle/background CPU remains material, continue with Step 5 per-window throttling evidence.
+5. Preserve hardware acceleration, hidden mounted-pane state, immediate terminal-state flushes, and background turn delivery unless direct evidence supports a narrower change.
+
+Known validation debt: the packaged-app suite consistently passes five checks, while `boot progress overlay fades out or shows error state` times out after 60 seconds. Treat that as a separate E2E reliability investigation rather than evidence against the shipped performance fixes.
+
 ## Step 1 — Replace infinite session-status spinners
 
 **Status:** implemented, dogfooded, and visually corrected.
@@ -111,7 +134,7 @@ The packaged-app behavior test passed. In the post-change isolated probe, 12 hid
 
 ## Step 2c — Bound visible shimmer animations
 
-**Status:** implemented; packaged production dogfood pending.
+**Status:** implemented, deployed, and loaded for extended dogfood; live validation pending.
 
 ### Problem
 
@@ -142,7 +165,7 @@ Add a shared `ShimmerPulse` primitive that preserves the same shimmer appearance
 
 ## Step 3 — Reduce visible Markdown reparse cost
 
-**Status:** implemented; packaged production dogfood pending.
+**Status:** implemented, deployed, and loaded for extended dogfood; live validation pending.
 
 ### Problem
 
