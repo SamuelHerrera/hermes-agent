@@ -30,6 +30,7 @@ import { $pinnedSessionIds } from '@/store/layout'
 import { $petActive } from '@/store/pet'
 import { $petOverlayActive } from '@/store/pet-overlay'
 import { $activeGatewayProfile, $gatewaySwapTarget, $profiles } from '@/store/profile'
+import { $projectTree, projectColorForCwd } from '@/store/projects'
 import {
   $contextSuggestions,
   $gatewayState,
@@ -349,6 +350,7 @@ export const ChatView = memo(function ChatView({
   const selectedSessionId = useStore(view.$storedId)
   const sessions = useStore($sessions)
   const sessionColorById = useStore($sessionColorById)
+  const projectTree = useStore($projectTree)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
   const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
 
@@ -360,7 +362,7 @@ export const ChatView = memo(function ChatView({
   const sessionAccentColor = selectedSession
     ? sessionColorFor(selectedSession)
     : selectedSessionId
-      ? sessionColorById[selectedSessionId]
+      ? (sessionColorById[selectedSessionId] ?? projectColorForCwd(currentCwd, projectTree) ?? undefined)
       : undefined
 
   // Durable composer/queue scope (lineage root) so auto-compression tip rotation

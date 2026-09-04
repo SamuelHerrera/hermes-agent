@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { assistantTextPart, type ChatMessage } from '@/lib/chat-messages'
+import { $projectTree } from '@/store/projects'
 import {
   $activeSessionId,
   $awaitingResponse,
@@ -169,6 +170,7 @@ describe('ChatView composer accent', () => {
     $messages.set([assistantMessage('assistant-1', 'Ready')])
     $selectedStoredSessionId.set('stored-1')
     $sessions.set([{ id: 'stored-1', message_count: 1, title: 'Colored chat' } as never])
+    $projectTree.set([])
     $sessionColorOverrides.set({})
   })
 
@@ -187,6 +189,7 @@ describe('ChatView composer accent', () => {
     $messages.set([])
     $selectedStoredSessionId.set(null)
     $sessions.set([])
+    $projectTree.set([])
     $sessionColorOverrides.set({})
   })
 
@@ -229,6 +232,58 @@ describe('ChatView composer accent', () => {
     )
 
     expect(screen.getByTestId('chatbar')).toBeTruthy()
+    expect(chatBarProps.current?.sessionAccentColor).toBe('#ff5c7a')
+  })
+
+  it('uses the project color for a fresh draft before its session row is listed', () => {
+    $currentCwd.set('/work/project')
+    $sessions.set([])
+    $projectTree.set([
+      {
+        color: '#ff5c7a',
+        id: 'project-1',
+        label: 'Project',
+        path: '/work/project',
+        repos: [],
+        sessionCount: 0
+      }
+    ])
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/stored-1']}>
+          <ChatView
+            gateway={null}
+            maxVoiceRecordingSeconds={120}
+            onAddContextRef={vi.fn()}
+            onAddUrl={vi.fn()}
+            onAttachDroppedItems={vi.fn()}
+            onAttachImageBlob={vi.fn()}
+            onBranchInNewChat={vi.fn()}
+            onCancel={vi.fn()}
+            onDeleteSelectedSession={vi.fn()}
+            onEdit={vi.fn()}
+            onPasteClipboardImage={vi.fn()}
+            onPickFiles={vi.fn()}
+            onPickFolders={vi.fn()}
+            onPickImages={vi.fn()}
+            onReload={vi.fn()}
+            onRemoveAttachment={vi.fn()}
+            onRetryResume={vi.fn()}
+            onSteer={vi.fn()}
+            onSubmit={vi.fn()}
+            onThreadMessagesChange={vi.fn()}
+            onToggleSelectedPin={vi.fn()}
+            onTranscribeAudio={vi.fn()}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+
     expect(chatBarProps.current?.sessionAccentColor).toBe('#ff5c7a')
   })
 })

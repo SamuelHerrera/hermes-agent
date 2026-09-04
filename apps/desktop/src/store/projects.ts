@@ -352,11 +352,11 @@ export function resolveNewSessionCwd(): string {
 // The project (explicit or auto) that owns `cwd`, by longest path match across
 // the live tree. Null when no project covers it (it'll surface as a fresh
 // auto-project on the next tree refresh).
-export function projectIdForCwd(cwd: string): null | string {
+export function projectIdForCwd(cwd: string, projects = $projectTree.get()): null | string {
   let best: null | string = null
   let bestLen = -1
 
-  for (const project of $projectTree.get()) {
+  for (const project of projects) {
     // Match project + repo roots AND each worktree-lane path: a linked worktree
     // (e.g. a sibling `repo-retry`) lives OUTSIDE the repo root, so root-prefix
     // matching alone would miss it — but it's still part of the project.
@@ -378,10 +378,10 @@ export function projectIdForCwd(cwd: string): null | string {
 /** The current project tint for a workspace path. Draft session tabs have a
  * cwd before they have a listed session row, so they resolve through the same
  * live project-tree membership used by the sidebar instead of painting grey. */
-export function projectColorForCwd(cwd: string): null | string {
-  const projectId = projectIdForCwd(cwd)
+export function projectColorForCwd(cwd: string, projects = $projectTree.get()): null | string {
+  const projectId = projectIdForCwd(cwd, projects)
 
-  return projectId ? ($projectTree.get().find(project => project.id === projectId)?.color ?? null) : null
+  return projectId ? (projects.find(project => project.id === projectId)?.color ?? null) : null
 }
 
 // The display NAME of the explicit, named project owning `cwd` (longest path
