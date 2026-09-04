@@ -5515,6 +5515,92 @@ class _RecordingAgent:
         return {"final_response": "", "messages": []}
 
 
+def test_notification_poller_fans_in_same_turn_background_completions(monkeypatch):
+    """One originating turn produces one follow-up synthesis, not N turns."""
+    import queue as _queue_mod
+
+    from tools.process_registry import process_registry
+
+    isolated_queue: _queue_mod.Queue = _queue_mod.Queue()
+    monkeypatch.setattr(process_registry, "completion_queue", isolated_queue)
+    monkeypatch.setattr(server, "_emit", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(server, "_maybe_fire_tui_loop_tick", lambda *_args: None)
+    monkeypatch.setattr(server, "_collect_kanban_notifications", lambda *_args: [])
+    monkeypatch.setattr(ad, "claim_event_delivery", lambda evt, _consumer: evt["delegation_id"])
+    completed = []
+    monkeypatch.setattr(
+        ad,
+        "complete_event_delivery",
+        lambda evt, _claim: completed.append(evt["delegation_id"]),
+    )
+    monkeypatch.setattr(ad, "release_event_delivery", lambda *_args: None)
+    live = {"value": True}
+    monkeypatch.setattr(
+        ad,
+        "active_for_origin_turn",
+        lambda *_args, **_kwargs: 1 if live["value"] else 0,
+    )
+
+    sid = "sid-fan-in"
+    session = _session(session_key="session-a")
+    turns = []
+
+    def _run(_rid, _sid, current, prompt, **kwargs):
+        turns.append((prompt, kwargs))
+        with current["history_lock"]:
+            current["running"] = False
+
+    monkeypatch.setattr(server, "_run_prompt_submit", _run)
+    server._sessions[sid] = session
+
+    def _event(index):
+        return {
+            "type": "async_delegation",
+            "delegation_id": f"deleg-{index}",
+            "origin_ui_session_id": sid,
+            "session_key": "session-a",
+            "parent_session_id": "parent-session",
+            "origin_turn_id": "originating-turn-id",
+            "goal": f"review {index}",
+            "status": "completed",
+            "summary": f"result {index}",
+            "api_calls": 1,
+            "duration_seconds": 0.1,
+        }
+
+    isolated_queue.put(_event(1))
+
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=server._notification_poller_loop,
+        args=(stop, sid, session),
+        daemon=True,
+    )
+    thread.start()
+    time.sleep(0.35)
+    assert turns == [], "the first result must wait while sibling work is live"
+    isolated_queue.put(_event(2))
+    live["value"] = False
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline and (not isolated_queue.empty() or not turns):
+        time.sleep(0.02)
+    time.sleep(0.1)
+    stop.set()
+    thread.join(timeout=3)
+
+    try:
+        assert len(turns) == 1
+        prompt, kwargs = turns[0]
+        assert "result 1" in prompt
+        assert "result 2" in prompt
+        assert kwargs["display_kind"] == "async_delegation_complete"
+        assert kwargs["display_metadata"]["task_count"] == 2
+        assert set(completed) == {"deleg-1", "deleg-2"}
+    finally:
+        stop.set()
+        server._sessions.pop(sid, None)
+
+
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_run_prompt_submit_requeues_foreign_completion(
     monkeypatch, tmp_path, exit_code
@@ -5557,7 +5643,7 @@ def test_run_prompt_submit_requeues_foreign_completion(
         process_registry._completion_consumed.discard(event["session_id"])
 
 
-def test_run_prompt_submit_delivers_completion_observed_by_poll(monkeypatch, tmp_path):
+def test_run_prompt_submit_leaves_completion_for_fan_in_poller(monkeypatch, tmp_path):
     import queue as _queue_mod
 
     from tools.process_registry import process_registry
@@ -5587,9 +5673,8 @@ def test_run_prompt_submit_delivers_completion_observed_by_poll(monkeypatch, tmp
     try:
         server._run_prompt_submit("rid-a", "sid_a", session, "session-a-turn")
 
-        assert turns[0] == "session-a-turn"
-        assert len(turns) == 2
-        assert "proc_polled" in turns[1]
+        assert turns == ["session-a-turn"]
+        assert isolated_queue.get_nowait() == event
         assert isolated_queue.empty()
     finally:
         server._sessions.pop("sid_a", None)
@@ -5653,20 +5738,16 @@ def test_run_prompt_submit_requeues_all_unstarted_notifications_with_real_thread
     try:
         server._run_prompt_submit("rid-a", "sid_a", session, "session-a-turn")
 
-        assert nested_started.wait(timeout=5)
         threads[0].join(timeout=5)
         assert not threads[0].is_alive()
-        # Membership, not order: the completion_queue is process-global, and
-        # notification pollers leaked by earlier session.init tests in this
-        # file legitimately steal-and-requeue foreign-session events (see
-        # _notification_poller_loop's belongs-elsewhere branch), rotating the
-        # queue. The requeue contract is that batch_2 and batch_3 both remain
-        # queued (never consumed) while batch_1's turn is in flight — so drain
-        # with a deadline (an event may be transiently held by a poller
-        # mid-cycle) and assert exactly {batch_2, batch_3} come back.
+        assert turns == ["session-a-turn"]
+        assert not nested_started.is_set()
+        # The prompt worker never competes with the fan-in poller: all three
+        # notifications remain queued for one grouped follow-up turn.
         queued: dict = {}
         deadline = time.time() + 5.0
         while time.time() < deadline and set(queued) != {
+            "proc_batch_1",
             "proc_batch_2",
             "proc_batch_3",
         }:
@@ -5675,7 +5756,7 @@ def test_run_prompt_submit_requeues_all_unstarted_notifications_with_real_thread
             except _queue_mod.Empty:
                 continue
             queued[evt["session_id"]] = evt
-        assert set(queued) == {"proc_batch_2", "proc_batch_3"}
+        assert set(queued) == {"proc_batch_1", "proc_batch_2", "proc_batch_3"}
     finally:
         release_nested.set()
         for thread in threads:
@@ -5688,7 +5769,7 @@ def test_run_prompt_submit_requeues_all_unstarted_notifications_with_real_thread
             process_registry._poll_observed.discard(event["session_id"])
 
 
-def test_run_prompt_submit_delivers_completion_owned_through_compression_lineage(
+def test_run_prompt_submit_defers_compression_lineage_completion_to_poller(
     monkeypatch, tmp_path
 ):
     import queue as _queue_mod
@@ -5733,17 +5814,16 @@ def test_run_prompt_submit_delivers_completion_owned_through_compression_lineage
     try:
         server._run_prompt_submit("rid-b", "sid_b", session, "session-b-turn")
 
-        assert turns[0] == "session-b-turn"
-        assert len(turns) == 2
-        assert "proc_precompression" in turns[1]
-        assert ownership_checks == ["proc_precompression"]
+        assert turns == ["session-b-turn"]
+        assert ownership_checks == []
+        assert isolated_queue.get_nowait() == event
         assert isolated_queue.empty()
     finally:
         server._sessions.pop("sid_b", None)
         process_registry._completion_consumed.discard(event["session_id"])
 
 
-def test_run_prompt_submit_prefers_origin_ui_session_id(monkeypatch, tmp_path):
+def test_run_prompt_submit_defers_origin_ui_completion_to_poller(monkeypatch, tmp_path):
     import queue as _queue_mod
 
     from tools.process_registry import process_registry
@@ -5782,10 +5862,9 @@ def test_run_prompt_submit_prefers_origin_ui_session_id(monkeypatch, tmp_path):
     try:
         server._run_prompt_submit("rid-b", "sid_b", session, "session-b-turn")
 
-        assert turns[0] == "session-b-turn"
-        assert len(turns) == 2
-        assert "proc_origin_owned" in turns[1]
-        assert ownership_checks == ["proc_origin_owned"]
+        assert turns == ["session-b-turn"]
+        assert ownership_checks == []
+        assert isolated_queue.get_nowait() == event
         assert isolated_queue.empty()
     finally:
         server._sessions.pop("sid_b", None)

@@ -9859,6 +9859,79 @@ def _collect_kanban_notifications(session: dict) -> list:
     return texts
 
 
+def _notification_fan_in_key(evt: dict) -> str:
+    """Return the parent-turn key for terminal completion notifications."""
+    if evt.get("type") not in {"async_delegation", "completion"}:
+        return ""
+    return str(evt.get("origin_turn_id") or "")
+
+
+def _notification_group_has_live_work(evt: dict, process_registry) -> bool:
+    """Whether more completion-producing work from this turn is still live."""
+    origin_turn_id = _notification_fan_in_key(evt)
+    if not origin_turn_id:
+        return False
+    session_key = str(evt.get("session_key") or "")
+    from tools.async_delegation import active_for_origin_turn
+
+    return bool(
+        active_for_origin_turn(origin_turn_id, session_key=session_key)
+        or process_registry.active_notifying_for_turn(
+            origin_turn_id, session_key=session_key
+        )
+    )
+
+
+def _take_same_turn_notifications(
+    first_evt: dict, sid: str, session: dict, process_registry
+) -> list[dict]:
+    """Drain currently-ready sibling completions without stealing other tabs."""
+    key = _notification_fan_in_key(first_evt)
+    if not key:
+        return [first_evt]
+    grouped = [first_evt]
+    deferred: list[dict] = []
+    while not process_registry.completion_queue.empty():
+        try:
+            candidate = process_registry.completion_queue.get_nowait()
+        except Exception:
+            break
+        if (
+            _notification_fan_in_key(candidate) == key
+            and _session_owns_notification_event(sid, session, candidate)
+        ):
+            grouped.append(candidate)
+        else:
+            deferred.append(candidate)
+    for candidate in deferred:
+        process_registry.completion_queue.put(candidate)
+    return grouped
+
+
+def _format_notification_fan_in(blocks: list[str]) -> str:
+    if len(blocks) == 1:
+        return blocks[0]
+    return (
+        f"[BACKGROUND WORK GROUP COMPLETE — {len(blocks)} results from one "
+        "originating turn]\nThe related background work finished. Review all "
+        "results together and respond once.\n\n"
+        + "\n\n---\n\n".join(blocks)
+    )
+
+
+def _coalesced_async_delegation_display_metadata(events: list[dict]) -> dict:
+    metadata = [_async_delegation_display_metadata(evt) for evt in events]
+    return {
+        "delegation_id": str(events[0].get("delegation_id") or ""),
+        "delegation_ids": [
+            str(evt.get("delegation_id") or "") for evt in events
+        ],
+        "task_count": sum(item["task_count"] for item in metadata),
+        "completed_count": sum(item["completed_count"] for item in metadata),
+        "failed_count": sum(item["failed_count"] for item in metadata),
+    }
+
+
 def _notification_poller_loop(
     stop_event: threading.Event, sid: str, session: dict
 ) -> None:
@@ -9973,31 +10046,35 @@ def _notification_poller_loop(
             )
             continue
 
-        _evt_sid = evt.get("session_id", "")
-        if evt.get("type") == "completion" and process_registry.is_completion_consumed(_evt_sid):
+        if _notification_group_has_live_work(evt, process_registry):
+            process_registry.completion_queue.put(evt)
+            time.sleep(0.25)
             continue
 
-        text = format_process_notification(evt)
-        if not text:
+        events = _take_same_turn_notifications(evt, sid, session, process_registry)
+        deliverable: list[tuple[dict, str]] = []
+        for candidate in events:
+            candidate_sid = candidate.get("session_id", "")
+            if (
+                candidate.get("type") == "completion"
+                and process_registry.is_completion_consumed(candidate_sid)
+            ):
+                continue
+            candidate_text = format_process_notification(candidate)
+            if candidate_text:
+                deliverable.append((candidate, candidate_text))
+        if not deliverable:
             continue
 
-        # Only emit the same notification identity to TUI once — re-queued
-        # completions get re-emitted every 0.5s otherwise when session is busy,
-        # while distinct watch_match events from the same process must remain
-        # visible independently.
-        _dedup_key = _notification_event_dedup_key(evt)
-        if _dedup_key not in _emitted:
-            _emit("status.update", sid, {"kind": "process", "text": text})
-            _emitted.add(_dedup_key)
-
-        _requeued = False
+        requeued = False
         with session["history_lock"]:
             if session.get("running"):
-                process_registry.completion_queue.put(evt)
-                _requeued = True
+                for candidate, _candidate_text in deliverable:
+                    process_registry.completion_queue.put(candidate)
+                requeued = True
             else:
                 session["running"] = True
-        if _requeued:
+        if requeued:
             # Back off before re-polling: the re-queued event keeps the queue
             # non-empty, so without a sleep this loop spins at full speed
             # (100% CPU, GIL churn) for as long as the session stays busy.
@@ -10008,25 +10085,52 @@ def _notification_poller_loop(
         from tools.async_delegation import (
             claim_event_delivery, complete_event_delivery, release_event_delivery,
         )
-        _claim = claim_event_delivery(evt, "tui-poller")
-        if _claim is None:
+        claimed: list[tuple[dict, str, str]] = []
+        for candidate, candidate_text in deliverable:
+            claim = claim_event_delivery(candidate, "tui-poller")
+            if claim is not None:
+                claimed.append((candidate, candidate_text, claim))
+        if not claimed:
+            with session["history_lock"]:
+                session["running"] = False
             continue
+
+        claimed_events = [candidate for candidate, _text, _claim in claimed]
+        text = _format_notification_fan_in(
+            [candidate_text for _candidate, candidate_text, _claim in claimed]
+        )
+        unseen = False
+        for candidate in claimed_events:
+            dedup_key = _notification_event_dedup_key(candidate)
+            if dedup_key not in _emitted:
+                _emitted.add(dedup_key)
+                unseen = True
+        if unseen:
+            _emit("status.update", sid, {"kind": "process", "text": text})
+
         try:
             _emit("message.start", sid)
-            if evt.get("type") == "async_delegation":
+            if all(
+                candidate.get("type") == "async_delegation"
+                for candidate in claimed_events
+            ):
                 _run_prompt_submit(
                     rid,
                     sid,
                     session,
                     text,
                     display_kind="async_delegation_complete",
-                    display_metadata=_async_delegation_display_metadata(evt),
+                    display_metadata=(
+                        _coalesced_async_delegation_display_metadata(claimed_events)
+                    ),
                 )
             else:
                 _run_prompt_submit(rid, sid, session, text)
-            complete_event_delivery(evt, _claim)
+            for candidate, _candidate_text, claim in claimed:
+                complete_event_delivery(candidate, claim)
         except Exception as exc:
-            release_event_delivery(evt, _claim)
+            for candidate, _candidate_text, claim in claimed:
+                release_event_delivery(candidate, claim)
             print(
                 f"[tui_gateway] notification poller dispatch failed: "
                 f"{type(exc).__name__}: {exc}",
@@ -11172,59 +11276,11 @@ def _run_prompt_submit(
                 with session["history_lock"]:
                     session["running"] = False
 
-        # Drain completion notifications that arrived during this turn.
-        # The background poller handles between-turn delivery; this is
-        # the safety net for events that arrived mid-turn.
-        #
-        # Ownership filter (#42674, #35652): a turn finishing in session B
-        # must not consume an event that belongs to session A. The registry
-        # requeues every addressed event this session cannot positively claim;
-        # the poller then delivers it to a live owner or drops an orphan.
-        try:
-            from tools.process_registry import process_registry
-
-            # Positive-proof ownership (compression-chain aware) — the same
-            # fail-closed gate the poller uses, so the post-turn drain can't
-            # adopt another session's addressed notification while a
-            # post-compression session still claims its own pre-compression
-            # dispatches (#55578).
-            drained = process_registry.drain_notifications(
-                session_key=session.get("session_key", ""),
-                owns_event=lambda e: _session_owns_notification_event(sid, session, e),
-                skip_poll_observed=False,
-            )
-            for index, (_evt, synth) in enumerate(drained):
-                with session["history_lock"]:
-                    if session.get("running"):
-                        for pending_evt, _pending_synth in drained[index:]:
-                            process_registry.completion_queue.put(pending_evt)
-                        break
-                    session["running"] = True
-                from tools.async_delegation import (
-                    claim_event_delivery, complete_event_delivery, release_event_delivery,
-                )
-                _claim = claim_event_delivery(_evt, "tui-post-turn")
-                if _claim is None:
-                    continue
-                try:
-                    _emit("message.start", sid)
-                    _run_prompt_submit(rid, sid, session, synth)
-                    complete_event_delivery(_evt, _claim)
-                except Exception as _n_exc:
-                    release_event_delivery(_evt, _claim)
-                    print(
-                        f"[tui_gateway] completion notification dispatch failed: "
-                        f"{type(_n_exc).__name__}: {_n_exc}",
-                        file=sys.stderr,
-                    )
-                    with session["history_lock"]:
-                        session["running"] = False
-        except Exception as _drain_exc:
-            print(
-                f"[tui_gateway] completion queue drain failed: "
-                f"{type(_drain_exc).__name__}: {_drain_exc}",
-                file=sys.stderr,
-            )
+        # Completion delivery is intentionally owned only by the background
+        # notification poller. A second post-turn consumer used to race that
+        # poller and recursively launch one model turn per completion. Keeping
+        # one consumer lets it wait for all work from the originating turn and
+        # fan the results into one synthesis call.
 
     run_thread = threading.Thread(target=run, daemon=True)
     session["_run_thread"] = run_thread

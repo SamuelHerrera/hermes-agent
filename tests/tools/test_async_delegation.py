@@ -97,6 +97,33 @@ def test_active_for_session_counts_every_live_delegation_state():
     assert ad.active_for_session("") == 0
 
 
+def test_active_for_origin_turn_is_scoped_to_the_commissioning_turn():
+    with ad._records_lock:
+        ad._records.update(
+            {
+                "same-turn": {
+                    "status": "running",
+                    "origin_turn_id": "turn-1",
+                    "session_key": "session-a",
+                },
+                "other-turn": {
+                    "status": "running",
+                    "origin_turn_id": "turn-2",
+                    "session_key": "session-a",
+                },
+                "other-session": {
+                    "status": "running",
+                    "origin_turn_id": "turn-1",
+                    "session_key": "session-b",
+                },
+            }
+        )
+
+    assert ad.active_for_origin_turn("turn-1", session_key="session-a") == 1
+    assert ad.active_for_origin_turn("turn-1", session_key="session-b") == 1
+    assert ad.active_for_origin_turn("", session_key="session-a") == 0
+
+
 def test_dispatch_returns_immediately_without_blocking():
     gate = threading.Event()
 
@@ -173,6 +200,25 @@ def test_completion_event_lands_on_shared_queue_with_session_key():
     assert evt["session_key"] == "agent:main:cli:dm:local"
     assert evt["parent_session_id"] == "20260703_parent_sid"
     assert evt["delegation_id"] == res["delegation_id"]
+
+
+def test_completion_event_keeps_originating_turn_for_fan_in():
+    res = ad.dispatch_async_delegation(
+        goal="compute X",
+        context=None,
+        toolsets=None,
+        role="leaf",
+        model="test-model",
+        session_key="session-a",
+        origin_turn_id="parent-turn-1",
+        runner=lambda: {"status": "completed", "summary": "done"},
+        max_async_children=3,
+    )
+
+    evt = _drain_for(res["delegation_id"])
+
+    assert evt is not None
+    assert evt["origin_turn_id"] == "parent-turn-1"
 
 
 def test_rich_reinjection_block_is_self_contained():
@@ -569,6 +615,8 @@ def test_delegate_task_background_routes_async_and_does_not_block(monkeypatch):
     parent = MagicMock()
     parent._delegate_depth = 0
     parent.session_id = "sess"
+    parent._current_task_id = "parent-turn-task"
+    parent._current_turn_id = "parent-turn-id"
     parent._interrupt_requested = False
     parent._active_children = []
     parent._active_children_lock = None
@@ -616,6 +664,7 @@ def test_delegate_task_background_routes_async_and_does_not_block(monkeypatch):
     assert evt["type"] == "async_delegation"
     # Single task rides the batch path → carries a 1-item results list.
     assert evt.get("is_batch") is True
+    assert evt["origin_turn_id"] == "parent-turn-id"
     assert len(evt["results"]) == 1
     assert evt["results"][0]["summary"] == "done: the real task"
     text = format_process_notification(evt)

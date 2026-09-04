@@ -8,7 +8,7 @@ description: "Spawn isolated child agents for parallel workstreams with delegate
 
 The `delegate_task` tool spawns child AIAgent instances with isolated context, inherited tool access, and their own terminal sessions. Each child gets a fresh conversation and works independently — only its final summary enters the parent's context.
 
-Top-level model calls run in the background automatically. Hermes returns a handle immediately so the conversation can continue, then posts the result back as a new message. An orchestrator subagent waits for its own workers so it can synthesize their results before returning.
+Top-level model calls run in the background by default. Hermes returns a handle immediately so the conversation can continue, then posts the result back as a new message. When a result is required before the current turn can finish — for example, one final review — the caller can set `background=false` and wait for it in that turn. An orchestrator subagent always waits for its own workers so it can synthesize their results before returning.
 
 ## Single Task
 
@@ -115,7 +115,7 @@ delegate_task(
 
 ## Batch Mode Details
 
-When a top-level agent provides a `tasks` array, Hermes returns one background handle, runs the subagents in parallel, and posts one consolidated result after every child finishes. An orchestrator subagent waits for its batch in the current turn so it can synthesize the results.
+When a top-level agent provides a `tasks` array, Hermes returns one background handle by default, runs the subagents in parallel, and posts one consolidated result after every child finishes. With `background=false`, the batch joins in the current turn instead. An orchestrator subagent always waits for its batch so it can synthesize the results.
 
 - **Maximum concurrency:** 3 tasks by default (configurable via `delegation.max_concurrent_children` or the `DELEGATION_MAX_CONCURRENT_CHILDREN` env var; floor of 1, no hard ceiling). Batches larger than the limit return a tool error rather than being silently truncated.
 - **Thread pool:** Uses `ThreadPoolExecutor` with the configured concurrency limit as max workers
@@ -123,7 +123,12 @@ When a top-level agent provides a `tasks` array, Hermes returns one background h
 - **Result ordering:** Results are sorted by task index to match input order regardless of completion order
 - **Cancellation:** Follow-up messages do not cancel a top-level background batch. `/stop` or closing/resetting the owning session cancels its active children. Synchronous orchestrator children still follow their parent's interrupt state
 
-Synchronous single-task delegation from an orchestrator runs directly without thread pool overhead.
+Synchronous single-task delegation from an orchestrator or an explicit top-level `background=false` call runs directly without thread pool overhead.
+
+In Desktop/TUI gateway sessions, independently launched background completions
+from the same originating parent turn are held until that turn's related work
+finishes, then combined into one synthesis turn. This avoids paying for one
+parent-model acknowledgement per child while preserving every child result.
 
 ### Durable background completions
 

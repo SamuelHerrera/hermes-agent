@@ -2714,6 +2714,7 @@ def terminal_tool(
     timeout: Optional[int] = None,
     task_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    origin_turn_id: Optional[str] = None,
     force: bool = False,
     workdir: Optional[str] = None,
     pty: bool = False,
@@ -2729,6 +2730,7 @@ def terminal_tool(
         timeout: Command timeout in seconds (default: from config)
         task_id: Unique identifier for environment isolation (optional)
         session_id: Conversation/session identifier for durable observability
+        origin_turn_id: Internal parent-turn identifier for completion fan-in
         force: If True, skip dangerous command check (use after user confirms)
         workdir: Working directory for this command (optional, uses session cwd if not set)
         pty: If True, use pseudo-terminal for interactive CLI tools (local backend only)
@@ -3166,6 +3168,7 @@ def terminal_tool(
                         command=command,
                         cwd=effective_cwd,
                         task_id=effective_task_id,
+                        origin_turn_id=origin_turn_id or "",
                         session_key=session_key,
                         env_vars=getattr(env, "env", None) or {},
                         use_pty=effective_pty,
@@ -3180,6 +3183,7 @@ def terminal_tool(
                         command=command,
                         cwd=effective_cwd,
                         task_id=effective_task_id,
+                        origin_turn_id=origin_turn_id or "",
                         session_key=session_key,
                     )
                 if getattr(proc_session, "completion_reason", None) == "interrupted_before_start":
@@ -4004,6 +4008,7 @@ def _handle_terminal(args, **kw):
         timeout=args.get("timeout"),
         task_id=kw.get("task_id"),
         session_id=kw.get("session_id"),
+        origin_turn_id=kw.get("turn_id"),
         workdir=args.get("workdir"),
         pty=args.get("pty", False),
         notify_on_complete=args.get("notify_on_complete", False),

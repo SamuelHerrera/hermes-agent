@@ -369,6 +369,7 @@ class ProcessSession:
     id: str                                     # Unique session ID ("proc_xxxxxxxxxxxx")
     command: str                                 # Original command string
     task_id: str = ""                           # Task/sandbox isolation key
+    origin_turn_id: str = ""                     # Unique parent agent turn
     session_key: str = ""                       # Gateway session key (for reset protection)
     pid: Optional[int] = None                   # OS process ID
     process: Optional[subprocess.Popen] = None  # Popen handle (local only)
@@ -975,6 +976,7 @@ class ProcessRegistry:
         command: str,
         cwd: str = None,
         task_id: str = "",
+        origin_turn_id: str = "",
         session_key: str = "",
         env_vars: dict = None,
         use_pty: bool = False,
@@ -1005,6 +1007,7 @@ class ProcessRegistry:
             id=f"proc_{uuid.uuid4().hex[:12]}",
             command=command,
             task_id=task_id,
+            origin_turn_id=origin_turn_id,
             session_key=session_key,
             cwd=_resolve_safe_cwd(cwd or os.getcwd()),
             started_at=time.time(),
@@ -1243,6 +1246,7 @@ class ProcessRegistry:
         command: str,
         cwd: str = None,
         task_id: str = "",
+        origin_turn_id: str = "",
         session_key: str = "",
         timeout: int = 10,
     ) -> ProcessSession:
@@ -1261,6 +1265,7 @@ class ProcessRegistry:
             id=f"proc_{uuid.uuid4().hex[:12]}",
             command=command,
             task_id=task_id,
+            origin_turn_id=origin_turn_id,
             session_key=session_key,
             cwd=cwd,
             started_at=time.time(),
@@ -1613,6 +1618,7 @@ class ProcessRegistry:
                 "type": "completion",
                 "session_id": session.id,
                 "session_key": session.session_key,
+                "origin_turn_id": session.origin_turn_id,
                 "command": session.command,
                 "exit_code": session.exit_code,
                 "completion_reason": session.completion_reason,
@@ -1627,6 +1633,21 @@ class ProcessRegistry:
             self.completion_queue.put(notification)
 
     # ----- Query Methods -----
+
+    def active_notifying_for_turn(
+        self, origin_turn_id: str, *, session_key: str = ""
+    ) -> int:
+        """Count live processes that will notify for one agent turn."""
+        if not origin_turn_id:
+            return 0
+        with self._lock:
+            return sum(
+                1
+                for session in self._running.values()
+                if session.origin_turn_id == origin_turn_id
+                and session.notify_on_complete
+                and (not session_key or session.session_key == session_key)
+            )
 
     def is_completion_consumed(self, session_id: str) -> bool:
         """Check if a completion notification was already consumed via wait/log."""
@@ -2557,6 +2578,7 @@ class ProcessRegistry:
                             "cwd": s.cwd,
                             "started_at": s.started_at,
                             "task_id": s.task_id,
+                            "origin_turn_id": s.origin_turn_id,
                             "session_key": s.session_key,
                             "watcher_platform": s.watcher_platform,
                             "watcher_chat_id": s.watcher_chat_id,
@@ -2647,6 +2669,7 @@ class ProcessRegistry:
                 id=entry["session_id"],
                 command=entry.get("command", "unknown"),
                 task_id=entry.get("task_id", ""),
+                origin_turn_id=entry.get("origin_turn_id", ""),
                 session_key=entry.get("session_key", ""),
                 pid=pid,
                 host_start_time=recorded_start,

@@ -244,6 +244,7 @@ def _persist_dispatch(record: Dict[str, Any]) -> None:
         key: record.get(key)
         for key in (
             "goal", "goals", "context", "toolsets", "role", "model", "is_batch",
+            "origin_turn_id",
             # Routing origin (scope_id/user_id/user_name): persisted so a
             # restart-recovered completion can reconstruct a full
             # SessionSource — see _capture_routing_origin.
@@ -365,6 +366,7 @@ def recover_abandoned_delegations() -> int:
                 # after a restart remain routable to api_server sessions.
                 "origin_session_id": origin_session_id or "",
                 "parent_session_id": parent_id, "goal": task.get("goal", ""),
+                "origin_turn_id": task.get("origin_turn_id", ""),
                 "goals": task.get("goals"), "context": task.get("context"),
                 "toolsets": task.get("toolsets"), "role": task.get("role"),
                 "model": task.get("model"), "is_batch": bool(task.get("is_batch")),
@@ -638,6 +640,23 @@ def active_for_session(origin_ui_session_id: str) -> int:
         )
 
 
+def active_for_origin_turn(origin_turn_id: str, *, session_key: str = "") -> int:
+    """Count live delegation units commissioned by one parent agent turn."""
+    if not origin_turn_id:
+        return 0
+    with _records_lock:
+        return sum(
+            1
+            for record in _records.values()
+            if record.get("status") in {"running", "stalling", "finalizing"}
+            and str(record.get("origin_turn_id") or "") == origin_turn_id
+            and (
+                not session_key
+                or str(record.get("session_key") or "") == session_key
+            )
+        )
+
+
 def active_task_count() -> int:
     """Number of async delegation TASKS (child subagents) currently running.
 
@@ -759,6 +778,7 @@ def dispatch_async_delegation(
     model: Optional[str],
     session_key: str,
     parent_session_id: Optional[str] = None,
+    origin_turn_id: str = "",
     runner: Callable[[], Dict[str, Any]],
     origin_ui_session_id: str = "",
     origin_session_id: str = "",
@@ -821,6 +841,7 @@ def dispatch_async_delegation(
         "origin_ui_session_id": origin_ui_session_id,
         "origin_session_id": origin_session_id,
         "parent_session_id": parent_session_id,
+        "origin_turn_id": origin_turn_id,
         **_capture_routing_origin(),
         "status": "running",
         "dispatched_at": dispatched_at,
@@ -969,6 +990,7 @@ def _push_completion_event(
         "origin_ui_session_id": record.get("origin_ui_session_id", ""),
         "origin_session_id": record.get("origin_session_id", ""),
         "parent_session_id": record.get("parent_session_id"),
+        "origin_turn_id": record.get("origin_turn_id", ""),
         "goal": record.get("goal", ""),
         "context": record.get("context"),
         "toolsets": record.get("toolsets"),
@@ -1021,6 +1043,7 @@ def dispatch_async_delegation_batch(
     model: Optional[str],
     session_key: str,
     parent_session_id: Optional[str] = None,
+    origin_turn_id: str = "",
     runner: Callable[[], Dict[str, Any]],
     origin_ui_session_id: str = "",
     origin_session_id: str = "",
@@ -1068,6 +1091,7 @@ def dispatch_async_delegation_batch(
         "origin_ui_session_id": origin_ui_session_id,
         "origin_session_id": origin_session_id,
         "parent_session_id": parent_session_id,
+        "origin_turn_id": origin_turn_id,
         **_capture_routing_origin(),
         "status": "running",
         "dispatched_at": dispatched_at,
@@ -1181,6 +1205,7 @@ def _push_batch_completion_event(
         "origin_ui_session_id": event_record.get("origin_ui_session_id", ""),
         "origin_session_id": event_record.get("origin_session_id", ""),
         "parent_session_id": event_record.get("parent_session_id"),
+        "origin_turn_id": event_record.get("origin_turn_id", ""),
         "goal": event_record.get("goal", ""),
         "goals": event_record.get("goals"),
         "context": event_record.get("context"),

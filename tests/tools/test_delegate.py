@@ -1224,6 +1224,58 @@ class TestDelegationReasoningEffort(unittest.TestCase):
 class TestDispatchDelegateTask(unittest.TestCase):
     """Tests for the _dispatch_delegate_task helper and full param forwarding."""
 
+    def test_explicit_foreground_delegation_is_honored(self):
+        """A required reviewer can return inside the commissioning turn."""
+        import run_agent
+
+        captured = {}
+
+        def fake_delegate_task(**kwargs):
+            captured.update(kwargs)
+            return "{}"
+
+        parent = _make_mock_parent(depth=0)
+        with patch("tools.delegate_tool.delegate_task", fake_delegate_task):
+            run_agent.AIAgent._dispatch_delegate_task(
+                parent,
+                {"goal": "final review", "background": False},
+            )
+
+        self.assertIs(captured["background"], False)
+
+    def test_omitted_background_keeps_top_level_delegation_async(self):
+        import run_agent
+
+        captured = {}
+
+        def fake_delegate_task(**kwargs):
+            captured.update(kwargs)
+            return "{}"
+
+        parent = _make_mock_parent(depth=0)
+        with patch("tools.delegate_tool.delegate_task", fake_delegate_task):
+            run_agent.AIAgent._dispatch_delegate_task(parent, {"goal": "research"})
+
+        self.assertIs(captured["background"], True)
+
+    def test_registry_fallback_honors_explicit_foreground_delegation(self):
+        from tools.delegate_tool import _model_background_value
+
+        parent = _make_mock_parent(depth=0)
+
+        self.assertIs(
+            _model_background_value({"background": False}, parent),
+            False,
+        )
+
+    def test_schema_explains_foreground_join_semantics(self):
+        description = DELEGATE_TASK_SCHEMA["parameters"]["properties"][
+            "background"
+        ]["description"]
+
+        self.assertIn("required before", description)
+        self.assertNotIn("IGNORED", description)
+
     def test_model_acp_args_not_forwarded(self):
         """The live model dispatch path strips hidden ACP transport args."""
         import run_agent

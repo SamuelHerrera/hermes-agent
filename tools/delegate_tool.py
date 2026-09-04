@@ -4086,6 +4086,9 @@ def delegate_task(
             origin_ui_session_id=_origin_ui_session_id,
             origin_session_id=_wake_sid,
             parent_session_id=_parent_session_id,
+            origin_turn_id=str(
+                getattr(parent_agent, "_current_turn_id", "") or ""
+            ),
             runner=_batch_runner,
             interrupt_fn=_batch_interrupt,
             max_async_children=_get_max_async_children(),
@@ -4435,10 +4438,9 @@ def _build_top_level_description() -> str:
         "terminal session, and toolset, and only its final summary returns to "
         "you. Provide 'goal' for a single task or 'tasks' for a parallel batch "
         "(limits and nesting rules are in the parameter descriptions).\n\n"
-        "Runs in the background: dispatch returns immediately with live "
-        "transcript paths, and the completed result (one consolidated message "
-        "for a batch) re-enters the conversation on its own. Do NOT wait or "
-        "poll; continue other work.\n\n"
+        "Runs in the background by default. Set background=false only when the "
+        "result is required before this turn can finish (for example, one final "
+        "review); otherwise do NOT wait or poll.\n\n"
         "LIVE ORCHESTRATION: while children run, this tool also controls "
         "them — action='list' (live children + ids), action='steer' "
         "(subagent_id + message, redirect without stopping), action='stop' "
@@ -4632,13 +4634,12 @@ DELEGATE_TASK_SCHEMA = {
             "background": {
                 "type": "boolean",
                 "description": (
-                    "DEPRECATED / IGNORED. Top-level single and batch "
-                    "delegations run in the background automatically — you do "
-                    "not need to (and cannot) opt in or out. A single result or "
-                    "consolidated batch result re-enters the conversation when "
-                    "the work finishes; just continue working in the meantime. "
-                    "Setting this has no effect; the parameter remains only for "
-                    "backward compatibility."
+                    "Optional execution mode for top-level delegations. Omit or "
+                    "set true for normal background work; the result re-enters "
+                    "later without blocking this turn. Set false only when the "
+                    "result is required before the current turn may finish, "
+                    "such as one final review. Nested orchestrators remain "
+                    "synchronous regardless."
                 ),
             },
             "action": {
@@ -4686,18 +4687,23 @@ from tools.registry import registry, tool_error
 def _model_background_value(args: dict, parent_agent=None) -> bool:
     """Background flag for the MODEL-facing dispatch path (registry fallback).
 
-    Delegations from the top-level agent always run in the background — the
-    model does not choose. This applies to both a single task and a fan-out
-    batch (the whole batch is one async unit that joins on all children and
-    returns one consolidated result). The one
-    exception is a delegation from an orchestrator subagent (depth > 0), which
-    needs its workers' results within its own turn. The live path is
-    ``run_agent._dispatch_delegate_task``; this lambda mirrors it for the rare
-    case the intercept is bypassed. Direct Python callers of ``delegate_task``
-    keep the historical synchronous default.
+    Top-level delegations default to background execution but may explicitly
+    set ``background=false`` to join required work inside the current turn.
+    Delegations from an orchestrator subagent (depth > 0) always remain
+    synchronous because the orchestrator needs its workers' results. The live
+    path is ``run_agent._dispatch_delegate_task``; this helper mirrors it when
+    the intercept is bypassed. Direct Python callers of ``delegate_task`` keep
+    the historical synchronous default.
     """
     is_subagent = getattr(parent_agent, "_delegate_depth", 0) > 0
-    return not is_subagent
+    if is_subagent:
+        return False
+    requested = args.get("background")
+    return (
+        is_truthy_value(requested, default=True)
+        if requested is not None
+        else True
+    )
 
 
 _MODEL_HIDDEN_TASK_FIELDS = {"acp_command", "acp_args"}

@@ -63,6 +63,44 @@ def _make_session(
     return s
 
 
+def test_active_notifying_processes_are_scoped_to_originating_turn(registry):
+    same_turn = _make_session(sid="proc_same", task_id="turn-task")
+    same_turn.origin_turn_id = "turn-1"
+    same_turn.session_key = "session-a"
+    same_turn.notify_on_complete = True
+    silent = _make_session(sid="proc_silent", task_id="turn-task")
+    silent.origin_turn_id = "turn-1"
+    silent.session_key = "session-a"
+    other_session = _make_session(sid="proc_other", task_id="turn-task")
+    other_session.origin_turn_id = "turn-1"
+    other_session.session_key = "session-b"
+    other_session.notify_on_complete = True
+    registry._running = {
+        same_turn.id: same_turn,
+        silent.id: silent,
+        other_session.id: other_session,
+    }
+
+    assert registry.active_notifying_for_turn("turn-1", session_key="session-a") == 1
+    assert registry.active_notifying_for_turn("turn-1", session_key="session-b") == 1
+    assert registry.active_notifying_for_turn("", session_key="session-a") == 0
+
+
+def test_completion_notification_keeps_originating_turn(registry):
+    session = _make_session(sid="proc_done", task_id="turn-task")
+    session.origin_turn_id = "turn-1"
+    session.session_key = "session-a"
+    session.notify_on_complete = True
+    session.exited = True
+    session.exit_code = 0
+    registry._running[session.id] = session
+
+    registry._move_to_finished(session)
+
+    event = registry.completion_queue.get_nowait()
+    assert event["origin_turn_id"] == "turn-1"
+
+
 def _spawn_python_sleep(seconds: float) -> subprocess.Popen:
     """Spawn a portable short-lived Python sleep process."""
     return subprocess.Popen(

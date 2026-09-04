@@ -48,6 +48,7 @@ def test_terminal_background_keeps_pty_for_regular_interactive_commands(monkeypa
                 command="python3 -c \"print(input())\"",
                 background=True,
                 pty=True,
+                origin_turn_id="unique-turn-id",
             )
         )
     finally:
@@ -55,4 +56,5 @@ def test_terminal_background_keeps_pty_for_regular_interactive_commands(monkeypa
         terminal_tool_module._last_activity.pop("default", None)
 
     assert captured["use_pty"] is True
+    assert captured["origin_turn_id"] == "unique-turn-id"
     assert "pty_note" not in result
