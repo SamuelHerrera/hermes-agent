@@ -533,9 +533,10 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     startFreshSessionDraft({ source: 'wiring.fresh-session-request' })
   }, [freshSessionRequest, startFreshSessionDraft])
 
-  // Close-all/close-final-tab should not materialize another visible "New
-  // session" tab. It still clears the primary chat state through the same fresh
-  // draft reset path, then parks the workspace on a cheap empty placeholder.
+  // Implicit lifecycle transitions (close-all/final-tab and profile switches)
+  // must not materialize another visible "New session" tab. They still clear
+  // the primary chat state through the fresh-draft reset path, then park the
+  // workspace on a cheap empty placeholder.
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     if (emptyWorkspaceRequest === lastEmptyWorkspaceRef.current) {

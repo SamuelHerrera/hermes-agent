@@ -156,10 +156,10 @@ export const $activeGatewayProfile = atom<string>('default')
 // / default, so single-profile users are unaffected.
 export const $newChatProfile = atom<string | null>(null)
 
-// Bumped whenever the open session should be dropped for a fresh new-session
-// draft: a profile switch/create (below), or deleting the project that owns the
-// currently-open session (store/projects). The chat controller subscribes and
-// resets to the intro draft, so we never strand the user in an orphaned view.
+// Bumped whenever the open session should be dropped for an explicit fresh
+// new-session draft (below), or deleting the project that owns the currently-
+// open session (store/projects). The chat controller subscribes and resets to
+// the intro draft, so we never strand the user in an orphaned view.
 export const $freshSessionRequest = atom(0)
 export const $emptyWorkspaceRequest = atom(0)
 
@@ -359,14 +359,16 @@ export const $profileScope = computed([$showAllProfiles, $activeGatewayProfile],
 // $activeGatewayProfile → name, so $profileScope follows).
 export function selectProfile(name: string): void {
   const target = normalizeProfileKey(name)
-  // Switching profiles (or coming back from the all-profiles browse view) starts
-  // fresh; re-tapping the profile you're already in leaves your session be.
+  // A context switch must not leave the previous profile's session on screen,
+  // but it also must not manufacture a synthetic "New session" tab. Park the
+  // workspace while the target profile's own persisted tabs hydrate; the
+  // explicit per-profile new-session action below still starts a real draft.
   const switching = $showAllProfiles.get() || target !== normalizeProfileKey($activeGatewayProfile.get())
   $showAllProfiles.set(false)
   $newChatProfile.set(target)
 
   if (switching) {
-    requestFreshSession('profile.select')
+    requestEmptyWorkspace('profile.select')
   }
 
   void ensureGatewayProfile(target)

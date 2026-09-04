@@ -19,8 +19,19 @@ vi.mock('@/hermes', () => ({
 vi.mock('@/lib/query-client', () => ({ invalidateProfileScopedQueries: vi.fn() }))
 vi.mock('@/store/starmap', () => ({ resetStarmapGraph }))
 
-const { $activeGatewayProfile, $profiles, ensureGatewayProfile, prewarmProfileBackend, refreshProfiles } =
-  await import('./profile')
+const {
+  $activeGatewayProfile,
+  $emptyWorkspaceRequest,
+  $freshSessionRequest,
+  $newChatProfile,
+  $profiles,
+  $showAllProfiles,
+  ensureGatewayProfile,
+  newSessionInProfile,
+  prewarmProfileBackend,
+  refreshProfiles,
+  selectProfile
+} = await import('./profile')
 
 const { $connection } = await import('./session')
 const { invalidateProfileScopedQueries } = await import('@/lib/query-client')
@@ -50,6 +61,8 @@ beforeEach(() => {
   openGatewayForProfile.mockClear()
   $gateway.set({ id: 'live-socket' })
   $activeGatewayProfile.set('default')
+  $newChatProfile.set(null)
+  $showAllProfiles.set(false)
   $connection.set(localConn())
   $profiles.set([])
   vi.stubGlobal('window', { hermesDesktop: { getConnection } })
@@ -116,6 +129,32 @@ describe('profile-scoped cache invalidation', () => {
 
     expect(invalidateProfileScopedQueries).toHaveBeenCalled()
     expect(resetStarmapGraph).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('selectProfile workspace transition', () => {
+  it('parks the prior workspace instead of materializing a synthetic New session tab', async () => {
+    const emptyBefore = $emptyWorkspaceRequest.get()
+    const freshBefore = $freshSessionRequest.get()
+
+    selectProfile('vps-remote')
+
+    expect($newChatProfile.get()).toBe('vps-remote')
+    expect($freshSessionRequest.get()).toBe(freshBefore)
+    expect($emptyWorkspaceRequest.get()).toBe(emptyBefore + 1)
+    await vi.waitFor(() => expect(ensureGatewayForProfile).toHaveBeenCalledWith('vps-remote'))
+  })
+
+  it('keeps an explicit per-profile New session action as a fresh draft', async () => {
+    const emptyBefore = $emptyWorkspaceRequest.get()
+    const freshBefore = $freshSessionRequest.get()
+
+    newSessionInProfile('vps-remote')
+
+    expect($newChatProfile.get()).toBe('vps-remote')
+    expect($freshSessionRequest.get()).toBe(freshBefore + 1)
+    expect($emptyWorkspaceRequest.get()).toBe(emptyBefore)
+    await vi.waitFor(() => expect(ensureGatewayForProfile).toHaveBeenCalledWith('vps-remote'))
   })
 })
 
