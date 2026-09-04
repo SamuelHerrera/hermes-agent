@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 
 import { Codicon } from '@/components/ui/codicon'
+import { StatusPulse } from '@/components/ui/status-pulse'
 import { Tip } from '@/components/ui/tooltip'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
@@ -30,11 +31,10 @@ type StatusIconVariant = {
 // Shared base for every active dot; idle is smaller and uses its own class.
 const DOT_BASE = 'size-1.5 rounded-full'
 const LOADING_RING_CLASS = 'size-3'
-const LOADING_RING_ICON_SIZE = '0.75rem'
 
 // Most states are dots: color + fill/hollow tell states apart. A live turn is
-// the exception — it becomes the only moving status treatment, then returns to a
-// normal dot as soon as the session settles.
+// the exception — it gets one shared finite pulse every five seconds, then
+// returns to a normal dot as soon as the session settles.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // Amber — a clarify/approval is blocking the turn. The one "act now" color,
   // and the only state the user is required to do something about.
@@ -44,15 +44,15 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
     role: 'status',
     title: r => r.waitingForAnswer
   },
-  // Accent spinner — the turn is running. This is the only moving session
-  // status treatment; settled states return to a normal dot.
+  // Accent ring — the turn is running. Its finite shared pulse is the only
+  // moving session treatment; settled states return to a normal dot.
   working: {
     ariaLabel: r => r.sessionRunning,
     className: `${LOADING_RING_CLASS} text-(--ui-accent)`,
     icon: 'loading',
     role: 'status'
   },
-  // Muted accent spinner — still authoritatively running, but nothing has
+  // Muted accent ring — still authoritatively running, but nothing has
   // arrived for the watchdog window. Motion stays because the turn is alive;
   // opacity is what says it has gone quiet.
   stalled: {
@@ -175,7 +175,12 @@ function LoadingProjectDot({
       role={variant.role}
       title={variant.title?.(r) ?? label}
     >
-      <Codicon className="absolute inset-0 block leading-none" name="loading" size={LOADING_RING_ICON_SIZE} spinning />
+      <StatusPulse
+        aria-hidden="true"
+        className="absolute inset-0 rounded-full border border-current"
+        data-session-live-pulse
+        kind="opacity"
+      />
       <ProjectColorDot color={color} />
     </span>
   )

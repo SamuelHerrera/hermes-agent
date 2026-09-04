@@ -31,31 +31,31 @@ afterEach(() => {
   $unreadFinishedSessionIds.set([])
 })
 
-const spinner = (container: HTMLElement) =>
-  container.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+const continuousSpinner = (container: HTMLElement) => container.querySelector<HTMLElement>('.codicon-modifier-spin')
 
 const normalDot = (container: HTMLElement) => container.querySelector('span[aria-hidden="true"].rounded-full')
 const loadingRing = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-session-status="working"]')
+const livePulse = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-session-live-pulse]')
 
 describe('SessionStatusDot running icon', () => {
-  it('shows a rotating loading icon while a session is running', () => {
+  it('shows a finite live pulse instead of a continuous spinner while a session is running', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
     const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    const runningSpinner = spinner(container)
     const ring = loadingRing(container)
 
-    expect(runningSpinner).toBeTruthy()
-    expect(runningSpinner?.style.fontSize).toBe('0.75rem')
+    expect(continuousSpinner(container)).toBeNull()
+    expect(livePulse(container)).toBeTruthy()
     expect(ring?.classList.contains('size-3')).toBe(true)
     expect(normalDot(container)).toBeTruthy()
   })
 
-  it('does not show a rotating loading icon for a settled session', () => {
+  it('does not show a live pulse for a settled session', () => {
     const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    expect(spinner(container)).toBeNull()
+    expect(continuousSpinner(container)).toBeNull()
+    expect(livePulse(container)).toBeNull()
     expect(normalDot(container)).toBeTruthy()
   })
 
@@ -63,29 +63,28 @@ describe('SessionStatusDot running icon', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
     const { container } = render(<SessionStatusDot storedSessionId="s1" />)
 
-    expect(spinner(container)).toBeTruthy()
+    expect(livePulse(container)).toBeTruthy()
 
     act(() => {
       clearAllSessionStates()
     })
 
-    expect(spinner(container)).toBeNull()
+    expect(livePulse(container)).toBeNull()
     expect(normalDot(container)).toBeTruthy()
   })
 })
 
 describe('session tab attention treatment', () => {
-  it('wraps the leading project dot with the spinner while a session is running', () => {
+  it('wraps the leading project dot with a finite pulse while a session is running', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
     const lead = render(<SessionTabLead session={{ id: 's1' } as never} storedSessionId="s1" />)
 
-    const tabSpinner = spinner(lead.container)
     const tabRing = loadingRing(lead.container)
 
     expect(lead.container.querySelector('[data-session-project-dot] [data-session-status="working"]')).toBeTruthy()
-    expect(tabSpinner).toBeTruthy()
-    expect(tabSpinner?.style.fontSize).toBe('0.75rem')
+    expect(continuousSpinner(lead.container)).toBeNull()
+    expect(livePulse(lead.container)).toBeTruthy()
     expect(tabRing?.classList.contains('size-3')).toBe(true)
     expect(normalDot(lead.container)).toBeTruthy()
 
