@@ -47,6 +47,7 @@ describe('SessionStatusDot running icon', () => {
 
     expect(continuousSpinner(container)).toBeNull()
     expect(livePulse(container)).toBeTruthy()
+    expect(livePulse(container)?.querySelector('.codicon-loading')).toBeTruthy()
     expect(ring?.classList.contains('size-3')).toBe(true)
     expect(normalDot(container)).toBeTruthy()
   })
@@ -85,6 +86,7 @@ describe('session tab attention treatment', () => {
     expect(lead.container.querySelector('[data-session-project-dot] [data-session-status="working"]')).toBeTruthy()
     expect(continuousSpinner(lead.container)).toBeNull()
     expect(livePulse(lead.container)).toBeTruthy()
+    expect(livePulse(lead.container)?.querySelector('.codicon-loading')).toBeTruthy()
     expect(tabRing?.classList.contains('size-3')).toBe(true)
     expect(normalDot(lead.container)).toBeTruthy()
 

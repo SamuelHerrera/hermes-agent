@@ -79,7 +79,7 @@ const subscribePulse = (subscriber: PulseSubscriber): (() => void) => {
   }
 }
 
-export interface StatusPulseProps extends Omit<ComponentProps<'span'>, 'children' | 'ref'> {
+export interface StatusPulseProps extends Omit<ComponentProps<'span'>, 'ref'> {
   kind: 'opacity' | 'ping'
   opacity?: number
 }
@@ -90,7 +90,8 @@ export interface StatusPulseProps extends Omit<ComponentProps<'span'>, 'children
  * Continuous CSS animations keep Chromium producing frames and recalculating
  * styles for an otherwise motionless Desktop window. Drive the same visual
  * cue directly so React stays out of the loop and the renderer/compositor can
- * sleep between pulses.
+ * sleep between pulses. Optional children keep the exact geometry of an
+ * existing status glyph while this wrapper owns only its finite opacity beat.
  */
 export function StatusPulse({ kind, opacity = 1, ...props }: StatusPulseProps) {
   const ref = useRef<HTMLSpanElement>(null)

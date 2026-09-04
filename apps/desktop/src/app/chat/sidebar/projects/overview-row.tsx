@@ -3,6 +3,7 @@ import type * as React from 'react'
 import { useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
+import { StatusPulse } from '@/components/ui/status-pulse'
 import { Tip } from '@/components/ui/tooltip'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
@@ -68,13 +69,13 @@ function ProjectSummaryCount({
   dataAttr,
   icon,
   label,
-  spinning = false
+  pulsing = false
 }: {
   count: number
   dataAttr: 'archived' | 'chats' | 'children' | 'running'
   icon: string
   label: string
-  spinning?: boolean
+  pulsing?: boolean
 }) {
   const countAttrs = {
     ...(dataAttr === 'archived' ? { 'data-project-archived-count': true } : {}),
@@ -92,7 +93,13 @@ function ProjectSummaryCount({
         data-project-summary-kind={dataAttr}
         {...countAttrs}
       >
-        <Codicon name={icon} size="0.75rem" spinning={spinning} />
+        {pulsing ? (
+          <StatusPulse data-project-live-pulse kind="opacity">
+            <Codicon name={icon} size="0.75rem" />
+          </StatusPulse>
+        ) : (
+          <Codicon name={icon} size="0.75rem" />
+        )}
         <span>{count}</span>
       </span>
     </Tip>
@@ -122,7 +129,7 @@ function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
           dataAttr="running"
           icon="sync"
           label={`${runningCount} running chat${runningCount === 1 ? '' : 's'}`}
-          spinning
+          pulsing
         />
       )}
       <ProjectSummaryCount

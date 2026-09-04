@@ -169,6 +169,8 @@ describe('ProjectOverviewRow', () => {
     expect(secondary?.contains(archivedCount)).toBe(true)
     expect(runningCount?.textContent).toBe('2')
     expect(runningCount?.querySelector('.codicon-sync')).toBeTruthy()
+    expect(runningCount?.querySelector('[data-project-live-pulse]')).toBeTruthy()
+    expect(runningCount?.querySelector('.codicon-modifier-spin')).toBeNull()
     expect(chatCount?.textContent).toBe('7')
     expect(chatCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
     expect(childCount?.textContent).toBe('6')

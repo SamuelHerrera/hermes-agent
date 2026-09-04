@@ -1,4 +1,4 @@
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { StatusPulse } from './status-pulse'
@@ -95,6 +95,17 @@ describe('StatusPulse', () => {
 
     act(() => vi.advanceTimersByTime(1))
     expect(played).toHaveLength(2)
+  })
+
+  it('pulses its child without replacing the child geometry', () => {
+    render(
+      <StatusPulse kind="opacity">
+        <span data-testid="original-glyph" />
+      </StatusPulse>
+    )
+
+    expect(screen.getByTestId('original-glyph')).toBeTruthy()
+    expect(played).toHaveLength(1)
   })
 
   it('cancels scheduled work while minimized and restarts once visible', () => {

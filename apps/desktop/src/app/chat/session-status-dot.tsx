@@ -177,10 +177,12 @@ function LoadingProjectDot({
     >
       <StatusPulse
         aria-hidden="true"
-        className="absolute inset-0 rounded-full border border-current"
+        className="absolute inset-0 grid place-items-center"
         data-session-live-pulse
         kind="opacity"
-      />
+      >
+        <Codicon className="block leading-none" name="loading" size="0.75rem" />
+      </StatusPulse>
       <ProjectColorDot color={color} />
     </span>
   )
