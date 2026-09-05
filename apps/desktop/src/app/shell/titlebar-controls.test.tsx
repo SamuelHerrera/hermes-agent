@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { $keepAwake, setKeepAwake } from '@/store/keep-awake'
 import { setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
 
 import type { StatusbarItem } from './statusbar-controls'
@@ -18,6 +19,7 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 
 afterEach(() => {
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
+  act(() => setKeepAwake(false))
   cleanup()
   vi.clearAllMocks()
 })
@@ -53,6 +55,25 @@ describe('TitlebarControls', () => {
     expect(screen.getByRole('button', { name: 'New project' }).querySelector('.codicon-new-folder')).toBeTruthy()
   })
 
+  it('toggles keep-awake directly from the app toolbar', () => {
+    render(
+      <MemoryRouter>
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    const enable = screen.getByRole('button', { name: 'Keep computer awake: Off' })
+    expect(enable.getAttribute('aria-pressed')).toBe('false')
+    expect(enable.querySelector('.codicon-unlock')).toBeTruthy()
+
+    fireEvent.click(enable)
+
+    expect($keepAwake.get()).toBe(true)
+    const disable = screen.getByRole('button', { name: 'Keep computer awake: On' })
+    expect(disable.getAttribute('aria-pressed')).toBe('true')
+    expect(disable.querySelector('.codicon-lock')).toBeTruthy()
+  })
+
   it('keeps requested app controls visible and moves the rest behind the dots menu', async () => {
     const commandCenter: StatusbarItem = {
       icon: <span data-testid="command-center-icon" />,
@@ -66,9 +87,10 @@ describe('TitlebarControls', () => {
     const approval: StatusbarItem = {
       icon: <span data-testid="approval-icon" />,
       id: 'approval-mode',
+      menuContent: <span>Approval settings</span>,
       title: 'Approval mode: Off',
       toggleLabel: 'Approvals',
-      variant: 'action'
+      variant: 'menu'
     }
 
     const terminal: StatusbarItem = {
@@ -112,15 +134,15 @@ describe('TitlebarControls', () => {
 
     expect(buttonNames).toEqual([
       'Hide sidebar',
+      'Keep computer awake: Off',
       'More app actions',
       'Profiles',
       'Codex usage unavailable',
-      'Approval mode: Off',
       'Show terminal',
       'New project',
       'New session'
     ])
-    expect(appControls.children[1]).toBe(more)
+    expect(appControls.children[2]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
@@ -128,6 +150,7 @@ describe('TitlebarControls', () => {
     fireEvent.click(more)
 
     expect(await screen.findByRole('menuitem', { name: 'Command Center' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Approvals' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
@@ -164,9 +187,9 @@ describe('TitlebarControls', () => {
 
     expect(buttonNames).toEqual([
       'Hide sidebar',
+      'Keep computer awake: Off',
       'More app actions',
       'Capabilities',
-      'Messaging',
       'Profiles',
       'Codex usage unavailable',
       'Mute haptics',
