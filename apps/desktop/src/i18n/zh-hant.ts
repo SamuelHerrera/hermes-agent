@@ -658,7 +658,8 @@ export const zhHant = defineLocale({
       imported: '設定已匯入',
       invalidJson: '設定 JSON 無效',
       keepAwakeTitle: '保持電腦喚醒',
-      keepAwakeDesc: '防止閒置睡眠；在 macOS 上闔蓋後仍可繼續執行。變更此設定時，macOS 會要求管理員授權。'
+      keepAwakeDesc:
+        '防止閒置睡眠；在 macOS 上闔蓋後仍可繼續執行。首次變更時，macOS 會要求管理員核准安裝受限的本機授權；後續變更不需要密碼。'
     },
     quickEntry: {
       enabledTitle: '快速輸入',

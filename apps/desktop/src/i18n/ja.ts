@@ -671,7 +671,8 @@ export const ja = defineLocale({
       imported: '設定をインポートしました',
       invalidJson: '設定 JSON が無効です',
       keepAwakeTitle: 'コンピューターをスリープさせない',
-      keepAwakeDesc: 'アイドル時のスリープを防ぎ、macOSでは蓋を閉じても実行を継続します。変更時に管理者の承認が求められます。'
+      keepAwakeDesc:
+        'アイドル時のスリープを防ぎ、macOSでは蓋を閉じても実行を継続します。初回の変更時のみ、限定的なローカル認証のインストールに管理者の承認が必要です。以降の変更ではパスワードは不要です。'
     },
     quickEntry: {
       enabledTitle: 'クイック入力',

@@ -796,7 +796,8 @@ export const zh: Translations = {
       imported: '配置已导入',
       invalidJson: '配置 JSON 无效',
       keepAwakeTitle: '保持电脑唤醒',
-      keepAwakeDesc: '防止空闲休眠；在 macOS 上合盖后仍可继续运行。更改此设置时，macOS 会请求管理员授权。',
+      keepAwakeDesc:
+        '防止空闲休眠；在 macOS 上合盖后仍可继续运行。首次更改时，macOS 会请求管理员批准安装受限的本地授权；后续更改无需密码。',
       attachmentSizeTitle: '预览 / 图片加载大小上限',
       attachmentSizeDesc:
         '桌面端为预览和图片附件加载本地文件的大小上限（MB）。默认为 16。远程非图片附件使用单独的 256 MB 上限。设置过大会将整个文件读入内存，可能导致应用卡死或崩溃。',
