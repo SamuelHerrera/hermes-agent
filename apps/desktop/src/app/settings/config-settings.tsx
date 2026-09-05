@@ -18,7 +18,7 @@ import {
   refreshDataUrlReadMaxMb,
   setDataUrlReadMaxMb
 } from '@/store/data-url-read-max'
-import { $keepAwake, setKeepAwake } from '@/store/keep-awake'
+import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
 import { notify, notifyError } from '@/store/notifications'
 import { repoDiscoveryPolicyFromConfig, repoDiscoveryPolicySignature, scanAndRecordRepos } from '@/store/projects'
 import type { ConfigFieldSchema, HermesConfigRecord } from '@/types/hermes'
@@ -69,6 +69,7 @@ export function ConfigSettings({
   const { t } = useI18n()
   const c = t.settings.config
   const keepAwake = useStore($keepAwake)
+  const keepAwakeBusy = useStore($keepAwakeBusy)
   // The editable draft is local (debounced autosave watches it), but it's seeded
   // from — and saved back through — the shared config cache, so edits are visible
   // in the MCP/model surfaces and reopening the page doesn't reload-flash.
@@ -310,8 +311,9 @@ export function ConfigSettings({
           <ToggleRow
             checked={keepAwake}
             description={c.keepAwakeDesc}
+            disabled={keepAwakeBusy}
             label={c.keepAwakeTitle}
-            onChange={setKeepAwake}
+            onChange={on => void setKeepAwake(on)}
           />
           <QuickEntrySettings />
         </>

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { $keepAwake, setKeepAwake } from '@/store/keep-awake'
+import { $keepAwake } from '@/store/keep-awake'
 import { setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
 
 import type { StatusbarItem } from './statusbar-controls'
@@ -19,7 +19,7 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 
 afterEach(() => {
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
-  act(() => setKeepAwake(false))
+  act(() => $keepAwake.set(false))
   cleanup()
   vi.clearAllMocks()
 })

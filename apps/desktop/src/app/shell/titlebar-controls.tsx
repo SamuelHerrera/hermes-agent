@@ -29,7 +29,7 @@ import { resolveProfileColor } from '@/lib/profile-color'
 import { cn } from '@/lib/utils'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
-import { $keepAwake, setKeepAwake } from '@/store/keep-awake'
+import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
 import {
   $sidebarOpen,
   $sidebarWidth,
@@ -393,6 +393,7 @@ export function TitlebarControls({
   const modHeld = useModifierHeld()
   const hapticsMuted = useStore($hapticsMuted)
   const keepAwake = useStore($keepAwake)
+  const keepAwakeBusy = useStore($keepAwakeBusy)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
@@ -460,12 +461,13 @@ export function TitlebarControls({
     },
     {
       active: keepAwake,
+      disabled: keepAwakeBusy,
       icon: <TitlebarIcon name={keepAwake ? 'lock' : 'unlock'} />,
       id: 'keep-awake',
       label: `${t.settings.config.keepAwakeTitle}: ${keepAwake ? t.common.on : t.common.off}`,
       onSelect: () => {
         triggerHaptic('tap')
-        setKeepAwake(!keepAwake)
+        void setKeepAwake(!keepAwake)
       },
       title: t.settings.config.keepAwakeDesc
     },

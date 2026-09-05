@@ -240,7 +240,8 @@ declare global {
       setTitleBarTheme?: (payload: HermesTitleBarTheme) => void
       setNativeTheme?: (mode: 'dark' | 'light' | 'system') => void
       setTranslucency?: (payload: { intensity: number }) => void
-      setKeepAwake?: (on: boolean) => void
+      getKeepAwake?: () => Promise<{ error?: string; ok: boolean; on: boolean }>
+      setKeepAwake?: (on: boolean) => Promise<{ error?: string; ok: boolean; on: boolean }>
       setPreviewShortcutActive?: (active: boolean) => void
       openExternal: (url: string) => Promise<void>
       openPreviewInBrowser?: (url: string) => Promise<void>

@@ -671,7 +671,7 @@ export const ja = defineLocale({
       imported: '設定をインポートしました',
       invalidJson: '設定 JSON が無効です',
       keepAwakeTitle: 'コンピューターをスリープさせない',
-      keepAwakeDesc: '本体のスリープを防ぎ、長時間や夜通しの実行を継続します。画面は暗転できます。'
+      keepAwakeDesc: 'アイドル時のスリープを防ぎ、macOSでは蓋を閉じても実行を継続します。変更時に管理者の承認が求められます。'
     },
     quickEntry: {
       enabledTitle: 'クイック入力',

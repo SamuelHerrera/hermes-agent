@@ -183,6 +183,7 @@ import { snapHudBounds } from './hud-snap'
 import { createHudSnapShortcut } from './hud-snap-shortcut'
 import { buildHudWindowUrl } from './hud-url'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
+import { createMacClosedLidSleep, macSleepErrorMessage } from './macos-closed-lid-sleep'
 import { ensureMainWindow } from './main-window-lifecycle'
 import {
   oauthGuardMayHardFail,
@@ -11857,12 +11858,12 @@ ipcMain.on('hermes:translucency', (_event, payload) => {
   }
 })
 
-// Keep-awake: hold the machine awake for long/overnight runs. Main owns the one
-// blocker and its persisted state so a cold launch restores it (applied on
-// ready — powerSaveBlocker needs the app ready). The renderer toggles it from
-// Settings → Advanced over IPC. See store/keep-awake.
+// Keep-awake: hold the machine awake for long/overnight runs. Main owns the
+// Electron idle-sleep blocker, the privileged macOS closed-lid guard, and the
+// persisted state. The renderer only commits state confirmed by this IPC seam.
 const KEEP_AWAKE_CONFIG_PATH = path.join(app.getPath('userData'), 'keep-awake.json')
 const keepAwake = createKeepAwake(powerSaveBlocker)
+const macClosedLidSleep = createMacClosedLidSleep()
 
 function readPersistedKeepAwake() {
   try {
@@ -11872,17 +11873,60 @@ function readPersistedKeepAwake() {
   }
 }
 
-ipcMain.on('hermes:keep-awake', (_event, on) => {
-  const enabled = Boolean(on)
-  keepAwake.set(enabled)
-
+function writePersistedKeepAwake(on: boolean) {
   try {
     fs.mkdirSync(path.dirname(KEEP_AWAKE_CONFIG_PATH), { recursive: true })
-    fs.writeFileSync(KEEP_AWAKE_CONFIG_PATH, JSON.stringify({ on: enabled }, null, 2), 'utf8')
+    fs.writeFileSync(KEEP_AWAKE_CONFIG_PATH, JSON.stringify({ on }, null, 2), 'utf8')
   } catch (error) {
     rememberLog(`[keep-awake] write failed: ${error.message}`)
   }
+}
+
+async function currentKeepAwakeState() {
+  if (!IS_MAC) {
+    return keepAwake.isActive()
+  }
+
+  try {
+    return keepAwake.isActive() && (await macClosedLidSleep.current()).active
+  } catch (error) {
+    rememberLog(`[keep-awake] macOS state check failed: ${macSleepErrorMessage(error)}`)
+
+    return false
+  }
+}
+
+async function applyKeepAwake(enabled: boolean) {
+  try {
+    if (IS_MAC) {
+      await macClosedLidSleep.set(enabled)
+    }
+
+    keepAwake.set(enabled)
+    writePersistedKeepAwake(enabled)
+
+    return { ok: true, on: enabled }
+  } catch (error) {
+    const message = macSleepErrorMessage(error)
+
+    rememberLog(`[keep-awake] apply failed: ${message}`)
+
+    return { error: message, ok: false, on: await currentKeepAwakeState() }
+  }
+}
+
+ipcMain.handle('hermes:keep-awake:get', async () => {
+  const on = await currentKeepAwakeState()
+
+  if (keepAwake.isActive() !== on) {
+    keepAwake.set(on)
+    writePersistedKeepAwake(on)
+  }
+
+  return { ok: true, on }
 })
+
+ipcMain.handle('hermes:keep-awake:set', (_event, on) => applyKeepAwake(Boolean(on)))
 
 // Quick Entry: the renderer reads the live registration state on settings mount
 // and writes the preference back. Main is authoritative — it owns the OS
