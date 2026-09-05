@@ -245,6 +245,32 @@ test('addWorktree: existingBranch checks the branch out without a new branch', a
   }
 })
 
+test('addWorktree: existingBranch accepts a created worktree when post-checkout fails', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-convert-hook-'))
+
+  try {
+    await ensureGitRepo('git', dir)
+    execFileSync('git', ['-C', dir, 'branch', 'existing-feature'])
+
+    const hook = path.join(dir, '.git', 'hooks', 'post-checkout')
+
+    fs.writeFileSync(hook, ['#!/bin/sh', 'printf "post-checkout failed\\n" >&2', 'exit 1', ''].join('\n'))
+    fs.chmodSync(hook, 0o755)
+
+    const result = await addWorktree(dir, { existingBranch: 'existing-feature' }, 'git')
+    const retry = await addWorktree(dir, { existingBranch: 'existing-feature' }, 'git')
+
+    assert.equal(result.branch, 'existing-feature')
+    assert.equal(
+      execFileSync('git', ['-C', result.path, 'branch', '--show-current']).toString().trim(),
+      'existing-feature'
+    )
+    assert.equal(fs.realpathSync(retry.path), fs.realpathSync(result.path))
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('addWorktree: existing default branch switches the main checkout, not .worktrees/main', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-convert-default-'))
   const git = (...args) => execFileSync('git', args, { cwd: dir }).toString().trim()
@@ -371,6 +397,42 @@ test('addWorktree: base origin/main does not set up upstream tracking', async ()
   } finally {
     fs.rmSync(remoteDir, { recursive: true, force: true })
     fs.rmSync(cloneDir, { recursive: true, force: true })
+  }
+})
+
+test('addWorktree: accepts a created worktree when post-checkout fails and reuses it on retry', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-lfs-hook-'))
+
+  const git = (...args) =>
+    execFileSync('git', ['-C', dir, ...args])
+      .toString()
+      .trim()
+
+  try {
+    await ensureGitRepo('git', dir)
+
+    const hook = path.join(dir, '.git', 'hooks', 'post-checkout')
+
+    fs.writeFileSync(
+      hook,
+      [
+        '#!/bin/sh',
+        'printf "This repository is configured for Git LFS but git-lfs was not found on your path.\\n" >&2',
+        'exit 127',
+        ''
+      ].join('\n')
+    )
+    fs.chmodSync(hook, 0o755)
+
+    const result = await addWorktree(dir, { branch: 'needs-lfs', name: 'needs-lfs' }, 'git')
+    const retry = await addWorktree(dir, { branch: 'needs-lfs', name: 'needs-lfs' }, 'git')
+
+    assert.equal(result.branch, 'needs-lfs')
+    assert.ok(fs.existsSync(result.path))
+    assert.equal(git('-C', result.path, 'branch', '--show-current'), 'needs-lfs')
+    assert.equal(fs.realpathSync(retry.path), fs.realpathSync(result.path))
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
   }
 })
 

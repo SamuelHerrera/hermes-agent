@@ -242,6 +242,38 @@ function uniqueDir(base) {
   return dir
 }
 
+function samePath(a, b) {
+  return path.resolve(String(a || '')) === path.resolve(String(b || ''))
+}
+
+async function worktreeWasCreated(gitBin, root, dir, branch) {
+  const trees = await listWorktrees(root, gitBin)
+  const tree = trees.find(item => samePath(item.path, dir))
+
+  return Boolean(tree && (!branch || tree.branch === branch))
+}
+
+async function worktreeForBranch(gitBin, root, branch) {
+  const trees = await listWorktrees(root, gitBin)
+
+  return trees.find(item => item.branch === branch) || null
+}
+
+// `git worktree add` can finish the checkout and then exit non-zero because a
+// post-checkout hook failed. Accept that command only after Git confirms the
+// requested path and branch were registered; pre-checkout failures still throw.
+async function runWorktreeAdd(gitBin, args, root, dir, branch) {
+  try {
+    await runGit(gitBin, args, root)
+  } catch (err) {
+    if (await worktreeWasCreated(gitBin, root, dir, branch)) {
+      return
+    }
+
+    throw err
+  }
+}
+
 async function addExistingBranchWorktree(gitBin, root, name) {
   const requested = sanitizeBranch(name)
 
@@ -262,6 +294,12 @@ async function addExistingBranchWorktree(gitBin, root, name) {
     return { path: root, branch, repoRoot: root }
   }
 
+  const existingTree = await worktreeForBranch(gitBin, root, branch)
+
+  if (existingTree) {
+    return { path: existingTree.path, branch, repoRoot: root }
+  }
+
   const dir = uniqueDir(path.join(root, '.worktrees', slugify(branch)))
 
   if (remote) {
@@ -275,12 +313,12 @@ async function addExistingBranchWorktree(gitBin, root, name) {
       // that the repo already has.
     }
 
-    await runGit(gitBin, ['worktree', 'add', '--track', '-b', branch, dir, requested], root)
+    await runWorktreeAdd(gitBin, ['worktree', 'add', '--track', '-b', branch, dir, requested], root, dir, branch)
 
     return { path: dir, branch, repoRoot: root }
   }
 
-  await runGit(gitBin, ['worktree', 'add', dir, branch], root)
+  await runWorktreeAdd(gitBin, ['worktree', 'add', dir, branch], root, dir, branch)
 
   return { path: dir, branch, repoRoot: root }
 }
@@ -299,6 +337,12 @@ async function addWorktree(repoPath, options, gitBin) {
 
   const slug = slugify(opts.name || `work-${Date.now().toString(36)}`)
   const branch = sanitizeBranch(opts.branch) || `hermes/${slug}`
+  const existingTree = await worktreeForBranch(gitBin, root, branch)
+
+  if (existingTree) {
+    return { path: existingTree.path, branch, repoRoot: root }
+  }
+
   const dir = uniqueDir(path.join(root, '.worktrees', slug))
 
   const args = ['worktree', 'add', '-b', branch, dir]
@@ -333,12 +377,12 @@ async function addWorktree(repoPath, options, gitBin) {
   }
 
   try {
-    await runGit(gitBin, args, root)
+    await runWorktreeAdd(gitBin, args, root, dir, branch)
   } catch (err) {
     // Branch name may already exist — retry checking out the existing branch
     // into a fresh worktree dir instead of failing the whole flow.
     if (/already exists/i.test(err.stderr || '')) {
-      await runGit(gitBin, ['worktree', 'add', dir, branch], root)
+      await runWorktreeAdd(gitBin, ['worktree', 'add', dir, branch], root, dir, branch)
     } else {
       throw err
     }
