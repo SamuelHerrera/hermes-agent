@@ -101,6 +101,7 @@ function computeWindowOptions(state, displays): WindowOptions {
 
   if (
     state &&
+    state.isMaximized !== true &&
     finite(state.x) &&
     finite(state.y) &&
     onScreen({ x: state.x, y: state.y, width: opts.width, height: opts.height }, displays)
