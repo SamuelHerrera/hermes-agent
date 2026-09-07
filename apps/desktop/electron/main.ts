@@ -10231,6 +10231,7 @@ function createWindow() {
   })
 
   const createdMainWindow = mainWindow
+  const createdMainWindowWebContentsId = createdMainWindow.webContents.id
 
   if (IS_MAC) {
     mainWindow.setWindowButtonPosition?.(WINDOW_BUTTON_POSITION)
@@ -10257,7 +10258,7 @@ function createWindow() {
 
   const revealController = wireWindowReveal(createdMainWindow, {
     onRevealed: () => {
-      rememberLog(`[uat] main-window.revealed webContentsId=${createdMainWindow.webContents.id}`)
+      rememberLog(`[uat] main-window.revealed webContentsId=${createdMainWindowWebContentsId}`)
       // Persist geometry as soon as the window is visible so a crash before the
       // first clean resize/move/close still captures the restored bounds (#56726).
       schedulePersistWindowState()
@@ -10308,7 +10309,7 @@ function createWindow() {
 
   // the closed wrapper remains truthy, so clear only the window this callback owns.
   mainWindow.on('closed', () => {
-    rememberLog(`[uat] main-window.closed webContentsId=${createdMainWindow.webContents.id}`)
+    rememberLog(`[uat] main-window.closed webContentsId=${createdMainWindowWebContentsId}`)
     closePetOverlay()
     wakeIndicatorController.close()
 
@@ -10396,7 +10397,7 @@ function createWindow() {
   startHermes().catch(error => rememberLog(error.stack || error.message))
 
   mainWindow.webContents.once('did-finish-load', () => {
-    rememberLog(`[uat] main-window.did-finish-load webContentsId=${createdMainWindow.webContents.id}`)
+    rememberLog(`[uat] main-window.did-finish-load webContentsId=${createdMainWindowWebContentsId}`)
     // Zoom restore is handled by wireCommonWindowHandlers (shared with session
     // windows); no need to reapply it here.
     broadcastBootProgress()
