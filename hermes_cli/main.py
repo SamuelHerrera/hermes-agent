@@ -7533,6 +7533,8 @@ def cmd_gui(args: argparse.Namespace):
         if _desktop_linux_needs_no_sandbox() and _desktop_linux_sandbox_helper_is_regular_file(packaged_executable):
             print("⚠ Falling back to --no-sandbox because this Linux host restricts unprivileged user namespaces and the Electron sandbox helper could not be configured.")
             launch_command.append("--no-sandbox")
+        elif sys.platform == "linux" and _desktop_linux_sandbox_helper_is_regular_file(packaged_executable):
+            print("⚠ Electron's Linux SUID sandbox helper could not be configured; launching with Chromium's user-namespace sandbox instead.")
         else:
             sys.exit(1)
 
