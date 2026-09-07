@@ -80,7 +80,7 @@ interface WindowOptions {
 // width/height, capped to the largest current display so a size saved on a
 // since-disconnected bigger monitor can't exceed any screen the user now has.
 // Sets x/y only when still on-screen; otherwise Electron centers the window.
-function computeWindowOptions(state, displays): WindowOptions {
+function computeWindowOptions(state, displays, preferredWorkArea = null): WindowOptions {
   const opts: WindowOptions = {
     width: finite(state?.width) ? state.width : DEFAULT_WIDTH,
     height: finite(state?.height) ? state.height : DEFAULT_HEIGHT
@@ -99,7 +99,10 @@ function computeWindowOptions(state, displays): WindowOptions {
     opts.height = clamp(opts.height, MIN_HEIGHT, cap.height)
   }
 
-  if (
+  if (state?.isMaximized === true && preferredWorkArea) {
+    opts.x = Math.round(preferredWorkArea.x + Math.max(0, (preferredWorkArea.width - opts.width) / 2))
+    opts.y = Math.round(preferredWorkArea.y + Math.max(0, (preferredWorkArea.height - opts.height) / 2))
+  } else if (
     state &&
     state.isMaximized !== true &&
     finite(state.x) &&

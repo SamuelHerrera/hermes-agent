@@ -10198,10 +10198,11 @@ function closeQuickEntryWindow() {
 function createWindow() {
   const icon = getAppIconPath()
   const savedWindowState = readWindowState()
+  const preferredWindowWorkArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
 
   rememberLog(`[uat] main-window.create requested appVersion=${app.getVersion()} savedState=${Boolean(savedWindowState)}`)
   mainWindow = new BrowserWindow({
-    ...computeWindowOptions(savedWindowState, screen.getAllDisplays()),
+    ...computeWindowOptions(savedWindowState, screen.getAllDisplays(), preferredWindowWorkArea),
     minWidth: WINDOW_MIN_WIDTH,
     minHeight: WINDOW_MIN_HEIGHT,
     title: 'Hermes',
