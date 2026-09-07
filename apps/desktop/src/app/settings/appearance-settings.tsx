@@ -16,6 +16,11 @@ import { $backdrop, setBackdrop } from '@/store/backdrop'
 import { $embedAllowed, $embedMode, clearEmbedAllowed, type EmbedMode, setEmbedMode } from '@/store/embed-consent'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
 import { $reactionsEnabled, setReactionsEnabled } from '@/store/reactions-enabled'
+import {
+  $statusPulsePeriodMs,
+  setStatusPulsePeriodMs,
+  STATUS_PULSE_PERIODS_MS
+} from '@/store/status-pulse'
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
 import { $translucency, setTranslucency } from '@/store/translucency'
 import { $zoomPercent, setZoomPercent } from '@/store/zoom'
@@ -254,6 +259,7 @@ export function AppearanceSettings() {
   const translucency = useStore($translucency)
   const reactionsEnabled = useStore($reactionsEnabled)
   const backdrop = useStore($backdrop)
+  const statusPulsePeriodMs = useStore($statusPulsePeriodMs)
   const installs = useStore($marketplaceInstalls)
   const profiles = useStore($profiles)
   const activeProfileKey = normalizeProfileKey(useStore($activeGatewayProfile))
@@ -298,6 +304,11 @@ export function AppearanceSettings() {
   ] as const satisfies readonly { id: EmbedMode; label: string }[]
 
   const uiScaleOptions = UI_SCALE_PRESETS.map(preset => ({ id: preset, label: `${preset}%` }))
+
+  const statusPulseOptions = STATUS_PULSE_PERIODS_MS.map(periodMs => ({
+    id: String(periodMs),
+    label: `${periodMs / 1_000}s`
+  }))
 
   const matchedScalePreset = matchUiScalePreset(zoomPercent)
 
@@ -432,6 +443,21 @@ export function AppearanceSettings() {
           />
 
           <TerminalFontSetting />
+
+          <ListRow
+            action={
+              <SegmentedControl
+                onChange={id => {
+                  triggerHaptic('selection')
+                  setStatusPulsePeriodMs(Number(id))
+                }}
+                options={statusPulseOptions}
+                value={String(statusPulsePeriodMs)}
+              />
+            }
+            description={a.statusPulseDesc}
+            title={a.statusPulseTitle}
+          />
 
           <ListRow
             action={

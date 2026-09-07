@@ -33,7 +33,8 @@ const DOT_BASE = 'size-1.5 rounded-full'
 const LOADING_RING_CLASS = 'size-3'
 
 // Most states are dots: color + fill/hollow tell states apart. A live turn is
-// the exception — it gets one shared finite pulse every five seconds, then
+// the exception — it gets one shared finite pulse at the configured cadence,
+// two seconds by default, then
 // returns to a normal dot as soon as the session settles.
 const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
   // Amber — a clarify/approval is blocking the turn. The one "act now" color,

@@ -49,7 +49,7 @@ Replace the infinite rotation with the existing shared `StatusPulse` mechanism:
 
 - retain the stable project-color dot;
 - use a full 0.75rem Codicon outline circle rather than freezing the open `loading` arc or substituting a heavier CSS border ring;
-- briefly pulse the glyph once every five seconds;
+- briefly pulse the glyph at a user-selectable 2, 3, or 5 second cadence (2 seconds by default);
 - synchronize all status pulses through one scheduler;
 - let the existing pause controller stop animations while the window is hidden, minimized, or unfocused;
 - render no `codicon-modifier-spin` for a working or stalled session;
@@ -78,7 +78,7 @@ The finite pulse used about 82% less GPU-process CPU and 87% less renderer CPU t
 - Sidebar rows and tab leads contain no infinite spinner.
 - Settled sessions contain no live pulse.
 - Existing needs-input, unread, background, and draft states are unchanged.
-- With many active sessions but no streamed deltas, the renderer and GPU helper can sleep between five-second pulses.
+- With many active sessions but no streamed deltas, the renderer and GPU helper can sleep between finite pulses.
 
 ## Step 2 — Make streaming-tail replacement O(1)
 

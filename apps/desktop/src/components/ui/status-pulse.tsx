@@ -1,14 +1,19 @@
+import { useStore } from '@nanostores/react'
 import { type ComponentProps, useEffect, useRef } from 'react'
 
 import { createRendererLoopPauseController } from '@/lib/renderer-loop-pause'
+import {
+  $statusPulsePeriodMs,
+  DEFAULT_STATUS_PULSE_PERIOD_MS,
+  type StatusPulsePeriodMs
+} from '@/store/status-pulse'
 
 const PULSE_DURATION_MS = 400
-const PULSE_PERIOD_MS = 5_000
 
 // One pause controller + one period timer shared by every StatusPulse
 // instance. A sidebar can show dozens of pulsing dots at once; per-instance
 // controllers would mean N×(document/window/bridge) listeners and N
-// unsynchronized 5s wakes. Ref-counted: the controller and timer exist only
+// unsynchronized wakes. Ref-counted: the controller and timer exist only
 // while at least one pulse is mounted, and all pulses play in one aligned
 // wake so the renderer sleeps between beats.
 type PulseSubscriber = { play: () => void; cancel: () => void }
@@ -16,6 +21,7 @@ type PulseSubscriber = { play: () => void; cancel: () => void }
 const pulseSubscribers = new Set<PulseSubscriber>()
 let sharedPauseController: ReturnType<typeof createRendererLoopPauseController> | null = null
 let sharedTimer = 0
+let sharedPeriodMs: StatusPulsePeriodMs = DEFAULT_STATUS_PULSE_PERIOD_MS
 
 const stopSharedTimer = () => {
   if (sharedTimer !== 0) {
@@ -35,7 +41,7 @@ const beat = () => {
     subscriber.play()
   }
 
-  sharedTimer = window.setTimeout(beat, PULSE_PERIOD_MS)
+  sharedTimer = window.setTimeout(beat, sharedPeriodMs)
 }
 
 const handleSharedPauseChange = () => {
@@ -54,7 +60,12 @@ const handleSharedPauseChange = () => {
   beat()
 }
 
-const subscribePulse = (subscriber: PulseSubscriber): (() => void) => {
+const subscribePulse = (subscriber: PulseSubscriber, periodMs: StatusPulsePeriodMs): (() => void) => {
+  if (sharedPeriodMs !== periodMs) {
+    sharedPeriodMs = periodMs
+    stopSharedTimer()
+  }
+
   pulseSubscribers.add(subscriber)
 
   if (!sharedPauseController) {
@@ -65,7 +76,7 @@ const subscribePulse = (subscriber: PulseSubscriber): (() => void) => {
   // start the beat. Later joiners just wait for the next aligned beat.
   if (sharedTimer === 0 && !sharedPauseController.isPaused()) {
     subscriber.play()
-    sharedTimer = window.setTimeout(beat, PULSE_PERIOD_MS)
+    sharedTimer = window.setTimeout(beat, sharedPeriodMs)
   }
 
   return () => {
@@ -86,6 +97,7 @@ export interface StatusPulseProps extends Omit<ComponentProps<'span'>, 'ref'> {
 
 export function useStatusPulseRef<T extends Element>(kind: StatusPulseProps['kind'], opacity = 1) {
   const ref = useRef<T>(null)
+  const periodMs = useStore($statusPulsePeriodMs)
 
   useEffect(() => {
     const element = ref.current
@@ -122,13 +134,13 @@ export function useStatusPulseRef<T extends Element>(kind: StatusPulseProps['kin
       animation = null
     }
 
-    const unsubscribe = subscribePulse({ play, cancel })
+    const unsubscribe = subscribePulse({ play, cancel }, periodMs)
 
     return () => {
       unsubscribe()
       cancel()
     }
-  }, [kind, opacity])
+  }, [kind, opacity, periodMs])
 
   return ref
 }

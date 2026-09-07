@@ -1,6 +1,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { setStatusPulsePeriodMs } from '@/store/status-pulse'
+
 import { StatusPulse } from './status-pulse'
 
 interface PlayedAnimation {
@@ -48,6 +50,7 @@ describe('StatusPulse', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    setStatusPulsePeriodMs(2_000)
     vi.spyOn(window.document, 'hasFocus').mockReturnValue(true)
     installMatchMedia(false)
     installWindowStateBridge()
@@ -90,7 +93,7 @@ describe('StatusPulse', () => {
     expect(played[0]?.options).toMatchObject({ duration: 400, iterations: 1 })
     expect(vi.getTimerCount()).toBe(1)
 
-    act(() => vi.advanceTimersByTime(4_999))
+    act(() => vi.advanceTimersByTime(1_999))
     expect(played).toHaveLength(1)
 
     act(() => vi.advanceTimersByTime(1))
@@ -119,7 +122,7 @@ describe('StatusPulse', () => {
     expect(played[0]?.cancel).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
 
-    act(() => vi.advanceTimersByTime(5_000))
+    act(() => vi.advanceTimersByTime(2_000))
     expect(played).toHaveLength(1)
 
     act(() => windowStateCallback?.({ isMinimized: false, isVisible: true }))
@@ -138,5 +141,20 @@ describe('StatusPulse', () => {
 
     expect(played).toHaveLength(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reschedules all pulses when the configured period changes', () => {
+    render(<StatusPulse kind="opacity" />)
+
+    expect(played).toHaveLength(1)
+
+    act(() => setStatusPulsePeriodMs(5_000))
+    expect(played).toHaveLength(2)
+
+    act(() => vi.advanceTimersByTime(4_999))
+    expect(played).toHaveLength(2)
+
+    act(() => vi.advanceTimersByTime(1))
+    expect(played).toHaveLength(3)
   })
 })

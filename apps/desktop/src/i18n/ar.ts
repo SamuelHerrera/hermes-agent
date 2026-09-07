@@ -401,6 +401,8 @@ export const ar = defineLocale({
       colorModeDesc: 'اختر الوضع الفاتح أو الداكن أو اتبع النظام.',
       toolViewTitle: 'عرض الأدوات',
       toolViewDesc: 'تحكم في كيفية عرض نشاط الأدوات داخل المحادثة.',
+      statusPulseTitle: 'حركة الحالة المباشرة',
+      statusPulseDesc: 'مدى تكرار نبض مؤشرات الجلسات النشطة. يقلل الإيقاع الأبطأ من استخدام العرض ووحدة الرسوميات.',
       translucencyTitle: 'شفافية النافذة',
       translucencyDesc: 'إظهار سطح المكتب من خلال النافذة بالكامل. متاح على macOS وWindows فقط.',
       backdropTitle: 'خلفية النافذة',
