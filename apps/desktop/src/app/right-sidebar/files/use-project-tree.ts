@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { $connection } from '@/store/session'
 import { $workspaceChangeTick, consumeWorkspaceChange } from '@/store/workspace-events'
 
-import { clearProjectDirCache, type ProjectTreeEntry, readProjectDir } from './ipc'
+import { type ProjectTreeEntry, readProjectDir } from './ipc'
 
 export interface TreeNode {
   /** Absolute filesystem path. Doubles as react-arborist node id. */
@@ -192,10 +192,6 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
   nextRootRequestId = requestId
   inflight.clear()
 
-  if (force || current.cwd !== cwd) {
-    clearProjectDirCache(cwd)
-  }
-
   $projectTree.set({
     collapseNonce: current.collapseNonce,
     cwd,
@@ -209,13 +205,13 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
   })
 
   let resolvedCwd = cwd
-  let { entries, error } = await readProjectDir(cwd, cwd)
+  let { entries, error } = await readProjectDir(cwd)
 
   if (error) {
     const fallback = await fallbackRootFor(cwd)
 
     if (fallback) {
-      const retry = await readProjectDir(fallback, fallback)
+      const retry = await readProjectDir(fallback)
 
       if (!retry.error) {
         resolvedCwd = fallback
@@ -244,7 +240,6 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
 export function resetProjectTreeState() {
   lastConnectionKey = ''
   clearProjectTree()
-  clearProjectDirCache()
 }
 
 // Non-destructive live refresh as the agent edits: preserves expansion + loaded
@@ -271,7 +266,7 @@ async function revalidateTree(cwd: string, change: { dirs: string[]; full: boole
       return
     }
 
-    const reads = await Promise.all(targets.map(async dir => ({ dir, ...(await readProjectDir(dir, rootPath)) })))
+    const reads = await Promise.all(targets.map(async dir => ({ dir, ...(await readProjectDir(dir)) })))
 
     setProjectTree(latest => {
       if (latest.cwd !== cwd || !latest.loaded) {
@@ -302,7 +297,7 @@ async function revalidateTree(cwd: string, change: { dirs: string[]; full: boole
   // Opaque fallback: reconcile every loaded dir. Siblings read concurrently
   // (Promise.all keeps order); loaded subfolders recurse.
   const reconcile = async (dirPath: string, existing: TreeNode[]): Promise<TreeNode[]> => {
-    const { entries, error } = await readProjectDir(dirPath, rootPath)
+    const { entries, error } = await readProjectDir(dirPath)
 
     if (error) {
       return existing
@@ -394,8 +389,7 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
         }
       })
 
-      const rootPath = $projectTree.get().resolvedCwd || cwd
-      const { entries, error } = await readProjectDir(id, rootPath)
+      const { entries, error } = await readProjectDir(id)
 
       inflight.delete(id)
 
@@ -431,7 +425,6 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
     lastConnectionKey = connectionKey
 
     if (connectionChanged) {
-      clearProjectDirCache()
       void loadRoot(cwd, { force: true })
 
       return
@@ -466,7 +459,7 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
     let cancelled = false
 
     const timer = window.setInterval(() => {
-      void readProjectDir(cwd, cwd).then(({ error }) => {
+      void readProjectDir(cwd).then(({ error }) => {
         if (!cancelled && !error) {
           void loadRoot(cwd, { force: true })
         }

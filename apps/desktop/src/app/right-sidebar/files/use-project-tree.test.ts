@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HermesReadDirResult } from '@/global'
 import { $connection } from '@/store/session'
 
-import { clearProjectDirCache, readProjectDir } from './ipc'
+import { readProjectDir } from './ipc'
 import { resetProjectTreeState, useProjectTree } from './use-project-tree'
 
 const readDir = vi.fn<(path: string) => Promise<HermesReadDirResult>>()
@@ -111,7 +111,7 @@ describe('useProjectTree', () => {
     expect(readDir).toHaveBeenCalledTimes(1)
   })
 
-  it('reads gitignore from the real path while caching per connection', async () => {
+  it('reads the real path without Git-ignore filtering across local connections', async () => {
     const readFileDataUrl = vi.fn(async () => `data:text/plain;base64,${btoa('ignored.log\n')}`)
     const gitRoot = vi.fn(async () => '/repo')
     readDir.mockImplementation(async path => {
@@ -131,18 +131,25 @@ describe('useProjectTree', () => {
     ;(window as unknown as { hermesDesktop: unknown }).hermesDesktop = { gitRoot, readDir, readFileDataUrl }
 
     $connection.set({ baseUrl: 'local-a', mode: 'local' } as never)
-    await expect(readProjectDir('/repo/src', '/repo')).resolves.toMatchObject({
-      entries: [{ name: 'app.ts', path: '/repo/src/app.ts', isDirectory: false }]
+    await expect(readProjectDir('/repo/src')).resolves.toMatchObject({
+      entries: [
+        { name: 'app.ts', path: '/repo/src/app.ts', isDirectory: false },
+        { name: 'ignored.log', path: '/repo/src/ignored.log', isDirectory: false }
+      ]
     })
-    expect(readDir).toHaveBeenCalledWith('/repo')
+    expect(readDir).toHaveBeenCalledWith('/repo/src')
     expect(readDir).not.toHaveBeenCalledWith(expect.stringContaining('local-a'))
 
     $connection.set({ baseUrl: 'local-b', mode: 'local' } as never)
-    clearProjectDirCache()
-    await expect(readProjectDir('/repo/src', '/repo')).resolves.toMatchObject({
-      entries: [{ name: 'app.ts', path: '/repo/src/app.ts', isDirectory: false }]
+    await expect(readProjectDir('/repo/src')).resolves.toMatchObject({
+      entries: [
+        { name: 'app.ts', path: '/repo/src/app.ts', isDirectory: false },
+        { name: 'ignored.log', path: '/repo/src/ignored.log', isDirectory: false }
+      ]
     })
-    expect(readDir.mock.calls.filter(([path]) => path === '/repo')).toHaveLength(2)
+    expect(readDir.mock.calls.filter(([path]) => path === '/repo/src')).toHaveLength(2)
+    expect(readFileDataUrl).not.toHaveBeenCalled()
+    expect(gitRoot).not.toHaveBeenCalled()
   })
 
   it('captures per-folder error code and shows an error placeholder child', async () => {
