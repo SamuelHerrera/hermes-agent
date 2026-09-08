@@ -22,7 +22,6 @@ import {
   resolveTimeoutMs,
   SAFE_STORAGE_ENCODING,
   SECRET_FILE_MODE,
-  sensitiveFileBlockReason,
   tightenSecretFileMode,
   writeSecretFileAtomic
 } from './hardening'
@@ -660,13 +659,6 @@ test('a token is never persisted in plaintext when safeStorage is unavailable', 
   )
 })
 
-test('sensitiveFileBlockReason blocks obvious secret file patterns', () => {
-  assert.match(String(sensitiveFileBlockReason('/tmp/.env')), /\.env/)
-  assert.equal(sensitiveFileBlockReason('/tmp/.env.example'), null)
-  assert.match(String(sensitiveFileBlockReason('/Users/me/.ssh/id_ed25519')), /SSH/)
-  assert.match(String(sensitiveFileBlockReason('/tmp/server-cert.pem')), /\.pem/)
-})
-
 test('path helpers reject blank non-string NUL and Windows device syntax', async () => {
   await rejectsWithCode(resolveReadableFileForIpc('', { purpose: 'File preview' }), 'invalid-path')
   await rejectsWithCode(resolveReadableFileForIpc('   ', { purpose: 'File preview' }), 'invalid-path')
@@ -728,7 +720,7 @@ test('resolveRequestedPathForIpc expands ~ to the home directory', () => {
   )
 })
 
-test('resolveReadableFileForIpc validates existence type size and sensitivity', async () => {
+test('resolveReadableFileForIpc validates existence type and size without filename restrictions', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-desktop-hardening-'))
 
   try {
@@ -788,12 +780,7 @@ test('resolveReadableFileForIpc validates existence type size and sensitivity', 
 
     const envPath = path.join(tempDir, '.env')
     fs.writeFileSync(envPath, 'SECRET_TOKEN=123', 'utf8')
-    await assert.rejects(
-      resolveReadableFileForIpc(envPath, {
-        purpose: 'File preview'
-      }),
-      /blocked for sensitive file/
-    )
+    assert.equal((await resolveReadableFileForIpc(envPath)).resolvedPath, envPath)
 
     const envTemplatePath = path.join(tempDir, '.env.example')
     fs.writeFileSync(envTemplatePath, 'EXAMPLE_TOKEN=value', 'utf8')
@@ -808,15 +795,19 @@ test('resolveReadableFileForIpc validates existence type size and sensitivity', 
   }
 })
 
-test('resolveReadableFileForIpc blocks common sensitive files', async () => {
+test('resolveReadableFileForIpc permits project configuration and key files', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-desktop-sensitive-'))
 
   try {
     const sshDir = path.join(tempDir, '.ssh')
     fs.mkdirSync(sshDir)
 
-    const blockedFiles = [
+    const projectFiles = [
       path.join(tempDir, '.env'),
+      path.join(tempDir, '.env.local'),
+      path.join(tempDir, '.envrc'),
+      path.join(tempDir, '.netrc'),
+      path.join(tempDir, '.pypirc'),
       path.join(tempDir, '.npmrc'),
       path.join(sshDir, 'id_ed25519'),
       path.join(tempDir, 'cert.pem'),
@@ -824,9 +815,11 @@ test('resolveReadableFileForIpc blocks common sensitive files', async () => {
       path.join(tempDir, 'cert.pfx')
     ]
 
-    for (const filePath of blockedFiles) {
-      fs.writeFileSync(filePath, 'secret', 'utf8')
-      await rejectsWithCode(resolveReadableFileForIpc(filePath, { purpose: 'File preview' }), 'sensitive-file')
+    for (const filePath of projectFiles) {
+      fs.writeFileSync(filePath, 'synthetic fixture', 'utf8')
+      assert.equal((await resolveReadableFileForIpc(filePath)).resolvedPath, filePath)
+      const dataUrl = await readFileDataUrlForIpc(filePath, { mimeType: 'text/plain' })
+      assert.equal(Buffer.from(dataUrl.split(',')[1], 'base64').toString(), 'synthetic fixture')
     }
 
     const allowed = path.join(tempDir, '.env.example')
@@ -837,7 +830,7 @@ test('resolveReadableFileForIpc blocks common sensitive files', async () => {
   }
 })
 
-test('resolveReadableFileForIpc blocks symlinks whose realpath is sensitive', async () => {
+test('resolveReadableFileForIpc permits symlinks to environment files', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-desktop-realpath-'))
 
   try {
@@ -856,7 +849,9 @@ test('resolveReadableFileForIpc blocks symlinks whose realpath is sensitive', as
       throw error
     }
 
-    await rejectsWithCode(resolveReadableFileForIpc(linkPath, { purpose: 'File preview' }), 'sensitive-file')
+    const resolved = await resolveReadableFileForIpc(linkPath, { purpose: 'File preview' })
+    assert.equal(resolved.realPath, fs.realpathSync(envPath))
+    assert.equal(fs.readFileSync(resolved.resolvedPath, 'utf8'), 'SECRET_TOKEN=123')
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true })
   }

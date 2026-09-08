@@ -32,9 +32,6 @@ function dataUrlReadMaxBytesFromMb(maxMb) {
   return clampDataUrlReadMaxMb(maxMb) * 1024 * 1024
 }
 
-const SAFE_ENV_SUFFIXES = new Set(['dist', 'example', 'sample', 'template'])
-const SENSITIVE_EXTENSIONS = new Set(['.kdbx', '.p12', '.pem', '.pfx'])
-
 // Owner-only mode for userData files that carry credentials (the encrypted
 // gateway token in connection.json, and the URL/SSH fields alongside it).
 // connection.json was the odd one out: its two credential-bearing neighbours
@@ -274,57 +271,6 @@ function resolvePersistedRemoteToken({
   return encryptSecret(incomingToken, { allowPlainText: allowPlainText === true })
 }
 
-function sensitiveFileBlockReason(filePath) {
-  const normalized = String(filePath || '')
-    .replace(/\\/g, '/')
-    .toLowerCase()
-
-  const basename = path.basename(normalized)
-  const ext = path.extname(basename)
-
-  if (!basename) {
-    return null
-  }
-
-  if (normalized.includes('/.ssh/')) {
-    return 'SSH key/config files are blocked.'
-  }
-
-  if (normalized.includes('/.gnupg/')) {
-    return 'GPG key material is blocked.'
-  }
-
-  if (normalized.endsWith('/.aws/credentials')) {
-    return 'AWS credential files are blocked.'
-  }
-
-  if (basename === '.env') {
-    return '.env files are blocked because they commonly contain secrets.'
-  }
-
-  if (basename.startsWith('.env.')) {
-    const suffix = basename.slice('.env.'.length)
-
-    if (!SAFE_ENV_SUFFIXES.has(suffix)) {
-      return `${basename} is blocked because it appears to contain environment secrets.`
-    }
-  }
-
-  if (/^id_(rsa|dsa|ecdsa|ed25519)(?:\..+)?$/.test(basename) && !basename.endsWith('.pub')) {
-    return 'SSH private key files are blocked.'
-  }
-
-  if (SENSITIVE_EXTENSIONS.has(ext)) {
-    return `${ext} key/certificate files are blocked.`
-  }
-
-  if (basename === '.npmrc' || basename === '.netrc' || basename === '.pypirc') {
-    return `${basename} is blocked because it may include auth credentials.`
-  }
-
-  return null
-}
-
 function ipcPathError(code: any, message: string): Error & { code: any } {
   const error = new Error(message) as Error & { code: any }
 
@@ -439,14 +385,6 @@ async function realpathForIpc(fsImpl, resolvedPath, purpose) {
   }
 }
 
-function rejectSensitiveFilePath(filePath, purpose) {
-  const blockReason = sensitiveFileBlockReason(filePath)
-
-  if (blockReason) {
-    throw ipcPathError('sensitive-file', `${purpose} blocked for sensitive file: ${blockReason}`)
-  }
-}
-
 async function resolveDirectoryForIpc(
   dirPath,
   options: {
@@ -475,17 +413,12 @@ async function resolveReadableFileForIpc(
     purpose?: string
     baseDir?: fs.PathOrFileDescriptor
     fs?: typeof fs
-    blockSensitive?: boolean
     maxBytes?: number
   } = {}
 ) {
   const purpose = String(options.purpose || 'File read')
   const fsImpl = options.fs || fs
   const resolvedPath = resolveRequestedPathForIpc(filePath, { baseDir: options.baseDir, purpose })
-
-  if (options.blockSensitive !== false) {
-    rejectSensitiveFilePath(resolvedPath, purpose)
-  }
 
   const stat = await statForIpc(fsImpl, resolvedPath, purpose, 'file')
 
@@ -498,10 +431,6 @@ async function resolveReadableFileForIpc(
   }
 
   const realPath = await realpathForIpc(fsImpl, resolvedPath, purpose)
-
-  if (options.blockSensitive !== false) {
-    rejectSensitiveFilePath(realPath, purpose)
-  }
 
   const maxBytes = Number.isFinite(options.maxBytes) && Number(options.maxBytes) > 0 ? Number(options.maxBytes) : null
 
@@ -524,7 +453,6 @@ async function readFileDataUrlForIpc(
     purpose?: string
     baseDir?: fs.PathOrFileDescriptor
     fs?: typeof fs
-    blockSensitive?: boolean
     maxBytes?: number
     mimeType: string
   }
@@ -555,7 +483,6 @@ export {
   resolveTimeoutMs,
   SAFE_STORAGE_ENCODING,
   SECRET_FILE_MODE,
-  sensitiveFileBlockReason,
   TEXT_PREVIEW_SOURCE_MAX_BYTES,
   tightenSecretFileMode,
   writeSecretFileAtomic
