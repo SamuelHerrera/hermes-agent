@@ -193,8 +193,8 @@ def test_stream_upload_cleans_temp_on_cancellation(forced_files_client):
     assert leftovers == [], f"temp upload files leaked on cancellation: {leftovers}"
 
 
-def test_sensitive_env_files_hidden_from_listing(forced_files_client):
-    """Regression test for #57505: .env files must not appear in directory listings."""
+def test_env_files_visible_in_listing(forced_files_client):
+    """The operator's file browser includes project environment files."""
     client, root = forced_files_client
 
     # Create a regular file and .env variants including shorthand suffixes.
@@ -212,9 +212,9 @@ def test_sensitive_env_files_hidden_from_listing(forced_files_client):
     assert listing.status_code == 200
     names = [e["name"] for e in listing.json()["entries"]]
     assert "config.txt" in names
-    assert ".env" not in names
-    assert ".env.local" not in names
-    assert ".env.prod" not in names
+    assert ".env" in names
+    assert ".env.local" in names
+    assert ".env.prod" in names
 
 
 
@@ -227,16 +227,18 @@ def test_sensitive_env_files_hidden_from_listing(forced_files_client):
 
 
 
-def test_other_credential_store_basenames_blocked(forced_files_client):
-    """Regression: the managed-files guard must cover the same credential
-    basenames as gateway.platforms.base._ROOT_CREDENTIAL_FILES and
-    agent.file_safety.get_read_block_error, not just .env — an operator can
-    point the managed root at HERMES_HOME itself (#57505), which contains
-    all of these live secret stores."""
+def test_configuration_files_can_be_managed(forced_files_client):
+    """Authenticated users can list, read, download, and overwrite any filename."""
     client, root = forced_files_client
     root.mkdir(parents=True, exist_ok=True)
 
-    for name in (
+    names = (
+        ".env",
+        ".env.local",
+        ".env.example",
+        ".ENV.prod",
+        ".envrc",
+        ".git-credentials",
         "auth.json",
         "auth.lock",
         "credentials",
@@ -248,32 +250,36 @@ def test_other_credential_store_basenames_blocked(forced_files_client):
         "webhook_subscriptions.json",
         "bws_cache.json",
         "bws_cache.enc.json",
-    ):
+    )
+    for name in names:
         p = root / name
-        p.write_text("SECRET=abc123")
-        assert client.get("/api/files/read", params={"path": str(p)}).status_code == 403, name
-        assert client.get("/api/files/download", params={"path": str(p)}).status_code == 403, name
+        _seed_file(client, root, name)
+        read = client.get("/api/files/read", params={"path": str(p)})
+        assert read.status_code == 200, name
+        assert read.json()["data_url"].endswith(";base64,aGVsbG8="), name
+        download = client.get("/api/files/download", params={"path": str(p)})
+        assert download.status_code == 200, name
+        assert download.content == b"hello", name
+        saved = client.post("/api/files/upload", json={
+            "path": str(p), "data_url": "data:text/plain;base64,dXBkYXRlZA==",
+            "overwrite": True,
+        })
+        assert saved.status_code == 200, name
+        assert p.read_text() == "updated", name
 
     listing = client.get("/api/files", params={"path": str(root)})
-    names = [e["name"] for e in listing.json()["entries"]]
-    assert names == []
+    assert listing.status_code == 200
+    assert {e["name"] for e in listing.json()["entries"]} == set(names)
 
 
 
 
-def test_credential_dir_trees_blocked_on_subdir_descent(forced_files_client):
-    """Regression: mcp-tokens/ (live MCP OAuth tokens) and pairing/ are denied
-    as whole directory trees by both canonical guards
-    (gateway.platforms.base._ROOT_CREDENTIAL_DIRS and
-    agent.file_safety). A basename-only check would still expose their
-    per-server files (e.g. ``mcp-tokens/github.json``) once the browser
-    descends into the subdir. The managed-files guard must block any path with
-    a credential-directory component, not just leaf basenames."""
+def test_configuration_directory_trees_accessible(forced_files_client):
+    """Directory names do not prevent the operator from managing their files."""
     client, root = forced_files_client
     root.mkdir(parents=True, exist_ok=True)
 
-    # A per-server MCP token file with a NON-canonical basename that the
-    # basename denylist alone would not catch.
+    # Only synthetic fixtures are used, never real credential stores.
     mcp_dir = root / "mcp-tokens"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     mcp_file = mcp_dir / "github.json"
@@ -284,21 +290,28 @@ def test_credential_dir_trees_blocked_on_subdir_descent(forced_files_client):
     pairing_file = pairing_dir / "device-abc"
     pairing_file.write_text("PAIRING-SECRET\n")
 
-    # The token dirs themselves must not appear in the root listing.
+    # Both directories and their contents are browsable.
     root_names = [e["name"] for e in client.get(
         "/api/files", params={"path": str(root)}).json()["entries"]]
-    assert "mcp-tokens" not in root_names
-    assert "pairing" not in root_names
+    assert "mcp-tokens" in root_names
+    assert "pairing" in root_names
 
-    # Read/download of the per-server files must be denied even though their
-    # basenames aren't in _SENSITIVE_MANAGED_FILE_BASENAMES.
     for p in (mcp_file, pairing_file):
-        assert client.get("/api/files/read", params={"path": str(p)}).status_code == 403, str(p)
-        assert client.get("/api/files/download", params={"path": str(p)}).status_code == 403, str(p)
+        assert client.get("/api/files/read", params={"path": str(p)}).status_code == 200
+        download = client.get("/api/files/download", params={"path": str(p)})
+        assert download.status_code == 200
+        assert download.content == p.read_bytes()
 
-    # Listing the credential dir itself yields nothing exploitable: every child
-    # is filtered because the parent component is a credential dir.
     mcp_listing = client.get("/api/files", params={"path": str(mcp_dir)})
-    assert [e["name"] for e in mcp_listing.json()["entries"]] == []
+    assert [e["name"] for e in mcp_listing.json()["entries"]] == [mcp_file.name]
+
+
+@pytest.mark.parametrize("endpoint", ["/api/files", "/api/files/read", "/api/files/download"])
+def test_configuration_files_still_require_authentication(forced_files_client, endpoint):
+    client, root = forced_files_client
+    path = _seed_file(client, root, ".env")
+    del client.headers[web_server._SESSION_HEADER_NAME]
+    response = client.get(endpoint, params={"path": str(root if endpoint == "/api/files" else path)})
+    assert response.status_code == 401
 
 
