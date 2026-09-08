@@ -152,6 +152,7 @@ describe('Sidebar project chrome', () => {
 
     expect(container.querySelector('[data-sidebar-toolbar-spacer]')).toBeNull()
     expect(sidebar?.firstElementChild).toBe(content)
+    expect(content?.className).toContain('pt-[calc(var(--titlebar-control-height,24px)+0.375rem)]')
   })
 
   it('renders the project overview directly without a redundant Projects header', () => {

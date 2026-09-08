@@ -1422,7 +1422,16 @@ export function ChatSidebar({
       )}
       collapsible="none"
     >
-      <SidebarContent className={cn("gap-0 overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent px-2.5 scrollbar-fade", SCROLL_GUTTER)}>
+      <SidebarContent
+        className={cn(
+          // The fixed app-control toolbar sits at the top of the sidebar pane
+          // (flush with the tab strip). Keep the scroll rail full-height, but
+          // start content below the controls so Linux/WSLg's titlebar drag
+          // region cannot visually cover the first project row (Home).
+          'gap-0 overflow-y-auto overflow-x-hidden overscroll-contain bg-transparent px-2.5 pt-[calc(var(--titlebar-control-height,24px)+0.375rem)] scrollbar-fade',
+          SCROLL_GUTTER
+        )}
+      >
         <SidebarGroup className="shrink-0 p-0 pb-0">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">

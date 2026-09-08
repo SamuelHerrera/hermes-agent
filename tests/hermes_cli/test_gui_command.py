@@ -550,6 +550,33 @@ def test_gui_launches_even_when_desktop_entry_install_fails(tmp_path, monkeypatc
     assert mock_run.call_args.args[0] == [str(packaged_exe)]
 
 
+@pytest.mark.linux_only
+def test_gui_launches_with_user_namespace_sandbox_when_sudo_fixup_fails(tmp_path, monkeypatch, capsys):
+    """A non-interactive app-menu launch must not die on a sudo prompt.
+
+    When the host allows Chromium's unprivileged user-namespace sandbox, a
+    root-owned 4755 chrome-sandbox helper is not required. The launcher should
+    warn and continue instead of exiting before Electron starts.
+    """
+    root = _make_desktop_tree(tmp_path)
+    monkeypatch.setattr(cli_main, "PROJECT_ROOT", root)
+    packaged_exe = _make_packaged_executable(root, monkeypatch)
+
+    launch_ok = subprocess.CompletedProcess([str(packaged_exe)], 0)
+
+    with patch("hermes_cli.main._desktop_build_needed", return_value=False), \
+         patch("hermes_cli.main._resolve_node_runtime_npm", return_value="/usr/bin/npm"), \
+         patch("hermes_cli.main._desktop_linux_sandbox_fixup", return_value=False), \
+         patch("hermes_cli.main._desktop_linux_needs_no_sandbox", return_value=False), \
+         patch("hermes_cli.main.subprocess.run", return_value=launch_ok) as mock_run, \
+         pytest.raises(SystemExit) as exc:
+        cli_main.cmd_gui(_ns(skip_build=True))
+
+    assert exc.value.code == 0
+    assert mock_run.call_args.args[0] == [str(packaged_exe)]
+    assert "user-namespace sandbox" in capsys.readouterr().out
+
+
 @pytest.mark.macos_only
 def test_gui_skips_desktop_entry_off_linux(tmp_path, monkeypatch):
     root = _make_desktop_tree(tmp_path)

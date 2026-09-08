@@ -103,6 +103,21 @@ test('computeWindowOptions keeps the size but drops an off-screen position', () 
   assert.deepEqual(computeWindowOptions(saved, PRIMARY), { width: 1400, height: 900 })
 })
 
+test('computeWindowOptions centers maximized windows on the preferred work area', () => {
+  const saved = sanitizeWindowState({ x: 200, y: 150, width: 1400, height: 900, isMaximized: true })
+  assert.deepEqual(computeWindowOptions(saved, PRIMARY, { x: 1920, y: 0, width: 2560, height: 1400 }), {
+    width: 1400,
+    height: 900,
+    x: 2500,
+    y: 250
+  })
+})
+
+test('computeWindowOptions drops position for maximized windows without a preferred work area', () => {
+  const saved = sanitizeWindowState({ x: 200, y: 150, width: 1400, height: 900, isMaximized: true })
+  assert.deepEqual(computeWindowOptions(saved, PRIMARY), { width: 1400, height: 900 })
+})
+
 test('computeWindowOptions clamps a size larger than the only display', () => {
   const saved = sanitizeWindowState({ width: 2560, height: 1440 })
   assert.deepEqual(computeWindowOptions(saved, LAPTOP), { width: 1366, height: 728 })
