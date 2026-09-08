@@ -1403,13 +1403,25 @@ function adoptContributedPanes(): void {
       allPaneIds(next).find(id => id !== pane.id && placementOf(id) === placement) ??
       mainId
 
-    const target = findGroupOfPane(next, anchor ?? '')?.id
+    let target = findGroupOfPane(next, anchor ?? '')?.id
+    let pos = dock?.pos ?? 'center'
+
+    // Parking an empty workspace and then removing the outgoing profile's
+    // tiles can leave no main group at all. `mainId` is only REGISTERED, not
+    // necessarily in the tree, so it cannot anchor its own restoration.
+    // Recreate a main group beside the sidebar (or before the remaining tool
+    // groups), without stacking chat into a tool panel or resetting the layout.
+    if (!target && placement === 'main') {
+      const sidebar = findGroupOfPane(next, 'sessions')
+      target = sidebar?.id ?? groupLeafIds(next)[0]
+      pos = sidebar ? 'right' : 'left'
+    }
 
     if (target) {
       const redirected = redirectFromFixedLeftPanel(next, pane.id, {
         before: dock?.before,
         groupId: target,
-        pos: dock?.pos ?? 'center'
+        pos
       })
 
       // Whether the DESTINATION zone's header was explicitly hidden, read
