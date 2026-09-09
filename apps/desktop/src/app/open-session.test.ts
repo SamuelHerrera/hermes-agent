@@ -29,7 +29,7 @@ vi.mock('./routes', () => ({
 
 import { $activeSessionId, $selectedStoredSessionId, $workspaceEmptyPlaceholder } from '@/store/session'
 
-import { mainChatOccupied, openSession, openSessionIntentFromModifiers } from './open-session'
+import { mainChatOccupied, openSession, openSessionIntentFromModifiers, shouldOpenWorkspaceSessionTile } from './open-session'
 
 /**
  * The question behind both the sidebar "+" and a palette open: is there a
@@ -52,6 +52,25 @@ describe('mainChatOccupied', () => {
 
   it('is free when nothing is open', () => {
     expect(mainChatOccupied(null, null)).toBe(false)
+  })
+})
+
+describe('shouldOpenWorkspaceSessionTile', () => {
+  it('opens project-scoped sidebar plus clicks as tabs even when main is empty', () => {
+    expect(shouldOpenWorkspaceSessionTile('/repo', true, null, null)).toBe(true)
+  })
+
+  it('keeps path-less empty plus clicks on the main draft surface', () => {
+    expect(shouldOpenWorkspaceSessionTile(null, true, null, null)).toBe(false)
+  })
+
+  it('stacks path-less plus clicks once main is occupied', () => {
+    expect(shouldOpenWorkspaceSessionTile(null, true, 'runtime-a', null)).toBe(true)
+    expect(shouldOpenWorkspaceSessionTile(null, true, null, 'stored-a')).toBe(true)
+  })
+
+  it('does not stack when the caller did not request a tab', () => {
+    expect(shouldOpenWorkspaceSessionTile('/repo', false, 'runtime-a', 'stored-a')).toBe(false)
   })
 })
 

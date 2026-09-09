@@ -44,6 +44,23 @@ export function mainChatOccupied(activeSessionId: null | string, selectedStoredS
   return Boolean(activeSessionId || selectedStoredSessionId)
 }
 
+/** Sidebar project/worktree "+" is explicitly additive: even an empty main
+ *  workspace should get a real tab so repeated clicks create independent
+ *  project-scoped drafts. Path-less buckets keep the older blank-main behavior
+ *  until the main chat is occupied. */
+export function shouldOpenWorkspaceSessionTile(
+  path: null | string,
+  openTab: boolean | undefined,
+  activeSessionId: null | string,
+  selectedStoredSessionId: null | string
+): boolean {
+  if (!openTab) {
+    return false
+  }
+
+  return Boolean(path?.trim() || mainChatOccupied(activeSessionId, selectedStoredSessionId))
+}
+
 /** Read modifiers the way session rows do — meta OR ctrl for tab, +shift for
  *  window. `base` is what an unmodified select means for the caller: the
  *  sidebar spends main (`in-place`), a palette-style open doesn't (`stack`). */

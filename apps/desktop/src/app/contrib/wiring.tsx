@@ -88,7 +88,7 @@ import { useKeybinds } from '../hooks/use-keybinds'
 import { useHudHandoff } from '../hud/handoff'
 import { ModelPickerOverlay } from '../model-picker-overlay'
 import { ModelVisibilityOverlay } from '../model-visibility-overlay'
-import { mainChatOccupied, openSession } from '../open-session'
+import { openSession, shouldOpenWorkspaceSessionTile } from '../open-session'
 import { PetGenerateOverlay } from '../pet-generate/pet-generate-overlay'
 import { FileActionDialogs } from '../right-sidebar/file-actions'
 import { RemoteFolderPicker } from '../right-sidebar/files/remote-picker'
@@ -583,7 +583,14 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // prefills the MAIN composer right after, so it has to own that surface.
   const startSessionInWorkspace = useCallback(
     (path: null | string, options?: { openTab?: boolean }) => {
-      if (options?.openTab && mainChatOccupied(activeSessionIdRef.current, $selectedStoredSessionId.get())) {
+      if (
+        shouldOpenWorkspaceSessionTile(
+          path,
+          options?.openTab,
+          activeSessionIdRef.current,
+          $selectedStoredSessionId.get()
+        )
+      ) {
         void openNewSessionTile('center', { cwd: path, listed: false, source: 'workspace.start-session' })
 
         return

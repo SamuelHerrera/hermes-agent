@@ -2679,6 +2679,38 @@ describe('openNewSessionTile empty workspace placeholder', () => {
     expect($workspaceEmptyPlaceholder.get()).toBe(false)
     expect(navigate).toHaveBeenCalledWith('/', { replace: true })
   })
+
+  it('does not spend the close-all placeholder for project-scoped tab creates', async () => {
+    const requestGateway = vi.fn(async () => {
+      const n = requestGateway.mock.calls.length
+
+      return {
+        info: { cwd: '/repo' },
+        session_id: `runtime-${n}`,
+        stored_session_id: `stored-${n}`
+      } as never
+    })
+
+    let handle: HarnessHandle | null = null
+
+    $workspaceEmptyPlaceholder.set(true)
+    render(<Harness onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.openNewSessionTile('center', { cwd: '/repo', listed: false, source: 'workspace.start-session' })
+      await handle!.openNewSessionTile('center', { cwd: '/repo', listed: false, source: 'workspace.start-session' })
+    })
+
+    expect(requestGateway).toHaveBeenCalledTimes(2)
+    expect(requestGateway).toHaveBeenNthCalledWith(1, 'session.create', expect.objectContaining({ cwd: '/repo' }))
+    expect(requestGateway).toHaveBeenNthCalledWith(2, 'session.create', expect.objectContaining({ cwd: '/repo' }))
+    expect($workspaceEmptyPlaceholder.get()).toBe(true)
+    expect($sessionTiles.get()).toEqual([
+      expect.objectContaining({ runtimeId: 'runtime-1', storedSessionId: 'stored-1', workspaceCwd: '/repo' }),
+      expect.objectContaining({ runtimeId: 'runtime-2', storedSessionId: 'stored-2', workspaceCwd: '/repo' })
+    ])
+  })
 })
 
 describe('createBackendSessionForSend workspace target', () => {

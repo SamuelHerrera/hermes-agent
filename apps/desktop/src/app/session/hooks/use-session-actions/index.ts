@@ -805,16 +805,17 @@ export function useSessionActions({
   const openNewSessionTile = useCallback(
     async (dir: TileDock = 'right', options?: { cwd?: null | string; listed?: boolean; source?: string }) => {
       const source = options?.source ?? 'unspecified'
+      const explicitCwd = options?.cwd?.trim() || ''
 
       logUatEvent('tabs', 'new-session-tile.requested', {
         dir,
-        hasCwd: Boolean(options?.cwd),
+        hasCwd: Boolean(explicitCwd),
         listed: options?.listed ?? true,
         source,
         workspaceEmptyPlaceholder: $workspaceEmptyPlaceholder.get()
       })
 
-      if (dir === 'center' && $workspaceEmptyPlaceholder.get()) {
+      if (dir === 'center' && $workspaceEmptyPlaceholder.get() && !explicitCwd) {
         logUatEvent('tabs', 'new-session-tile.reused-workspace-placeholder', { source })
         startFreshSessionDraft({ replaceRoute: true, source: `new-session-tile:${source}` })
 
@@ -827,7 +828,7 @@ export function useSessionActions({
         // Fresh tile → the caller's workspace when one was named (the sidebar
         // "+" on a project/worktree lane), else the resolved new-session cwd
         // (project scope → configured default).
-        const params = await desktopSessionCreateParams((options?.cwd || resolveNewSessionCwd()).trim())
+        const params = await desktopSessionCreateParams(explicitCwd || resolveNewSessionCwd().trim())
         const created = await requestGateway<SessionCreateResponse>('session.create', params)
         const stored = created.stored_session_id
 
@@ -866,7 +867,7 @@ export function useSessionActions({
 
         openSessionTile(stored, dir, undefined, undefined, {
           runtimeId: created.session_id,
-          workspaceCwd: runtimeInfo?.cwd ?? options?.cwd?.trim()
+          workspaceCwd: runtimeInfo?.cwd ?? explicitCwd
         })
 
         if (dir === 'center' && runtimeInfo?.cwd) {
