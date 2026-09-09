@@ -10243,8 +10243,8 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
     """Offer to configure dashboard auth when a non-loopback bind has none.
 
     Called from ``cmd_dashboard`` just before ``start_server``. The auth
-    gate engages on every non-loopback bind (``--insecure`` is a no-op since
-    the June 2026 hardening), and ``start_server`` fails closed when no
+    gate engages on every non-loopback bind unless ``--insecure`` is explicit,
+    and ``start_server`` fails closed when no
     ``DashboardAuthProvider`` is registered. Rather than greet an interactive
     operator with that hard error, prompt them to set up the bundled
     username/password provider on the spot — or point them at
@@ -10260,7 +10260,7 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
     try:
         from hermes_cli.web_server import should_require_auth
-        if not should_require_auth(host):
+        if not should_require_auth(host, allow_public=getattr(args, "insecure", False)):
             return  # loopback bind — gate never engages
     except Exception:
         return  # if we can't tell, defer to start_server's own gate
@@ -10283,8 +10283,8 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
         f"needs an auth provider."
     )
     print(
-        "  Non-loopback binds always require authentication "
-        "(--insecure no longer bypasses this)."
+        "  Non-loopback binds require authentication unless --insecure is "
+        "explicitly passed for a trusted private network."
     )
     print()
     print("  How do you want to authenticate the dashboard?")

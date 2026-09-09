@@ -195,15 +195,14 @@ def test_dashboard_oauth_gate_engages_on_non_loopback_bind(
     )
 
 
-def test_dashboard_insecure_env_var_no_longer_bypasses_gate(
+def test_dashboard_insecure_env_var_bypasses_gate_when_explicit(
     built_image: str, container_name: str,
 ) -> None:
-    """``HERMES_DASHBOARD_INSECURE=1`` NO LONGER disables the auth gate
-    (June 2026 hardening). With insecure set on a 0.0.0.0 bind and NO auth
-    provider registered, start_server fails closed — the dashboard never
-    binds, so ``/api/status`` is unreachable. This proves the unauthenticated
-    public-dashboard escape hatch is gone: there is no env that serves the
-    dashboard on a public bind without an auth provider.
+    """``HERMES_DASHBOARD_INSECURE=1`` explicitly disables the auth gate.
+
+    This is intentionally dangerous and only for operator-owned trusted
+    networks, but the container wrapper must pass the flag through so the
+    backend can serve a direct Desktop/API connection with no username/password.
     """
     start_container(
         built_image, container_name,
@@ -212,16 +211,14 @@ def test_dashboard_insecure_env_var_no_longer_bypasses_gate(
         "HERMES_DASHBOARD_INSECURE=1",
         cmd="sleep 120",
     )
-    # Fail-closed: the dashboard process must NOT successfully serve. Probe
-    # for a few seconds; /api/status should never become reachable because
-    # start_server raised SystemExit before binding.
+    # Explicit opt-out: the dashboard process should serve and report that no
+    # auth gate is active.
     ok, _ = poll_container(
         container_name,
         "curl -fsS -m 2 http://127.0.0.1:9119/api/status >/dev/null 2>&1",
         deadline_s=12.0,
     )
-    assert not ok, (
-        "Dashboard must NOT serve on a public bind with --insecure and no "
-        "auth provider — the gate fails closed. /api/status became reachable, "
-        "meaning the unauthenticated escape hatch is still open."
-    )
+    assert ok, "Dashboard did not serve with explicit HERMES_DASHBOARD_INSECURE=1"
+    status_code, body = _http_probe(container_name, "/api/status")
+    assert status_code == 200
+    assert json.loads(body).get("auth_required") is False

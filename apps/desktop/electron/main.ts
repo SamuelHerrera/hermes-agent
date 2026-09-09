@@ -7329,6 +7329,14 @@ function buildSshBlock(input: any, existingBlock: any = {}) {
   return merged
 }
 
+function buildGatewayWsUrlWithoutCredential(baseUrl) {
+  const parsed = new URL(baseUrl)
+  const wsScheme = parsed.protocol === 'https:' ? 'wss' : 'ws'
+  const prefix = parsed.pathname.replace(/\/+$/, '')
+
+  return `${wsScheme}://${parsed.host}${prefix}/api/ws`
+}
+
 // Build a remote backend connection descriptor from an already-resolved remote
 // config. Handles both auth models (OAuth ws-ticket vs static session token)
 // and is shared by the per-profile, env, and global resolution paths. `token`
@@ -7344,12 +7352,25 @@ async function buildRemoteConnection(
   remoteIdentity?
 ) {
   const baseUrl = normalizeRemoteBaseUrl(rawUrl)
+  let effectiveAuthMode = authMode
+  let statusBody: any = null
+
+  try {
+    statusBody = await fetchPublicJson(`${baseUrl}/api/status`, { timeoutMs: 8_000 })
+    if (authModeFromStatus(statusBody) === 'token') {
+      effectiveAuthMode = 'token'
+    }
+  } catch {
+    // Keep the configured mode when the status probe is unavailable; the normal
+    // readiness/auth checks below will surface the real connection error.
+  }
+
   // For token/oauth remotes the meaningful host is the real backend URL; for
   // SSH remotes the caller passes the entered/resolved host explicitly (the
   // baseUrl is a 127.0.0.1 tunnel and would be useless in the pill).
   const host = remoteHost || hostLabelFromBaseUrl(baseUrl)
 
-  if (authMode === 'oauth') {
+  if (effectiveAuthMode === 'oauth') {
     // OAuth gateway: auth comes from EITHER a native bearer token (cookieless
     // RFC 8252 flow) OR the session cookies in the OAuth partition. Liveness is
     // NOT "is the access-token cookie present?" — Portal issues a 24h rotating
@@ -7405,6 +7426,20 @@ async function buildRemoteConnection(
   }
 
   if (!token) {
+    if (statusBody?.auth_disabled === true) {
+      return {
+        baseUrl,
+        mode: 'remote',
+        source,
+        authMode: 'token',
+        remoteHost: host || undefined,
+        remoteIdentity,
+        remoteKind,
+        token: null,
+        wsUrl: buildGatewayWsUrlWithoutCredential(baseUrl)
+      }
+    }
+
     throw new Error(
       'Remote Hermes gateway is selected, but no session token is saved. ' +
         'Open Settings → Gateway and save a token, or switch back to Local.'

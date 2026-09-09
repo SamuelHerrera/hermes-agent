@@ -45,12 +45,12 @@ def client_loopback():
     ("127.0.0.1", True,  False),
     ("localhost", False, False),
     ("::1",       False, False),
-    # --insecure (allow_public=True) NO LONGER bypasses the gate on a public
-    # bind (June 2026 hermes-0day hardening). Non-loopback always requires auth.
-    ("0.0.0.0",   True,  True),
+    # --insecure (allow_public=True) is an explicit operator override for a
+    # trusted private network and bypasses the auth gate on non-loopback binds.
+    ("0.0.0.0",   True,  False),
     ("0.0.0.0",   False, True),
     ("192.168.1.5", False, True),
-    ("10.0.0.1",  True,  True),     # allow_public ignored — LAN IP is public
+    ("10.0.0.1",  True,  False),    # explicit trusted-network override
     ("100.64.0.1", False, True),    # Tailscale CGNAT — treated as public
     ("hermes-agent-prod-abc.fly.dev", False, True),
 ])

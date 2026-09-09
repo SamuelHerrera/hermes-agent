@@ -33,10 +33,8 @@ def _add_server_runtime_args(parser) -> None:
         "--insecure",
         action="store_true",
         help=(
-            "DEPRECATED / NO-OP. Formerly bypassed auth on a non-loopback "
-            "bind. As of the June 2026 hardening it no longer disables "
-            "authentication — a public bind always requires an auth provider "
-            "(password or OAuth). Bind 127.0.0.1 + tunnel to keep it local."
+            "Allow unauthenticated access on a non-loopback bind. Dangerous: "
+            "only use on a trusted private LAN/VPN/firewall boundary."
         ),
     )
     parser.add_argument(

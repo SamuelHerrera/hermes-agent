@@ -465,6 +465,8 @@ def _require_token(request: Request) -> None:
       making plugin install/enable/disable and the other ``_require_token``
       endpoints permanently unreachable behind the gate. Defer to the gate.
     """
+    if getattr(request.app.state, "public_auth_disabled", False):
+        return
     if getattr(request.app.state, "auth_required", False):
         # Gate is authoritative. It attaches ``request.state.session`` on
         # success and 401s otherwise, so a request that reached us is already
@@ -513,20 +515,20 @@ def should_require_auth(host: str, allow_public: bool = False) -> bool:
 
     Truth table:
       host == loopback        → False (no auth — local-only, trusted operator)
+      allow_public == True    → False (operator explicitly allows open network)
       host != loopback        → True  (gate engages — OAuth or password required)
 
     "Loopback" is 127.0.0.1, localhost, ::1. RFC1918 / CGNAT / link-local are
     deliberately treated as PUBLIC — a hostile device on the same LAN is exactly
     the threat model the gate is designed for.
 
-    ``allow_public`` (the legacy ``--insecure`` escape hatch) NO LONGER disables
-    the gate. It is accepted for backward-compat with old launch scripts and
-    desktop shells but is ignored: a non-loopback bind ALWAYS requires an auth
-    provider (OAuth or the bundled password provider). This closes the
-    unauthenticated-public-dashboard hole behind the June 2026 ``hermes-0day``
-    MCP-persistence campaign, where ``--insecure --host 0.0.0.0`` left the
-    config/MCP/agent surface open to internet scanners.
+    ``allow_public`` is intentionally dangerous and should only be used on a
+    private, trusted network. It preserves the operator-owned Desktop/backend
+    topology where a shared ``hermes serve`` process is reachable directly over
+    LAN/VPN without a dashboard login.
     """
+    if allow_public:
+        return False
     return host not in _LOOPBACK_HOST_VALUES
 
 
@@ -689,6 +691,8 @@ async def _dashboard_auth_gate(request: Request, call_next):
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Require the session token on all /api/ routes except the public list."""
+    if getattr(request.app.state, "public_auth_disabled", False):
+        return await call_next(request)
     # A request already authenticated by the token-auth seam (a service caller
     # presenting a bearer token on a registered token route) carries
     # ``token_authenticated`` — never bounce it through the cookie/session gate.
@@ -2992,6 +2996,7 @@ async def get_health():
         "ok": True,
         "version": __version__,
         "auth_required": bool(getattr(app.state, "auth_required", False)),
+        "auth_disabled": bool(getattr(app.state, "public_auth_disabled", False)),
     }
 
 
@@ -3158,6 +3163,7 @@ async def get_status(profile: Optional[str] = None):
         # SPA's StatusPage can show "OAuth gate ON via Nous Research" or
         # "loopback only — no auth gate" with no extra round trips.
         auth_required = bool(getattr(app.state, "auth_required", False))
+        auth_disabled = bool(getattr(app.state, "public_auth_disabled", False))
         auth_providers: list[str] = []
         # RFC 8252 native-app capability advertisement. The desktop reads this
         # to decide whether it can use the system-browser + loopback + PKCE
@@ -3222,6 +3228,7 @@ async def get_status(profile: Optional[str] = None):
             "restart_drain_timeout": restart_drain_timeout,
             "active_sessions": active_sessions,
             "auth_required": auth_required,
+            "auth_disabled": auth_disabled,
             "auth_providers": auth_providers,
             "auth_flows": auth_flows,
             "nous_session_valid": nous_session_valid,
@@ -15094,6 +15101,8 @@ def _ws_auth_reason(ws: "WebSocket") -> tuple[Optional[str], str]:
     issues from the log.
     """
     auth_required = bool(getattr(app.state, "auth_required", False))
+    if getattr(app.state, "public_auth_disabled", False):
+        return None, "none"
     if auth_required:
         # Lazy import — keeps this function importable in test harnesses
         # that don't bring in the dashboard_auth layer.
@@ -18031,19 +18040,18 @@ def start_server(
     # injection / WS-auth paths can branch on it consistently.  Phase 3.5
     # uses this to decide whether to refuse the bind, log the gate-on
     # banner, and enable uvicorn proxy_headers.
-    app.state.auth_required = should_require_auth(host)
+    app.state.public_auth_disabled = bool(allow_public and host not in _LOOPBACK_HOST_VALUES)
+    app.state.auth_required = should_require_auth(host, allow_public=allow_public)
 
-    # ``--insecure`` no longer disables the auth gate (June 2026 hardening:
-    # the hermes-0day MCP-persistence campaign abused unauthenticated public
-    # dashboards). If a caller still passes it, warn that it is now a no-op
-    # rather than silently changing their expectation of an open bind.
+    # ``--insecure`` deliberately bypasses the auth gate for operator-owned
+    # private networks. Keep the warning loud because the dashboard/backend can
+    # read secrets, change config, and run tools on the host.
     if allow_public and host not in _LOOPBACK_HOST_VALUES:
         _log.warning(
-            "--insecure no longer bypasses dashboard authentication. A "
-            "non-loopback bind (%s) now ALWAYS requires an auth provider "
-            "(OAuth or the bundled password provider). Configure one — see "
-            "below — or bind to 127.0.0.1 and reach it over an SSH tunnel / "
-            "Tailscale.", host,
+            "Dashboard/backend auth is DISABLED on non-loopback bind %s "
+            "because --insecure was passed. Use only on a private trusted "
+            "network; anyone who can reach this port can drive Hermes.",
+            host,
         )
 
     if app.state.auth_required:
@@ -18078,8 +18086,9 @@ def start_server(
                 "print(hash_password('your-password'))\")\n"
                 "  • OAuth: run `hermes dashboard register` (Nous Portal) or "
                 "install a DashboardAuthProvider plugin.\n"
-                "There is no unauthenticated public-bind option — to keep it "
-                "local, bind 127.0.0.1 and tunnel in (SSH / Tailscale)."
+                "To deliberately allow an unauthenticated non-loopback bind, "
+                "restart with --insecure and restrict the listener to a trusted "
+                "LAN/VPN/firewall boundary."
             )
             # Hint when credentials exist but the bundled provider is blocked
             # (#54489).
