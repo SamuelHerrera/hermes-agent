@@ -236,7 +236,9 @@ describe('ChatView composer accent', () => {
   })
 
   it('uses the project color for a fresh draft before its session row is listed', () => {
+    $activeSessionId.set(null)
     $currentCwd.set('/work/project')
+    $selectedStoredSessionId.set(null)
     $sessions.set([])
     $projectTree.set([
       {
@@ -255,7 +257,7 @@ describe('ChatView composer accent', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/stored-1']}>
+        <MemoryRouter initialEntries={['/']}>
           <ChatView
             gateway={null}
             maxVoiceRecordingSeconds={120}

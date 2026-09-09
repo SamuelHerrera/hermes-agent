@@ -153,6 +153,56 @@ describe('PreviewPane console state', () => {
     expect(fireEvent.click(sourceLink!)).toBe(false)
   })
 
+  it('offers a safe rendered view for browsed HTML files while keeping source as default', async () => {
+    const readFileText = vi.fn(async () => ({
+      path: '/tmp/report.html',
+      text: '<!doctype html><h1>Report</h1><script>window.bad = true</script>'
+    }))
+
+    $connection.set({ mode: 'local' } as never)
+    vi.stubGlobal(
+      'window',
+      Object.assign(window, {
+        hermesDesktop: {
+          readFileText
+        }
+      })
+    )
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(
+        <PreviewPane
+          target={{
+            kind: 'file',
+            label: 'report.html',
+            path: '/tmp/report.html',
+            previewKind: 'html',
+            renderMode: 'source',
+            source: '/tmp/report.html',
+            url: 'file:///tmp/report.html'
+          }}
+        />
+      )
+    })
+
+    await waitFor(() => expect(readFileText).toHaveBeenCalledWith('/tmp/report.html'), {
+      container: rendered.container
+    })
+
+    expect(rendered.container.querySelector('iframe')).toBeNull()
+    expect(rendered.container.textContent).toContain('<h1>Report</h1>')
+
+    fireEvent.click(rendered.getByRole('button', { name: 'PREVIEW' }))
+
+    const iframe = rendered.container.querySelector('iframe')
+
+    expect(iframe?.getAttribute('sandbox')).toBe('')
+    expect(iframe?.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(iframe?.getAttribute('srcdoc')).toContain('<h1>Report</h1>')
+    expect(iframe?.getAttribute('srcdoc')).not.toContain('<script>')
+  })
+
   it('lets plugins render native file preview targets inside the normal preview tab', async () => {
     let dispose = () => {}
     await act(async () => {

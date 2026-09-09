@@ -31,6 +31,7 @@ import {
   writeDesktopFileText
 } from '@/lib/desktop-fs'
 import { Check, Pencil, X } from '@/lib/icons'
+import { remoteHtmlPreviewDocument } from '@/lib/local-preview'
 import { shikiLanguageForFilename } from '@/lib/markdown-code'
 import { cn } from '@/lib/utils'
 import type { PreviewTarget } from '@/store/preview'
@@ -379,6 +380,35 @@ function MarkdownPreview({ text }: { text: string }) {
   )
 }
 
+function textHtmlDataUrl(text: string): string {
+  const bytes = new TextEncoder().encode(text)
+  let binary = ''
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+
+  return `data:text/html;base64,${btoa(binary)}`
+}
+
+function HtmlPreview({ label, text }: { label: string; text: string }) {
+  const document = useMemo(() => remoteHtmlPreviewDocument(textHtmlDataUrl(text)), [text])
+
+  if (!document) {
+    return <PreviewEmptyState body="HTML preview could not be rendered." title={translateNow('preview.unavailable')} />
+  }
+
+  return (
+    <iframe
+      className="h-full w-full border-0 bg-white"
+      referrerPolicy="no-referrer"
+      sandbox=""
+      srcDoc={document}
+      title={label}
+    />
+  )
+}
+
 export function PreviewModeSwitcher({
   active,
   modes,
@@ -661,8 +691,8 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
     baselineRef.current = ''
   }, [filePath, reloadKey])
 
-  // HTML files are rendered as source code, not in a webview - so they take
-  // the same path as plain text files. `previewKind === 'binary'` arrives
+  // HTML files can be previewed or inspected as source code, so they take the
+  // same text-load path as plain text files. `previewKind === 'binary'` arrives
   // when the file is forcibly previewed past the binary refusal screen.
   const isText = target.previewKind === 'text' || target.previewKind === 'binary' || target.previewKind === 'html'
 
@@ -1032,11 +1062,12 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
 
   if (isText && state.text !== undefined) {
     const isMarkdown = (state.language || target.language) === 'markdown'
+    const isHtml = target.previewKind === 'html' || (state.language || target.language) === 'html'
     const hasDiff = Boolean(state.diff && state.diff.trim())
     // Order the toggle reads left→right; default lands on the most useful view.
     const modes: PreviewViewMode[] = []
 
-    if (isMarkdown) {
+    if (isMarkdown || isHtml) {
       modes.push('rendered')
     }
 
@@ -1086,7 +1117,11 @@ export function LocalFilePreview({ reloadKey, target }: { reloadKey: number; tar
         />
         <div className="min-h-0 flex-1 overflow-auto">
           {mode === 'rendered' ? (
-            <MarkdownPreview text={state.text} />
+            isHtml ? (
+              <HtmlPreview label={target.label} text={state.text} />
+            ) : (
+              <MarkdownPreview text={state.text} />
+            )
           ) : mode === 'diff' ? (
             <FileDiffPanel
               className="mx-0 mb-0 h-full max-h-none"

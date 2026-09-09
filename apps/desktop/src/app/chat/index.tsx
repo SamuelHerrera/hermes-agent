@@ -361,9 +361,9 @@ export const ChatView = memo(function ChatView({
 
   const sessionAccentColor = selectedSession
     ? sessionColorFor(selectedSession)
-    : selectedSessionId
-      ? (sessionColorById[selectedSessionId] ?? projectColorForCwd(currentCwd, projectTree) ?? undefined)
-      : undefined
+    : (selectedSessionId ? sessionColorById[selectedSessionId] : undefined) ??
+      projectColorForCwd(currentCwd, projectTree) ??
+      undefined
 
   // Durable composer/queue scope (lineage root) so auto-compression tip rotation
   // does not wipe an in-progress draft or orphan /queue entries. For the
