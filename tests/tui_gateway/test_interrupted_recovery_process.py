@@ -66,6 +66,53 @@ signal.pause()
     assert read_turn_marker(tmp_path, "claim-test")["attempts"] == 2
 
 
+@pytest.mark.parametrize("operation", ["cancel", "release"])
+def test_safety_writes_wait_for_cross_process_lock(tmp_path, operation):
+    import threading
+    from tui_gateway.turn_marker import clear_turn_marker, release_turn_recovery
+
+    record_turn_start(tmp_path, "contended", "controlled task")
+    token = claim_turn_recovery(tmp_path, "contended", read_turn_marker(tmp_path, "contended"))
+    code = """
+import fcntl, sys
+with open(sys.argv[1], 'a+b') as handle:
+    fcntl.flock(handle, fcntl.LOCK_EX)
+    print('locked', flush=True)
+    sys.stdin.readline()
+"""
+    holder = subprocess.Popen(
+        [sys.executable, "-c", code, str(tmp_path / "desktop/interrupted_turns.lock")],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+    )
+    finished = threading.Event()
+    errors = []
+    def write():
+        try:
+            if operation == "cancel":
+                clear_turn_marker(tmp_path, "contended", reason="cancelled")
+            else:
+                release_turn_recovery(tmp_path, "contended", token)
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+    worker = threading.Thread(target=write)
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        worker.start()
+        assert not finished.wait(0.2), "safety write must not silently drop on contention"
+    finally:
+        holder.communicate("release\n", timeout=5)
+        if worker.ident:
+            worker.join(timeout=5)
+    assert finished.is_set() and not errors
+    marker = read_turn_marker(tmp_path, "contended")
+    if operation == "cancel":
+        assert marker is None
+    else:
+        assert marker and "claim" not in marker
+
+
 WORKER = r"""
 import json, os, signal, threading, types
 from pathlib import Path

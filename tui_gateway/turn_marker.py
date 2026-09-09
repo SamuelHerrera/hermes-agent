@@ -83,7 +83,7 @@ def inspect_interrupted_tail(
 
 
 @contextlib.contextmanager
-def _locked(home):
+def _locked(home, *, blocking=False):
     # Serialize all sidecar read/modify/write transactions across backend PIDs.
     # Refuse rather than block a resume indefinitely if another writer is stuck.
     with _lock:
@@ -98,11 +98,11 @@ def _locked(home):
                     handle.write(b"0")
                     handle.flush()
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
 
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
             try:
                 yield
             finally:
@@ -143,7 +143,7 @@ def claim_turn_recovery(home, session_key, expected) -> str | None:
 
 def release_turn_recovery(home, session_key, token) -> None:
     try:
-        with _locked(home):
+        with _locked(home, blocking=True):
             path = _marker_path(home)
             entries = _load(path)
             entry = entries.get(session_key, {})
@@ -152,7 +152,8 @@ def release_turn_recovery(home, session_key, token) -> None:
                 entry.pop("claim_pid", None)
                 _store(path, entries)
     except Exception:
-        logger.debug("turn recovery release unavailable session=%s", session_key)
+        logger.error("turn recovery release failed session=%s", session_key)
+        raise
 
 
 def _marker_path(home: Path | str) -> Path:
@@ -245,11 +246,11 @@ def record_turn_start(
 def clear_turn_marker(
     home: Path | str, session_key: str, *, reason: str = "concluded"
 ) -> None:
-    """Remove the marker once its turn concluded (any outcome the client saw)."""
+    """Durably retire before acknowledging completion; never drop contention."""
     if not session_key:
         return
     try:
-        with _locked(home):
+        with _locked(home, blocking=True):
             path = _marker_path(home)
             entries = _load(path)
             # Keep a prompt-free terminal receipt. A later raw dangling tail
@@ -262,7 +263,8 @@ def clear_turn_marker(
             _store(path, _prune(entries, time.time()))
             logger.info("turn marker retired session=%s reason=%s", session_key, reason)
     except Exception:
-        logger.debug("failed to clear turn marker for %s", session_key, exc_info=True)
+        logger.error("failed to retire turn marker session=%s", session_key)
+        raise
 
 
 def suppress_turn_marker(
