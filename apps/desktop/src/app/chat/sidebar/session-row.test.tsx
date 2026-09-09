@@ -256,14 +256,16 @@ describe('SidebarSessionRow running indicator', () => {
 
     const { container } = renderRow(makeSession({ title: 'Running' }))
     const lead = container.querySelector<HTMLElement>('[data-session-project-dot]')
-    const spinner = lead?.querySelector<HTMLElement>('.codicon-loading.codicon-modifier-spin')
+    const ring = lead?.querySelector<SVGCircleElement>('[data-session-live-ring]')
 
     expect(arc(container)).toBeNull()
     expect(lead).toBeTruthy()
-    expect(lead?.querySelector('.rounded-full')).toBeTruthy()
-    expect(lead?.querySelector<HTMLElement>('.rounded-full')?.style.backgroundColor).toBe('rgb(47, 129, 247)')
-    expect(spinner).toBeTruthy()
-    expect(spinner?.closest('[data-session-project-dot]')).toBeTruthy()
+    expect(lead?.querySelector('[data-session-project-dot-shape]')).toBeTruthy()
+    expect(lead?.querySelector<SVGCircleElement>('[data-session-project-dot-shape]')?.getAttribute('fill')).toBe(
+      '#2f81f7'
+    )
+    expect(ring).toBeTruthy()
+    expect(ring?.closest('[data-session-project-dot]')).toBeTruthy()
     expect(container.querySelector('[data-row-actions] [data-session-status]')).toBeNull()
   })
 
