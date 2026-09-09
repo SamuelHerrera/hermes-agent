@@ -9,13 +9,13 @@ import {
 import { useStore } from '@nanostores/react'
 import { type FC, useCallback, useMemo, useState } from 'react'
 
-import { InterruptedTurnContinue } from '@/components/assistant-ui/thread/interrupted-turn-continue'
 import { ChangedFilesCard } from '@/components/assistant-ui/thread/changed-files-card'
 import {
   contentHasVisibleText,
   messageContentText,
   pickPrimaryPreviewTarget
 } from '@/components/assistant-ui/thread/content'
+import { InterruptedTurnContinue } from '@/components/assistant-ui/thread/interrupted-turn-continue'
 import { MESSAGE_PARTS_COMPONENTS } from '@/components/assistant-ui/thread/message-parts'
 import { ReactionPicker } from '@/components/assistant-ui/thread/message-reactions'
 import { ResponseLoadingIndicator, StreamStallIndicator } from '@/components/assistant-ui/thread/status'
@@ -55,8 +55,9 @@ interface MessageActionProps {
 export const AssistantMessage: FC<{
   getSessionId?: () => string | null
   onBranchInNewChat?: (messageId: string) => void
+  onContinueInterrupted?: (text: string) => Promise<boolean> | boolean
   onDismissError?: (messageId: string) => void
-}> = ({ getSessionId = () => null, onBranchInNewChat, onDismissError }) => {
+}> = ({ getSessionId = () => null, onBranchInNewChat, onContinueInterrupted, onDismissError }) => {
   const messageId = useAuiState(s => s.message.id)
   const messageRuntime = useMessageRuntime()
   const { t } = useI18n()
@@ -212,7 +213,9 @@ export const AssistantMessage: FC<{
             role="alert"
           >
             <ErrorPrimitive.Message className="min-w-0 flex-1" />
-            {isLastMessage && messageId.startsWith('assistant-recovery-') && <InterruptedTurnContinue />}
+            {isLastMessage && messageId.startsWith('assistant-recovery-') && onContinueInterrupted && (
+              <InterruptedTurnContinue onContinue={onContinueInterrupted} />
+            )}
             {onDismissError && (
               <TooltipIconButton
                 className="-my-0.5 shrink-0 text-current opacity-70 hover:opacity-100"

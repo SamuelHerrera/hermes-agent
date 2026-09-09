@@ -605,6 +605,7 @@ export const ChatView = memo(function ChatView({
             loading={threadLoading}
             onBranchInNewChat={onBranchInNewChat}
             onCancel={haltRun}
+            onContinueInterrupted={onSubmit}
             onDismissError={onDismissError}
             onRestoreToMessage={onRestoreToMessage}
             sessionId={activeSessionId}

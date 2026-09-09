@@ -343,7 +343,7 @@ function TodoHarness({ message }: { message: ThreadMessage }) {
   )
 }
 
-function MessageHarness({ message }: { message: ThreadMessage }) {
+function MessageHarness({ message, onContinueInterrupted }: { message: ThreadMessage; onContinueInterrupted?: (text: string) => boolean }) {
   const runtime = useExternalStoreRuntime<ThreadMessage>({
     messages: [message],
     isRunning: false,
@@ -352,7 +352,7 @@ function MessageHarness({ message }: { message: ThreadMessage }) {
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread />
+      <Thread onContinueInterrupted={onContinueInterrupted} />
     </AssistantRuntimeProvider>
   )
 }
@@ -552,8 +552,27 @@ describe('assistant-ui streaming renderer', () => {
   })
 
   it('offers Continue for an interrupted recovery notice', () => {
-    render(<MessageHarness message={{ ...assistantErrorMessage('Interrupted turn.'), id: 'assistant-recovery-runtime' }} />)
+    render(
+      <MessageHarness
+        message={{ ...assistantErrorMessage('Interrupted turn.'), id: 'assistant-recovery-runtime' }}
+        onContinueInterrupted={() => true}
+      />
+    )
     expect(screen.getByRole('button', { name: 'Continue' })).toBeTruthy()
+  })
+
+  it('routes Continue through the chat submit callback', () => {
+    const onContinueInterrupted = vi.fn(() => true)
+    render(
+      <MessageHarness
+        message={{ ...assistantErrorMessage('Interrupted turn.'), id: 'assistant-recovery-runtime' }}
+        onContinueInterrupted={onContinueInterrupted}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }))
+
+    expect(onContinueInterrupted).toHaveBeenCalledWith(expect.stringContaining('UNKNOWN'))
   })
 
   it('renders assistant provider errors inline', () => {

@@ -40,6 +40,7 @@ interface ThreadProps {
   loading?: ThreadLoadingState
   onBranchInNewChat?: (messageId: string) => void
   onCancel?: () => Promise<void> | void
+  onContinueInterrupted?: (text: string) => Promise<boolean> | boolean
   onDismissError?: (messageId: string) => void
   onRestoreToMessage?: (messageId: string, target?: RestoreMessageTarget) => Promise<void> | void
   sessionId?: string | null
@@ -62,6 +63,7 @@ export const Thread = memo(function Thread({
   loading,
   onBranchInNewChat,
   onCancel,
+  onContinueInterrupted,
   onDismissError,
   onRestoreToMessage,
   sessionId = null,
@@ -111,8 +113,8 @@ export const Thread = memo(function Thread({
   // transcript — thousands of renders of a thread that was about to be
   // replaced, all of it before the resume RPC had even been sent. They
   // reach the edit composer through ThreadEditContext instead (see above).
-  const callbacksRef = useRef({ onBranchInNewChat, onCancel, onDismissError, onRestoreToMessage })
-  callbacksRef.current = { onBranchInNewChat, onCancel, onDismissError, onRestoreToMessage }
+  const callbacksRef = useRef({ onBranchInNewChat, onCancel, onContinueInterrupted, onDismissError, onRestoreToMessage })
+  callbacksRef.current = { onBranchInNewChat, onCancel, onContinueInterrupted, onDismissError, onRestoreToMessage }
   const sessionIdRef = useRef(sessionId)
   sessionIdRef.current = sessionId
 
@@ -122,6 +124,7 @@ export const Thread = memo(function Thread({
 
   const hasBranchInNewChat = Boolean(onBranchInNewChat)
   const hasCancel = Boolean(onCancel)
+  const hasContinueInterrupted = Boolean(onContinueInterrupted)
   const hasDismissError = Boolean(onDismissError)
   const hasRestoreToMessage = Boolean(onRestoreToMessage)
 
@@ -132,6 +135,9 @@ export const Thread = memo(function Thread({
           getSessionId={() => sessionIdRef.current}
           onBranchInNewChat={
             hasBranchInNewChat ? messageId => callbacksRef.current.onBranchInNewChat?.(messageId) : undefined
+          }
+          onContinueInterrupted={
+            hasContinueInterrupted ? text => callbacksRef.current.onContinueInterrupted?.(text) ?? false : undefined
           }
           onDismissError={hasDismissError ? messageId => callbacksRef.current.onDismissError?.(messageId) : undefined}
         />
@@ -149,7 +155,7 @@ export const Thread = memo(function Thread({
         />
       )
     }),
-    [hasBranchInNewChat, hasCancel, hasDismissError, hasRestoreToMessage, requestRestoreConfirm]
+    [hasBranchInNewChat, hasCancel, hasContinueInterrupted, hasDismissError, hasRestoreToMessage, requestRestoreConfirm]
   )
 
   const emptyPlaceholder = intro ? (
