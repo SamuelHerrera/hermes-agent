@@ -879,8 +879,17 @@ export function hydrateSessionTodosFromMessages(
  */
 export function appendLiveSessionProjection(
   messages: ChatMessage[],
-  projection: Pick<SessionResumeResponse, 'inflight' | 'queued' | 'pending_prompt' | 'session_id'>
+  projection: Pick<SessionResumeResponse, 'inflight' | 'queued' | 'pending_prompt' | 'session_id' | 'recovery' | 'running'>
 ): ChatMessage[] {
+  if (projection.recovery?.needs_manual_continue && !projection.running && !projection.inflight?.streaming) {
+    const id = `assistant-recovery-${projection.session_id}`
+    return [...messages.filter(message => message.id !== id), {
+      id,
+      role: 'assistant',
+      parts: [],
+      error: 'Interrupted turn. No final reply was saved. Continue only after checking work already performed; tool outcomes may be unknown.'
+    }]
+  }
   const inflightUser = projection.inflight?.user?.trim() ?? ''
   const inflightAssistant = projection.inflight?.assistant ?? ''
   const inflightStreaming = Boolean(projection.inflight?.streaming)

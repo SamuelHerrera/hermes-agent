@@ -1,13 +1,14 @@
 """Durable interrupted-turn markers for the desktop/TUI auto-continue path.
 
-A running turn's progress lives only in process memory (the agent flushes to
-SQLite at turn end, not mid-turn), so an app/backend/machine death mid-turn
-leaves no durable trace of the interrupted prompt. This sidecar is that
-trace: a marker is written when a turn starts running and cleared when the
-turn concludes — success, handled error, or interrupt all clear it, so only
-a process death leaves one behind. ``session.resume`` reads the marker to
-decide whether to auto-continue the interrupted turn (see
-``_maybe_schedule_auto_continue`` in ``tui_gateway/server.py``).
+SQLite may contain partial mid-turn work even when the marker is missing.
+The marker records recovery intent/attempts; a prompt-free terminal receipt
+records completion, explicit cancellation or handled failure. Raw transcript
+fallback is manual-only because a dangling tail alone cannot identify why a
+turn stopped. ``session.resume`` checks the live turn lease before recovery.
+
+Recovery claims serialize cold resumes across clients/processes. A dead claim
+owner can be replaced; a live PID cannot. PID reuse can conservatively defer
+recovery, never authorize duplicate execution.
 
 Markers are stored per ``HERMES_HOME`` (callers pass the session's home so
 profile sessions keep their state in their own profile directory) and the
@@ -20,8 +21,11 @@ break a turn — so I/O errors degrade to "no marker" instead of raising.
 
 from __future__ import annotations
 
+import contextlib
+import uuid
 import json
 import logging
+import math
 import os
 import tempfile
 import threading
@@ -42,6 +46,115 @@ _MAX_PROMPT_CHARS = 64_000
 _lock = threading.Lock()
 
 
+def inspect_interrupted_tail(
+    home: Path | str, session_key: str, rows: list[dict]
+) -> dict | None:
+    """Classify a bounded RAW tip, before alternation repair invents results.
+
+    A dangling tool tail proves no final reply was stored, not why it stopped.
+    Older runtimes lack durable turn outcomes, so absence of a marker must NEVER
+    authorize automatic execution. Session ended_at is deliberately irrelevant.
+    """
+    tail = rows[-128:]
+    if not tail:
+        return None
+    last = tail[-1]
+    if not (
+        last.get("role") == "tool"
+        or (last.get("role") == "assistant" and last.get("tool_calls"))
+    ):
+        return None
+    entry = _load(_marker_path(home)).get(session_key, {})
+    # A tool may return after Stop. Only a subsequent user turn can supersede
+    # that receipt; a late tool timestamp cannot revoke the user's cancellation.
+    if entry.get("terminal_reason") and not any(
+        row.get("role") == "user"
+        and float(row.get("timestamp") or 0) > float(entry.get("finished_at") or 0)
+        for row in tail
+    ):
+        return None
+    return {
+        "state": "interrupted",
+        "source": "raw_transcript",
+        "reason": "missing_marker",
+        "needs_manual_continue": True,
+        "interrupted_at": float(last.get("timestamp") or 0),
+    }
+
+
+@contextlib.contextmanager
+def _locked(home):
+    # Serialize all sidecar read/modify/write transactions across backend PIDs.
+    # Refuse rather than block a resume indefinitely if another writer is stuck.
+    with _lock:
+        path = _marker_path(home).with_suffix(".lock")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a+b") as handle:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                yield
+            finally:
+                if os.name == "nt":
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def claim_turn_recovery(home, session_key, expected) -> str | None:
+    """Compare-and-claim the exact marker, counting attempts before agent build."""
+    try:
+        with _locked(home):
+            path = _marker_path(home)
+            entries = _load(path)
+            entry = entries.get(session_key, {})
+            if entry != expected or entry.get("suppression") or not entry.get("prompt"):
+                return None
+            pid = entry.get("claim_pid")
+            if pid:
+                from gateway.status import _pid_exists
+
+                if int(pid) <= 0 or _pid_exists(int(pid)):
+                    return None
+            token = uuid.uuid4().hex
+            entry.update(
+                claim=token,
+                claim_pid=os.getpid(),
+                attempts=int(entry.get("attempts", 0)) + 1,
+            )
+            _store(path, entries)
+            return token
+    except Exception:
+        logger.debug("turn recovery claim unavailable session=%s", session_key)
+        return None
+
+
+def release_turn_recovery(home, session_key, token) -> None:
+    try:
+        with _locked(home):
+            path = _marker_path(home)
+            entries = _load(path)
+            entry = entries.get(session_key, {})
+            if entry.get("claim") == token:
+                entry.pop("claim", None)
+                entry.pop("claim_pid", None)
+                _store(path, entries)
+    except Exception:
+        logger.debug("turn recovery release unavailable session=%s", session_key)
+
+
 def _marker_path(home: Path | str) -> Path:
     return Path(home) / _MARKER_DIR / _MARKER_FILE
 
@@ -53,7 +166,9 @@ def _load(path: Path) -> dict[str, dict]:
     except FileNotFoundError:
         return {}
     except Exception:
-        logger.debug("unreadable turn-marker file %s; starting fresh", path, exc_info=True)
+        logger.debug(
+            "unreadable turn-marker file %s; starting fresh", path, exc_info=True
+        )
         return {}
     if not isinstance(data, dict):
         return {}
@@ -64,7 +179,8 @@ def _prune(entries: dict[str, dict], now: float) -> dict[str, dict]:
     fresh = {
         key: entry
         for key, entry in entries.items()
-        if now - float(entry.get("started_at") or 0) <= _MAX_AGE_SECS
+        if entry.get("suppression")
+        or now - float(entry.get("started_at") or 0) <= _MAX_AGE_SECS
     }
     if len(fresh) <= _MAX_ENTRIES:
         return fresh
@@ -112,29 +228,61 @@ def record_turn_start(
         "started_at": now,
     }
     try:
-        with _lock:
+        with _locked(home):
             path = _marker_path(home)
             entries = _prune(_load(path), now)
+            previous = entries.get(session_key, {})
+            if attempts and previous.get("claim"):
+                entry.update(
+                    claim=previous["claim"], claim_pid=previous.get("claim_pid")
+                )
             entries[session_key] = entry
             _store(path, entries)
     except Exception:
         logger.debug("failed to record turn marker for %s", session_key, exc_info=True)
 
 
-def clear_turn_marker(home: Path | str, session_key: str) -> None:
+def clear_turn_marker(
+    home: Path | str, session_key: str, *, reason: str = "concluded"
+) -> None:
     """Remove the marker once its turn concluded (any outcome the client saw)."""
     if not session_key:
         return
     try:
-        with _lock:
+        with _locked(home):
             path = _marker_path(home)
             entries = _load(path)
-            if session_key not in entries:
-                return
-            del entries[session_key]
-            _store(path, entries)
+            # Keep a prompt-free terminal receipt. A later raw dangling tail
+            # must not reinterpret an explicit stop/failure as a process crash.
+            entries[session_key] = {
+                "terminal_reason": reason,
+                "finished_at": time.time(),
+                "started_at": time.time(),
+            }
+            _store(path, _prune(entries, time.time()))
+            logger.info("turn marker retired session=%s reason=%s", session_key, reason)
     except Exception:
         logger.debug("failed to clear turn marker for %s", session_key, exc_info=True)
+
+
+def suppress_turn_marker(
+    home: Path | str, session_key: str, reason: str, *, expected: dict | None = None
+) -> None:
+    """Sticky policy decision, reset only by an explicit new turn."""
+    try:
+        with _locked(home):
+            path = _marker_path(home)
+            entries = _load(path)
+            if session_key in entries and (
+                expected is None or entries[session_key] == expected
+            ):
+                entries[session_key]["suppression"] = reason
+                _store(path, entries)
+                logger.info(
+                    "turn recovery suppressed session=%s reason=%s", session_key, reason
+                )
+    except Exception:
+        logger.debug("turn suppression write failed session=%s", session_key)
 
 
 def read_turn_marker(home: Path | str, session_key: str) -> dict[str, Any] | None:
@@ -142,7 +290,7 @@ def read_turn_marker(home: Path | str, session_key: str) -> dict[str, Any] | Non
     if not session_key:
         return None
     try:
-        with _lock:
+        with _locked(home):
             entry = _load(_marker_path(home)).get(session_key)
     except Exception:
         return None
@@ -156,4 +304,6 @@ def read_turn_marker(home: Path | str, session_key: str) -> dict[str, Any] | Non
         attempts = max(0, int(entry.get("attempts") or 0))
     except (TypeError, ValueError):
         return None
-    return {"attempts": attempts, "prompt": prompt, "started_at": started_at}
+    if not math.isfinite(started_at) or started_at <= 0:
+        return None
+    return {**entry, "attempts": attempts, "prompt": prompt, "started_at": started_at}

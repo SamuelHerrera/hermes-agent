@@ -543,6 +543,19 @@ describe('assistant-ui streaming renderer', () => {
     expect(finalRoot?.querySelector('[data-slot="aui_msg-actions"]')).toBeTruthy()
   })
 
+  it('does not offer Continue on an obsolete recovery notice', () => {
+    render(<TranscriptHarness messages={[
+      { ...assistantErrorMessage('Interrupted turn.'), id: 'assistant-recovery-runtime' },
+      userMessage(), assistantMessage('Finished after continuing.', false)
+    ]} />)
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
+  })
+
+  it('offers Continue for an interrupted recovery notice', () => {
+    render(<MessageHarness message={{ ...assistantErrorMessage('Interrupted turn.'), id: 'assistant-recovery-runtime' }} />)
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeTruthy()
+  })
+
   it('renders assistant provider errors inline', () => {
     render(<MessageHarness message={assistantErrorMessage('OpenRouter rejected the request (403).')} />)
 

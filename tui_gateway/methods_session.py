@@ -535,6 +535,7 @@ def _(rid, params: dict) -> dict:
             _enable_gateway_prompts()
             try:
                 db.reopen_session(target)
+                recovery_evidence = _read_recovery_evidence(db, Path(profile_home or _hermes_home), target)
                 # One lineage SELECT feeds both projections (#67142-adjacent perf,
                 # from the desktop audit): the model-fed copy is alternation-repaired
                 # (raw_history → sanitize_replay_history → the resumed session's
@@ -575,6 +576,7 @@ def _(rid, params: dict) -> dict:
                 model_override=overrides.get("model_override"),
                 resume_runtime_overrides=overrides or None,
             )
+            record["_recovery_evidence"] = recovery_evidence
             if (live := _claim_or_reuse_live(sid, target, record, lease)) is not None:
                 return _ok(rid, _reuse_live_payload(*live))
 
@@ -604,7 +606,7 @@ def _(rid, params: dict) -> dict:
             }
             if auto_continue is not None:
                 payload["auto_continue"] = auto_continue
-            return _ok(rid, payload)
+            return _ok(rid, _apply_recovery_payload(payload, record))
 
         # Build the agent OUTSIDE the lock — _make_agent can block for seconds
         # (MCP discovery, prompt/skill build, AIAgent construction). Holding
@@ -624,6 +626,7 @@ def _(rid, params: dict) -> dict:
         )
         try:
             db.reopen_session(target)
+            recovery_evidence = _read_recovery_evidence(db, Path(profile_home or _hermes_home), target)
             # One lineage SELECT feeds both projections (see the interactive resume
             # above): the model-fed copy is alternation-repaired for LIVE REPLAY, the
             # display copy stays verbatim.
@@ -777,6 +780,7 @@ def _(rid, params: dict) -> dict:
                     lease.release()
                 return _err(rid, 5000, f"resume failed: {e}")
             session = _sessions.get(sid) or {}
+            session["_recovery_evidence"] = recovery_evidence
     finally:
         # Every return that does NOT reach the transfer above abandons this
         # handle — session-not-found, both "resume failed" paths, the live-session
@@ -810,7 +814,7 @@ def _(rid, params: dict) -> dict:
     }
     if auto_continue is not None:
         payload["auto_continue"] = auto_continue
-    return _ok(rid, payload)
+    return _ok(rid, _apply_recovery_payload(payload, session))
 
 
 @method("session.cwd.set")
@@ -2987,6 +2991,9 @@ def _(rid, params: dict) -> dict:
         with _session_control_effect_claim(rid, sid, session) as authority_error:
             if authority_error:
                 return authority_error
+            with session["history_lock"]:
+                session["_turn_cancel_requested"] = True
+                _retire_turn_marker(session, reason="cancelled")
             # Keypress barge-in: stopping the turn also silences its streaming
             # TTS (voice is process-global, so authorize before this side effect).
             _tts_stream_stop()
@@ -3014,6 +3021,9 @@ def _(rid, params: dict) -> dict:
     with _session_control_effect_claim(rid, sid, session) as authority_error:
         if authority_error:
             return authority_error
+        with session["history_lock"]:
+            session["_turn_cancel_requested"] = True
+            _retire_turn_marker(session, reason="cancelled")
         _tts_stream_stop()
         # Safety net: if the turn's run thread is already gone but `running`
         # stayed stuck, force-clear it so the session cannot remain bricked.

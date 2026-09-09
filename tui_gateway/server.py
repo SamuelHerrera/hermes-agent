@@ -34,11 +34,15 @@ from hermes_constants import (
 from hermes_cli.env_loader import load_hermes_dotenv
 from utils import is_truthy_value
 from tools.environments.local import hermes_subprocess_env
-from agent.replay_cleanup import sanitize_replay_history
+from agent.replay_cleanup import is_interrupted_tool_result, sanitize_replay_history
 from agent.skill_commands import describe_skill_invocation
 from agent.conversation_loop import INTERRUPT_WAITING_FOR_MODEL_PREFIX
 from tui_gateway import git_probe
 from tui_gateway.turn_marker import (
+    inspect_interrupted_tail,
+    suppress_turn_marker,
+    claim_turn_recovery,
+    release_turn_recovery,
     clear_turn_marker,
     read_turn_marker,
     record_turn_start,
@@ -7813,9 +7817,9 @@ def _fail_inflight_turn(session: dict, error: Any) -> None:
 # done this for restart-interrupted sessions since #27856). A WS/client
 # disconnect can also leave the marker while the backend turn is still alive,
 # so auto-continue first checks the durable turn lease; the original holder
-# owns completion in that case. If the marker is stale, clear it and let the
-# recovered partial transcript speak for itself — the user can ask to continue
-# manually.
+# owns completion in that case. Ineligible markers retain their suppression
+# decision and expose manual Continue. A missing marker permits only a bounded
+# raw-transcript/manual fallback, never automatic execution.
 
 _AUTO_CONTINUE_ENABLED_DEFAULT = True
 _AUTO_CONTINUE_FRESHNESS_MINUTES_DEFAULT = 15
@@ -7847,7 +7851,7 @@ def _session_home(session: dict) -> Path:
     return Path(profile_home) if profile_home else Path(_hermes_home)
 
 
-def _retire_turn_marker(session: dict, *keys: str) -> None:
+def _retire_turn_marker(session: dict, *keys: str, reason: str = "concluded") -> None:
     """Drop the crash marker for a turn whose outcome is about to reach the client.
 
     Called immediately before the terminal frame rather than at the end of the
@@ -7857,17 +7861,17 @@ def _retire_turn_marker(session: dict, *keys: str) -> None:
     turn on the next launch. Extra ``keys`` cover a session_key that
     compression rotated mid-turn.
     """
+    session.pop("recovery", None)
+    session["_auto_continue_scheduled"] = False
     home = _session_home(session)
     for key in dict.fromkeys((*keys, str(session.get("session_key") or ""))):
         if key:
-            clear_turn_marker(home, key)
+            clear_turn_marker(home, key, reason=reason)
 
 
 def _auto_continue_note(prompt: str) -> str:
-    # Same opening as the messaging gateway's recovery notes so transcript
-    # tooling recognizes both. The original prompt is embedded because a hard
-    # crash persists nothing of the interrupted turn to the session DB — this
-    # note is the only copy the model will see.
+    # Keep the shared recovery prefix. Include the request in case death
+    # preceded its SQLite write; mid-turn transcript rows may already exist.
     return (
         f"{_AUTO_CONTINUE_NOTE_PREFIX} — the app or its backend process "
         "stopped before the turn could finish. Some of the work may already "
@@ -7877,12 +7881,11 @@ def _auto_continue_note(prompt: str) -> str:
     )
 
 
-def _has_live_durable_turn_lease(session: dict, session_key: str) -> bool:
+def _has_live_durable_turn_lease(session: dict, session_key: str) -> bool | None:
     """True when another still-running backend turn owns this session.
 
-    Best-effort guard for auto-continue. Failure to inspect the lease must not
-    break crash recovery, so unknown/missing helpers fall back to the existing
-    marker decision.
+    None means inspection was unavailable. Display callers may treat that as
+    unknown, but automatic recovery requires an explicit False (fail closed).
     """
     try:
         with _session_db(session) as db:
@@ -7892,11 +7895,56 @@ def _has_live_durable_turn_lease(session: dict, session_key: str) -> bool:
                 else None
             )
             if getter is None:
-                return False
+                return None
             return bool(getter(session_key))
     except Exception:
-        logger.debug("auto-continue turn-lease check failed", exc_info=True)
-        return False
+        logger.debug("auto-continue turn-lease check failed")
+        return None
+
+
+def _read_recovery_evidence(db, home: Path, session_key: str) -> dict:
+    """Bounded raw tip read. Do not pass repaired/sanitized model history here."""
+    try:
+        rows = db.get_messages(session_key, limit=128, latest=True)
+        # Repaired orphan results can themselves be persisted on later turns.
+        # Their timestamps are not proof that a tool actually ran recently.
+        activity = [row for row in rows if row.get("role") in ("user", "assistant", "tool")
+                    and row.get("effect_disposition") != "unknown"
+                    and not str(row.get("content") or "").startswith("[Orphan recovery:")]
+        explicit_interrupt = False
+        for row in reversed(rows):
+            if row.get("role") != "tool":
+                break
+            if is_interrupted_tool_result(row.get("content")):
+                explicit_interrupt = True
+                break
+        last = rows[-1] if rows else {}
+        final_reply_at = (float(last.get("timestamp") or 0)
+                          if last.get("role") == "assistant" and last.get("content")
+                          and not last.get("tool_calls") else 0)
+        return {
+            "explicit_interrupt": explicit_interrupt,
+            "final_reply_at": final_reply_at,
+            "tail": inspect_interrupted_tail(home, session_key, rows),
+            "updated_at": float(activity[-1].get("timestamp") or 0) if activity else 0,
+        }
+    except Exception:
+        logger.debug("recovery raw-tail inspection unavailable session=%s", session_key)
+        return {}
+
+
+def _apply_recovery_payload(payload: dict, session: dict) -> dict:
+    if session.get("running"):
+        payload["running"] = True
+    recovery = session.get("recovery")
+    if recovery and recovery.get("state") == "scheduled":
+        payload["recovery"] = recovery
+        payload["status"] = "working"
+    if recovery and not payload.get("running"):
+        payload["recovery"] = recovery
+        if recovery.get("needs_manual_continue"):
+            payload["status"] = "error"
+    return payload
 
 
 def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> dict | None:
@@ -7909,29 +7957,66 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
     same _run_prompt_submit machinery as every other synthesized turn — so
     the client that just resumed streams it live.
     """
-    home = _session_home(session)
-    marker = read_turn_marker(home, session_key)
-    if marker is None:
-        return None
-    enabled, freshness_secs, max_attempts = _auto_continue_config()
-    age = time.time() - marker["started_at"]
-    if not enabled or age > freshness_secs or marker["attempts"] >= max_attempts:
-        # Stale, disabled, or crash-looping: stop trying. The journal/partial
-        # transcript still shows what happened; a manual message continues it.
-        clear_turn_marker(home, session_key)
-        return None
-    if _has_live_durable_turn_lease(session, session_key):
-        # The renderer/socket disappeared, not the backend turn. Do not launch
-        # a duplicate continuation that will block on the session lease and
-        # eventually surface session_turn_lease_timeout; the live turn will
-        # clear the marker when it concludes.
-        logger.info(
-            "auto-continue skipped for session %s: live turn lease is still held",
-            session_key,
-        )
-        return None
     if session.get("_auto_continue_scheduled"):
         return None
+    home = _session_home(session)
+    marker = read_turn_marker(home, session_key)
+    if session.get("running") or session.get("_turn_cancel_requested"):
+        session.pop("recovery", None)
+        return None
+    lease_state = _has_live_durable_turn_lease(session, session_key)
+    if lease_state is not False:
+        session.pop("recovery", None)
+        if lease_state is None and (marker or (session.get("_recovery_evidence") or {}).get("tail")):
+            session["recovery"] = {
+                "state": "interrupted", "source": "marker" if marker else "raw_transcript",
+                "reason": "lease_unavailable", "needs_manual_continue": True,
+                "interrupted_at": marker["started_at"] if marker else 0,
+            }
+        logger.info("turn recovery deferred session=%s reason=%s", session_key,
+                    "live_lease" if lease_state else "lease_unavailable")
+        return None
+    enabled, freshness_secs, max_attempts = _auto_continue_config()
+    if marker is None:
+        recovery = (session.get("_recovery_evidence") or {}).get("tail")
+        if recovery:
+            recovery = dict(recovery)
+            recovery["interrupted_at"] = (session.get("_recovery_evidence") or {}).get("updated_at") or recovery["interrupted_at"]
+            age = time.time() - recovery["interrupted_at"]
+            if age > freshness_secs or age < -60:
+                recovery["reason"] = "stale"
+        session["recovery"] = recovery
+        return None
+    if float((session.get("_recovery_evidence") or {}).get("final_reply_at") or 0) >= marker["started_at"]:
+        _retire_turn_marker(session, session_key, reason="durable_final_reply")
+        return None
+    updated_at = max(marker["started_at"], float((session.get("_recovery_evidence") or {}).get("updated_at") or 0))
+    age = time.time() - updated_at
+    reason = marker.get("suppression") or (
+        "explicit_interrupt" if (session.get("_recovery_evidence") or {}).get("explicit_interrupt") else
+        "disabled" if not enabled else "exhausted" if marker["attempts"] >= max_attempts
+        else "stale" if age > freshness_secs or age < -60 else None
+    )
+    if reason:
+        suppress_turn_marker(home, session_key, reason, expected=marker)
+        session["recovery"] = {
+            "state": "interrupted", "source": "marker", "reason": reason,
+            "needs_manual_continue": True, "interrupted_at": updated_at,
+        }
+        return None
+    claim = claim_turn_recovery(home, session_key, marker)
+    if claim is None:
+        peer_claim = (read_turn_marker(home, session_key) or {}).get("claim")
+        session["recovery"] = {
+            "state": "scheduled" if peer_claim else "interrupted", "source": "marker",
+            "reason": "peer_recovery" if peer_claim else "claim_unavailable",
+            "needs_manual_continue": not bool(peer_claim), "interrupted_at": updated_at,
+        }
+        return None
+    session["recovery"] = {
+        "state": "scheduled", "source": "marker", "reason": "fresh_marker",
+        "needs_manual_continue": False, "interrupted_at": updated_at,
+    }
     session["_auto_continue_scheduled"] = True
     attempt = marker["attempts"] + 1
     text = _auto_continue_note(marker["prompt"])
@@ -7942,16 +8027,28 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
             _start_agent_build(sid, session)
             err = _wait_agent(session, rid, timeout=120.0)
         except Exception:
-            logger.warning("auto-continue agent build failed for %s", sid, exc_info=True)
+            logger.warning("auto-continue agent build failed session=%s", sid)
             err = {"error": {"message": "agent build failed"}}
         if err:
-            # Leave the marker: the next resume retries (bounded by attempts).
+            # Failed builds also consume the durable retry budget.
+            session["recovery"] = {
+                "state": "interrupted", "source": "marker", "reason": "build_failed",
+                "needs_manual_continue": True, "interrupted_at": updated_at,
+            }
+            release_turn_recovery(home, session_key, claim)
+            session["_auto_continue_scheduled"] = False
+            return
+        current_marker = read_turn_marker(home, session_key)
+        if (_has_live_durable_turn_lease(session, session_key) is not False
+                or not current_marker or current_marker.get("claim") != claim):
+            release_turn_recovery(home, session_key, claim)
             session["_auto_continue_scheduled"] = False
             return
         with session["history_lock"]:
             if session.get("running") or session.get("_turn_cancel_requested") or session.get("_finalized"):
                 # A real user prompt beat us to it — their turn wins, and its
                 # own conclusion clears the marker.
+                release_turn_recovery(home, session_key, claim)
                 session["_auto_continue_scheduled"] = False
                 return
             session["running"] = True
@@ -7973,11 +8070,8 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
             _emit("message.start", sid)
             _run_prompt_submit(rid, sid, session, text, display_kind="auto_continue")
         except Exception as exc:
-            print(
-                f"[tui_gateway] auto-continue dispatch failed: "
-                f"{type(exc).__name__}: {exc}",
-                file=sys.stderr,
-            )
+            logger.warning("auto-continue dispatch failed session=%s error_type=%s", sid, type(exc).__name__)
+            release_turn_recovery(home, session_key, claim)
             with session["history_lock"]:
                 session["running"] = False
 
@@ -8302,7 +8396,7 @@ def _emit_terminal_turn_error(sid: str, session: dict, error: Any) -> None:
         rendered = ""
     if rendered:
         payload["rendered"] = rendered
-    _retire_turn_marker(session)
+    _retire_turn_marker(session, reason="error")
     _emit("message.complete", sid, payload)
 
 
@@ -8581,7 +8675,7 @@ def _session_has_live_detached_turn(session: dict | None) -> bool:
     key = _session_lookup_key(session)
     if not key:
         return False
-    return _has_live_durable_turn_lease(session, key)
+    return _has_live_durable_turn_lease(session, key) is True
 
 
 def _find_live_session_by_key(session_key: str) -> tuple[str, dict] | None:
@@ -8716,6 +8810,19 @@ def _live_session_payload(
         inflight = _inflight_snapshot(session)
         queued = _queued_prompt_snapshot(session)
         running = bool(session.get("running"))
+    # Retry lease deferral only when a client explicitly resumes/activates this
+    # already-resumed session. Never scan/relaunch all durable sessions.
+    if not running and "_recovery_evidence" in session:
+        key = _session_lookup_key(session, fallback=sid)
+        try:
+            with _session_db(session) as db:
+                session["_recovery_evidence"] = _read_recovery_evidence(db, _session_home(session), key)
+            continuation = _maybe_schedule_auto_continue(sid, session, key)
+        except Exception:
+            logger.debug("recovery inspection unavailable session=%s", key)
+            continuation = None
+    else:
+        continuation = None
     pending_prompt = _session_pending_prompt_snapshot(sid, session)
     # Prefer the persisted display lineage (candidate-inclusive) so this payload
     # matches the eager session.resume + REST transcript; the DB has its own
@@ -8736,13 +8843,15 @@ def _live_session_payload(
         "started_at": float(session.get("created_at") or time.time()),
         "status": _session_live_status(sid, session),
     }
+    if continuation:
+        payload["auto_continue"] = continuation
     if inflight:
         payload["inflight"] = inflight
     if queued:
         payload["queued"] = queued
     if pending_prompt:
         payload["pending_prompt"] = pending_prompt
-    return payload
+    return _apply_recovery_payload(payload, session)
 
 
 def _main_runtime_from_agent(agent) -> dict | None:
@@ -10517,8 +10626,9 @@ def _run_prompt_submit(
         marker_key = str(session.get("session_key") or "")
         marker_attempt = int(session.pop("_auto_continue_attempt", 0) or 0)
         marker_text = session.pop("_auto_continue_prompt", None) or text
-        if isinstance(marker_text, str) and marker_text.strip():
-            record_turn_start(marker_home, marker_key, marker_text, attempts=marker_attempt)
+        with session["history_lock"]:
+            if not session.get("_turn_cancel_requested") and isinstance(marker_text, str) and marker_text.strip():
+                record_turn_start(marker_home, marker_key, marker_text, attempts=marker_attempt)
         try:
             from tools.approval import (
                 reset_current_session_key,
@@ -10976,7 +11086,7 @@ def _run_prompt_submit(
                     (result.get("error") if isinstance(result, dict) else "") or raw
                 )
                 payload["recoverable"] = True
-            _retire_turn_marker(session, marker_key)
+            _retire_turn_marker(session, marker_key, reason="cancelled" if session.get("_turn_cancel_requested") else status)
             _emit("message.complete", sid, payload)
 
             # ── /goal continuation (Ralph-style loop) ─────────────────

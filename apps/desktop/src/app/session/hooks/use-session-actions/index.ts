@@ -1176,7 +1176,7 @@ export function useSessionActions({
               const running = Boolean(activated.running ?? cachedViewState.busy)
 
               const activatedHasLiveProjection = Boolean(
-                activated.inflight || activated.queued || pendingPromptNeedsInput
+                activated.recovery || activated.inflight || activated.queued || pendingPromptNeedsInput
               )
 
               // While idle, the persisted REST transcript is the display
@@ -1377,7 +1377,7 @@ export function useSessionActions({
         const prefetchMatchesResumedSession =
           !prefetchedStoredSessionId || !resumedStoredSessionId || prefetchedStoredSessionId === resumedStoredSessionId
 
-        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || pendingPromptNeedsInput)
+        const hasLiveProjection = Boolean(resumed.recovery || resumed.inflight || resumed.queued || pendingPromptNeedsInput)
 
         const preferredMessages =
           prefetchApplied && prefetchMatchesResumedSession && !hasLiveProjection

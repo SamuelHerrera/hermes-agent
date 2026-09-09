@@ -130,6 +130,18 @@ def test_marker_survives_corrupt_sidecar(tmp_path):
 # ── Turn lifecycle owns the marker ─────────────────────────────────────
 
 
+def test_cancel_before_turn_thread_starts_cannot_recreate_marker(emits, turn_env, marker_home):
+    def stop(message, **kw):
+        raise SystemExit()
+    session = _session(agent=types.SimpleNamespace(run_conversation=stop, clear_interrupt=lambda: None), running=True, _turn_cancel_requested=True)
+    clear_turn_marker(marker_home, "session-key", reason="cancelled")
+    try:
+        server._run_prompt_submit("rid", "sid", session, "task")
+    except SystemExit:
+        pass
+    assert read_turn_marker(marker_home, "session-key") is None
+
+
 def test_concluded_turn_clears_marker(emits, turn_env, marker_home):
     seen_mid_turn: list = []
 
@@ -287,7 +299,7 @@ def test_fresh_marker_schedules_continuation(emits, schedule_env, marker_home):
     assert ("message.start", "sid", None) in [(e, s, p) for e, s, p in emits]
 
 
-def test_stale_marker_is_cleared_not_continued(schedule_env, marker_home, monkeypatch):
+def test_stale_marker_is_retained_not_continued(schedule_env, marker_home, monkeypatch):
     record_turn_start(marker_home, "session-key", "old prompt")
     monkeypatch.setattr(
         server, "time", types.SimpleNamespace(time=lambda: time.time() + 3600)
@@ -297,7 +309,7 @@ def test_stale_marker_is_cleared_not_continued(schedule_env, marker_home, monkey
 
     assert result is None
     assert not schedule_env
-    assert read_turn_marker(marker_home, "session-key") is None
+    assert read_turn_marker(marker_home, "session-key")["suppression"] == "stale"
 
 
 def test_config_widens_freshness_window(emits, schedule_env, marker_home, monkeypatch):
@@ -324,7 +336,7 @@ def test_exhausted_attempts_break_the_loop(schedule_env, marker_home):
 
     assert result is None
     assert not schedule_env
-    assert read_turn_marker(marker_home, "session-key") is None
+    assert read_turn_marker(marker_home, "session-key")["suppression"] == "exhausted"
 
 
 def test_disabled_by_config(schedule_env, marker_home, monkeypatch):
@@ -339,6 +351,18 @@ def test_disabled_by_config(schedule_env, marker_home, monkeypatch):
 
     assert result is None
     assert not schedule_env
+    assert read_turn_marker(marker_home, "session-key")["suppression"] == "disabled"
+
+
+def test_disabled_decision_remains_sticky_after_config_changes(emits, schedule_env, marker_home, monkeypatch):
+    record_turn_start(marker_home, "session-key", "task")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"desktop": {"auto_continue": {"enabled": False}}})
+    server._maybe_schedule_auto_continue("sid", _session(), "session-key")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {})
+    session = _session()
+    server._maybe_schedule_auto_continue("sid", session, "session-key")
+    assert not schedule_env
+    assert session["recovery"]["reason"] == "disabled"
 
 
 def test_no_marker_means_no_continuation(schedule_env, marker_home):
@@ -354,10 +378,10 @@ def test_running_session_wins_over_continuation(emits, schedule_env, marker_home
 
     result = server._maybe_schedule_auto_continue("sid", session, "session-key")
 
-    # Scheduled (the descriptor is returned), but the kickoff bailed.
-    assert result is not None
+    # A live holder wins before a recovery thread is even created.
+    assert result is None
     assert not schedule_env
-    assert session["_auto_continue_scheduled"] is False
+    assert not session.get("_auto_continue_scheduled")
     assert read_turn_marker(marker_home, "session-key") is not None
     # Nothing left behind for the racing user turn to inherit.
     assert "_auto_continue_attempt" not in session
@@ -428,6 +452,71 @@ def test_failed_agent_build_leaves_marker_for_retry(
     assert not schedule_env
     assert session["_auto_continue_scheduled"] is False
     assert read_turn_marker(marker_home, "session-key") is not None
+
+
+def test_recheck_live_lease_after_agent_build(emits, schedule_env, marker_home, monkeypatch):
+    record_turn_start(marker_home, "session-key", "prompt")
+    leased = iter([False, True])
+    monkeypatch.setattr(server, "_has_live_durable_turn_lease", lambda *a: next(leased))
+    server._maybe_schedule_auto_continue("sid", _session(), "session-key")
+    assert not schedule_env
+
+
+def test_unknown_lease_never_authorizes_recovery(schedule_env, marker_home, monkeypatch):
+    import contextlib
+    @contextlib.contextmanager
+    def broken(_):
+        raise RuntimeError("unavailable")
+        yield
+    monkeypatch.setattr(server, "_session_db", broken)
+    record_turn_start(marker_home, "session-key", "prompt")
+    assert server._maybe_schedule_auto_continue("sid", _session(), "session-key") is None
+    assert not schedule_env
+    session = _session()
+    server._maybe_schedule_auto_continue("sid", session, "session-key")
+    assert session.get("recovery", {}).get("reason") == "lease_unavailable"
+
+
+def test_concurrent_cold_records_claim_only_one_recovery(emits, schedule_env, marker_home):
+    record_turn_start(marker_home, "session-key", "prompt")
+    server._maybe_schedule_auto_continue("sid1", _session(), "session-key")
+    server._maybe_schedule_auto_continue("sid2", _session(), "session-key")
+    assert len(schedule_env) == 1
+
+
+def test_build_failure_consumes_bounded_attempt(emits, schedule_env, marker_home, monkeypatch):
+    record_turn_start(marker_home, "session-key", "prompt")
+    monkeypatch.setattr(server, "_wait_agent", lambda *a, **kw: {"error": "failed"})
+    for _ in range(5):
+        server._maybe_schedule_auto_continue("sid", _session(), "session-key")
+    marker = read_turn_marker(marker_home, "session-key")
+    assert marker["attempts"] == 2
+    assert marker["suppression"] == "exhausted"
+
+
+def test_explicit_interrupted_tool_tail_never_autoruns(emits, schedule_env, marker_home):
+    record_turn_start(marker_home, "session-key", "task")
+    session = _session(_recovery_evidence={"explicit_interrupt": True})
+    assert server._maybe_schedule_auto_continue("sid", session, "session-key") is None
+    assert not schedule_env
+    assert session["recovery"]["reason"] == "explicit_interrupt"
+
+
+def test_durable_final_reply_after_marker_start_is_not_replayed(emits, schedule_env, marker_home):
+    record_turn_start(marker_home, "session-key", "task")
+    session = _session(_recovery_evidence={"final_reply_at": time.time() + 0.01})
+    assert server._maybe_schedule_auto_continue("sid", session, "session-key") is None
+    assert not schedule_env
+    assert read_turn_marker(marker_home, "session-key") is None
+
+
+def test_recent_durable_work_refreshes_long_running_turn(emits, schedule_env, marker_home, monkeypatch):
+    record_turn_start(marker_home, "session-key", "long task")
+    now = time.time() + 3600
+    monkeypatch.setattr(server, "time", types.SimpleNamespace(time=lambda: now))
+    session = _session(_recovery_evidence={"updated_at": now - 5})
+    assert server._maybe_schedule_auto_continue("sid", session, "session-key") is not None
+    assert len(schedule_env) == 1
 
 
 # ── End to end: continuation runs a real turn and clears the marker ────

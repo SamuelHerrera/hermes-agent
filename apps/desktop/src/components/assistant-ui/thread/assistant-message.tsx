@@ -9,6 +9,7 @@ import {
 import { useStore } from '@nanostores/react'
 import { type FC, useCallback, useMemo, useState } from 'react'
 
+import { InterruptedTurnContinue } from '@/components/assistant-ui/thread/interrupted-turn-continue'
 import { ChangedFilesCard } from '@/components/assistant-ui/thread/changed-files-card'
 import {
   contentHasVisibleText,
@@ -211,6 +212,7 @@ export const AssistantMessage: FC<{
             role="alert"
           >
             <ErrorPrimitive.Message className="min-w-0 flex-1" />
+            {isLastMessage && messageId.startsWith('assistant-recovery-') && <InterruptedTurnContinue />}
             {onDismissError && (
               <TooltipIconButton
                 className="-my-0.5 shrink-0 text-current opacity-70 hover:opacity-100"

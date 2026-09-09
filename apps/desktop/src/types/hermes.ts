@@ -605,6 +605,13 @@ export interface SessionPendingPrompt {
 }
 
 export interface SessionResumeResponse {
+  recovery?: {
+    state: 'interrupted' | 'scheduled'
+    source: 'raw_transcript' | 'marker'
+    reason: string
+    needs_manual_continue: boolean
+    interrupted_at: number
+  }
   /** Present when the backend found a fresh crash-interrupted turn and
    *  scheduled its automatic continuation; the turn arrives as a normal
    *  message.start stream right after this resume. */

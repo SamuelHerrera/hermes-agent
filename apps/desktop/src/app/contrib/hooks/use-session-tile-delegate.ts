@@ -136,7 +136,7 @@ export function useSessionTileDelegate({
               const baseMessages =
                 !running && persisted ? toChatMessages(persisted.messages) : cached.messages
 
-              const hasLiveProjection = Boolean(activated.inflight || activated.queued || activated.pending_prompt)
+              const hasLiveProjection = Boolean(activated.recovery || activated.inflight || activated.queued || activated.pending_prompt)
 
               const projectedMessages = hasLiveProjection
                 ? appendLiveSessionProjection(baseMessages, activated)
@@ -214,7 +214,7 @@ export function useSessionTileDelegate({
         const resumedRunning = Boolean(resumed.running ?? resumed.info?.running)
         const runtimeInfo = applyRuntimeInfo(resumed.info, { foreground: false })
         const baseMessages = toChatMessages(prefetch?.messages ?? resumed.messages ?? [])
-        const hasLiveProjection = Boolean(resumed.inflight || resumed.queued || resumed.pending_prompt)
+        const hasLiveProjection = Boolean(resumed.recovery || resumed.inflight || resumed.queued || resumed.pending_prompt)
         const projectedMessages = hasLiveProjection ? appendLiveSessionProjection(baseMessages, resumed) : baseMessages
         const recovery = recoverInFlightTurnJournal(storedSessionId, projectedMessages, { keepPending: resumedRunning })
 
