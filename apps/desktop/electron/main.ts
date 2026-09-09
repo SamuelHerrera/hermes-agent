@@ -5499,15 +5499,17 @@ function buildApplicationMenu() {
         label: 'Actual Size',
         accelerator: 'CommandOrControl+0',
         click: () => {
-          setAndPersistZoomLevel(mainWindow, DEFAULT_ZOOM_LEVEL)
+          setAndPersistZoomLevel(zoomTargetWindow(), DEFAULT_ZOOM_LEVEL)
         }
       },
       {
         label: 'Zoom In',
         accelerator: 'CommandOrControl+Plus',
         click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            setAndPersistZoomLevel(mainWindow, mainWindow.webContents.getZoomLevel() + ZOOM_STEP)
+          const window = zoomTargetWindow()
+
+          if (window) {
+            setAndPersistZoomLevel(window, window.webContents.getZoomLevel() + ZOOM_STEP)
           }
         }
       },
@@ -5515,8 +5517,10 @@ function buildApplicationMenu() {
         label: 'Zoom Out',
         accelerator: 'CommandOrControl+-',
         click: () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            setAndPersistZoomLevel(mainWindow, mainWindow.webContents.getZoomLevel() - ZOOM_STEP)
+          const window = zoomTargetWindow()
+
+          if (window) {
+            setAndPersistZoomLevel(window, window.webContents.getZoomLevel() - ZOOM_STEP)
           }
         }
       },
@@ -5598,6 +5602,7 @@ function installPreviewShortcut(window) {
 import {
   applyZoomLevel,
   DEFAULT_ZOOM_LEVEL,
+  installZoomReassertOnNavigationEvents,
   installZoomReassertOnWindowEvents,
   percentToZoomLevel,
   ZOOM_STEP,
@@ -5626,6 +5631,16 @@ function setAndPersistZoomLevel(window, zoomLevel) {
     }`
     )
     .catch(error => rememberLog(`[zoom] persist failed: ${error?.message || error}`))
+}
+
+function zoomTargetWindow() {
+  const focused = BrowserWindow.getFocusedWindow()
+
+  if (focused && !focused.isDestroyed()) {
+    return focused
+  }
+
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
 }
 
 function restorePersistedZoomLevel(window) {
@@ -9213,6 +9228,7 @@ function wireCommonWindowHandlers(win, { zoom = true }: { zoom?: boolean } = {})
     // listener is spent, so zoom was silently lost on renderer crash
     // recovery and any in-place reload/navigation (#46429).
     installZoomReassertOnWindowEvents(win, () => restorePersistedZoomLevel(win))
+    installZoomReassertOnNavigationEvents(win.webContents, () => schedulePersistedZoomReassert(win))
     win.webContents.on('did-finish-load', () => restorePersistedZoomLevel(win))
   }
 

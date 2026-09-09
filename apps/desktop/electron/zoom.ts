@@ -100,6 +100,19 @@ export function installZoomReassertOnWindowEvents(win, reassert, platform = proc
   }
 }
 
+// Hash-route changes do not trigger did-finish-load, but Electron/Chromium may
+// still apply a stale per-URL zoom override for the new fragment. Reassert after
+// in-page navigation so route/tab changes cannot flash or stick at an old level.
+export function installZoomReassertOnNavigationEvents(webContents, reassert) {
+  if (!webContents?.on) {
+    return
+  }
+
+  webContents.on('did-navigate-in-page', () => {
+    reassert()
+  })
+}
+
 /**
  * Zoom-wiring decision per window kind. Chat windows (main + session + the HUD)
  * keep global UI zoom; the pet overlay and the Quick Entry composer opt out
