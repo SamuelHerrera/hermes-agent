@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest'
+
 import { appendLiveSessionProjection } from './utils'
 
 describe('interrupted recovery projection', () => {
   it('renders a stable manual-continue error row without claiming work is running', () => {
     const projection = {
+      inflight: null,
+      pending_prompt: null,
+      queued: null,
+      running: false,
       session_id: 'runtime',
       recovery: {
         state: 'interrupted' as const,

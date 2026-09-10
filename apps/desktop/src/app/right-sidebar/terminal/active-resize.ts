@@ -21,8 +21,8 @@ export function observeActiveTerminalResize(
   let initialResizeDelivered = false
   let stopped = false
 
-  const scheduleFit = () => {
-    if (!activated || stopped || frame !== 0) {
+  const scheduleFrame = (run: () => void) => {
+    if (stopped || frame !== 0) {
       return
     }
 
@@ -30,9 +30,33 @@ export function observeActiveTerminalResize(
       frame = 0
 
       if (!stopped) {
-        onFit()
+        run()
       }
     })
+  }
+
+  const runWake = (fit: boolean) => {
+    if (fit) {
+      onFit()
+    }
+
+    onActivate()
+  }
+
+  const scheduleFit = () => {
+    if (!activated) {
+      return
+    }
+
+    scheduleFrame(onFit)
+  }
+
+  const scheduleWake = () => {
+    if (!activated || document.visibilityState === 'hidden') {
+      return
+    }
+
+    scheduleFrame(() => runWake(true))
   }
 
   const observer = new ResizeObserver(() => {
@@ -50,25 +74,39 @@ export function observeActiveTerminalResize(
 
   observer.observe(host)
 
-  frame = window.requestAnimationFrame(() => {
-    frame = 0
-
-    if (stopped) {
-      return
-    }
-
+  scheduleFrame(() => {
     activated = true
-
-    if (fitOnActivate) {
-      onFit()
-    }
-
-    onActivate()
+    runWake(fitOnActivate)
   })
+
+  const handleVisibility = () => {
+    scheduleWake()
+  }
+
+  const handleWindowState = (payload: { isMinimized?: boolean; isVisible?: boolean }) => {
+    if (payload?.isMinimized === false && payload?.isVisible !== false) {
+      scheduleWake()
+    }
+  }
+
+  window.addEventListener('focus', scheduleWake)
+  document.addEventListener('visibilitychange', handleVisibility)
+
+  const desktop = (
+    window as Window & {
+      hermesDesktop?: { onWindowStateChanged?: (callback: typeof handleWindowState) => () => void }
+    }
+  ).hermesDesktop
+
+  const offWindowState = desktop?.onWindowStateChanged?.(handleWindowState)
 
   return () => {
     stopped = true
     observer.disconnect()
+    window.removeEventListener('focus', scheduleWake)
+    document.removeEventListener('visibilitychange', handleVisibility)
+    offWindowState?.()
+
 
     if (frame !== 0) {
       window.cancelAnimationFrame(frame)

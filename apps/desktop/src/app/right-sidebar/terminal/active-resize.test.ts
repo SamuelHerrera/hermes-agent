@@ -114,7 +114,7 @@ describe('observeActiveTerminalResize', () => {
     )
 
     const onFit = vi.fn()
-    observeActiveTerminalResize(document.createElement('div'), { onActivate: vi.fn(), onFit })
+    const dispose = observeActiveTerminalResize(document.createElement('div'), { onActivate: vi.fn(), onFit })
 
     raf.flush()
     expect(onFit).toHaveBeenCalledTimes(1)
@@ -128,6 +128,8 @@ describe('observeActiveTerminalResize', () => {
     expect(raf.pending()).toBe(1)
     raf.flush()
     expect(onFit).toHaveBeenCalledTimes(2)
+
+    dispose()
   })
 
   it('reuses a first-mount fit without fitting again on activation', () => {
@@ -145,7 +147,7 @@ describe('observeActiveTerminalResize', () => {
     const onActivate = vi.fn()
     const onFit = vi.fn()
 
-    observeActiveTerminalResize(document.createElement('div'), {
+    const dispose = observeActiveTerminalResize(document.createElement('div'), {
       fitOnActivate: false,
       onActivate,
       onFit
@@ -155,5 +157,85 @@ describe('observeActiveTerminalResize', () => {
 
     expect(onActivate).toHaveBeenCalledOnce()
     expect(onFit).not.toHaveBeenCalled()
+
+    dispose()
+  })
+
+  it('wakes and redraws an already-active terminal when the app regains focus', () => {
+    const raf = installRaf()
+
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        disconnect = vi.fn()
+        observe = vi.fn()
+        unobserve = vi.fn()
+      } as unknown as typeof ResizeObserver
+    )
+
+    const onActivate = vi.fn()
+    const onFit = vi.fn()
+
+    const dispose = observeActiveTerminalResize(document.createElement('div'), {
+      fitOnActivate: false,
+      onActivate,
+      onFit
+    })
+
+    raf.flush()
+    expect(onActivate).toHaveBeenCalledTimes(1)
+    expect(onFit).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new Event('focus'))
+    expect(raf.pending()).toBe(1)
+
+    raf.flush()
+    expect(onFit).toHaveBeenCalledTimes(1)
+    expect(onActivate).toHaveBeenCalledTimes(2)
+
+    dispose()
+  })
+
+  it('wakes after Electron reports the focused window is visible again', () => {
+    const raf = installRaf()
+    const bridge: { onWindowState?: (payload: { isMinimized?: boolean; isVisible?: boolean }) => void } = {}
+    const offWindowState = vi.fn()
+
+    Object.defineProperty(window, 'hermesDesktop', {
+      configurable: true,
+      value: {
+        onWindowStateChanged: vi.fn(callback => {
+          bridge.onWindowState = callback
+
+          return offWindowState
+        })
+      }
+    })
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        disconnect = vi.fn()
+        observe = vi.fn()
+        unobserve = vi.fn()
+      } as unknown as typeof ResizeObserver
+    )
+
+    const onActivate = vi.fn()
+    const dispose = observeActiveTerminalResize(document.createElement('div'), { onActivate, onFit: vi.fn() })
+
+    raf.flush()
+    onActivate.mockClear()
+
+    bridge.onWindowState?.({ isMinimized: true, isVisible: false })
+    expect(raf.pending()).toBe(0)
+
+    bridge.onWindowState?.({ isMinimized: false, isVisible: true })
+    expect(raf.pending()).toBe(1)
+
+    raf.flush()
+    expect(onActivate).toHaveBeenCalledTimes(1)
+
+    dispose()
+    expect(offWindowState).toHaveBeenCalledTimes(1)
   })
 })
