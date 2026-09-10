@@ -11,12 +11,9 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import { GenerateButton } from '@/components/ui/generate-button'
 import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
-import { type ProjectIdeaTemplate, randomIdeaTemplates } from '@/lib/project-idea-templates'
 import { cn } from '@/lib/utils'
 import { notifyError } from '@/store/notifications'
 import {
@@ -24,7 +21,6 @@ import {
   addProjectFolder,
   closeProjectDialog,
   createProject,
-  generateProjectIdea,
   pickProjectFolder,
   renameProject
 } from '@/store/projects'
@@ -41,9 +37,6 @@ export function ProjectDialog() {
 
   const [name, setName] = useState('')
   const [folders, setFolders] = useState<string[]>([])
-  const [idea, setIdea] = useState('')
-  const [templates, setTemplates] = useState<ProjectIdeaTemplate[]>([])
-  const [generatingIdea, setGeneratingIdea] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
 
@@ -51,9 +44,6 @@ export function ProjectDialog() {
     if (open) {
       setName(state?.name ?? '')
       setFolders([])
-      setIdea('')
-      setTemplates(randomIdeaTemplates())
-      setGeneratingIdea(false)
       setSubmitting(false)
 
       if (mode !== 'add-folder') {
@@ -124,25 +114,7 @@ export function ProjectDialog() {
     // A project owns sessions by folder (cwd-prefix), so creation requires at
     // least one — a folder-less project couldn't hold a session anyway.
     if (mode === 'create' && trimmed && folders.length) {
-      await runSubmit(() => createProject({ folders, idea: idea.trim() || undefined, name: trimmed, use: true }))
-    }
-  }
-
-  const generateIdea = async () => {
-    if (generatingIdea) {
-      return
-    }
-
-    setGeneratingIdea(true)
-
-    try {
-      const text = await generateProjectIdea(name)
-
-      if (text) {
-        setIdea(text)
-      }
-    } finally {
-      setGeneratingIdea(false)
+      await runSubmit(() => createProject({ folders, name: trimmed, use: true }))
     }
   }
 
@@ -150,7 +122,11 @@ export function ProjectDialog() {
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-md" onInteractOutside={event => event.preventDefault()}>
+      <DialogContent
+        bodyClassName="grid-cols-1"
+        className="max-w-md"
+        onInteractOutside={event => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {mode === 'create' && <DialogDescription>{p.createDesc}</DialogDescription>}
@@ -225,56 +201,6 @@ export function ProjectDialog() {
               <Codicon name="add" size="0.75rem" />
               {p.addFolder}
             </Button>
-          </div>
-        )}
-
-        {mode === 'create' && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[0.6875rem] font-medium text-(--ui-text-tertiary)">{p.ideaLabel}</span>
-            <div className="relative">
-              <Textarea
-                className="min-h-20 pr-8 text-[0.8125rem]"
-                disabled={submitting}
-                onChange={event => setIdea(event.target.value)}
-                placeholder={p.ideaPlaceholder}
-                value={idea}
-              />
-              <GenerateButton
-                className="absolute top-1 right-1"
-                disabled={submitting}
-                generating={generatingIdea}
-                generatingLabel={p.ideaGenerating}
-                label={p.ideaGenerate}
-                onGenerate={() => void generateIdea()}
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-1">
-              {templates.map(template => (
-                <button
-                  className="flex items-center gap-1 rounded-full border border-(--ui-stroke-tertiary) px-2 py-0.5 text-[0.6875rem] text-(--ui-text-secondary) transition-colors hover:border-(--ui-stroke-secondary) hover:bg-(--ui-control-hover-background) hover:text-foreground disabled:opacity-50"
-                  disabled={submitting}
-                  key={template.label}
-                  onClick={() => setIdea(template.idea)}
-                  type="button"
-                >
-                  <span aria-hidden>{template.emoji}</span>
-                  {template.label}
-                </button>
-              ))}
-              <Tip label={p.ideaShuffle}>
-                <Button
-                  aria-label={p.ideaShuffle}
-                  className="size-5 text-(--ui-text-quaternary) hover:text-foreground"
-                  disabled={submitting}
-                  onClick={() => setTemplates(randomIdeaTemplates())}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Codicon name="refresh" size="0.75rem" />
-                </Button>
-              </Tip>
-            </div>
           </div>
         )}
 

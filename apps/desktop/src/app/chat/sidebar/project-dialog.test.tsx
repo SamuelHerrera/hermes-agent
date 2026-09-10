@@ -1,6 +1,8 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type * as Nanostores from 'nanostores'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { createProject } from '@/store/projects'
 
 import { ProjectDialog } from './project-dialog'
 
@@ -53,7 +55,7 @@ vi.mock('@/store/projects', () => ({
   addProjectFolder: vi.fn(),
   closeProjectDialog: vi.fn(),
   createProject: vi.fn(),
-  generateProjectIdea: vi.fn(),
+
   pickProjectFolder: vi.fn(async () => '/Users/test/my-folder'),
   renameProject: vi.fn()
 }))
@@ -62,18 +64,25 @@ vi.mock('@/store/notifications', () => ({
   notifyError: vi.fn()
 }))
 
-vi.mock('@/lib/project-idea-templates', () => ({
-  randomIdeaTemplates: () => [{ emoji: '🚀', idea: 'A rocket tracker', label: 'Rocket tracker' }]
-}))
-
 const tipTrigger = (el: HTMLElement) => el.closest('[data-slot="tooltip-trigger"]')
 
 describe('ProjectDialog', () => {
-  it('wraps the "shuffle idea" button in a Tip', () => {
+  it('creates a workspace from name and folders without Idea controls', async () => {
     render(<ProjectDialog />)
-
-    const button = screen.getByRole('button', { name: 'Shuffle ideas' })
-    expect(tipTrigger(button)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Shuffle ideas' })).toBeNull()
+    expect(screen.queryByPlaceholderText('What are you building?')).toBeNull()
+    expect(screen.getAllByRole('textbox')).toHaveLength(1)
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: ' Renamed ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add folder' }))
+    await screen.findByRole('button', { name: 'Remove folder' })
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() =>
+      expect(createProject).toHaveBeenCalledWith({
+        name: 'Renamed',
+        folders: ['/Users/test/my-folder'],
+        use: true
+      })
+    )
   })
 
   it('wraps the "remove folder" button in a Tip once a folder is added', async () => {

@@ -329,6 +329,39 @@ def test_delete_removes_project(tmp_path):
     assert "projects.delete" in server._methods
 
 
+@pytest.mark.parametrize("git_repo", [False, True])
+def test_removed_project_stays_hidden_and_readd_restores_it(tmp_path, git_repo):
+    repo = tmp_path / "workspace"
+    repo.mkdir()
+    if git_repo:
+        (repo / ".git").mkdir()
+    project = _call("projects.create", {
+        "name": "Original", "folders": [str(repo)], "icon": "rocket", "color": "#123456", "use": True,
+    })["project"]
+    db = server._get_db()
+    db.create_session("remembered-session", "cli", cwd=str(repo))
+    db.append_message("remembered-session", "user", "Keep this session")
+    _call("projects.record_repos", {"repos": [{"root": str(repo), "label": "workspace"}]})
+
+    assert _call("projects.delete", {"id": project["id"]})["active_id"] is None
+    tree, _ = server._build_project_tree(
+        db, preview_limit=3, hydrate=True, session_limit=100, include_discovered=True,
+    )
+    assert not any(p.get("path") == str(repo) for p in tree["projects"])
+    assert "remembered-session" in tree["scoped_session_ids"]
+
+    restored = _call("projects.create", {"name": "New name", "folders": [str(repo)], "use": True})["project"]
+    assert restored["id"] == project["id"]
+    assert restored["name"] == "New name"
+    assert restored["icon"] == project["icon"]
+    assert restored["color"] == project["color"]
+    tree, active = server._build_project_tree(
+        db, preview_limit=3, hydrate=True, session_limit=100, include_discovered=True,
+    )
+    assert active == project["id"]
+    assert any(p["id"] == project["id"] for p in tree["projects"])
+
+
 def test_discover_repos_is_registered_long_handler():
     assert "projects.discover_repos" in server._methods
     assert "projects.discover_repos" in server._LONG_HANDLERS

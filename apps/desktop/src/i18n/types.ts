@@ -1614,11 +1614,6 @@ export interface Translations {
       addFolderTitle: string
       namePlaceholder: string
       foldersLabel: string
-      ideaLabel: string
-      ideaPlaceholder: string
-      ideaGenerate: string
-      ideaGenerating: string
-      ideaShuffle: string
       noFolders: string
       addFolder: string
       primaryBadge: string

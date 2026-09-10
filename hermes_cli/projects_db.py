@@ -209,6 +209,8 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
     for col in _OPTIONAL_PROJECT_COLUMNS:
         if col not in cols:
             _add_column_if_missing(conn, "projects", col, f"{col} TEXT")
+    if "deleted" not in cols:
+        _add_column_if_missing(conn, "projects", "deleted", "deleted INTEGER NOT NULL DEFAULT 0")
 
 
 # ---------------------------------------------------------------------------
@@ -305,13 +307,13 @@ def _attach_folders(conn: sqlite3.Connection, project: Project) -> Project:
 # ---------------------------------------------------------------------------
 
 
-def _unique_slug(conn: sqlite3.Connection, candidate: str) -> str:
+def _unique_slug(conn: sqlite3.Connection, candidate: str, *, exclude_id: str = "") -> str:
     """Return ``candidate`` or ``candidate-2``, ``-3`` ... if taken."""
     base = candidate
     n = 1
     slug = base
     while conn.execute(
-        "SELECT 1 FROM projects WHERE slug = ?", (slug,)
+        "SELECT 1 FROM projects WHERE slug = ? AND id != ?", (slug, exclude_id)
     ).fetchone() is not None:
         n += 1
         suffix = f"-{n}"
@@ -336,6 +338,10 @@ def create_project(
     ``folders`` are normalized to absolute paths. If ``primary_path`` is given
     it is added to the folder set (if not already present) and marked primary;
     otherwise the first folder becomes primary.
+
+    Re-adding a removed workspace restores its identity and settings when the
+    selected folders identify one removed project. Name and folders always
+    come from this call; explicit settings override the remembered values.
     """
     name = str(name or "").strip()
     if not name:
@@ -358,12 +364,39 @@ def create_project(
         primary = folder_paths[0]
 
     with write_txn(conn):
-        unique = _unique_slug(conn, slug_candidate)
+        removed = list_deleted_projects(conn)
+        selected = {os.path.normcase(path) for path in folder_paths}
+        exact = []
+        overlapping = []
+        for project in removed:
+            previous = {os.path.normcase(f.path) for f in project.folders}
+            if selected and previous == selected:
+                exact.append(project)
+            if selected & previous:
+                overlapping.append(project)
+        matches = exact or overlapping
+        remembered = matches[0] if len(matches) == 1 else None
+        if remembered:
+            pid = remembered.id
+            now = remembered.created_at
+            slug_candidate = normalize_slug(slug) if slug else remembered.slug
+            description = remembered.description if description is None else description
+            icon = remembered.icon if icon is None else icon
+            color = remembered.color if color is None else color
+            board_slug = remembered.board_slug if board_slug is None else board_slug
+            # Only replace the folder set; retain the row and any internal
+            # fields added by other features, plus project-keyed UI preferences.
+            conn.execute("DELETE FROM project_folders WHERE project_id = ?", (pid,))
+        unique = _unique_slug(conn, slug_candidate, exclude_id=pid)
         conn.execute(
             "INSERT INTO projects "
             "(id, slug, name, description, icon, color, board_slug, "
             " primary_path, created_at, archived) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0) "
+            "ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, name = excluded.name, "
+            "description = excluded.description, icon = excluded.icon, color = excluded.color, "
+            "board_slug = excluded.board_slug, primary_path = excluded.primary_path, "
+            "archived = 0, deleted = 0",
             (
                 pid,
                 unique,
@@ -389,11 +422,17 @@ def create_project(
 def list_projects(
     conn: sqlite3.Connection, *, include_archived: bool = False
 ) -> List[Project]:
-    sql = "SELECT * FROM projects"
+    sql = "SELECT * FROM projects WHERE deleted = 0"
     if not include_archived:
-        sql += " WHERE archived = 0"
+        sql += " AND archived = 0"
     sql += " ORDER BY created_at ASC"
     rows = conn.execute(sql).fetchall()
+    return [_attach_folders(conn, _project_from_row(r)) for r in rows]
+
+
+def list_deleted_projects(conn: sqlite3.Connection) -> List[Project]:
+    """Remembered workspaces, excluded from normal lookup and discovery."""
+    rows = conn.execute("SELECT * FROM projects WHERE deleted = 1").fetchall()
     return [_attach_folders(conn, _project_from_row(r)) for r in rows]
 
 
@@ -402,11 +441,11 @@ def get_project(
 ) -> Optional[Project]:
     """Look up a project by id first, then by slug."""
     row = conn.execute(
-        "SELECT * FROM projects WHERE id = ?", (id_or_slug,)
+        "SELECT * FROM projects WHERE id = ? AND deleted = 0", (id_or_slug,)
     ).fetchone()
     if row is None:
         row = conn.execute(
-            "SELECT * FROM projects WHERE slug = ?", (str(id_or_slug).lower(),)
+            "SELECT * FROM projects WHERE slug = ? AND deleted = 0", (str(id_or_slug).lower(),)
         ).fetchone()
     if row is None:
         return None
@@ -584,9 +623,14 @@ def restore_project(conn: sqlite3.Connection, project_id: str) -> bool:
 
 
 def delete_project(conn: sqlite3.Connection, project_id: str) -> bool:
-    """Hard-delete a project and its folders (cascade)."""
+    """Hide a project, retaining its settings and folder identity for re-add."""
     with write_txn(conn):
-        cur = conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+        cur = conn.execute(
+            "UPDATE projects SET deleted = 1 WHERE id = ? AND deleted = 0", (project_id,)
+        )
+        conn.execute(
+            "DELETE FROM project_meta WHERE key = ? AND value = ?", (_ACTIVE_META_KEY, project_id)
+        )
     return cur.rowcount > 0
 
 
@@ -744,10 +788,10 @@ def project_for_path(
     target = _normalize_path(path)
     sql = (
         "SELECT pf.project_id AS pid, pf.path AS folder "
-        "FROM project_folders pf JOIN projects p ON p.id = pf.project_id"
+        "FROM project_folders pf JOIN projects p ON p.id = pf.project_id WHERE p.deleted = 0"
     )
     if not include_archived:
-        sql += " WHERE p.archived = 0"
+        sql += " AND p.archived = 0"
     best_pid: Optional[str] = None
     best_len = -1
     for row in conn.execute(sql).fetchall():

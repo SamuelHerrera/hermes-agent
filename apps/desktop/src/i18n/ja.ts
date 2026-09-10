@@ -1750,11 +1750,6 @@ export const ja = defineLocale({
       addFolderTitle: 'フォルダを追加',
       namePlaceholder: '例: Skunkworks',
       foldersLabel: 'フォルダ',
-      ideaLabel: 'アイデア',
-      ideaPlaceholder: 'このプロジェクトは何ですか？（IDEA.md に保存）',
-      ideaGenerate: 'アイデアを生成',
-      ideaGenerating: '生成中…',
-      ideaShuffle: 'テンプレートをシャッフル',
       noFolders: 'まだフォルダがありません。',
       addFolder: 'フォルダを追加',
       primaryBadge: 'メイン',
@@ -1774,7 +1769,7 @@ export const ja = defineLocale({
       staleBackend:
         'プロジェクトを作成するには Hermes バックエンドを更新してください。バックエンドがこのデスクトップアプリより古いです（設定 → 更新 → バックエンド）。',
       deleteConfirm:
-        'Hermes から保存済みプロジェクトを削除します。ファイル・git リポジトリ・ワークツリーはそのまま残ります。',
+        'このプロジェクトをサイドバーから削除しますか？同じフォルダを再追加すると設定が復元されます。ファイルとセッションはそのまま残ります。',
       startWork: '新しいワークツリー',
       newWorktreeTitle: '新しいワークツリー',
       newWorktreeDesc: 'このワークツリーのブランチ名を入力してください。',

@@ -1926,11 +1926,6 @@ export const en: Translations = {
       addFolderTitle: 'Add folder',
       namePlaceholder: 'e.g. Skunkworks',
       foldersLabel: 'Folders',
-      ideaLabel: 'Idea',
-      ideaPlaceholder: "What's this project about? (saved to IDEA.md)",
-      ideaGenerate: 'Generate idea',
-      ideaGenerating: 'Generating…',
-      ideaShuffle: 'Shuffle templates',
       noFolders: 'No folders added yet.',
       addFolder: 'Add folder',
       primaryBadge: 'primary',
@@ -1954,7 +1949,8 @@ export const en: Translations = {
       createFailed: 'Could not create project',
       staleBackend:
         'Update the Hermes backend to create projects — your backend is older than this desktop app (Settings → Updates → Backend).',
-      deleteConfirm: 'This removes the saved project from Hermes. Files, git repos, and worktrees stay untouched.',
+      deleteConfirm:
+        'Remove this project from the sidebar? Its settings are remembered when you add the same folder again. Files and sessions stay untouched.',
       startWork: 'New worktree',
       newWorktreeTitle: 'New worktree',
       newWorktreeDesc: 'Name the branch for this worktree.',

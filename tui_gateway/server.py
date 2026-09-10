@@ -12907,6 +12907,19 @@ def _build_project_tree(
         db, session_limit, include_discovered=include_discovered
     )
 
+    from hermes_cli import projects_db as pdb
+
+    with pdb.connect_closing() as conn:
+        removed_folders = {
+            os.path.normcase(os.path.realpath(folder.path))
+            for project in pdb.list_deleted_projects(conn)
+            for folder in project.folders
+        }
+
+    def _is_removed_workspace(path: str) -> bool:
+        target = os.path.normcase(os.path.realpath(path))
+        return any(target == folder or target.startswith(folder + os.sep) for folder in removed_folders)
+
     # The hydrated tree can request all rows with session_limit <= 0. Counts still
     # page archived rows in bounded chunks instead of one-row loops.
     batch_size = session_limit if session_limit > 0 else 5000
@@ -12956,8 +12969,8 @@ def _build_project_tree(
         count_sessions=count_sessions,
         preview_limit=preview_limit,
         hydrate=hydrate,
-        is_junk_root=_is_repo_junk,
-        is_junk_cwd=_is_session_cwd_junk,
+        is_junk_root=lambda root: _is_repo_junk(root) or _is_removed_workspace(root),
+        is_junk_cwd=lambda cwd: _is_session_cwd_junk(cwd) or _is_removed_workspace(cwd),
         exists=_dir_exists_cached,
     )
     return tree, active_id
