@@ -112,10 +112,10 @@ export function openSession(
   }
 
   // Close All leaves an inert workspace placeholder, not a draft worth
-  // preserving. Any in-window open should spend that placeholder before adding
-  // a preview/tab, so the strip changes from "no tabs" directly to the chosen
-  // chat instead of keeping a stale "New session" tab beside it.
-  if ($workspaceEmptyPlaceholder.get()) {
+  // preserving. Permanent in-window opens should spend that placeholder, but a
+  // sidebar preview click must still create the first VS Code-style replaceable
+  // italic tab instead of loading the session permanently into workspace.
+  if ($workspaceEmptyPlaceholder.get() && resolved !== 'preview') {
     resolved = 'in-place'
   }
 

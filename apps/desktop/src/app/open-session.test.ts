@@ -151,14 +151,14 @@ describe('openSession', () => {
     expect(openSessionTile).not.toHaveBeenCalled()
   })
 
-  it('preview spends the empty close-all placeholder instead of adding a tab', () => {
+  it('preview opens a replaceable tab even from the empty close-all placeholder', () => {
     $workspaceEmptyPlaceholder.set(true)
     focusOpenSession.mockReturnValue(null)
 
     openSession('s1', navigate, 'preview')
 
-    expect(navigate).toHaveBeenCalledWith('/c/s1')
-    expect(openPreviewSessionTile).not.toHaveBeenCalled()
+    expect(openPreviewSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(navigate).not.toHaveBeenCalled()
     expect(openSessionTile).not.toHaveBeenCalled()
   })
 
