@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { useI18n } from '@/i18n'
+import { cleanPath, comparisonPath } from '@/lib/path-compare'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
 import { $activeGatewayProfile } from '@/store/profile'
-import { projectHistory } from '@/store/projects'
+import { $projectTree, projectHistory } from '@/store/projects'
 import type { ProjectInfo } from '@/types/hermes'
 
 import { ProjectIconGlyph } from './projects/project-appearance'
@@ -25,15 +26,18 @@ export function RecentProjects(props: RecentProjectsProps) {
   const profile = useStore($activeGatewayProfile)
   const gateway = useStore($gateway)
   const [source, setSource] = useState({ gateway, profile, generation: 0 })
+
   if (source.gateway !== gateway || source.profile !== profile) {
     setSource({ gateway, profile, generation: source.generation + 1 })
   }
+
   return <RecentProjectList key={source.generation} {...props} />
 }
 
 function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsProps) {
   const { t } = useI18n()
   const p = t.sidebar.projects
+  const tree = useStore($projectTree)
   const [history, setHistory] = useState<Awaited<ReturnType<typeof projectHistory>> | null>(null)
   const [projects, setProjects] = useState<ProjectInfo[]>([])
   const [loading, setLoading] = useState(true)
@@ -45,6 +49,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
     void projectHistory()
       .then(async api => {
         const rows = await api.list()
+
         if (live) {
           setHistory(api)
           setProjects(rows)
@@ -60,6 +65,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
           setLoading(false)
         }
       })
+
     return () => {
       live = false
     }
@@ -69,8 +75,10 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
     if (!history || busy || disabled) {
       return
     }
+
     setBusy(true)
     onBusyChange?.(true)
+
     try {
       if (remove) {
         setProjects(await history.forget(id))
@@ -86,17 +94,40 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
     }
   }
 
+  // Sidebar membership, not the currently selected project, defines "open".
+  // Saved ids are authoritative; path identity also covers inferred repo rows.
+  const visibleProjects = projects.filter(
+    project =>
+      !tree.some(
+        node =>
+          !node.archived &&
+          !node.isNoProject &&
+          (node.id === project.id ||
+            ((!node.id.startsWith('p_') || !project.id.startsWith('p_')) &&
+              node.path &&
+              project.folders.some(
+                folder => comparisonPath(cleanPath(folder.path)) === comparisonPath(cleanPath(node.path!))
+              )))
+      )
+  )
+
+  if (loading || (!failed && visibleProjects.length === 0)) {
+    return null
+  }
+
   return (
-    <section aria-label={p.recentTitle} className="min-w-0 border-t border-(--stroke-nous) pt-3">
+    <section
+      aria-label={p.recentTitle}
+      className="min-w-0 border-t border-(--stroke-nous) pt-3 min-[800px]:order-first min-[800px]:border-r min-[800px]:border-t-0 min-[800px]:pr-4 min-[800px]:pt-0"
+      data-project-recents
+    >
       <h3 className="text-[0.75rem] font-medium text-(--ui-text-secondary)">{p.recentTitle}</h3>
       <p className="mt-1 text-[0.6875rem] text-(--ui-text-tertiary)">{p.recentHint}</p>
-      {loading || failed || projects.length === 0 ? (
-        <p className="mt-2 text-[0.75rem] text-(--ui-text-tertiary)">
-          {loading ? t.common.loading : failed ? p.recentFailed : p.recentEmpty}
-        </p>
+      {failed ? (
+        <p className="mt-2 text-[0.75rem] text-(--ui-text-tertiary)">{p.recentFailed}</p>
       ) : (
         <ul className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto">
-          {projects.map(project => (
+          {visibleProjects.map(project => (
             <li
               className="flex min-w-0 items-center gap-1 rounded-md hover:bg-(--ui-control-hover-background)"
               key={project.id}

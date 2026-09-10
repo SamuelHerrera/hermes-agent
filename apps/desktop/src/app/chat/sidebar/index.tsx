@@ -143,7 +143,6 @@ import type { SidebarNavItem } from '../../types'
 import { SidebarLoadMoreRow } from './load-more-row'
 import { contributedNavItems } from './nav-contributions'
 import { orderByIds, reconcileOrderIds, resolveManualSessionOrderIds, sameIds } from './order'
-import { ProjectDialog } from './project-dialog'
 import {
   excludeProjectSessions,
   liveSessionProjectId,
@@ -1878,7 +1877,6 @@ export function ChatSidebar({
         {!showSessionSections && <SidebarBlankState onNewProject={openProjectCreate} />}
 
       </SidebarContent>
-      <ProjectDialog />
       {/* One mount for the whole app. The header of WorktreeDialog tells why. */}
       <WorktreeDialog />
     </Sidebar>

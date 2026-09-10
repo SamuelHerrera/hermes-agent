@@ -27,7 +27,7 @@ import {
 
 import { RecentProjects } from './recent-projects'
 
-// Single dialog mounted once in the sidebar; it renders create / rename /
+// Single dialog mounted in the shell; it renders create / rename /
 // add-folder flows driven by the $projectDialog atom. Folders are chosen via
 // the native directory picker (reused from the default-project-dir setting).
 export function ProjectDialog() {
@@ -126,7 +126,7 @@ export function ProjectDialog() {
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
         bodyClassName="grid-cols-1"
-        className="max-w-md"
+        className="w-[calc(100vw-2rem)] max-w-md min-[800px]:has-[[data-project-recents]]:max-w-3xl"
         onInteractOutside={event => event.preventDefault()}
       >
         <DialogHeader>
@@ -134,88 +134,91 @@ export function ProjectDialog() {
           {mode === 'create' && <DialogDescription>{p.createDesc}</DialogDescription>}
         </DialogHeader>
 
-        {mode !== 'add-folder' && (
-          <Input
-            autoFocus
-            disabled={submitting}
-            onChange={event => setName(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter') {
-                event.preventDefault()
-                void submit()
-              } else if (event.key === 'Escape') {
-                onOpenChange(false)
-              }
-            }}
-            placeholder={p.namePlaceholder}
-            ref={nameRef}
-            value={name}
-          />
-        )}
-
-        {mode === 'create' && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[0.6875rem] font-medium text-(--ui-text-tertiary)">{p.foldersLabel}</span>
-            {folders.length === 0 ? (
-              <span className="text-[0.75rem] text-(--ui-text-quaternary)">{p.noFolders}</span>
-            ) : (
-              <ul className="flex flex-col gap-1">
-                {folders.map((folder, index) => (
-                  <li
-                    className={cn(
-                      'flex items-center gap-2 rounded-md bg-(--ui-control-hover-background) px-2 py-1 text-[0.75rem]'
-                    )}
-                    key={folder}
-                  >
-                    <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="folder" size="0.75rem" />
-                    <span className="min-w-0 flex-1 truncate" title={folder}>
-                      {folder}
-                    </span>
-                    {index === 0 && (
-                      <span className="shrink-0 text-[0.625rem] uppercase text-(--ui-text-quaternary)">
-                        {p.primaryBadge}
-                      </span>
-                    )}
-                    <Tip label={p.removeFolder}>
-                      <Button
-                        aria-label={p.removeFolder}
-                        className="size-5 shrink-0 text-(--ui-text-quaternary) hover:text-foreground"
-                        onClick={() => setFolders(prev => prev.filter(f => f !== folder))}
-                        size="icon-xs"
-                        type="button"
-                        variant="ghost"
-                      >
-                        <Codicon name="close" size="0.75rem" />
-                      </Button>
-                    </Tip>
-                  </li>
-                ))}
-              </ul>
+        <div className="grid min-w-0 grid-cols-1 gap-4 min-[800px]:has-[[data-project-recents]]:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+          <div className="grid min-w-0 grid-cols-1 content-start gap-3">
+            {mode !== 'add-folder' && (
+              <Input
+                autoFocus
+                disabled={submitting}
+                onChange={event => setName(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    void submit()
+                  } else if (event.key === 'Escape') {
+                    onOpenChange(false)
+                  }
+                }}
+                placeholder={p.namePlaceholder}
+                ref={nameRef}
+                value={name}
+              />
             )}
-            <Button
-              className="self-start"
-              disabled={submitting}
-              onClick={() => void pickFolder()}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <Codicon name="add" size="0.75rem" />
-              {p.addFolder}
-            </Button>
+
+            {mode === 'create' && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[0.6875rem] font-medium text-(--ui-text-tertiary)">{p.foldersLabel}</span>
+                {folders.length === 0 ? (
+                  <span className="text-[0.75rem] text-(--ui-text-quaternary)">{p.noFolders}</span>
+                ) : (
+                  <ul className="flex flex-col gap-1">
+                    {folders.map((folder, index) => (
+                      <li
+                        className={cn(
+                          'flex items-center gap-2 rounded-md bg-(--ui-control-hover-background) px-2 py-1 text-[0.75rem]'
+                        )}
+                        key={folder}
+                      >
+                        <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="folder" size="0.75rem" />
+                        <span className="min-w-0 flex-1 truncate" title={folder}>
+                          {folder}
+                        </span>
+                        {index === 0 && (
+                          <span className="shrink-0 text-[0.625rem] uppercase text-(--ui-text-quaternary)">
+                            {p.primaryBadge}
+                          </span>
+                        )}
+                        <Tip label={p.removeFolder}>
+                          <Button
+                            aria-label={p.removeFolder}
+                            className="size-5 shrink-0 text-(--ui-text-quaternary) hover:text-foreground"
+                            onClick={() => setFolders(prev => prev.filter(f => f !== folder))}
+                            size="icon-xs"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Codicon name="close" size="0.75rem" />
+                          </Button>
+                        </Tip>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button
+                  className="self-start"
+                  disabled={submitting}
+                  onClick={() => void pickFolder()}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Codicon name="add" size="0.75rem" />
+                  {p.addFolder}
+                </Button>
+              </div>
+            )}
+
+            {mode === 'add-folder' && (
+              <Button disabled={submitting} onClick={() => void pickFolder()} type="button">
+                <Codicon name="folder-opened" size="0.875rem" />
+                {p.addFolder}
+              </Button>
+            )}
           </div>
-        )}
-
-        {mode === 'create' && open && (
-          <RecentProjects disabled={submitting} onBusyChange={setSubmitting} onOpen={closeProjectDialog} />
-        )}
-
-        {mode === 'add-folder' && (
-          <Button disabled={submitting} onClick={() => void pickFolder()} type="button">
-            <Codicon name="folder-opened" size="0.875rem" />
-            {p.addFolder}
-          </Button>
-        )}
+          {mode === 'create' && open && (
+            <RecentProjects disabled={submitting} onBusyChange={setSubmitting} onOpen={closeProjectDialog} />
+          )}
+        </div>
 
         {mode !== 'add-folder' && (
           <DialogFooter>

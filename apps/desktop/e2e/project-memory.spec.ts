@@ -84,6 +84,34 @@ test('project removal remembers settings across clients and the simplified creat
     await form.getByRole('textbox').fill('Renamed workspace')
     await form.getByRole('button', { name: 'Add folder', exact: true }).click()
     await expect(form.getByText(folder, { exact: true })).toBeVisible()
+    const recents = fixture.page.getByRole('region', { name: 'Recently opened' })
+    await expect(recents).toBeVisible()
+    // Resize the real window; history goes left on wide windows, below on narrow ones.
+    for (const width of [1200, 650]) {
+      await fixture.app.evaluate(({ BrowserWindow }, width) => {
+        const window = BrowserWindow.getAllWindows()[0]
+        window.setMinimumSize(400, 400)
+        window.setSize(width, 850)
+      }, width)
+      await expect
+        .poll(async () => {
+          const list = (await recents.boundingBox())!
+          const input = (await form.getByRole('textbox').boundingBox())!
+          return width === 1200 ? list.x + list.width <= input.x : list.y > input.y + input.height
+        })
+        .toBe(true)
+      await fixture.page.screenshot({ path: testInfo.outputPath(`recent-projects-${width}.png`) })
+      const overflow = await form.evaluate(el =>
+        Array.from(el.querySelectorAll('*')).some(
+          node =>
+            node.clientWidth > 0 &&
+            node.scrollWidth > node.clientWidth + 1 &&
+            getComputedStyle(node).overflowX === 'auto'
+        )
+      )
+      expect(overflow).toBe(false)
+    }
+    await fixture.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1200, 850))
     const dialogBounds = await form.boundingBox()
     const createBounds = await form.getByRole('button', { name: 'Create', exact: true }).boundingBox()
     expect(createBounds!.x + createBounds!.width).toBeLessThanOrEqual(dialogBounds!.x + dialogBounds!.width)
@@ -99,23 +127,34 @@ test('project removal remembers settings across clients and the simplified creat
     await expect(fixture.page.getByText('Renamed workspace', { exact: true }).first()).toBeVisible()
     await fixture.page.screenshot({ path: testInfo.outputPath('restored-project.png') })
     await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
-    const recents = fixture.page.getByRole('region', { name: 'Recently opened' })
+    await expect(recents).toHaveCount(0)
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await rpc(fixture.page, 'projects.delete', { id: original.project.id })
+    await fixture.page.reload()
+    await waitForAppReady(fixture)
+    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
     await expect(recents.getByText('Renamed workspace', { exact: true })).toBeVisible()
     await fixture.page.screenshot({ path: testInfo.outputPath('recent-projects.png') })
     await recents.getByRole('button', { name: 'Remove from recent projects: Renamed workspace', exact: true }).click()
-    await expect(recents.getByText('No recent projects.', { exact: true })).toBeVisible()
-    const kept = await rpc<{ project: Project }>(fixture.page, 'projects.get', { id: original.project.id })
-    expect(kept.project.icon).toBe(original.project.icon)
-    expect(kept.project.color).toBe(original.project.color)
+    await expect(recents).toHaveCount(0)
     // Forgetting history is durable across fresh clients and dialog mounts.
     await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
     await fixture.page.reload()
     await waitForAppReady(fixture)
     await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
-    await expect(recents.getByText('No recent projects.', { exact: true })).toBeVisible()
+    await expect(recents).toHaveCount(0)
     await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
-    await rpc(fixture.page, 'projects.set_active', { id: original.project.id })
+    const kept = await rpc<{ project: Project }>(fixture.page, 'projects.create', {
+      name: 'Renamed workspace',
+      folders: [folder],
+      use: true
+    })
+    expect(kept.project.id).toBe(original.project.id)
+    expect(kept.project.icon).toBe(original.project.icon)
+    expect(kept.project.color).toBe(original.project.color)
     await rpc(fixture.page, 'projects.delete', { id: original.project.id })
+    await fixture.page.reload()
+    await waitForAppReady(fixture)
     await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
     await recents.getByRole('button', { name: 'Open project: Renamed workspace', exact: true }).click()
     await expect(fixture.page.getByRole('dialog')).toHaveCount(0)
