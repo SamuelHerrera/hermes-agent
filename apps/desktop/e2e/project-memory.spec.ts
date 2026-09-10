@@ -101,6 +101,15 @@ test('project removal remembers settings across clients and the simplified creat
         })
         .toBe(true)
       await fixture.page.screenshot({ path: testInfo.outputPath(`recent-projects-${width}.png`) })
+      if (width === 1200) {
+        const title = (await form.getByRole('heading', { name: 'New project', exact: true }).boundingBox())!
+        const historyTitle = (await recents.getByRole('heading').boundingBox())!
+        expect(title.x).toBeGreaterThan(historyTitle.x + historyTitle.width)
+        expect(Math.abs(title.y - historyTitle.y)).toBeLessThan(8)
+      }
+      await expect(
+        recents.getByText('Remove entries from this list without losing project settings.', { exact: true })
+      ).toHaveCount(0)
       const overflow = await form.evaluate(el =>
         Array.from(el.querySelectorAll('*')).some(
           node =>

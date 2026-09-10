@@ -129,13 +129,12 @@ export function ProjectDialog() {
         className="w-[calc(100vw-2rem)] max-w-md min-[800px]:has-[[data-project-recents]]:max-w-3xl"
         onInteractOutside={event => event.preventDefault()}
       >
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {mode === 'create' && <DialogDescription>{p.createDesc}</DialogDescription>}
-        </DialogHeader>
-
         <div className="grid min-w-0 grid-cols-1 gap-4 min-[800px]:has-[[data-project-recents]]:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
           <div className="grid min-w-0 grid-cols-1 content-start gap-3">
+            <DialogHeader className="pr-5">
+              <DialogTitle>{title}</DialogTitle>
+              {mode === 'create' && <DialogDescription>{p.createDesc}</DialogDescription>}
+            </DialogHeader>
             {mode !== 'add-folder' && (
               <Input
                 autoFocus

@@ -122,7 +122,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
       data-project-recents
     >
       <h3 className="text-[0.75rem] font-medium text-(--ui-text-secondary)">{p.recentTitle}</h3>
-      <p className="mt-1 text-[0.6875rem] text-(--ui-text-tertiary)">{p.recentHint}</p>
+
       {failed ? (
         <p className="mt-2 text-[0.75rem] text-(--ui-text-tertiary)">{p.recentFailed}</p>
       ) : (
@@ -157,7 +157,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
                   </span>
                 </span>
               </button>
-              <Tip label={p.removeRecent}>
+              <Tip label={`${p.removeRecent}. ${p.recentHint}`}>
                 <Button
                   aria-label={`${p.removeRecent}: ${project.name}`}
                   className="mr-1 shrink-0 text-(--ui-text-tertiary)"
