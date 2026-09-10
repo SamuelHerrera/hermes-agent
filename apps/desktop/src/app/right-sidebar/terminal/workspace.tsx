@@ -2,23 +2,22 @@ import { useStore } from '@nanostores/react'
 import { useEffect } from 'react'
 
 import { $backgroundStatusBySession } from '@/store/composer-status'
+import { $sessions } from '@/store/session'
+import { $sessionStates } from '@/store/session-states'
 
 import { seedAgentTerminalCommand, syncAgentTerminalSnapshot } from './agent-terminal-stream'
 import { setActiveTerminalId } from './buffer'
-import { AgentTerminalInstance, TerminalInstance } from './instance'
+import { PersistentTerminalHost } from './persistent'
 import { $activeTerminalId, $terminals, ensureAgentTerminal } from './terminals'
 
 interface TerminalWorkspaceProps {
   onAddSelectionToChat: (text: string, label?: string) => void
 }
 
-/** The persistent-overlay layer: the stack of live xterm instances (only these
- *  must stay in the fixed overlay, for the WebGL host). Mount/visibility is owned
- *  by PersistentTerminal (latched so shells survive hiding); the tab rail and
- *  new-terminal control live in the pane DOM — see TerminalPaneChrome. */
+/** Persistent shell/process hosts, independently positioned over their pane
+ *  slots. Removing a tab hides its host; removing an entry disposes it. */
 export function TerminalWorkspace({ onAddSelectionToChat }: TerminalWorkspaceProps) {
   const terminals = useStore($terminals)
-  const activeId = useStore($activeTerminalId)
   const background = useStore($backgroundStatusBySession)
 
   // Mirror the tab selection into the agent reader (read_terminal reads it).
@@ -35,9 +34,16 @@ export function TerminalWorkspace({ onAddSelectionToChat }: TerminalWorkspacePro
   // Live chunks stream via agent.terminal.output; the process-list snapshot also
   // seeds/falls back so the tab never stays blank if the stream races startup.
   useEffect(() => {
-    for (const list of Object.values(background)) {
+    for (const [runtimeId, list] of Object.entries(background)) {
+      const state = $sessionStates.get()[runtimeId]
+      const session = $sessions.get().find(session => session.id === (state?.storedSessionId ?? runtimeId))
+
       for (const item of list) {
-        ensureAgentTerminal(item.id, item.title)
+        ensureAgentTerminal(item.id, item.title, {
+          ownerSessionId: runtimeId,
+          profile: session?.profile,
+          cwd: session?.cwd ?? ''
+        })
         seedAgentTerminalCommand(item.id, item.title)
         syncAgentTerminalSnapshot(item.id, item.output ?? '')
       }
@@ -46,21 +52,9 @@ export function TerminalWorkspace({ onAddSelectionToChat }: TerminalWorkspacePro
 
   return (
     <>
-      {terminals.map(term =>
-        term.kind === 'agent' ? (
-          <AgentTerminalInstance active={term.id === activeId} id={term.id} key={term.id} procId={term.procId!} />
-        ) : (
-          <TerminalInstance
-            active={term.id === activeId}
-            cwd={term.cwd}
-            id={term.id}
-            key={term.id}
-            onAddSelectionToChat={onAddSelectionToChat}
-            restoreCwd={term.restoreCwd}
-            reviveBuffer={term.reviveBuffer}
-          />
-        )
-      )}
+      {terminals.map(term => (
+        <PersistentTerminalHost key={term.id} onAddSelectionToChat={onAddSelectionToChat} terminal={term} />
+      ))}
     </>
   )
 }

@@ -166,6 +166,7 @@ import { SidebarBlankState, SidebarSessionSkeletons } from './section-states'
 import { buildSessionByAnyId } from './session-index'
 import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section'
 import { CONTEXT_SPLIT_KIT, SplitSubmenu } from './split-submenu'
+import { useTerminalProjectTree } from './terminal-rows'
 
 // Search remains wired internally for an eventual resurfacing, but the sidebar
 // chrome no longer shows the input section by default.
@@ -323,7 +324,8 @@ export function ChatSidebar({
   const workspaceParentOrderIds = useStore($sidebarWorkspaceParentOrderIds)
   const projectOrderIds = useStore($sidebarProjectOrderIds)
   const projects = useStore($projects)
-  const projectTree = useStore($projectTree)
+  const backendProjectTree = useStore($projectTree)
+  const projectTree = useTerminalProjectTree(backendProjectTree)
   const subagentsBySession = useStore($subagentsBySession)
   const projectTreeLoading = useStore($projectTreeLoading)
   const removedSessionIds = useStore($removedSessionIds)
@@ -931,11 +933,8 @@ export function ChatSidebar({
   const enteredProjectContent = useMemo(
     () =>
       enteredProject
-        ? overlayLiveLanes(
-            enteredProject,
-            liveProjectSessions,
-            removedSessionIds,
-            session => showsRunningArc(dotStates[session.id] ?? 'idle')
+        ? overlayLiveLanes(enteredProject, liveProjectSessions, removedSessionIds, session =>
+            showsRunningArc(dotStates[session.id] ?? 'idle')
           )
         : undefined,
     [enteredProject, liveProjectSessions, removedSessionIds, dotStates]
@@ -1870,19 +1869,16 @@ export function ChatSidebar({
                   />
                 )
               })}
-
           </div>
         )}
 
         {!showSessionSections && <SidebarBlankState onNewProject={openProjectCreate} />}
-
       </SidebarContent>
       {/* One mount for the whole app. The header of WorktreeDialog tells why. */}
       <WorktreeDialog />
     </Sidebar>
   )
 }
-
 
 function CronNavJobs({
   onOpenJob,

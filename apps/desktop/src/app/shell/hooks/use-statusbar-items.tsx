@@ -84,7 +84,7 @@ export function useStatusbarItems({
   // What the button paints and flips is whether the terminal is ON SCREEN —
   // the takeover store alone stays true behind a stacked sibling tab or a
   // minimized zone, which lit the button for a pane the user couldn't see.
-  const terminalShowing = useStore($paneVisible('terminal'))
+
   const filesShowing = useStore($paneVisible('files'))
   const reviewShowing = useStore($paneVisible('review'))
   const primaryBusy = useStore($busy)
@@ -508,13 +508,12 @@ export function useStatusbarItems({
       },
       {
         actionId: 'view.showTerminal',
-        className: `w-7 justify-center px-0${terminalShowing ? ' bg-accent/55 text-foreground' : ''}`,
-        hidden: !chatOpen,
+        className: 'w-7 justify-center px-0',
         icon: <Terminal className="size-3.5" />,
         id: 'terminal',
-        onSelect: () => togglePaneVisible('terminal'),
-        title: terminalShowing ? copy.hideTerminal : copy.showTerminal,
-        toggleLabel: copy.toggleTerminal,
+        onSelect: () => void createDefaultTerminal(),
+        title: t.keybinds.actions['view.newTerminal'],
+        toggleLabel: t.keybinds.actions['view.newTerminal'],
         variant: 'action'
       },
       ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK
@@ -531,7 +530,7 @@ export function useStatusbarItems({
       filesShowing,
       gatewayState,
       reviewShowing,
-      terminalShowing,
+      t.keybinds.actions,
       turnStartedAt
     ]
   )
@@ -548,3 +547,5 @@ export function useStatusbarItems({
 
   return { leftStatusbarItems, statusbarItems }
 }
+
+import { createDefaultTerminal } from '@/app/right-sidebar/terminal/actions'

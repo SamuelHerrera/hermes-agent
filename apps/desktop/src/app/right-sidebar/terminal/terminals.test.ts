@@ -2,6 +2,7 @@ import { atom } from 'nanostores'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'hermes.desktop.terminals.v1'
+vi.mock('@/components/pane-shell/tree/store', () => ({ revealTreePane: vi.fn(), $layoutTree: atom(null), noteActiveTreeGroup: vi.fn() }))
 
 async function loadTerminalStore() {
   const $currentCwd = atom('/workspace')
@@ -14,6 +15,20 @@ async function loadTerminalStore() {
 }
 
 describe('terminal store persistence', () => {
+  it('updates automatic foreground titles without overwriting custom names or publishing no-ops', async () => {
+    const { $terminals, createTerminal, reportTerminalShell, renameTerminal } = await loadTerminalStore()
+    const id = createTerminal('/repo')
+    reportTerminalShell(id, 'btop')
+    expect($terminals.get().find(term => term.id === id)?.title).toBe('btop')
+    const before = $terminals.get()
+    reportTerminalShell(id, 'btop')
+    expect($terminals.get()).toBe(before)
+    reportTerminalShell(id, 'zsh')
+    expect($terminals.get().find(term => term.id === id)?.title).toBe('zsh')
+    renameTerminal(id, 'Monitor')
+    reportTerminalShell(id, 'btop')
+    expect($terminals.get().find(term => term.id === id)?.title).toBe('Monitor')
+  })
   beforeEach(() => {
     window.localStorage.clear()
     vi.resetModules()

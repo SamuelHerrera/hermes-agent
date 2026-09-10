@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useState } from 'react'
 
+import { createTerminal } from '@/app/right-sidebar/terminal/terminals'
 import {
   type ActionItemSpec,
   ActionsContextMenu,
@@ -21,6 +22,7 @@ import {
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { useI18n } from '@/i18n'
 import { $panesFlipped, dismissAutoProject } from '@/store/layout'
+import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
   copyPath,
   deleteProject,
@@ -31,10 +33,23 @@ import {
   setHomeProjectAppearance,
   setProjectAppearance
 } from '@/store/projects'
-import { workspaceCwdForNewSession } from '@/store/session'
+import { getConfiguredDefaultProjectDir } from '@/store/session'
 
 import { ProjectAppearancePicker } from './project-appearance'
 import type { SidebarProjectTree } from './workspace-groups'
+
+function terminalProjectPath(project: SidebarProjectTree): string {
+  return project.isNoProject
+    ? getConfiguredDefaultProjectDir()
+    : (project.path ?? project.repos.find(repo => repo.path)?.path ?? '')
+}
+
+function openProjectTerminal(project: SidebarProjectTree): void {
+  createTerminal(terminalProjectPath(project), {
+    projectId: project.id,
+    profile: normalizeProfileKey($activeGatewayProfile.get())
+  })
+}
 
 // Shared per-project state + handlers, so the kebab dropdown and the row's
 // right-click menu drive the exact same actions. Modeled on git GUIs (GitHub
@@ -76,28 +91,35 @@ function useProjectActions({
 
   // Rename / add folder / set active — explicit projects only (auto ones lack a
   // materialized record; Home is a local bucket, not a projects.db row).
-  const identityItems: ActionItemSpec[] = project.isAuto || project.isNoProject
-    ? []
-    : [
-        { icon: 'edit', key: 'rename', label: p.menuRename, onSelect: () => openProjectRename(target) },
-        {
-          icon: 'new-folder',
-          key: 'add-folder',
-          label: p.menuAddFolder,
-          onSelect: () => openProjectAddFolder(target)
-        },
-        {
-          disabled: isActive,
-          icon: 'target',
-          key: 'set-active',
-          label: p.menuSetActive,
-          onSelect: () => void setActiveProject(project.id)
-        }
-      ]
+  const identityItems: ActionItemSpec[] =
+    project.isAuto || project.isNoProject
+      ? []
+      : [
+          { icon: 'edit', key: 'rename', label: p.menuRename, onSelect: () => openProjectRename(target) },
+          {
+            icon: 'new-folder',
+            key: 'add-folder',
+            label: p.menuAddFolder,
+            onSelect: () => openProjectAddFolder(target)
+          },
+          {
+            disabled: isActive,
+            icon: 'target',
+            key: 'set-active',
+            label: p.menuSetActive,
+            onSelect: () => void setActiveProject(project.id)
+          }
+        ]
 
-  const actionPath = project.isNoProject ? workspaceCwdForNewSession() : project.path
+  const actionPath = terminalProjectPath(project)
 
   const pathItems: ActionItemSpec[] = [
+    {
+      icon: 'terminal',
+      key: 'terminal',
+      label: t.keybinds.actions['view.newTerminal'],
+      onSelect: () => openProjectTerminal(project)
+    },
     {
       disabled: !actionPath,
       icon: 'folder-opened',

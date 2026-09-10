@@ -98,7 +98,8 @@ import { startSessionDrag } from '../chat/session-drag'
 import { stackSessionTilesIntoMain, watchSessionTiles, WorkspaceTabMenu } from '../chat/session-tile'
 import { SessionTabAttentionDot, SessionTabLead } from '../chat/subagent-session-icon'
 import { HudShell } from '../hud/hud-shell'
-import { $terminalTakeover, setTerminalTakeover } from '../right-sidebar/store'
+import { createDefaultTerminal } from '../right-sidebar/terminal/actions'
+import { watchTerminalPanes } from '../right-sidebar/terminal/panes'
 import { $workspaceIsPage } from '../routes'
 import { ShellContextMenu } from '../shell/shell-context-menu'
 
@@ -220,18 +221,7 @@ registry.registerMany([
     },
     render: renderWorkspacePane
   },
-  {
-    id: 'terminal',
-    area: 'panes',
-    title: 'terminal',
-    // revealOnPreset: choosing a layout that places the terminal (e.g.
-    // "Terminal deck") turns takeover on so the zone actually shows. height
-    // sizes the fixed track (a single-pane zone declaring a height is a fixed
-    // track — the preset weight is moot): a short deck, not a third of the
-    // window.
-    data: { placement: 'bottom', height: '20vh', maxHeight: '80vh', revealOnPreset: true },
-    render: () => <WiredPane part="terminal" />
-  },
+
   {
     id: 'files',
     area: 'panes',
@@ -542,6 +532,12 @@ watchContributedPanes()
 watchSessionTiles()
 watchRouteTiles()
 watchPreviewTiles()
+watchTerminalPanes()
+
+// Migrate the old nested terminal host out of remembered layouts.
+if ($layoutTree.get() && allPaneIds($layoutTree.get()!).includes('terminal')) {
+  removeTreePane('terminal')
+}
 
 // Composer pop-out state is keyed by layout zone, so drop entries for zones the
 // user has since closed or merged away — otherwise a long-lived install keeps a
@@ -694,31 +690,19 @@ bindPaneVisibility(
   closeReview,
   openReview
 )
-// ⌃` / statusbar toggle — the terminal hides like other non-left panels instead
-// of collapsing to a rail; PTYs stay alive while hidden (see PersistentTerminal).
-markToolPanelPane('terminal')
-bindPaneVisibility(
-  'terminal',
-  $terminalTakeover,
-  () => setTerminalTakeover(false),
-  () => setTerminalTakeover(true)
-)
-// ⌘K door onto the same pane the keybind and statusbar pill flip — was a
-// one-way "open" row under Go to, so it never showed on/off and couldn't hide.
-// Reads the TREE like every other pane toggle: `$terminalTakeover` stays true
-// behind a stacked sibling tab or a minimized zone, which would light the row
-// "on" for a terminal that isn't on screen.
-registry.register(
-  paletteToggle({
+registry.register({
+  id: 'view.showTerminal',
+  area: PALETTE_AREA,
+  title: 'New terminal',
+  data: {
     id: 'view.showTerminal',
-    label: 'Toggle terminal',
     action: 'view.showTerminal',
+    label: 'New terminal',
     icon: Terminal,
     keywords: ['terminal', 'shell', 'console', 'pty'],
-    get: () => isPaneVisible('terminal'),
-    set: () => togglePaneVisible('terminal')
-  })
-)
+    run: createDefaultTerminal
+  } satisfies PaletteContribution
+})
 
 // Logs are ⌘K-ONLY chrome: the pane contribution EXISTS only while $logsOpen
 // is on. Off (the default) keeps logs out of the registry and the tree

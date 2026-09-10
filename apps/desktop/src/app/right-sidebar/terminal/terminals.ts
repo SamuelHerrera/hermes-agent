@@ -1,5 +1,7 @@
 import { atom, computed } from 'nanostores'
 
+import { findGroupOfPane } from '@/components/pane-shell/tree/model'
+import { $layoutTree, noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
 import { readKey, writeKey } from '@/lib/storage'
 import { $currentCwd } from '@/store/session'
 
@@ -33,9 +35,18 @@ export interface TerminalEntry {
    *  background process (`terminal(background=true)`), keyed by `procId`. */
   kind: 'user' | 'agent'
   procId?: string
+  /** Navigation ownership is fixed at creation, independent of later cd/chat changes. */
+  projectId?: string
+  profile?: string
+  ownerSessionId?: string
+  /** Closing a top-level tab hides the view, not the shell or its sidebar entry. */
+  hidden?: boolean
 }
 
 interface PersistedTerminalEntry {
+  projectId?: string
+  profile?: string
+  hidden?: boolean
   auto: boolean
   cwd: string
   id: string
@@ -76,6 +87,9 @@ function sanitizePersistedTerminal(value: unknown): PersistedTerminalEntry | nul
     auto: typeof record.auto === 'boolean' ? record.auto : true,
     cwd,
     id,
+    ...(typeof record.projectId === 'string' ? { projectId: record.projectId } : {}),
+    ...(typeof record.profile === 'string' ? { profile: record.profile } : {}),
+    ...(record.hidden === true ? { hidden: true } : {}),
     ...(restoreCwd ? { restoreCwd } : {}),
     ...(reviveBuffer ? { reviveBuffer } : {}),
     title: title || 'Terminal'
@@ -124,6 +138,9 @@ function persistTerminals(list: readonly TerminalEntry[], activeTerminalId: null
       auto: term.auto,
       cwd: term.cwd,
       id: term.id,
+      ...(term.projectId ? { projectId: term.projectId } : {}),
+      ...(term.profile ? { profile: term.profile } : {}),
+      ...(term.hidden ? { hidden: true } : {}),
       ...(term.restoreCwd ? { restoreCwd: term.restoreCwd } : {}),
       ...(term.reviveBuffer ? { reviveBuffer: term.reviveBuffer } : {}),
       title: term.title
@@ -145,6 +162,8 @@ export const $terminals = atom<readonly TerminalEntry[]>(
   restored.terminals.map(term => ({ ...term, kind: 'user' as const }))
 )
 export const $activeTerminalId = atom<string | null>(restored.activeTerminalId)
+export const $openTerminals = computed($terminals, list => list.filter(term => !term.hidden))
+export const terminalPaneId = (id: string) => `terminal-instance:${id}`
 
 $terminals.subscribe(list => persistTerminals(list, $activeTerminalId.get()))
 $activeTerminalId.subscribe(active => persistTerminals($terminals.get(), active))
@@ -159,10 +178,13 @@ const newId = () =>
 
 /** Append a fresh terminal and focus it. Captures the current cwd once (its only
  *  tie to session/project state); pass an explicit cwd to override. Returns the id. */
-export function createTerminal(cwd: string = $currentCwd.get()): string {
+export function createTerminal(
+  cwd: string = $currentCwd.get(),
+  ownership: Pick<TerminalEntry, 'projectId' | 'profile'> = {}
+): string {
   const id = newId()
-  $terminals.set([...$terminals.get(), { id, title: 'Terminal', auto: true, cwd, kind: 'user' }])
-  $activeTerminalId.set(id)
+  $terminals.set([...$terminals.get(), { id, title: 'Terminal', auto: true, cwd, kind: 'user', ...ownership }])
+  selectTerminal(id)
 
   return id
 }
@@ -175,10 +197,20 @@ const findByProc = (procId: string) => $terminals.get().find(term => term.procId
 
 /** Auto-surface an agent background process as a read-only tab — once. Returns
  *  the tab id, or null if it was already surfaced and the user has since closed it. */
-export function ensureAgentTerminal(procId: string, title: string): string | null {
+export function ensureAgentTerminal(
+  procId: string,
+  title: string,
+  ownership: Pick<TerminalEntry, 'ownerSessionId' | 'profile' | 'cwd'> = { cwd: '' }
+): string | null {
   const existing = findByProc(procId)
 
   if (existing) {
+    const patch = Object.fromEntries(Object.entries(ownership).filter(([, value]) => Boolean(value)))
+
+    if (Object.entries(patch).some(([key, value]) => existing[key as keyof TerminalEntry] !== value)) {
+      $terminals.set($terminals.get().map(term => (term.id === existing.id ? { ...term, ...patch } : term)))
+    }
+
     return existing.id
   }
 
@@ -188,7 +220,10 @@ export function ensureAgentTerminal(procId: string, title: string): string | nul
 
   surfacedProcs.add(procId)
   const id = newId()
-  $terminals.set([...$terminals.get(), { id, title: title || 'agent', auto: false, cwd: '', kind: 'agent', procId }])
+  $terminals.set([
+    ...$terminals.get(),
+    { id, title: title || 'agent', auto: false, kind: 'agent', procId, ...ownership }
+  ])
 
   return id
 }
@@ -205,8 +240,7 @@ export function openAgentTerminal(procId: string, title: string): void {
     $terminals.set([...$terminals.get(), { id, title: title || 'agent', auto: false, cwd: '', kind: 'agent', procId }])
   }
 
-  $activeTerminalId.set(id)
-  setTerminalTakeover(true)
+  selectTerminal(id)
 }
 
 /** Guarantee at least one tab exists when the pane opens.
@@ -219,9 +253,26 @@ export function ensureTerminal(): void {
 }
 
 export function selectTerminal(id: string): void {
-  if ($terminals.get().some(term => term.id === id)) {
+  const terminal = $terminals.get().find(term => term.id === id)
+
+  if (terminal) {
+    if (terminal.hidden) {
+      $terminals.set($terminals.get().map(term => (term.id === id ? { ...term, hidden: false } : term)))
+    }
+
     $activeTerminalId.set(id)
+    revealTreePane(terminalPaneId(id))
+    const tree = $layoutTree.get()
+    const group = tree ? findGroupOfPane(tree, terminalPaneId(id)) : null
+
+    if (group) {
+      noteActiveTreeGroup(group.id)
+    }
   }
+}
+
+export function hideTerminal(id: string): void {
+  $terminals.set($terminals.get().map(term => (term.id === id ? { ...term, hidden: true } : term)))
 }
 
 // Compare-ready form of a directory path: trimmed, trailing separators dropped
@@ -276,11 +327,11 @@ export function cycleTerminal(direction: 1 | -1): void {
     list.findIndex(term => term.id === $activeTerminalId.get())
   )
 
-  $activeTerminalId.set(list[(current + direction + list.length) % list.length].id)
+  selectTerminal(list[(current + direction + list.length) % list.length].id)
 }
 
-/** Drop a terminal. Focus slides to the neighbor that fills its slot; closing
- *  the last one closes the whole pane. */
+/** Remove an entry and dispose its terminal host. Unlike a tab close, this
+ *  ends a manual shell and removes its sidebar entry. */
 export function closeTerminal(id: string): void {
   const list = $terminals.get()
   const index = list.findIndex(term => term.id === id)
@@ -303,8 +354,8 @@ export function closeTerminal(id: string): void {
 
 /** Close the read-only agent tab mirroring a background process. The agent
  *  drives this via the desktop-gated `close_terminal` tool → `terminal.close`.
- *  The process is NOT killed — only the view is dropped; `surfacedProcs` keeps
- *  it from auto-resurfacing, and the status-stack row can reopen it on demand.
+ *  The process is NOT killed — only the tab is hidden. Its chat-child sidebar
+ *  entry remains available to reopen, just like a manually closed tab.
  *  No-op when no such tab exists. */
 export function closeAgentTerminalByProc(procId: string): boolean {
   const term = $terminals.get().find(t => t.kind === 'agent' && t.procId === procId)
@@ -313,7 +364,7 @@ export function closeAgentTerminalByProc(procId: string): boolean {
     return false
   }
 
-  closeTerminal(term.id)
+  hideTerminal(term.id)
 
   return true
 }
@@ -322,7 +373,7 @@ export function closeActiveTerminal(): void {
   const id = $activeTerminalId.get()
 
   if (id) {
-    closeTerminal(id)
+    hideTerminal(id)
   }
 }
 
@@ -386,12 +437,16 @@ export function renameTerminal(id: string, title: string): void {
   )
 }
 
-/** A live terminal reports its resolved shell; adopt it as the label only while
+/** A live terminal reports its foreground process; adopt it as the label only while
  *  the user hasn't named the tab themselves. */
 export function reportTerminalShell(id: string, shell: string): void {
   const name = shell.trim()
 
   if (!name) {
+    return
+  }
+
+  if (!$terminals.get().some(term => term.id === id && term.auto && term.title !== name)) {
     return
   }
 

@@ -7,18 +7,19 @@ import { $paneStates } from '@/store/panes'
 
 import { $terminalTakeover } from '../store'
 
-import { PersistentTerminal, TerminalSlot } from './persistent'
+import { PersistentTerminalHost, TerminalSlot } from './persistent'
 
 vi.mock('../store', async () => ({
   $terminalTakeover: (await import('nanostores')).atom(false)
 }))
 
-vi.mock('./terminals', () => ({
-  ensureTerminal: vi.fn()
+vi.mock('./terminals', async () => ({
+  selectTerminal: vi.fn()
 }))
 
-vi.mock('./workspace', () => ({
-  TerminalWorkspace: () => <div data-testid="terminal-workspace" />
+vi.mock('./instance', () => ({
+  TerminalInstance: () => <div data-testid="terminal-workspace" />,
+  AgentTerminalInstance: () => <div data-testid="agent-terminal" />
 }))
 
 let resizeObserverCallback: ResizeObserverCallback | null = null
@@ -126,8 +127,11 @@ function installRaf() {
 function Harness() {
   return (
     <>
-      <TerminalSlot className="slot" />
-      <PersistentTerminal onAddSelectionToChat={() => undefined} />
+      <TerminalSlot className="slot" terminalId="one" />
+      <PersistentTerminalHost
+        onAddSelectionToChat={() => undefined}
+        terminal={{ id: 'one', kind: 'user', auto: true, cwd: '', title: 'Terminal' }}
+      />
     </>
   )
 }
@@ -136,9 +140,12 @@ function HiddenPaneHarness({ hidden }: { hidden: boolean }) {
   return (
     <>
       <div {...hiddenPaneProps(hidden)}>
-        <TerminalSlot className="slot" />
+        <TerminalSlot className="slot" terminalId="one" />
       </div>
-      <PersistentTerminal onAddSelectionToChat={() => undefined} />
+      <PersistentTerminalHost
+        onAddSelectionToChat={() => undefined}
+        terminal={{ id: 'one', kind: 'user', auto: true, cwd: '', title: 'Terminal' }}
+      />
     </>
   )
 }

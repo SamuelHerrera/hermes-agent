@@ -8,9 +8,8 @@ import { markRightPanePerf } from '@/debug/right-pane-events'
 import { createRendererLoopPauseController } from '@/lib/renderer-loop-pause'
 import { $paneStates } from '@/store/panes'
 
-import { $terminalTakeover } from '../store'
-
-import { ensureTerminal } from './terminals'
+import { AgentTerminalInstance, TerminalInstance } from './instance'
+import { selectTerminal, type TerminalEntry } from './terminals'
 import { TerminalWorkspace } from './workspace'
 
 /**
@@ -20,11 +19,11 @@ import { TerminalWorkspace } from './workspace'
  * the host stays put and we chase the slot's bounding rect with position:fixed.
  */
 
-const $slot = atom<HTMLElement | null>(null)
+const $slots = atom<Record<string, HTMLElement>>({})
 
 const SLOT_CLASS = 'relative flex min-h-0 min-w-0 flex-1 flex-col'
 
-export function TerminalSlot({ className = SLOT_CLASS }: { className?: string }) {
+export function TerminalSlot({ terminalId, className = SLOT_CLASS }: { terminalId: string; className?: string }) {
   const ref = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -34,16 +33,18 @@ export function TerminalSlot({ className = SLOT_CLASS }: { className?: string })
       return
     }
 
-    $slot.set(el)
+    $slots.set({ ...$slots.get(), [terminalId]: el })
 
     return () => {
-      if ($slot.get() === el) {
-        $slot.set(null)
+      if ($slots.get()[terminalId] === el) {
+        const next = { ...$slots.get() }
+        delete next[terminalId]
+        $slots.set(next)
       }
     }
-  }, [])
+  }, [terminalId])
 
-  return <div className={className} data-terminal-slot="" ref={ref} />
+  return <div className={className} data-terminal-slot={terminalId} ref={ref} />
 }
 
 interface PersistentTerminalProps {
@@ -62,10 +63,16 @@ const sameRect = (a: Rect | null, b: Rect) =>
   !!a && a.hidden === b.hidden && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height
 
 export function PersistentTerminal({ onAddSelectionToChat }: PersistentTerminalProps) {
-  const slot = useStore($slot)
-  const terminalTakeover = useStore($terminalTakeover)
+  return <TerminalWorkspace onAddSelectionToChat={onAddSelectionToChat} />
+}
+
+export function PersistentTerminalHost({
+  terminal,
+  onAddSelectionToChat
+}: PersistentTerminalProps & { terminal: TerminalEntry }) {
+  const slots = useStore($slots)
+  const slot = slots[terminal.id]
   const [rect, setRect] = useState<Rect | null>(null)
-  const [ready, setReady] = useState(false)
 
   // VS Code parity: once the pane has ever been opened, keep the terminals
   // mounted — and their shells alive — even while hidden. Hiding the pane just
@@ -74,16 +81,9 @@ export function PersistentTerminal({ onAddSelectionToChat }: PersistentTerminalP
   // terminal exists (covers having closed the last tab).
   const [mounted, setMounted] = useState(false)
 
-  useEffect(() => {
-    if (terminalTakeover && ready) {
-      setMounted(true)
-      ensureTerminal()
-    }
-  }, [terminalTakeover, ready])
-
   useLayoutEffect(() => {
     if (!slot) {
-      setRect(null)
+      setRect(previous => (previous ? { ...previous, hidden: true } : null))
 
       return
     }
@@ -130,7 +130,9 @@ export function PersistentTerminal({ onAddSelectionToChat }: PersistentTerminalP
         setRect(next)
 
         if (next.width > 0 && next.height > 0) {
-          setReady(true)
+          if (!next.hidden) {
+            setMounted(true)
+          }
         }
 
         return true
@@ -256,8 +258,26 @@ export function PersistentTerminal({ onAddSelectionToChat }: PersistentTerminalP
   // booting xterm/node-pty at 0×0 starts the shell at 80×24 and spawns a visible
   // conhost on Windows. After that `mounted` latches: shells persist while hidden.
   return (
-    <div aria-hidden={!visible} data-persistent-terminal="" style={style}>
-      {mounted && <TerminalWorkspace onAddSelectionToChat={onAddSelectionToChat} />}
+    <div
+      aria-hidden={!visible}
+      data-persistent-terminal={terminal.id}
+      onFocusCapture={() => selectTerminal(terminal.id)}
+      onPointerDown={() => selectTerminal(terminal.id)}
+      style={style}
+    >
+      {mounted &&
+        (terminal.kind === 'agent' ? (
+          <AgentTerminalInstance active={visible} id={terminal.id} procId={terminal.procId!} />
+        ) : (
+          <TerminalInstance
+            active={visible}
+            cwd={terminal.cwd}
+            id={terminal.id}
+            onAddSelectionToChat={onAddSelectionToChat}
+            restoreCwd={terminal.restoreCwd}
+            reviveBuffer={terminal.reviveBuffer}
+          />
+        ))}
     </div>
   )
 }

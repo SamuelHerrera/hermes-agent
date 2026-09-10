@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
+import { createTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { copyPath, setHomeProjectAppearance } from '@/store/projects'
 
 import { ProjectMenu } from './project-menu'
@@ -29,6 +30,7 @@ beforeAll(() => {
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: {
+      keybinds: { actions: { 'view.newTerminal': 'New terminal' } },
       common: { cancel: 'Cancel', confirm: 'Confirm', done: 'Done', loading: 'Loading…' },
       sidebar: {
         projects: {
@@ -74,8 +76,9 @@ vi.mock('@/store/projects', () => ({
 }))
 
 vi.mock('@/store/session', () => ({
-  workspaceCwdForNewSession: vi.fn(() => '/home/default')
+  getConfiguredDefaultProjectDir: vi.fn(() => '/home/default')
 }))
+vi.mock('@/app/right-sidebar/terminal/terminals', () => ({ createTerminal: vi.fn() }))
 
 const project = {
   color: null,
@@ -98,6 +101,22 @@ const openTriggerMenu = (trigger: HTMLElement) => {
 }
 
 describe('ProjectMenu', () => {
+  it('creates one terminal in the project folder through its dropdown', () => {
+    render(<ProjectMenu isActive={false} project={project} />)
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New terminal' }))
+    expect(createTerminal).toHaveBeenCalledExactlyOnceWith('/repo', { projectId: 'p1', profile: 'default' })
+  })
+
+  it('uses the default folder for the Home terminal menu item', () => {
+    render(<ProjectMenu isActive={false} project={{ ...project, id: '__no_project__', isNoProject: true }} />)
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New terminal' }))
+    expect(createTerminal).toHaveBeenCalledExactlyOnceWith('/home/default', {
+      projectId: '__no_project__',
+      profile: 'default'
+    })
+  })
   it('does not wrap the kebab trigger in a Tip', () => {
     render(<ProjectMenu isActive={false} project={project} />)
 
@@ -135,7 +154,9 @@ describe('ProjectMenu', () => {
     expect(await screen.findByRole('button', { name: 'No color' })).toBeTruthy()
     expect(screen.getByPlaceholderText('Search Iconify…').tagName).toBe('INPUT')
     expect(screen.getByText('Icons')).toBeTruthy()
-    expect(screen.getByPlaceholderText('Search Iconify…').closest('[data-project-icon-picker]')?.className).toContain('w-72')
+    expect(screen.getByPlaceholderText('Search Iconify…').closest('[data-project-icon-picker]')?.className).toContain(
+      'w-72'
+    )
   }, 15000)
 
   it('scopes the Home menu to appearance plus path actions, not project identity/destructive actions', async () => {

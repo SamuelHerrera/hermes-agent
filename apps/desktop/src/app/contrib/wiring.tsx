@@ -141,7 +141,7 @@ import { usePetBridge } from './hooks/use-pet-bridge'
 import { useQuickEntryBridge } from './hooks/use-quick-entry-bridge'
 import { useSessionTileDelegate } from './hooks/use-session-tile-delegate'
 import { $restartPreviewServer, useStatusbarContributions, useTitlebarToolContributions } from './panes'
-import { ChatRoutesSurface, SidebarSurface, TerminalSurface } from './surfaces'
+import { ChatRoutesSurface, SidebarSurface } from './surfaces'
 import type { WiringActions, WiringApi } from './types'
 
 // Overlay views the controller mounts over the shell — lazy, load on demand.
@@ -1006,7 +1006,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     [actions, currentView]
   )
 
-  const terminalNode = useMemo(() => <TerminalSurface />, [])
+  const terminalNode = null
 
   // The former bottom statusbar now renders inside the top-right titlebar
   // controls. Keep the wired part present for plugin/fallback type stability, but

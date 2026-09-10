@@ -23,6 +23,7 @@ import {
   SidebarRowNest,
   SidebarRowShell
 } from '../chrome'
+import { TerminalSidebarRows, useProjectTerminals } from '../terminal-rows'
 
 import { latestProjectSessions, PROJECT_OVERVIEW_SESSION_LIMIT, useWorkspaceNodeOpen } from './model'
 import { ProjectIconGlyph } from './project-appearance'
@@ -34,14 +35,11 @@ import { StartWorkButton, WorkspaceAddButton } from './workspace-header'
 // picks are stored in `icon`; null means "fall back to favicon/default".
 export function projectIcon({ color, icon, isNoProject, path }: SidebarProjectTree) {
   return (
-    <SidebarRowLeadGlyph className="group-hover/workspace:text-foreground" style={color && icon ? { color } : undefined}>
-      <ProjectIconGlyph
-        color={color}
-        icon={icon}
-        isNoProject={isNoProject}
-        path={path}
-        size="1rem"
-      />
+    <SidebarRowLeadGlyph
+      className="group-hover/workspace:text-foreground"
+      style={color && icon ? { color } : undefined}
+    >
+      <ProjectIconGlyph color={color} icon={icon} isNoProject={isNoProject} path={path} size="1rem" />
     </SidebarRowLeadGlyph>
   )
 }
@@ -72,7 +70,7 @@ function ProjectSummaryCount({
   pulsing = false
 }: {
   count: number
-  dataAttr: 'archived' | 'chats' | 'children' | 'running'
+  dataAttr: 'archived' | 'chats' | 'children' | 'running' | 'terminals'
   icon: string
   label: string
   pulsing?: boolean
@@ -120,6 +118,8 @@ function projectCounts(project: SidebarProjectTree) {
 
 function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
   const { archivedCount, chatCount, childCount, runningCount } = projectCounts(project)
+  const terminals = useProjectTerminals(project, true)
+  const { t } = useI18n()
 
   return (
     <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
@@ -152,6 +152,14 @@ function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
         icon="archive"
         label={`${archivedCount} archived chat${archivedCount === 1 ? '' : 's'}`}
       />
+      {terminals.length > 0 && (
+        <ProjectSummaryCount
+          count={terminals.length}
+          dataAttr="terminals"
+          icon="terminal"
+          label={`${t.rightSidebar.terminalsAria}: ${terminals.length}`}
+        />
+      )}
     </span>
   )
 }
@@ -199,10 +207,11 @@ export function ProjectDetailHeaderRow({
           actions={
             <>
               {projectPath && <StartWorkButton repoPath={projectPath} />}
+
               {onNewSession && (
                 <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(projectPath)} />
               )}
-              {!project.isNoProject && <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} scoped />}
+              <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} scoped />
             </>
           }
           className="hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none"
@@ -233,6 +242,7 @@ export function ProjectOverviewRow({
   const s = t.sidebar
   const isActive = project.id === activeProjectId
   const [open, toggleOpen] = useWorkspaceNodeOpen(project.id)
+  const terminals = useProjectTerminals(project)
   const homeAppearances = useStore($homeProjectAppearances)
   const activeGatewayProfile = useStore($activeGatewayProfile)
 
@@ -275,6 +285,7 @@ export function ProjectOverviewRow({
         <>
           {/* Home is a bucket, not a record, so its menu omits rename/delete,
               but it can still start sessions and carry local appearance. */}
+
           {onNewSession && (
             <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(project.path)} />
           )}
@@ -310,7 +321,7 @@ export function ProjectOverviewRow({
       }}
       ref={rowRef}
       toggle={
-        preview.length > 0
+        preview.length > 0 || terminals.length > 0
           ? { ariaLabel: s.projects.toggle(project.label, !open), onToggle: toggleOpen, open }
           : undefined
       }
@@ -326,7 +337,12 @@ export function ProjectOverviewRow({
       <ProjectContextMenu isActive={isActive} project={appearanceProject}>
         {shell}
       </ProjectContextMenu>
-      {visiblePreview.length > 0 && <SidebarRowNest>{renderRows?.(visiblePreview)}</SidebarRowNest>}
+      {open && (visiblePreview.length > 0 || terminals.length > 0) && (
+        <SidebarRowNest>
+          {renderRows?.(visiblePreview)}
+          <TerminalSidebarRows terminals={terminals} />
+        </SidebarRowNest>
+      )}
     </div>
   )
 }

@@ -21,6 +21,7 @@ import { notifyError } from '@/store/notifications'
 import { removeWorktreePath } from '@/store/projects'
 
 import { SidebarRowStack } from '../chrome'
+import { TerminalSidebarRows, useProjectTerminals } from '../terminal-rows'
 
 import { useWorkspaceNodeOpen } from './model'
 import { SidebarWorkspaceGroup } from './workspace-group'
@@ -52,14 +53,21 @@ export function EnteredProjectContent({
   liveSessions?: SessionInfo[]
   removedSessionIds?: ReadonlySet<string>
 }) {
+  const terminals = useProjectTerminals(project)
+
   if (!project.repos.length) {
-    return null
+    return <TerminalSidebarRows terminals={terminals} />
   }
 
   // Home's rows aren't anchored to a folder, so there's no repo or worktree
   // structure to show — just the chats.
   if (project.isNoProject) {
-    return <>{renderRows(project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions)))}</>
+    return (
+      <>
+        {renderRows(project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions)))}
+        <TerminalSidebarRows terminals={terminals} />
+      </>
+    )
   }
 
   const single = project.repos.length === 1
@@ -78,6 +86,7 @@ export function EnteredProjectContent({
           showHeader={!single}
         />
       ))}
+      <TerminalSidebarRows terminals={terminals} />
     </>
   )
 }

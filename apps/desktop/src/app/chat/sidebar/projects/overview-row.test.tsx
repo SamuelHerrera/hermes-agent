@@ -2,8 +2,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { $terminals } from '@/app/right-sidebar/terminal/terminals'
 import type { SessionInfo } from '@/hermes'
 import { $sidebarRowMeta } from '@/store/layout'
+import { $projectTree } from '@/store/projects'
 
 import { ProjectDetailHeaderRow, ProjectOverviewRow } from './overview-row'
 import type { SidebarProjectTree } from './workspace-groups'
@@ -12,6 +14,8 @@ const workspaceNodeOpen = vi.hoisted(() => ({ value: false }))
 
 afterEach(() => {
   cleanup()
+  $terminals.set([])
+  $projectTree.set([])
   act(() => $sidebarRowMeta.set(['preview', 'updated']))
   workspaceNodeOpen.value = false
 })
@@ -19,6 +23,7 @@ afterEach(() => {
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: {
+      rightSidebar: { terminalsAria: 'Terminals' },
       sidebar: {
         newSessionIn: (label: string) => `New session in ${label}`,
         projects: {
@@ -74,6 +79,20 @@ const project = { id: 'p1', label: 'Test D' } as unknown as SidebarProjectTree
 const tipTrigger = (el: HTMLElement) => el.closest('[data-slot="tooltip-trigger"]')
 
 describe('ProjectOverviewRow', () => {
+  it('counts manual and agent terminals, including closed views, but excludes other profiles and projects', () => {
+    $projectTree.set([{ ...project, path: '/repo', repos: [] }])
+    const base = { auto: true, cwd: '/repo', title: 'shell', projectId: project.id, profile: 'default' }
+    $terminals.set([
+      { ...base, id: 'manual', kind: 'user', hidden: true },
+      { ...base, id: 'agent', kind: 'agent', procId: 'proc' },
+      { ...base, id: 'other-profile', kind: 'user', profile: 'other' },
+      { ...base, id: 'other-project', kind: 'user', cwd: '/elsewhere', projectId: 'elsewhere' }
+    ])
+    const { container } = render(<ProjectOverviewRow project={{ ...project, path: '/repo', repos: [] }} />)
+    expect(container.querySelector('[data-project-summary-kind="terminals"]')?.textContent).toBe('2')
+    act(() => $terminals.set([]))
+    expect(container.querySelector('[data-project-summary-kind="terminals"]')).toBeNull()
+  })
   it('wraps the "new session" add button in a Tip with the project-scoped label', () => {
     render(<ProjectOverviewRow onNewSession={vi.fn()} project={project} />)
 
@@ -187,7 +206,15 @@ describe('ProjectOverviewRow', () => {
 
   it('hides zero-only running and child/subagent metrics to keep compact icon/count display', () => {
     const { container } = render(
-      <ProjectOverviewRow project={{ ...project, archivedSessionCount: 0, chatSessionCount: 2, childSessionCount: 0, runningSessionCount: 0 }} />
+      <ProjectOverviewRow
+        project={{
+          ...project,
+          archivedSessionCount: 0,
+          chatSessionCount: 2,
+          childSessionCount: 0,
+          runningSessionCount: 0
+        }}
+      />
     )
 
     expect(container.querySelector('[data-project-running-count]')).toBeNull()
@@ -200,12 +227,14 @@ describe('ProjectOverviewRow', () => {
 
     render(
       <ProjectOverviewRow
-        previewSessions={[
-          { id: 'one', running: true },
-          { id: 'two', running: true },
-          { id: 'three', running: true },
-          { id: 'four', running: true }
-        ] as unknown as SessionInfo[]}
+        previewSessions={
+          [
+            { id: 'one', running: true },
+            { id: 'two', running: true },
+            { id: 'three', running: true },
+            { id: 'four', running: true }
+          ] as unknown as SessionInfo[]
+        }
         project={project}
         renderRows={sessions => sessions.map(session => <div key={session.id}>{session.id}</div>)}
       />

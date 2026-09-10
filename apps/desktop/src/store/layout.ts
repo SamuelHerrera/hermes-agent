@@ -48,6 +48,7 @@ const SIDEBAR_WORKSPACE_ORDER_STORAGE_KEY = 'hermes.desktop.workspaceOrder'
 const SIDEBAR_WORKSPACE_PARENT_ORDER_STORAGE_KEY = 'hermes.desktop.workspaceParentOrder'
 const SIDEBAR_PROJECT_ORDER_STORAGE_KEY = 'hermes.desktop.projectOrder'
 const SIDEBAR_SESSION_BRANCH_OPEN_STORAGE_KEY = 'hermes.desktop.sessionBranchOpen'
+const SIDEBAR_SESSION_TERMINAL_OPEN_STORAGE_KEY = 'hermes.desktop.sessionTerminalOpen'
 const SIDEBAR_WORKSPACE_COLLAPSED_STORAGE_KEY = 'hermes.desktop.workspaceCollapsed'
 const SIDEBAR_WORKSPACE_NODE_OPEN_STORAGE_KEY = 'hermes.desktop.workspaceNodeOpen'
 const SIDEBAR_DISMISSED_AUTO_PROJECTS_STORAGE_KEY = 'hermes.desktop.dismissedAutoProjects'
@@ -121,6 +122,19 @@ export const $sidebarProjectOrderIds = persistentAtom(
 
 export const $sidebarSessionBranchOpen = persistentAtom<Record<string, boolean>>(
   SIDEBAR_SESSION_BRANCH_OPEN_STORAGE_KEY,
+  {},
+  Codecs.json<Record<string, boolean>>(raw => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(raw).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+    )
+  })
+)
+export const $sidebarSessionTerminalOpen = persistentAtom<Record<string, boolean>>(
+  SIDEBAR_SESSION_TERMINAL_OPEN_STORAGE_KEY,
   {},
   Codecs.json<Record<string, boolean>>(raw => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -728,6 +742,13 @@ export function toggleSidebarSessionBranchOpen(id: string, defaultOpen = false):
   const open = current[id] ?? defaultOpen
 
   $sidebarSessionBranchOpen.set({ ...current, [id]: !open })
+}
+
+export function toggleSidebarSessionTerminalOpen(id: string, defaultOpen = true): void {
+  const current = $sidebarSessionTerminalOpen.get()
+  const open = current[id] ?? defaultOpen
+
+  $sidebarSessionTerminalOpen.set({ ...current, [id]: !open })
 }
 
 export function setSidebarResizing(resizing: boolean) {

@@ -4,13 +4,14 @@ import { useNavigate } from 'react-router'
 import { closeActiveTab } from '@/app/chat/close-tab'
 import { hudTargetSessionId } from '@/app/hud/handoff'
 import { setTerminalTakeover } from '@/app/right-sidebar/store'
-import { closeActiveTerminal, createTerminal, cycleTerminal } from '@/app/right-sidebar/terminal/terminals'
+import { createDefaultTerminal } from '@/app/right-sidebar/terminal/actions'
 import {
-  activateTreeTabSlot,
-  cycleTreeTabInFocusedZone,
-  isPaneVisible,
-  togglePaneVisible
-} from '@/components/pane-shell/tree/store'
+  $activeTerminalId,
+  closeActiveTerminal,
+  cycleTerminal,
+  terminalPaneId
+} from '@/app/right-sidebar/terminal/terminals'
+import { activateTreeTabSlot, cycleTreeTabInFocusedZone, isPaneVisible } from '@/components/pane-shell/tree/store'
 import { onReleaseTypingFocus } from '@/components/ui/keyboard-first'
 import { findBarClaimsCombo } from '@/lib/find-in-page'
 import { contributedKeybindHandler, PROFILE_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
@@ -226,19 +227,17 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.toggleStatusbar': toggleStatusbarVisible,
     'view.showFiles': showFiles,
     'view.toggleHud': () => toggleHud(hudTargetSessionId()),
-    'view.showTerminal': () => togglePaneVisible('terminal'),
-    // Create first so the pane's open-effect ensure sees a non-empty set and
-    // doesn't also spawn one — net effect is exactly one fresh terminal.
+    'view.showTerminal': () => void createDefaultTerminal(),
+    // Both creation entry points add one ordinary workspace tab.
     'view.newTerminal': () => {
-      createTerminal()
-      setTerminalTakeover(true)
+      createDefaultTerminal()
     },
     // Switch / close only act while the terminal is actually ON SCREEN — ask
     // the tree, not the toggle store (which stays true behind a stacked
     // sibling tab or a minimized zone).
-    'view.nextTerminal': () => isPaneVisible('terminal') && cycleTerminal(1),
-    'view.prevTerminal': () => isPaneVisible('terminal') && cycleTerminal(-1),
-    'view.closeTerminal': () => isPaneVisible('terminal') && closeActiveTerminal(),
+    'view.nextTerminal': () => isPaneVisible(terminalPaneId($activeTerminalId.get() ?? '')) && cycleTerminal(1),
+    'view.prevTerminal': () => isPaneVisible(terminalPaneId($activeTerminalId.get() ?? '')) && cycleTerminal(-1),
+    'view.closeTerminal': () => isPaneVisible(terminalPaneId($activeTerminalId.get() ?? '')) && closeActiveTerminal(),
     'view.flipPanes': togglePanesFlipped,
     // ⌘W: close the focused tab (terminal / preview target / zone tree tab).
     // On the main tab with session tabs stacked, it shifts the next one in —

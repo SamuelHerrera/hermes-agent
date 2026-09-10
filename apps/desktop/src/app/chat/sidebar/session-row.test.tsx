@@ -3,12 +3,13 @@ import { atom } from 'nanostores'
 import type * as React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { $terminals } from '@/app/right-sidebar/terminal/terminals'
 import type { SessionInfo } from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
 import type * as Time from '@/lib/time'
 import type * as ComposerStatusStore from '@/store/composer-status'
-import { $sidebarRowMeta } from '@/store/layout'
+import { $sidebarRowMeta, $sidebarSessionTerminalOpen } from '@/store/layout'
 import { setSessions } from '@/store/session'
 import type * as SessionStore from '@/store/session'
 import { setSessionColorOverride } from '@/store/session-color'
@@ -22,12 +23,15 @@ afterEach(() => {
   cleanup()
   act(() => {
     $sidebarRowMeta.set(['preview', 'updated'])
+    $sidebarSessionTerminalOpen.set({})
+    $terminals.set([])
   })
 })
 
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: {
+      common: { delete: 'Delete' },
       sidebar: {
         projects: { home: 'Home' },
         row: {
@@ -436,6 +440,50 @@ describe('SidebarSessionRow', () => {
     expect(secondRow?.contains(screen.getByText('Card metadata parent'))).toBe(true)
     expect(secondRow?.contains(age)).toBe(true)
     expect(secondRow?.contains(childCount)).toBe(true)
+  })
+
+  it('shows a terminal count and collapses chat-owned terminal children from the row disclosure', () => {
+    const owner = makeSession({ id: 's1', title: 'Terminal parent' })
+    act(() => {
+      setSessions([owner])
+      publishSessionState('runtime-s1', createClientSessionState(owner.id))
+      $terminals.set([
+        {
+          auto: true,
+          cwd: '/repo',
+          id: 'terminal-s1',
+          kind: 'agent',
+          ownerSessionId: 'runtime-s1',
+          title: 'set -euo pipefail'
+        }
+      ])
+    })
+
+    const { container } = render(
+      <SidebarSessionRow
+        isPinned={false}
+        isSelected={false}
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        session={owner}
+      />
+    )
+
+    const terminalCount = container.querySelector('[data-session-terminal-count]')
+    const toggle = screen.getByRole('button', { name: 'Collapse terminal' })
+
+    expect(terminalCount?.textContent).toContain('1')
+    expect(terminalCount?.querySelector('.codicon-terminal')).toBeTruthy()
+    expect(container.querySelector('[data-session-terminals="s1"] [data-sidebar-terminal="terminal-s1"]')).not.toBeNull()
+    expect(container.querySelector('[data-session-row-primary-actions]')?.contains(toggle)).toBe(true)
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole('button', { name: 'Expand terminal' })).toBeTruthy()
+    expect(container.querySelector('[data-session-terminals="s1"]')).toBeNull()
+    expect(container.querySelector('[data-session-terminal-count]')?.textContent).toContain('1')
   })
 
   // Full-title tooltip on hover (#83000-class ask): the label is a tooltip

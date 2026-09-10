@@ -1,4 +1,5 @@
-import { setTerminalTakeover } from '@/app/right-sidebar/store'
+import { createDefaultTerminal } from '@/app/right-sidebar/terminal/actions'
+import { $activeTerminalId, $terminals, selectTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { revealTreePane } from '@/components/pane-shell/tree/store'
 
 import { setFileBrowserOpen, setSidebarOpen } from './layout'
@@ -13,7 +14,16 @@ const PANE_REVEALERS: Record<string, () => void> = {
   files: () => setFileBrowserOpen(true),
   review: () => openReview(),
   sessions: () => setSidebarOpen(true),
-  terminal: () => setTerminalTakeover(true)
+  terminal: () => {
+    const active = $activeTerminalId.get()
+    const id = $terminals.get().find(terminal => terminal.id === active)?.id ?? $terminals.get()[0]?.id
+
+    if (id) {
+      selectTerminal(id)
+    } else {
+      createDefaultTerminal()
+    }
+  }
 }
 
 /** Reveal a desktop pane by name. Returns false for an unknown pane. */

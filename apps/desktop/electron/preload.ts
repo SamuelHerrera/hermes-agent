@@ -256,6 +256,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     }
   },
   terminal: {
+    process: id => ipcRenderer.invoke('hermes:terminal:process', id),
     cwd: id => ipcRenderer.invoke('hermes:terminal:cwd', id),
     dispose: id => ipcRenderer.invoke('hermes:terminal:dispose', id),
     resize: (id, size) => ipcRenderer.invoke('hermes:terminal:resize', id, size),

@@ -269,7 +269,7 @@ export const en: Translations = {
       'view.showFiles': 'Toggle file browser',
       'view.toggleHud': 'Toggle HUD mode',
       'hud.snapToPointer': 'Move HUD to pointer (global, while HUD is open)',
-      'view.showTerminal': 'Toggle terminal',
+      'view.showTerminal': 'New terminal',
       'view.newTerminal': 'New terminal',
       'view.nextTerminal': 'Next terminal',
       'view.prevTerminal': 'Previous terminal',

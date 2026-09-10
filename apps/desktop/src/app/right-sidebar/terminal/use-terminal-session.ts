@@ -18,6 +18,7 @@ import { observeActiveTerminalResize } from './active-resize'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
 import { mirrorSelection, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
+import { watchTerminalProcess } from './process-title'
 import {
   isAddSelectionShortcut,
   isMacPlatform,
@@ -850,6 +851,29 @@ export function useTerminalSession({
           shellNameRef.current = session.shell || 'shell'
           setShellName(session.shell || 'shell')
           onShellRef.current?.(session.shell || 'shell')
+          // SSH/Windows rely on application-emitted OSC titles; native POSIX
+          // PTYs can identify foreground apps even when they emit no title.
+          let nativeTitle = false
+
+          const titleListener = term.onTitleChange(title => {
+            if (!nativeTitle) {
+              onShellRef.current?.(title)
+            }
+          })
+
+          cleanup.push(() => titleListener.dispose())
+
+          if (terminalApi.process) {
+            cleanup.push(
+              watchTerminalProcess(
+                () => terminalApi.process!(session.id),
+                name => {
+                  nativeTitle = true
+                  onShellRef.current?.(name)
+                }
+              )
+            )
+          }
 
           const initial = term.hasSelection() ? term.getSelection() : ''
           selectionRef.current = initial

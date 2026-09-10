@@ -3,6 +3,7 @@ import { useStore } from '@nanostores/react'
 import type * as React from 'react'
 import { useCallback, useMemo } from 'react'
 
+import { $focusedTerminalId } from '@/app/right-sidebar/terminal/navigation'
 import { SidebarPanelLabel } from '@/app/shell/sidebar-label'
 import { DisclosureCaret } from '@/components/ui/disclosure-caret'
 import { SidebarGroup, SidebarGroupContent } from '@/components/ui/sidebar'
@@ -19,6 +20,8 @@ import {
 import { sessionBucketLabel } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { $sidebarSessionBranchOpen, toggleSidebarSessionBranchOpen } from '@/store/layout'
+import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
+import { $connection } from '@/store/session'
 import { sessionMatchesStoredId, sessionPinId, setSessions } from '@/store/session'
 import { $sessionDotStateById, hasLiveTurn } from '@/store/session-dot-state'
 
@@ -32,6 +35,7 @@ import {
   SidebarWorkspaceGroup,
   type SidebarWorkspaceTree
 } from './projects'
+import { $projectSessionOrders, orderProjectSessions, saveProjectSessionOrder } from './projects/session-order'
 import { WorkspaceAddButton } from './projects/workspace-header'
 import { ReorderableList, useSortableBindings } from './reorderable-list'
 import { SidebarSessionSkeletons } from './section-states'
@@ -39,7 +43,6 @@ import { SidebarSessionRow } from './session-row'
 import { VirtualSessionList } from './virtual-session-list'
 
 export const VIRTUALIZE_THRESHOLD = 25
-
 
 function seedSessionForOpen(session: SessionInfo): void {
   setSessions(prev => {
@@ -89,9 +92,7 @@ function SidebarSectionHeader({
   const labelBody = navLike ? (
     <>
       {icon}
-      <span className="min-w-0 flex-1 truncate leading-none">
-        {label}
-      </span>
+      <span className="min-w-0 flex-1 truncate leading-none">{label}</span>
       {meta && <SidebarSectionMeta>{meta}</SidebarSectionMeta>}
     </>
   ) : (
@@ -203,8 +204,7 @@ interface SidebarSessionsSectionProps {
   // sequence inside one, so a reorder no longer costs the whole list its
   // dividers. Pinned passes nothing — its rows arrive in pin order already.
   manualOrderIds?: string[]
-  // The flat session list is the only hand-reorderable surface (grouped/project
-  // views sort deterministically), so it owns the one ReorderableList.
+  // Flat-list ordering is separate from the project-scoped manual order below.
   onReorderSessions?: (ids: string[]) => void
   // Drag-to-reorder for the project overview list (top-level projects).
   onReorderProjects?: (ids: string[]) => void
@@ -275,6 +275,10 @@ export function SidebarSessionsSection({
 }: SidebarSessionsSectionProps) {
   const { t } = useI18n()
   const dividerLabels = t.sidebar.dateDivider
+  const focusedTerminal = useStore($focusedTerminalId)
+  const projectOrders = useStore($projectSessionOrders)
+  const profile = useStore($activeGatewayProfile)
+  const connection = useStore($connection)
   const statusDividerLabels = t.sidebar.statusDivider
   const dotStates = useStore($sessionDotStateById)
   const branchOpenById = useStore($sidebarSessionBranchOpen)
@@ -303,7 +307,8 @@ export function SidebarSessionsSection({
   // recency sort — the drag order is layered on per date group below, so the
   // buckets stay truthful and a reorder never costs the list its dividers.
   const displayEntries = useMemo(
-    () => flattenSessionsWithBranches(sessions, { branchOpenById, defaultBranchCollapsed: true, preserveOrder: pinned }),
+    () =>
+      flattenSessionsWithBranches(sessions, { branchOpenById, defaultBranchCollapsed: true, preserveOrder: pinned }),
     [sessions, branchOpenById, pinned]
   )
 
@@ -327,7 +332,7 @@ export function SidebarSessionsSection({
         hasBranchChildren,
         card,
         isPinned: pinned,
-        isSelected: session.id === activeSessionId,
+        isSelected: !focusedTerminal && session.id === activeSessionId,
         onArchive: () => onArchiveSession(session.id),
         onBranch: onBranchSession ? () => onBranchSession(session.id, session.profile) : undefined,
         onDelete: () => onDeleteSession(session.id),
@@ -350,6 +355,7 @@ export function SidebarSessionsSection({
     },
     [
       activeSessionId,
+      focusedTerminal,
       card,
       onArchiveSession,
       onBranchSession,
@@ -404,6 +410,33 @@ export function SidebarSessionsSection({
       ),
     [branchOpenById, renderRow]
   )
+
+  const renderProjectRows = (items: SessionInfo[], project: SidebarProjectTree) => {
+    const key = JSON.stringify([
+      connection?.mode ?? 'local',
+      connection?.mode === 'remote' ? (connection.baseUrl ?? '') : '',
+      normalizeProfileKey(profile),
+      project.id
+    ])
+
+    const order = projectOrders[key]
+
+    const entries = flattenSessionsWithBranches(orderProjectSessions(items, order), {
+      branchOpenById,
+      defaultBranchCollapsed: true,
+      preserveOrder: Boolean(order?.ids.length)
+    })
+
+    const ids = entries.filter(entry => !entry.branchStem).map(entry => entry.session.id)
+
+    return (
+      <ReorderableList ids={ids} onReorder={next => saveProjectSessionOrder(key, items, next)} sensors={dndSensors}>
+        {entries.map(({ session, branchStem, hasBranchChildren, branchChildCount, branchCollapsed }) =>
+          renderRow(session, ids.length > 1, branchStem, hasBranchChildren, branchChildCount, branchCollapsed)
+        )}
+      </ReorderableList>
+    )
+  }
 
   // Flat recents as list rows: grouped by recency when enabled, plain otherwise.
   // The hand-picked order is then applied INSIDE each date group, so dragging a
@@ -465,7 +498,7 @@ export function SidebarSessionsSection({
             onNewSession={onNewSessionInWorkspace}
             project={projectContent}
             removedSessionIds={removedSessionIds}
-            renderRows={renderRows}
+            renderRows={items => renderProjectRows(items, projectContent)}
             repoWorktrees={projectRepoWorktrees}
           />
         ) : (
@@ -493,7 +526,7 @@ export function SidebarSessionsSection({
         onNewSession={onNewSessionInWorkspace}
         previewSessions={projectOverviewPreviews?.[project.id]}
         project={project}
-        renderRows={renderRows}
+        renderRows={items => renderProjectRows(items, project)}
       />
     )
 
@@ -528,7 +561,7 @@ export function SidebarSessionsSection({
   } else if (flatVirtualized) {
     const virtual = (
       <VirtualSessionList
-        activeSessionId={activeSessionId}
+        activeSessionId={focusedTerminal ? null : activeSessionId}
         card={card}
         className={contentClassName}
         dividerAction={dividerAction}

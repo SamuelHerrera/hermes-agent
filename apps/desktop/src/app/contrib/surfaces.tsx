@@ -19,7 +19,6 @@ import { $freshDraftReady, $gatewayState } from '@/store/session'
 import { ChatView } from '../chat'
 import { ChatSidebar } from '../chat/sidebar'
 import { openSession } from '../open-session'
-import { TerminalPaneChrome } from '../right-sidebar/terminal/chrome'
 import { contributedRoutes, NEW_CHAT_ROUTE, ROUTES_AREA, sessionRoute } from '../routes'
 import { useStatusSnapshot } from '../shell/hooks/use-status-snapshot'
 import { useStatusbarItems } from '../shell/hooks/use-statusbar-items'
@@ -68,14 +67,6 @@ export const SidebarSurface = memo(function SidebarSurface({
   const latestActions = useMemo(() => latestSidebarActions(actions), [actions])
 
   return <ChatSidebar currentView={currentView} {...latestActions} />
-})
-
-export const TerminalSurface = memo(function TerminalSurface() {
-  return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-terminal-surface-background)">
-      <TerminalPaneChrome />
-    </div>
-  )
 })
 
 /** Owns the statusbar's own data hooks (status snapshot poll, contributed

@@ -12727,6 +12727,20 @@ ipcMain.handle('hermes:terminal:resize', (_event, id, size = {}) => {
 
   return true
 })
+ipcMain.handle('hermes:terminal:process', (event, id) => {
+  const info = terminalSessions.get(String(id || ''))
+
+  if (!info || info.webContentsId !== event.sender.id || info.sshScope !== undefined || process.platform === 'win32') {
+    return null
+  }
+
+  try {
+    return path.basename(info.pty.process || '') || null
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('hermes:terminal:cwd', async (_event, id) => {
   const sessionInfo = terminalSessions.get(String(id || ''))
 
