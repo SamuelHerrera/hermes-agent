@@ -25,6 +25,8 @@ import {
   renameProject
 } from '@/store/projects'
 
+import { RecentProjects } from './recent-projects'
+
 // Single dialog mounted once in the sidebar; it renders create / rename /
 // add-folder flows driven by the $projectDialog atom. Folders are chosen via
 // the native directory picker (reused from the default-project-dir setting).
@@ -202,6 +204,10 @@ export function ProjectDialog() {
               {p.addFolder}
             </Button>
           </div>
+        )}
+
+        {mode === 'create' && open && (
+          <RecentProjects disabled={submitting} onBusyChange={setSubmitting} onOpen={closeProjectDialog} />
         )}
 
         {mode === 'add-folder' && (

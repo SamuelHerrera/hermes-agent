@@ -8,6 +8,8 @@ import { ProjectDialog } from './project-dialog'
 
 afterEach(cleanup)
 
+vi.mock('./recent-projects', () => ({ RecentProjects: () => <section>Recently opened</section> }))
+
 vi.mock('@/i18n', () => ({
   useI18n: () => ({
     t: {

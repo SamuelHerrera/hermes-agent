@@ -12475,6 +12475,32 @@ def _(rid, params, pdb, conn) -> dict:
     return _ok(rid, {"project": _require_project(pdb, conn, params).to_dict()})
 
 
+@_projects_method("projects.recent")
+def _(rid, params, pdb, conn) -> dict:
+    return _ok(rid, {"projects": [p.to_dict() for p in pdb.list_recent_projects(conn)]})
+
+
+@_projects_method("projects.forget_recent")
+def _(rid, params, pdb, conn) -> dict:
+    project_id = str(params.get("id") or "").strip()
+    if not project_id:
+        raise ValueError("project id is required")
+    pdb.forget_recent_project(conn, project_id)
+    return _ok(rid, {"projects": [p.to_dict() for p in pdb.list_recent_projects(conn)]})
+
+
+@_projects_method("projects.record_recent")
+def _(rid, params, pdb, conn) -> dict:
+    pdb.record_recent_workspace(conn, str(params.get("path") or ""), params.get("name"))
+    return _ok(rid, {})
+
+
+@_projects_method("projects.open_recent")
+def _(rid, params, pdb, conn) -> dict:
+    pid = pdb.reopen_recent_project(conn, str(params.get("id") or ""))
+    return _ok(rid, {"project": pdb.get_project(conn, pid).to_dict()})
+
+
 @_projects_method("projects.create")
 def _(rid, params, pdb, conn) -> dict:
     pid = pdb.create_project(

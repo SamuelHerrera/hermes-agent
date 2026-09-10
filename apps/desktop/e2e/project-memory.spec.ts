@@ -98,6 +98,33 @@ test('project removal remembers settings across clients and the simplified creat
     expect(fs.readFileSync(path.join(folder, 'IDEA.md'), 'utf8')).toBe('Existing user document\n')
     await expect(fixture.page.getByText('Renamed workspace', { exact: true }).first()).toBeVisible()
     await fixture.page.screenshot({ path: testInfo.outputPath('restored-project.png') })
+    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    const recents = fixture.page.getByRole('region', { name: 'Recently opened' })
+    await expect(recents.getByText('Renamed workspace', { exact: true })).toBeVisible()
+    await fixture.page.screenshot({ path: testInfo.outputPath('recent-projects.png') })
+    await recents.getByRole('button', { name: 'Remove from recent projects: Renamed workspace', exact: true }).click()
+    await expect(recents.getByText('No recent projects.', { exact: true })).toBeVisible()
+    const kept = await rpc<{ project: Project }>(fixture.page, 'projects.get', { id: original.project.id })
+    expect(kept.project.icon).toBe(original.project.icon)
+    expect(kept.project.color).toBe(original.project.color)
+    // Forgetting history is durable across fresh clients and dialog mounts.
+    await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await fixture.page.reload()
+    await waitForAppReady(fixture)
+    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await expect(recents.getByText('No recent projects.', { exact: true })).toBeVisible()
+    await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await rpc(fixture.page, 'projects.set_active', { id: original.project.id })
+    await rpc(fixture.page, 'projects.delete', { id: original.project.id })
+    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await recents.getByRole('button', { name: 'Open project: Renamed workspace', exact: true }).click()
+    await expect(fixture.page.getByRole('dialog')).toHaveCount(0)
+    const reopened = await rpc<{ project: Project }>(fixture.page, 'projects.get', { id: original.project.id })
+    expect(reopened.project).toMatchObject({
+      id: original.project.id,
+      icon: original.project.icon,
+      color: original.project.color
+    })
   } finally {
     await fixture.cleanup()
   }

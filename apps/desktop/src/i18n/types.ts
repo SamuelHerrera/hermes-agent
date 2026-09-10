@@ -1615,6 +1615,12 @@ export interface Translations {
       namePlaceholder: string
       foldersLabel: string
       noFolders: string
+      recentTitle: string
+      recentHint: string
+      recentEmpty: string
+      recentFailed: string
+      removeRecent: string
+      openRecent: string
       addFolder: string
       primaryBadge: string
       removeFolder: string

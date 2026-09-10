@@ -23,6 +23,7 @@ import {
   openProjectCreate,
   pickProjectFolder,
   projectColorForCwd,
+  projectHistory,
   projectIdForCwd,
   projectNameForCwd,
   refreshProjects,
@@ -472,6 +473,51 @@ describe('projects RPC capability', () => {
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'warning', message: 'sidebar.projects.staleBackend' })
     )
+  })
+})
+
+describe('project history', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    $activeGatewayProfile.set('default')
+  })
+
+  it('records inferred projects on entry without creating saved projects', async () => {
+    const request = vi.fn().mockResolvedValue({})
+    activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
+    $projectTree.set([
+      { id: '/repo', path: '/repo', label: 'Repo', repos: [], sessionCount: 0, archivedSessionCount: 0 }
+    ])
+    enterProject('/repo')
+    expect(request).toHaveBeenCalledWith('projects.record_recent', { path: '/repo', name: 'Repo' })
+  })
+
+  it('forgets only history and rejects actions after a profile switch', async () => {
+    const request = vi.fn().mockResolvedValue({ projects: [] })
+    activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
+    const history = await projectHistory()
+    await history.forget('p_saved')
+    expect(request).toHaveBeenCalledExactlyOnceWith('projects.forget_recent', { id: 'p_saved' })
+    $activeGatewayProfile.set('other')
+    await expect(history.open('p_saved')).rejects.toThrow('profile changed')
+    expect(request).toHaveBeenCalledTimes(1)
+    $activeGatewayProfile.set('default')
+  })
+
+  it('rejects late history responses after the connection changes', async () => {
+    let resolve!: (value: unknown) => void
+    const request = vi.fn(
+      () =>
+        new Promise(r => {
+          resolve = r
+        })
+    )
+    activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
+    const history = await projectHistory()
+    const pending = history.list()
+    activeGateway.mockReturnValue({ connectionState: 'open', request: vi.fn() } as never)
+    resolve({ projects: [] })
+    await expect(pending).rejects.toThrow('profile changed')
   })
 })
 

@@ -60,6 +60,34 @@ def test_methods_registered():
         assert m in server._methods
 
 
+def test_recent_reopen_keeps_identity_and_history_removal_keeps_settings(tmp_path):
+    folder = str(tmp_path / "repo")
+    project = _call("projects.create", {"name": "Saved", "folders": [folder], "icon": "rocket", "color": "red"})["project"]
+    _call("projects.delete", {"id": project["id"]})
+    assert _call("projects.recent")["projects"][0]["id"] == project["id"]
+    reopened = _call("projects.open_recent", {"id": project["id"]})["project"]
+    assert (reopened["id"], reopened["icon"], reopened["color"]) == (project["id"], "rocket", "red")
+    _call("projects.forget_recent", {"id": project["id"]})
+    assert _call("projects.recent")["projects"] == []
+    assert _call("projects.get", {"id": project["id"]})["project"] == reopened
+    assert _call("projects.list")["active_id"] == project["id"]
+    _call("projects.set_active", {"id": project["id"]})
+    assert len(_call("projects.recent")["projects"]) == 1
+
+
+def test_inferred_project_open_is_recorded_without_promoting_until_reopened(tmp_path):
+    folder = str(tmp_path / "inferred")
+    _call("projects.record_recent", {"path": folder, "name": "Inferred"})
+    assert _call("projects.list")["projects"] == []
+    recent = _call("projects.recent")["projects"][0]
+    assert recent["primary_path"] == folder
+    opened = _call("projects.open_recent", {"id": recent["id"]})["project"]
+    assert opened["name"] == "Inferred"
+    assert [p["id"] for p in _call("projects.recent")["projects"]] == [opened["id"]]
+    assert _call("projects.open_recent", {"id": opened["id"]})["project"]["id"] == opened["id"]
+    assert len(_call("projects.list")["projects"]) == 1
+
+
 def test_for_cwd_is_a_long_handler():
     # git-probe handler must run off the dispatch thread.
     assert "projects.for_cwd" in server._LONG_HANDLERS

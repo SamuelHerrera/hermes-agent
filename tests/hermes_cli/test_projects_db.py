@@ -55,6 +55,48 @@ def test_create_get_list(conn):
     assert len(pdb.list_projects(conn)) == 1
 
 
+def test_recent_history_is_independent_of_removed_configuration(tmp_path):
+    db = tmp_path / "history.db"
+    folder = str(tmp_path / "repo")
+    with pdb.connect_closing(db) as conn:
+        first = pdb.create_project(conn, name="First", folders=[folder], icon="rocket", color="red")
+        second = pdb.create_project(conn, name="Second", folders=[str(tmp_path / "second")])
+        assert [p.id for p in pdb.list_recent_projects(conn)] == [second, first]
+        pdb.set_active(conn, first)
+        assert [p.id for p in pdb.list_recent_projects(conn)] == [first, second]
+        pdb.delete_project(conn, first)
+        assert pdb.list_recent_projects(conn)[0].id == first
+        assert pdb.forget_recent_project(conn, first)
+        assert [p.id for p in pdb.list_recent_projects(conn)] == [second]
+        assert pdb.get_active_id(conn) is None
+    with pdb.connect_closing(db) as conn:
+        assert [p.id for p in pdb.list_recent_projects(conn)] == [second]
+        assert pdb.create_project(conn, name="New name", folders=[folder]) == first
+        restored = pdb.list_recent_projects(conn)[0]
+        assert (restored.id, restored.name, restored.icon, restored.color) == (first, "New name", "rocket", "red")
+        pdb.forget_recent_project(conn, first)
+        assert pdb.get_project(conn, first) is not None
+        pdb.set_active(conn, first)
+        assert pdb.list_recent_projects(conn)[0].id == first
+
+
+def test_recent_history_migration_seeds_once_and_stays_profile_local(tmp_path):
+    db = tmp_path / "old.db"
+    with pdb.connect_closing(db) as conn:
+        pid = pdb.create_project(conn, name="Existing", folders=[str(tmp_path / "repo")])
+        conn.execute("DROP TABLE project_recents")
+        conn.execute("DELETE FROM project_meta WHERE key = 'recents_seeded'")
+        conn.commit()
+    pdb._INITIALIZED_PATHS.discard(str(db.resolve()))
+    with pdb.connect_closing(db) as conn:
+        assert [p.id for p in pdb.list_recent_projects(conn)] == [pid]
+        pdb.forget_recent_project(conn, pid)
+    pdb._INITIALIZED_PATHS.discard(str(db.resolve()))
+    with pdb.connect_closing(db) as conn, pdb.connect_closing(tmp_path / "other.db") as other:
+        assert pdb.list_recent_projects(conn) == []
+        assert pdb.list_recent_projects(other) == []
+
+
 def test_readding_removed_project_restores_settings_with_new_form_values(tmp_path):
     path = tmp_path / "projects.db"
     with pdb.connect_closing(path) as conn:

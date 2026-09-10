@@ -85,6 +85,15 @@ CREATE TABLE IF NOT EXISTS project_meta (
     value  TEXT
 );
 
+-- History is independent of sidebar visibility and remembered settings.
+-- Saved projects use their id; inferred workspaces use their path.
+CREATE TABLE IF NOT EXISTS project_recents (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    path       TEXT,
+    opened_at  INTEGER NOT NULL
+);
+
 -- Git repos found by scanning the filesystem (desktop "repo-first" discovery).
 -- Cached here so the overview is instant after the first scan instead of
 -- re-walking the disk every time the Projects view opens.
@@ -211,6 +220,13 @@ def _migrate_add_optional_columns(conn: sqlite3.Connection) -> None:
             _add_column_if_missing(conn, "projects", col, f"{col} TEXT")
     if "deleted" not in cols:
         _add_column_if_missing(conn, "projects", "deleted", "deleted INTEGER NOT NULL DEFAULT 0")
+    with write_txn(conn):
+        if not conn.execute("SELECT 1 FROM project_meta WHERE key = 'recents_seeded'").fetchone():
+            conn.execute(
+                "INSERT OR IGNORE INTO project_recents (id, name, path, opened_at) "
+                "SELECT id, name, primary_path, created_at * 1000000000 FROM projects"
+            )
+            conn.execute("INSERT INTO project_meta (key, value) VALUES ('recents_seeded', '1')")
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +432,7 @@ def create_project(
                 "VALUES (?, ?, ?, ?, ?)",
                 (pid, path, None, 1 if path == primary else 0, now),
             )
+        _record_recent_locked(conn, pid, name, primary)
     return pid
 
 
@@ -434,6 +451,74 @@ def list_deleted_projects(conn: sqlite3.Connection) -> List[Project]:
     """Remembered workspaces, excluded from normal lookup and discovery."""
     rows = conn.execute("SELECT * FROM projects WHERE deleted = 1").fetchall()
     return [_attach_folders(conn, _project_from_row(r)) for r in rows]
+
+
+def _record_recent_locked(conn: sqlite3.Connection, project_id: str, name: str, path: Optional[str]) -> None:
+    if path and project_id != path:
+        # Promoting an inferred workspace must not leave a duplicate history row.
+        conn.execute("DELETE FROM project_recents WHERE id = ?", (path,))
+    conn.execute(
+        "INSERT INTO project_recents (id, name, path, opened_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET name = excluded.name, path = excluded.path, opened_at = excluded.opened_at",
+        (project_id, name, path, time.time_ns()),
+    )
+
+
+def list_recent_projects(conn: sqlite3.Connection) -> List[Project]:
+    projects = []
+    for recent in conn.execute("SELECT * FROM project_recents ORDER BY opened_at DESC, id").fetchall():
+        # Include soft-removed projects, but resolve current names/folders/settings.
+        row = conn.execute("SELECT * FROM projects WHERE id = ?", (recent["id"],)).fetchone()
+        if row:
+            projects.append(_attach_folders(conn, _project_from_row(row)))
+        else:
+            projects.append(Project(
+                id=recent["id"], slug="", name=recent["name"], created_at=0,
+                primary_path=recent["path"],
+                folders=[ProjectFolder(path=recent["path"], is_primary=True)] if recent["path"] else [],
+            ))
+    return projects
+
+
+def forget_recent_project(conn: sqlite3.Connection, project_id: str) -> bool:
+    """Remove only the history entry, never the project or its settings."""
+    with write_txn(conn):
+        cur = conn.execute("DELETE FROM project_recents WHERE id = ?", (project_id,))
+    return cur.rowcount > 0
+
+
+def record_recent_workspace(conn: sqlite3.Connection, path: str, name: Optional[str] = None) -> None:
+    """Record an explicitly opened inferred workspace without promoting it."""
+    if not path or not os.path.isabs(os.path.expanduser(path)):
+        raise ValueError("workspace path must be absolute")
+    path = _normalize_path(path)
+    with write_txn(conn):
+        project = project_for_path(conn, path)
+        if project:
+            _record_recent_locked(conn, project.id, project.name, project.primary_path)
+        else:
+            _record_recent_locked(conn, path, str(name or "").strip() or os.path.basename(path), path)
+
+
+def reopen_recent_project(conn: sqlite3.Connection, project_id: str) -> str:
+    """Open the selected history entry, restoring a saved row by exact id."""
+    with write_txn(conn):
+        recent = conn.execute("SELECT * FROM project_recents WHERE id = ?", (project_id,)).fetchone()
+        if recent is None:
+            raise ValueError("project is no longer in recent history")
+        row = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if row:
+            conn.execute("UPDATE projects SET deleted = 0, archived = 0 WHERE id = ?", (project_id,))
+            conn.execute(
+                "INSERT INTO project_meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (_ACTIVE_META_KEY, project_id),
+            )
+            _record_recent_locked(conn, project_id, row["name"], row["primary_path"])
+            return project_id
+    existing = project_for_path(conn, recent["path"])
+    pid = existing.id if existing else create_project(conn, name=recent["name"], folders=[recent["path"]])
+    set_active(conn, pid)
+    return pid
 
 
 def get_project(
@@ -654,6 +739,9 @@ def set_active(conn: sqlite3.Connection, project_id: Optional[str]) -> None:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (_ACTIVE_META_KEY, project_id),
             )
+            project = get_project(conn, project_id)
+            if project:
+                _record_recent_locked(conn, project.id, project.name, project.primary_path)
 
 
 def get_active_id(conn: sqlite3.Connection) -> Optional[str]:

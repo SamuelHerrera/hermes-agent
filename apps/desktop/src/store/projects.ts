@@ -280,6 +280,12 @@ export function enterProject(id: string): void {
   // to pin, so they're view-scope only.
   if (id.startsWith('p_')) {
     void setActiveProject(id).catch(() => undefined)
+  } else if (id !== NO_PROJECT_ID) {
+    const project = $projectTree.get().find(node => node.id === id)
+    const path = projectRootCwd(project)
+    if (path) {
+      void gatewayRequest('projects.record_recent', { path, name: project?.label }).catch(() => undefined)
+    }
   }
 }
 
@@ -1097,6 +1103,36 @@ export async function setActiveProject(id: null | string): Promise<void> {
 }
 
 // ── Project management dialog ────────────────────────────────────────────────
+// Bind all history actions to the dialog's original gateway/profile. A switch
+// must never apply an old row or write its id into a different backend.
+export async function projectHistory() {
+  const { gateway, profile } = await activeProjectsContext()
+  const assertCurrent = () => {
+    if (gateway !== activeGateway() || profile !== ($activeGatewayProfile.get() || 'default')) {
+      throw new Error('Active Hermes profile changed')
+    }
+  }
+  const request = async <T>(method: string, params: Record<string, unknown> = {}) => {
+    assertCurrent()
+    const res = await gatewayRequestOn<T>(gateway, method, params)
+    assertCurrent()
+    return res
+  }
+  return {
+    list: async () => (await request<{ projects: ProjectInfo[] }>('projects.recent')).projects,
+    forget: async (id: string) =>
+      (await request<{ projects: ProjectInfo[] }>('projects.forget_recent', { id })).projects,
+    open: async (id: string) => {
+      const { project } = await request<{ project: ProjectInfo }>('projects.open_recent', { id })
+      $projects.set([...$projects.get().filter(p => p.id !== project.id), project])
+      $projectTree.set([projectInfoToTreeNode(project), ...$projectTree.get().filter(p => p.id !== project.id)])
+      $activeProjectId.set(project.id)
+      goToProject(project.id)
+      void refreshProjectTreeOn(gateway)
+    }
+  }
+}
+
 // A single dialog mounted in the sidebar reads this atom, so a project node's
 // menu can open create / rename / add-folder flows without prop threading
 // (mirrors $profileCreateRequest).
