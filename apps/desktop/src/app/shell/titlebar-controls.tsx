@@ -448,17 +448,18 @@ export function TitlebarControls({
   // The left chrome toggle owns the fixed sessions/files panel.
   const leftEdge = { open: sidebarOpen, toggle: toggleSidebarOpen }
 
+  const sidebarTool: TitlebarTool = {
+    actionId: 'view.toggleSidebar',
+    icon: <TitlebarIcon name="layout-sidebar-left" />,
+    id: 'sidebar',
+    label: leftEdge.open ? t.titlebar.hideSidebar : t.titlebar.showSidebar,
+    onSelect: () => {
+      triggerHaptic('tap')
+      leftEdge.toggle()
+    }
+  }
+
   const leftToolbarTools: TitlebarTool[] = [
-    {
-      actionId: 'view.toggleSidebar',
-      icon: <TitlebarIcon name="layout-sidebar-left" />,
-      id: 'sidebar',
-      label: leftEdge.open ? t.titlebar.hideSidebar : t.titlebar.showSidebar,
-      onSelect: () => {
-        triggerHaptic('tap')
-        leftEdge.toggle()
-      }
-    },
     {
       active: keepAwake,
       disabled: keepAwakeBusy,
@@ -723,6 +724,16 @@ export function TitlebarControls({
 
   return (
     <>
+      <div
+        className={titlebarToolClusterClass}
+        data-titlebar-sidebar-toggle
+        style={{
+          left: 'var(--titlebar-controls-left, 14px)',
+          top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
+        }}
+      >
+        <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
+      </div>
       {/*
         Pane-scoped tools (preview's monitor / devtools / refresh / X) render
         as their own fixed cluster. AppShell sets --shell-preview-toolbar-gap
@@ -752,29 +763,26 @@ export function TitlebarControls({
           // This toolbar overlays the full-height sidebar scroll rail by
           // design: no backing strip or layout spacer adds margin or shortens
           // the scrollbar. Keep only the toolbar itself opaque for legibility.
-          'left-2.5 overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)'
+          'left-2.5 overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)',
+          !sidebarOpen && 'hidden'
         )}
         ref={toolbarRef}
         style={{ top: 'var(--titlebar-height, 34px)', width: toolbarWidth }}
       >
+        <TitlebarOverflowMenu
+          navigate={navigate}
+          statusbarItems={overflowStatusbarItems}
+          tools={overflowOptionalToolbarTools}
+        />
+        <TitlebarProfileMenu />
         {leftToolbarTools
           .filter(tool => !tool.hidden)
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
-        {sidebarOpen && (
-          <>
-            <TitlebarOverflowMenu
-              navigate={navigate}
-              statusbarItems={overflowStatusbarItems}
-              tools={overflowOptionalToolbarTools}
-            />
-            {visibleExpandableToolbarItems.map(renderToolbarInlineItem)}
-            <TitlebarProfileMenu />
-            <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-            {visibleCoreToolbarItems.map(renderToolbarInlineItem)}
-          </>
-        )}
+        {visibleExpandableToolbarItems.map(renderToolbarInlineItem)}
+        <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
+        {visibleCoreToolbarItems.map(renderToolbarInlineItem)}
       </div>
     </>
   )

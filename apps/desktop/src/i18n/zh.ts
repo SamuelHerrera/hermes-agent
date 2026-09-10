@@ -860,7 +860,7 @@ export const zh: Translations = {
       alwaysOnBackendInstalled: 'Installed',
       alwaysOnBackendInstalledRunning: 'Installed / Running',
       restartBackend: 'Restart backend',
-      restartGateway: 'Restart WhatsApp gateway',
+      restartGateway: 'Restart gateway',
       localServicesUpdatedTitle: 'Local services updated',
       localServicesFailed: 'Local service operation failed',
       localServicesUnavailableTitle: 'Local services unavailable',

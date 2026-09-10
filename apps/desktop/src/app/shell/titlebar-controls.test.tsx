@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $keepAwake } from '@/store/keep-awake'
-import { setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
+import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
 
 import type { StatusbarItem } from './statusbar-controls'
 import { TitlebarControls } from './titlebar-controls'
@@ -20,11 +20,22 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 afterEach(() => {
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
   act(() => $keepAwake.set(false))
+  act(() => setSidebarOpen(true))
   cleanup()
   vi.clearAllMocks()
 })
 
 describe('TitlebarControls', () => {
+  it('keeps the sidebar toggle in the titlebar when the sidebar is hidden', () => {
+    render(<MemoryRouter><TitlebarControls onOpenSettings={vi.fn()} /></MemoryRouter>)
+    const toggle = screen.getByRole('button', { name: 'Hide sidebar' })
+    expect(toggle.closest('[data-titlebar-sidebar-toggle]')).toBeTruthy()
+    expect(within(screen.getByLabelText('App controls')).queryByRole('button', { name: 'Hide sidebar' })).toBeNull()
+    fireEvent.click(toggle)
+    expect($sidebarOpen.get()).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }))
+    expect($sidebarOpen.get()).toBe(true)
+  })
   it('aligns the sidebar app controls flush with the pane tab row', () => {
     render(
       <MemoryRouter>
@@ -133,16 +144,16 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
-      'Hide sidebar',
-      'Keep computer awake: Off',
       'More app actions',
       'Profiles',
+      'Keep computer awake: Off',
       'Codex usage unavailable',
+      'Approval mode: Off',
       'Show terminal',
       'New project',
       'New session'
     ])
-    expect(appControls.children[2]).toBe(more)
+    expect(appControls.children[0]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
@@ -150,7 +161,7 @@ describe('TitlebarControls', () => {
     fireEvent.click(more)
 
     expect(await screen.findByRole('menuitem', { name: 'Command Center' })).toBeTruthy()
-    expect(await screen.findByRole('menuitem', { name: 'Approvals' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
@@ -186,11 +197,11 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
-      'Hide sidebar',
-      'Keep computer awake: Off',
       'More app actions',
-      'Capabilities',
       'Profiles',
+      'Keep computer awake: Off',
+      'Capabilities',
+      'Messaging',
       'Codex usage unavailable',
       'Mute haptics',
       'Approval mode: Off',

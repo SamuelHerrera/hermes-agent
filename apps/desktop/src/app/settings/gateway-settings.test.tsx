@@ -117,7 +117,7 @@ describe('GatewaySettings', () => {
     render(<GatewaySettings />)
 
     expect(await screen.findByRole('button', { name: 'Restart backend' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Restart WhatsApp gateway' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restart gateway' })).toBeTruthy()
     expect(await screen.findByText('Installed / Running')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Install always-on backend' })).toBeNull()
     expect(screen.getByText('Always-on local services')).toBeTruthy()
