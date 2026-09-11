@@ -326,6 +326,9 @@ function SidebarSessionRowImpl({
   ) : null
 
   const hasNestedChildren = hasBranchChildren || terminalChildCount > 0
+  // A mixed list has one disclosure authority. Independent terminal state may
+  // have the opposite default (or a stale persisted value), so use it only for
+  // terminal-only rows, never alongside the parent's branch disclosure.
   const nestedChildrenCollapsed = hasBranchChildren ? branchCollapsed : terminalChildrenCollapsed
 
   const expandChildrenLabel = hasBranchChildren
@@ -349,9 +352,10 @@ function SidebarSessionRowImpl({
           event.preventDefault()
           event.stopPropagation()
           triggerHaptic('selection')
-          onToggleBranch?.()
 
-          if (terminalChildCount > 0) {
+          if (hasBranchChildren) {
+            onToggleBranch?.()
+          } else if (terminalChildCount > 0) {
             toggleSidebarSessionTerminalOpen(session.id, true)
           }
         }}
@@ -662,7 +666,7 @@ function SidebarSessionRowImpl({
           ) : null}
         </SidebarRowShell>
       </SessionContextMenu>
-      {terminalChildrenCollapsed ? null : <SessionTerminalRows session={session} />}
+      {nestedChildrenCollapsed ? null : <SessionTerminalRows session={session} />}
     </div>
   )
 }

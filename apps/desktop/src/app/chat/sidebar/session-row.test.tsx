@@ -1,3 +1,4 @@
+import { useStore } from '@nanostores/react'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { atom } from 'nanostores'
 import type * as React from 'react'
@@ -7,9 +8,15 @@ import { $terminals } from '@/app/right-sidebar/terminal/terminals'
 import type { SessionInfo } from '@/hermes'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import type * as ChatRuntime from '@/lib/chat-runtime'
+import { flattenSessionsWithBranches } from '@/lib/session-branch-tree'
 import type * as Time from '@/lib/time'
 import type * as ComposerStatusStore from '@/store/composer-status'
-import { $sidebarRowMeta, $sidebarSessionTerminalOpen } from '@/store/layout'
+import {
+  $sidebarRowMeta,
+  $sidebarSessionBranchOpen,
+  $sidebarSessionTerminalOpen,
+  toggleSidebarSessionBranchOpen
+} from '@/store/layout'
 import { setSessions } from '@/store/session'
 import type * as SessionStore from '@/store/session'
 import { setSessionColorOverride } from '@/store/session-color'
@@ -23,8 +30,11 @@ afterEach(() => {
   cleanup()
   act(() => {
     $sidebarRowMeta.set(['preview', 'updated'])
+    $sidebarSessionBranchOpen.set({})
     $sidebarSessionTerminalOpen.set({})
     $terminals.set([])
+    clearAllSessionStates()
+    setSessions([])
   })
 })
 
@@ -485,6 +495,78 @@ describe('SidebarSessionRow', () => {
     expect(container.querySelector('[data-session-terminals="s1"]')).toBeNull()
     expect(container.querySelector('[data-session-terminal-count]')?.textContent).toContain('1')
   })
+
+  it.each([
+    { branchOpen: false, terminalOpen: true, card: false },
+    { branchOpen: true, terminalOpen: false, card: false },
+    { branchOpen: false, terminalOpen: true, card: true },
+    { branchOpen: true, terminalOpen: false, card: true }
+  ])(
+    'keeps terminals and subagents in the same disclosure (branch=$branchOpen, terminal=$terminalOpen, card=$card)',
+    ({ branchOpen, terminalOpen, card }) => {
+      const owner = makeSession({ id: 'mixed-parent', title: 'Mixed parent' })
+
+      const child = makeSession({
+        id: 'mixed-child',
+        parent_session_id: owner.id,
+        delegate_parent_session_id: owner.id,
+        title: 'Review subagent'
+      })
+
+      const sessions = [owner, child]
+
+      act(() => {
+        setSessions(sessions)
+        $sidebarSessionBranchOpen.set({ [owner.id]: branchOpen })
+        $sidebarSessionTerminalOpen.set({ [owner.id]: terminalOpen })
+        publishSessionState('runtime-mixed', createClientSessionState(owner.id))
+        $terminals.set([
+          {
+            auto: true,
+            cwd: '/repo',
+            id: 'mixed-terminal',
+            kind: 'agent',
+            ownerSessionId: 'runtime-mixed',
+            title: 'Running terminal'
+          }
+        ])
+      })
+
+      function MixedList() {
+        const branchOpenById = useStore($sidebarSessionBranchOpen)
+
+        return flattenSessionsWithBranches(sessions, { branchOpenById }).map(entry => (
+          <SidebarSessionRow
+            {...entry}
+            card={card}
+            isPinned={false}
+            isSelected={false}
+            key={entry.session.id}
+            onArchive={noop}
+            onDelete={noop}
+            onPin={noop}
+            onResume={noop}
+            onToggleBranch={() => toggleSidebarSessionBranchOpen(entry.session.id)}
+          />
+        ))
+      }
+
+      const { container, unmount } = render(<MixedList />)
+
+      for (const open of [branchOpen, !branchOpen, branchOpen]) {
+        expect(screen.queryByText('Review subagent') !== null).toBe(open)
+        expect(screen.queryByText('Running terminal') !== null).toBe(open)
+        expect(container.querySelector('[data-session-child-count]')?.textContent).toBe('1')
+        expect(container.querySelector('[data-session-terminal-count]')?.textContent).toBe('1')
+        fireEvent.click(screen.getByRole('button', { name: open ? 'Collapse child chats' : 'Expand child chats' }))
+      }
+
+      unmount()
+      render(<MixedList />)
+      expect(screen.queryByText('Review subagent') !== null).toBe(!branchOpen)
+      expect(screen.queryByText('Running terminal') !== null).toBe(!branchOpen)
+    }
+  )
 
   // Full-title tooltip on hover (#83000-class ask): the label is a tooltip
   // trigger, but the tip only opens when the title is actually truncated.
