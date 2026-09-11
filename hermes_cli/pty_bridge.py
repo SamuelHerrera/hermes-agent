@@ -248,7 +248,7 @@ class PtyBridge:
     # -- teardown ---------------------------------------------------------
 
     def close(self) -> None:
-        """Terminate the child (SIGTERM → 0.5s grace → SIGKILL) and close fds.
+        """Terminate owned jobs (HUP → TERM → KILL, 0.5s grace) and close fds.
 
         Idempotent.  Reaping the child is important so we don't leak
         zombies across the lifetime of the dashboard process.
@@ -257,27 +257,76 @@ class PtyBridge:
             return
         self._closed = True
 
-        try:
-            pgid = os.getpgid(self._proc.pid)  # windows-footgun: ok — POSIX-only module (imports fcntl/termios/ptyprocess at top)
-        except Exception:
-            pgid = None
+        import psutil
 
-        # SIGHUP is the conventional "your terminal went away" signal.
-        # Send it to the whole foreground process group, not just the PTY
-        # leader: the dashboard TUI starts helper children such as the Python
-        # slash worker, and killing only the leader can strand those helpers.
-        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):  # windows-footgun: ok — POSIX-only module (imports fcntl/termios/ptyprocess at top)
-            if not self._proc.isalive():
-                break
+        # ptyprocess creates a new session whose id is the child's pid.
+        # Interactive shells put jobs in separate process groups. Capture
+        # process identities before signaling the leader, including descendants
+        # that created their own session, and retain them after reparenting.
+        # psutil checks creation time when signaling, avoiding PID-reuse kills.
+        owned = {}
+
+        def process_ids():
             try:
-                if pgid is not None:
-                    os.killpg(pgid, sig)  # windows-footgun: ok — POSIX-only module (imports fcntl/termios/ptyprocess at top)
-                else:
-                    self._proc.kill(sig)
-            except Exception:
-                pass
+                return psutil.pids()
+            except PermissionError:
+                if sys.platform != "darwin":
+                    raise
+                # macOS sandbox profiles may deny sysctl's process table but
+                # allow libproc enumeration (and inspection of our children).
+                import ctypes
+                libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+                size = 1024
+                while True:
+                    buf = (ctypes.c_int * size)()
+                    count = libproc.proc_listallpids(buf, ctypes.sizeof(buf))
+                    if count <= 0:
+                        raise OSError(ctypes.get_errno(), "Cannot enumerate PTY processes")
+                    if count < size:
+                        return list(buf[:count])
+                    size *= 2
+
+        def collect_session():
+            parents = {}
+            try:
+                pids = process_ids()
+            except (OSError, psutil.Error):
+                pids = [self.pid]
+            for pid in pids:
+                try:
+                    proc = psutil.Process(pid)
+                    if os.getsid(pid) == self.pid:
+                        owned.setdefault(pid, proc)
+                    parents[pid] = (proc.ppid(), proc)
+                except (OSError, psutil.Error):
+                    pass
+            # Include descendants that deliberately left the PTY session.
+            changed = True
+            while changed:
+                changed = False
+                for pid, (parent, proc) in parents.items():
+                    if pid not in owned and (parent == self.pid or parent in owned):
+                        owned[pid] = proc
+                        changed = True
+
+        def alive(proc):
+            try:
+                return proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+            except psutil.Error:
+                return False
+
+        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):
+            collect_session()
+            survivors = [proc for proc in owned.values() if alive(proc)]
+            if not survivors:
+                break
+            for proc in survivors:
+                try:
+                    proc.send_signal(sig)
+                except psutil.Error:
+                    pass
             deadline = time.monotonic() + 0.5
-            while self._proc.isalive() and time.monotonic() < deadline:
+            while any(alive(proc) for proc in survivors) and time.monotonic() < deadline:
                 time.sleep(0.02)
 
         try:

@@ -233,6 +233,7 @@ export function isIdlePromptOnly(serialized: string): boolean {
 interface UseTerminalSessionOptions {
   /** Renderer-side terminal id (the tab handle), used to key the agent reader. */
   id: string
+  profile?: string
   cwd: string
   /** Only the active tab is visible, owns the agent reader, and runs injections. */
   active: boolean
@@ -382,12 +383,16 @@ function quotePathForShell(path: string, shellName: string): string {
 export function useTerminalSession({
   id,
   cwd,
+  profile,
   active,
   onAddSelectionToChat,
   restoreCwd,
   reviveBuffer,
   onShell
 }: UseTerminalSessionOptions) {
+  // The persisted tab owns this shell even if the foreground changes during font loading.
+  const ownerRef = useRef(profile || 'default')
+
   // Key off renderedMode (the painted surface type), not resolvedMode (the
   // clicked switch) — a skin can keep a light surface in "dark" mode, and we
   // must match the surface or the ANSI palette inverts against it. themeName
@@ -836,9 +841,14 @@ export function useTerminalSession({
     const startSession = () =>
       void terminalApi
         // Prefer the prior session's last cwd so a reopened tab lands where the
-        // user last `cd`'d; the main side falls back to the launch cwd (then
-        // home) if that dir no longer exists.
-        .start({ cols: term.cols, cwd: initialRestoreCwdRef.current || cwd, rows: term.rows })
+        // user last `cd`'d. Remote backends reject an invalid explicit cwd;
+        // omit an unset launch directory so the backend chooses its own home.
+        .start({
+          profile: ownerRef.current,
+          cols: term.cols,
+          cwd: initialRestoreCwdRef.current || cwd || undefined,
+          rows: term.rows
+        })
         .then(session => {
           if (disposed) {
             void terminalApi.dispose(session.id)
@@ -903,6 +913,8 @@ export function useTerminalSession({
           window.requestAnimationFrame(() => {
             term.clearSelection() // drop any selection painted over transient boot rows
           })
+
+          return terminalApi.attach(session.id)
         })
         .catch(error => {
           setStatus('closed')

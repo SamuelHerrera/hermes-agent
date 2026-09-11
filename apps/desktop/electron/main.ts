@@ -59,7 +59,7 @@ import {
 } from './bootstrap-platform'
 import { decideBootstrapRepair } from './bootstrap-repair-guard'
 import { runBootstrap } from './bootstrap-runner'
-import { applyConnectionChange, resolveTerminalConnection } from './connection-apply'
+import { applyConnectionChange } from './connection-apply'
 import {
   authModeFromStatus,
   buildGatewayWsUrl,
@@ -217,6 +217,7 @@ import {
   revalidatePooledRemoteBackends,
   revalidateRemoteConnection
 } from './remote-liveness'
+import { openRemoteTerminal } from './remote-terminal'
 import { missingRendererAssets } from './renderer-bundle'
 import {
   attachRendererConsoleCapture,
@@ -242,6 +243,8 @@ import {
   SshConnection
 } from './ssh-connection'
 import { createStreamThrottle } from './stream-throttle'
+import { createTerminalDelivery } from './terminal-delivery'
+import { resolveTerminalRoute } from './terminal-route'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
 import {
   compareApiUrl,
@@ -7540,38 +7543,6 @@ async function teardownSshConnection(profile) {
   }
 }
 
-// CRITICAL: this must mirror resolveRemoteBackend's precedence, not just return
-// any cached SSH state. A per-profile token/OAuth override wins over a global
-// SSH connection — so if the active profile resolves to a NON-SSH backend, the
-// terminal must NOT fall through to a global SSH host.
-function activeSshTerminalTarget() {
-  const profile = primaryProfileKey()
-  const config = readDesktopConnectionConfig()
-
-  if (profileSshOverride(config, profile)) {
-    const scope = sshScopeKey(profile)
-    const state = sshConnections.get(scope)
-
-    return state && state.ssh ? { ssh: state.ssh, scope } : 'pending'
-  }
-
-  if (profileRemoteOverride(config, profile)) {
-    return null
-  }
-
-  if (process.env.HERMES_DESKTOP_REMOTE_URL) {
-    return null
-  }
-
-  if (config.mode === 'ssh') {
-    const state = sshConnections.get('')
-
-    return state && state.ssh ? { ssh: state.ssh, scope: '' } : 'pending'
-  }
-
-  return null
-}
-
 function effectiveSshConfigFingerprint(sshConfig) {
   const ssh =
     process.platform === 'win32'
@@ -8574,7 +8545,9 @@ function startPoolIdleReaper() {
 
 async function tryResumeDetachedPoolBackend(profile: string, entry) {
   const state = readDetachState(DESKTOP_DETACH_STATE_PATH)
-  const record = state?.records.find(candidate => candidate.role === 'pool' && candidate.profile === profile && pidLooksAlive(candidate.pid))
+  const record = state?.records.find(
+    candidate => candidate.role === 'pool' && candidate.profile === profile && pidLooksAlive(candidate.pid)
+  )
   if (!record) {
     return null
   }
@@ -10251,7 +10224,9 @@ function createWindow() {
   const savedWindowState = readWindowState()
   const preferredWindowWorkArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
 
-  rememberLog(`[uat] main-window.create requested appVersion=${app.getVersion()} savedState=${Boolean(savedWindowState)}`)
+  rememberLog(
+    `[uat] main-window.create requested appVersion=${app.getVersion()} savedState=${Boolean(savedWindowState)}`
+  )
   mainWindow = new BrowserWindow({
     ...computeWindowOptions(savedWindowState, screen.getAllDisplays(), preferredWindowWorkArea),
     minWidth: WINDOW_MIN_WIDTH,
@@ -11005,7 +10980,8 @@ function resolveHermesServiceCommand() {
   if (onPath && !looksLikeDesktopAppBinary(onPath)) {
     return onPath
   }
-  const active = process.platform === 'win32' ? path.join(VENV_ROOT, 'Scripts', 'hermes.exe') : path.join(VENV_ROOT, 'bin', 'hermes')
+  const active =
+    process.platform === 'win32' ? path.join(VENV_ROOT, 'Scripts', 'hermes.exe') : path.join(VENV_ROOT, 'bin', 'hermes')
   return active
 }
 
@@ -11020,7 +10996,9 @@ ipcMain.handle('hermes:local-services:install-backend', async () =>
   })
 )
 ipcMain.handle('hermes:local-services:restart-backend', async () => restartLocalBackendService())
-ipcMain.handle('hermes:local-services:restart-gateway', async () => restartGatewayService(resolveHermesServiceCommand()))
+ipcMain.handle('hermes:local-services:restart-gateway', async () =>
+  restartGatewayService(resolveHermesServiceCommand())
+)
 ipcMain.handle('hermes:ssh-config:hosts', async () => ({ hosts: collectSshConfigHosts() }))
 ipcMain.handle('hermes:ssh-config:resolve', async (_event, host) => {
   const value = String(host || '').trim()
@@ -12650,7 +12628,15 @@ function ensureNodePtySpawnHelper() {
 }
 
 ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
-  ensureNodePtySpawnHelper()
+  const route = await resolveTerminalRoute(payload?.profile, resolveRemoteBackend, scope => sshConnections.get(scope))
+
+  if (event.sender.isDestroyed()) {
+    throw new Error('Terminal window closed.')
+  }
+
+  if (route.kind !== 'remote') {
+    ensureNodePtySpawnHelper()
+  }
 
   const id = crypto.randomUUID()
   const { args, command, name } = terminalShellCommand()
@@ -12658,53 +12644,90 @@ ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
   const cols = Math.max(2, Number.parseInt(String(payload?.cols || 80), 10) || 80)
   const rows = Math.max(2, Number.parseInt(String(payload?.rows || 24), 10) || 24)
 
-  const sshTarget = await resolveTerminalConnection(activeSshTerminalTarget, () => ensureBackend(primaryProfileKey()))
-  const remote = Boolean(sshTarget)
-  const remoteState = remote ? sshConnections.get(sshTarget.scope) : null
-
+  const sshTarget = route.kind === 'ssh' ? route.target : null
+  const remote = route.kind !== 'local'
   const remoteCommand =
-    remoteState?.remotePlatform === 'Windows'
+    route.kind === 'ssh' && route.remotePlatform === 'Windows'
       ? buildWindowsInteractiveCommand(String(payload?.cwd || '').trim())
       : undefined
-
-  const ptyProcess = remote
-    ? nodePty.spawn(
-        process.platform === 'win32'
-          ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')
-          : 'ssh',
-        buildInteractiveSshArgs(sshTarget.ssh, String(payload?.cwd || '').trim(), undefined, remoteCommand),
-        { cols, cwd: app.getPath('home'), env: terminalShellEnv(), name: 'xterm-256color', rows }
-      )
-    : nodePty.spawn(command, args, { cols, cwd, env: terminalShellEnv(), name: 'xterm-256color', rows })
-
-  terminalSessions.set(id, {
-    pty: ptyProcess,
-    webContentsId: event.sender.id,
-    ...(remote ? { sshScope: sshTarget.scope, remoteCwd: String(payload?.cwd || '') } : {})
-  })
-
-  const send = (suffix, payload) => {
-    if (event.sender.isDestroyed()) {
-      return
+  let remotePty
+  if (route.kind === 'remote') {
+    const connection = route.connection
+    const wsUrl =
+      connection.authMode === 'oauth'
+        ? buildGatewayWsUrlWithTicket(connection.baseUrl, await mintGatewayWsTicket(connection.baseUrl))
+        : connection.wsUrl
+    const url = new URL(wsUrl)
+    url.pathname = url.pathname.replace(/\/api\/ws$/, '/api/terminal')
+    url.searchParams.set('cols', String(cols))
+    url.searchParams.set('rows', String(rows))
+    if (payload?.cwd !== undefined) {
+      url.searchParams.set('cwd', String(payload.cwd))
     }
-
-    event.sender.send(terminalChannel(id, suffix), payload)
+    // A profile override owns a whole remote backend. Global remotes share
+    // their backend's named profiles, matching the gateway routing contract.
+    if (connection.source !== 'profile') {
+      url.searchParams.set('profile', route.profile)
+    }
+    remotePty = await openRemoteTerminal(url.toString())
+    if (event.sender.isDestroyed()) {
+      remotePty.kill()
+      throw new Error('Terminal window closed.')
+    }
   }
 
-  ptyProcess.onData(data => send('data', data))
+  const ptyProcess =
+    remotePty ||
+    (sshTarget
+      ? nodePty.spawn(
+          process.platform === 'win32'
+            ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')
+            : 'ssh',
+          buildInteractiveSshArgs(sshTarget.ssh, String(payload?.cwd || '').trim(), undefined, remoteCommand),
+          { cols, cwd: app.getPath('home'), env: terminalShellEnv(), name: 'xterm-256color', rows }
+        )
+      : nodePty.spawn(command, args, { cols, cwd, env: terminalShellEnv(), name: 'xterm-256color', rows }))
+
+  const delivery = createTerminalDelivery((suffix, payload) => {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send(terminalChannel(id, suffix), payload)
+    }
+    if (suffix === 'exit') {
+      terminalSessions.delete(id)
+    }
+  })
+
+  terminalSessions.set(id, {
+    delivery,
+    pty: ptyProcess,
+    webContentsId: event.sender.id,
+    profile: route.profile,
+    remote,
+    ...(sshTarget ? { sshScope: sshTarget.scope } : {})
+  })
+
+  ptyProcess.onData(data => delivery.send('data', data))
   ptyProcess.onExit(({ exitCode, signal }) => {
-    terminalSessions.delete(id)
-    send('exit', { code: exitCode, signal: signal || null })
+    delivery.send('exit', { code: exitCode, signal: signal || null })
   })
   event.sender.once('destroyed', () => disposeTerminalSession(id))
 
-  return { cwd: remote ? null : cwd, id, shell: remote ? 'ssh' : name }
+  return { cwd: remote ? null : cwd, id, shell: route.kind === 'ssh' ? 'ssh' : remote ? 'shell' : name }
 })
 
-ipcMain.handle('hermes:terminal:write', (_event, id, data) => {
+ipcMain.handle('hermes:terminal:attach', (event, id) => {
+  const info = terminalSessions.get(String(id || ''))
+  if (!info || info.webContentsId !== event.sender.id) {
+    return false
+  }
+  info.delivery.attach()
+  return true
+})
+
+ipcMain.handle('hermes:terminal:write', (event, id, data) => {
   const sessionInfo = terminalSessions.get(String(id || ''))
 
-  if (!sessionInfo) {
+  if (!sessionInfo || sessionInfo.webContentsId !== event.sender.id) {
     return false
   }
 
@@ -12713,10 +12736,10 @@ ipcMain.handle('hermes:terminal:write', (_event, id, data) => {
   return true
 })
 
-ipcMain.handle('hermes:terminal:resize', (_event, id, size = {}) => {
+ipcMain.handle('hermes:terminal:resize', (event, id, size = {}) => {
   const sessionInfo = terminalSessions.get(String(id || ''))
 
-  if (!sessionInfo) {
+  if (!sessionInfo || sessionInfo.webContentsId !== event.sender.id) {
     return false
   }
 
@@ -12730,7 +12753,7 @@ ipcMain.handle('hermes:terminal:resize', (_event, id, size = {}) => {
 ipcMain.handle('hermes:terminal:process', (event, id) => {
   const info = terminalSessions.get(String(id || ''))
 
-  if (!info || info.webContentsId !== event.sender.id || info.sshScope !== undefined || process.platform === 'win32') {
+  if (!info || info.webContentsId !== event.sender.id || info.remote || process.platform === 'win32') {
     return null
   }
 
@@ -12741,17 +12764,22 @@ ipcMain.handle('hermes:terminal:process', (event, id) => {
   }
 })
 
-ipcMain.handle('hermes:terminal:cwd', async (_event, id) => {
+ipcMain.handle('hermes:terminal:cwd', async (event, id) => {
   const sessionInfo = terminalSessions.get(String(id || ''))
 
-  if (!sessionInfo) {
+  if (!sessionInfo || sessionInfo.webContentsId !== event.sender.id) {
     return null
   }
 
-  return sessionInfo.sshScope !== undefined ? null : readProcessCwd(sessionInfo.pty.pid)
+  return sessionInfo.remote ? null : readProcessCwd(sessionInfo.pty.pid)
 })
 
-ipcMain.handle('hermes:terminal:dispose', (_event, id) => disposeTerminalSession(String(id || '')))
+ipcMain.handle(
+  'hermes:terminal:dispose',
+  (event, id) =>
+    terminalSessions.get(String(id || ''))?.webContentsId === event.sender.id &&
+    disposeTerminalSession(String(id || ''))
+)
 
 ipcMain.handle('hermes:updates:check', async () =>
   DISABLE_UPDATE_UI_FOR_LOCAL_FORK

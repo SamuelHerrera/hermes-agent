@@ -274,6 +274,7 @@ export function PersistentTerminalHost({
             cwd={terminal.cwd}
             id={terminal.id}
             onAddSelectionToChat={onAddSelectionToChat}
+            profile={terminal.profile}
             restoreCwd={terminal.restoreCwd}
             reviveBuffer={terminal.reviveBuffer}
           />

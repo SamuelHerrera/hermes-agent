@@ -14,6 +14,9 @@ import time
 
 import pytest
 
+# These tests deliberately signal owned jobs after shell exit/reparenting.
+pytestmark = pytest.mark.live_system_guard_bypass
+
 pytest.importorskip("ptyprocess", reason="ptyprocess not installed")
 
 from hermes_cli.pty_bridge import PtyBridge, PtyUnavailableError
@@ -167,43 +170,38 @@ class TestPtyBridgeClose:
                 break
         assert reaped, f"pid {pid} still running after close()"
 
-    def test_close_signals_child_process_group(self, monkeypatch):
-        sent: list[tuple[int, signal.Signals]] = []
-
-        class _FakeProc:
-            pid = 12345
-            fd = -1
-
-            def __init__(self):
-                self.alive = True
-
-            def isalive(self):
-                return self.alive
-
-            def kill(self, sig):
-                raise AssertionError(f"single-process kill used: {sig}")
-
-            def close(self, force=False):
-                self.closed = force
-
-        fake = _FakeProc()
-
-        def fake_killpg(pgid, sig):
-            sent.append((pgid, sig))
-            fake.alive = False
-
-        monkeypatch.setattr(os, "getpgid", lambda pid: 67890)
-        monkeypatch.setattr(os, "killpg", fake_killpg)
-
-        bridge = PtyBridge.__new__(PtyBridge)
-        bridge._proc = fake
-        bridge._fd = -1
-        bridge._closed = False
-
-        bridge.close()
-
-        assert sent == [(67890, signal.SIGHUP)]
-        assert bridge._closed is True
+    @pytest.mark.parametrize("background", [False, True])
+    def test_close_kills_interactive_job_groups(self, tmp_path, background):
+        import psutil
+        import shlex
+        pidfile = tmp_path / "child.pid"
+        # Ignore both graceful signals to exercise escalation after bash exits.
+        script = ("import os,signal,time; "
+                  "signal.signal(signal.SIGHUP, signal.SIG_IGN); "
+                  "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                  f"open({str(pidfile)!r}, 'w').write(str(os.getpid())); "
+                  "time.sleep(120)")
+        bridge = PtyBridge.spawn(["/bin/bash", "--noprofile", "--norc", "-i"])
+        child = None
+        unrelated = __import__("subprocess").Popen(["sleep", "120"])
+        try:
+            command = shlex.quote(sys.executable) + " -c " + shlex.quote(script)
+            bridge.write((command + (" &" if background else "") + "\n").encode())
+            deadline = time.monotonic() + 5
+            while not pidfile.exists() and time.monotonic() < deadline:
+                bridge.read(timeout=0.05)
+            assert pidfile.exists()
+            child = psutil.Process(int(pidfile.read_text()))
+            assert os.getpgid(child.pid) != os.getpgid(bridge.pid)
+            bridge.close()
+            assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+            assert unrelated.poll() is None
+        finally:
+            bridge.close()
+            if child and child.is_running():
+                child.kill()
+            unrelated.terminate()
+            unrelated.wait(timeout=3)
 
 
 @skip_on_windows

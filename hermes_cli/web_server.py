@@ -16050,6 +16050,54 @@ async def console_ws(ws: WebSocket) -> None:
                 pass
 
 
+@app.websocket("/api/terminal")
+async def terminal_ws(ws: WebSocket) -> None:
+    """One authenticated desktop shell per socket; disconnect always reaps it.
+
+    Separate from /api/pty (Hermes TUI), so older runtimes fail closed rather
+    than accidentally starting a different program. Reuses its auth and pump.
+    """
+    auth_reason, _ = _ws_auth_reason(ws)
+    if auth_reason is not None:
+        await ws.close(code=4401, reason="terminal authentication required")
+        return
+    if _ws_host_origin_reason(ws) is not None:
+        await ws.close(code=4403, reason="terminal host/origin rejected")
+        return
+    if _ws_client_reason(ws) is not None:
+        await ws.close(code=4408, reason="terminal peer rejected")
+        return
+    if not _PTY_BRIDGE_AVAILABLE:
+        await ws.close(code=4404, reason="shell PTY unavailable")
+        return
+
+    from tools.environments.local import build_subprocess_env
+
+    try:
+        profile = ws.query_params.get("profile")
+        profile_home = _resolve_profile_dir(profile) if profile else get_hermes_home()
+        env = build_subprocess_env(extra={"HERMES_HOME": str(profile_home), "TERM": "xterm-256color"})
+        requested_cwd = ws.query_params.get("cwd")
+        cwd = str(Path.home()) if requested_cwd is None else os.path.expanduser(requested_cwd)
+        if not os.path.isdir(cwd):
+            raise ValueError("Requested terminal cwd is not a directory")
+        cols = max(2, min(2000, int(ws.query_params.get("cols", "80"))))
+        rows = max(2, min(1000, int(ws.query_params.get("rows", "24"))))
+        shell = (os.environ.get("COMSPEC") or "cmd.exe") if os.name == "nt" else (os.environ.get("SHELL") or "/bin/sh")
+        argv = [shell] if os.name == "nt" else [shell, "-l"]
+        bridge = PtyBridge.spawn(argv, cwd=cwd, env=env, cols=cols, rows=rows)
+    except (HTTPException, ValueError, OSError, PtyUnavailableError):
+        await ws.close(code=4400, reason="terminal could not start for owner")
+        return
+
+    try:
+        await ws.accept()
+        await ws.send_json({"type": "ready", "protocol": 1})
+        await _legacy_pump(ws, bridge)
+    finally:
+        await asyncio.to_thread(bridge.close)
+
+
 @app.websocket("/api/pty")
 async def pty_ws(ws: WebSocket) -> None:
     peer = ws.client.host if ws.client else "?"

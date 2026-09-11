@@ -18,7 +18,9 @@ vi.mock('./terminals', async () => ({
 }))
 
 vi.mock('./instance', () => ({
-  TerminalInstance: () => <div data-testid="terminal-workspace" />,
+  TerminalInstance: ({ profile }: { profile?: string }) => (
+    <div data-owner={profile} data-testid="terminal-workspace" />
+  ),
   AgentTerminalInstance: () => <div data-testid="agent-terminal" />
 }))
 
@@ -194,6 +196,21 @@ describe('PersistentTerminal rect tracking', () => {
     vi.restoreAllMocks()
     setVisibility(false)
     delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
+  })
+
+  it('passes a restored owner to a previously unmounted shell', () => {
+    installRaf()
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 200, 100))
+    render(
+      <>
+        <TerminalSlot terminalId="restored" />
+        <PersistentTerminalHost
+          onAddSelectionToChat={() => undefined}
+          terminal={{ id: 'restored', kind: 'user', auto: true, cwd: '', title: 'Terminal', profile: 'A' }}
+        />
+      </>
+    )
+    expect(container?.querySelector('[data-testid="terminal-workspace"]')?.getAttribute('data-owner')).toBe('A')
   })
 
   it('settles after rect changes instead of polling forever', () => {

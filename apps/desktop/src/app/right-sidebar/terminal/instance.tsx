@@ -22,6 +22,7 @@ const HOST_CLASS =
 
 interface TerminalInstanceProps {
   id: string
+  profile?: string
   cwd: string
   active: boolean
   onAddSelectionToChat: (text: string, label?: string) => void
@@ -35,6 +36,7 @@ export function TerminalInstance({
   id,
   active,
   cwd,
+  profile,
   onAddSelectionToChat,
   restoreCwd,
   reviveBuffer
@@ -44,6 +46,7 @@ export function TerminalInstance({
   const { addSelectionToChat, hostRef, selection, selectionStyle, status } = useTerminalSession({
     id,
     cwd,
+    profile,
     active,
     onAddSelectionToChat,
     restoreCwd,

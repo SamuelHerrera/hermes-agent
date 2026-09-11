@@ -19,6 +19,26 @@ async function loadTerminalStore() {
 }
 
 describe('terminal store persistence', () => {
+  it('keeps creation owners across All Profiles and persistence reload', async () => {
+    const store = await loadTerminalStore()
+    const profile = await import('@/store/profile')
+    profile.$activeGatewayProfile.set('A')
+    const a = store.createTerminal('/a')
+    profile.$activeGatewayProfile.set('B')
+    const b = store.createTerminal('/b')
+    profile.setShowAllProfiles(true)
+    expect(store.$openTerminals.get().map(term => [term.id, term.profile])).toEqual([
+      [a, 'A'],
+      [b, 'B']
+    ])
+    vi.resetModules()
+    const restored = await loadTerminalStore()
+    expect(restored.$terminals.get().map(term => [term.id, term.profile])).toEqual([
+      [a, 'A'],
+      [b, 'B']
+    ])
+  })
+
   it('updates automatic foreground titles without overwriting custom names or publishing no-ops', async () => {
     const { $terminals, createTerminal, reportTerminalShell, renameTerminal } = await loadTerminalStore()
     const id = createTerminal('/repo')
