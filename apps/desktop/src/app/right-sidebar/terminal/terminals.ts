@@ -3,6 +3,7 @@ import { atom, computed } from 'nanostores'
 import { findGroupOfPane } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
 import { readKey, writeKey } from '@/lib/storage'
+import { $activeGatewayProfile, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import { $currentCwd } from '@/store/session'
 
 import { setTerminalTakeover } from '../store'
@@ -162,11 +163,23 @@ export const $terminals = atom<readonly TerminalEntry[]>(
   restored.terminals.map(term => ({ ...term, kind: 'user' as const }))
 )
 export const $activeTerminalId = atom<string | null>(restored.activeTerminalId)
-export const $openTerminals = computed($terminals, list => list.filter(term => !term.hidden))
+// Visibility is a projection, never a mutation of terminal lifetime. Persistent
+// hosts still read $terminals, so filtering a pane cannot dispose its live shell.
+export const $openTerminals = computed([$terminals, $profileScope], (list, scope) =>
+  list.filter(term => !term.hidden && (scope === ALL_PROFILES || normalizeProfileKey(term.profile) === scope))
+)
 export const terminalPaneId = (id: string) => `terminal-instance:${id}`
 
 $terminals.subscribe(list => persistTerminals(list, $activeTerminalId.get()))
 $activeTerminalId.subscribe(active => persistTerminals($terminals.get(), active))
+
+$openTerminals.subscribe(list => {
+  if (!list.some(term => term.id === $activeTerminalId.get())) {
+    // Do not reveal/focus a pane here: background process discovery must not
+    // steal the chat's focus. The layout tree owns its own removal fallback.
+    $activeTerminalId.set(list[0]?.id ?? null)
+  }
+})
 
 export const $activeTerminal = computed(
   [$terminals, $activeTerminalId],
@@ -183,7 +196,8 @@ export function createTerminal(
   ownership: Pick<TerminalEntry, 'projectId' | 'profile'> = {}
 ): string {
   const id = newId()
-  $terminals.set([...$terminals.get(), { id, title: 'Terminal', auto: true, cwd, kind: 'user', ...ownership }])
+  const profile = normalizeProfileKey(ownership.profile ?? $activeGatewayProfile.get())
+  $terminals.set([...$terminals.get(), { id, title: 'Terminal', auto: true, cwd, kind: 'user', ...ownership, profile }])
   selectTerminal(id)
 
   return id
@@ -237,7 +251,18 @@ export function openAgentTerminal(procId: string, title: string): void {
 
   if (!id) {
     id = newId()
-    $terminals.set([...$terminals.get(), { id, title: title || 'agent', auto: false, cwd: '', kind: 'agent', procId }])
+    $terminals.set([
+      ...$terminals.get(),
+      {
+        id,
+        title: title || 'agent',
+        auto: false,
+        cwd: '',
+        kind: 'agent',
+        procId,
+        profile: normalizeProfileKey($activeGatewayProfile.get())
+      }
+    ])
   }
 
   selectTerminal(id)
@@ -256,6 +281,12 @@ export function selectTerminal(id: string): void {
   const terminal = $terminals.get().find(term => term.id === id)
 
   if (terminal) {
+    const scope = $profileScope.get()
+
+    if (scope !== ALL_PROFILES && normalizeProfileKey(terminal.profile) !== scope) {
+      return
+    }
+
     if (terminal.hidden) {
       $terminals.set($terminals.get().map(term => (term.id === id ? { ...term, hidden: false } : term)))
     }
@@ -300,7 +331,8 @@ $currentCwd.listen(cwd => {
     return
   }
 
-  const list = $terminals.get()
+  const profile = normalizeProfileKey($activeGatewayProfile.get())
+  const list = $openTerminals.get().filter(term => normalizeProfileKey(term.profile) === profile)
   const active = list.find(term => term.id === $activeTerminalId.get())
 
   if (active?.kind === 'user' && terminalCwd(active) === target) {
@@ -316,7 +348,7 @@ $currentCwd.listen(cwd => {
 
 /** Move the active tab by `direction` (+1 next / -1 prev), wrapping around. */
 export function cycleTerminal(direction: 1 | -1): void {
-  const list = $terminals.get()
+  const list = $openTerminals.get()
 
   if (list.length < 2) {
     return

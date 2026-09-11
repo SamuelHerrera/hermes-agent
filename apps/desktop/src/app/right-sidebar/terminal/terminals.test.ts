@@ -2,7 +2,11 @@ import { atom } from 'nanostores'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const STORAGE_KEY = 'hermes.desktop.terminals.v1'
-vi.mock('@/components/pane-shell/tree/store', () => ({ revealTreePane: vi.fn(), $layoutTree: atom(null), noteActiveTreeGroup: vi.fn() }))
+vi.mock('@/components/pane-shell/tree/store', () => ({
+  revealTreePane: vi.fn(),
+  $layoutTree: atom(null),
+  noteActiveTreeGroup: vi.fn()
+}))
 
 async function loadTerminalStore() {
   const $currentCwd = atom('/workspace')
@@ -69,7 +73,16 @@ describe('terminal store persistence', () => {
     // disk (this is what makes app-quit restore reliable).
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
       activeTerminalId: userId,
-      terminals: [{ auto: false, cwd: '/repo', id: userId, reviveBuffer: 'recent scrollback', title: 'server' }]
+      terminals: [
+        {
+          auto: false,
+          cwd: '/repo',
+          id: userId,
+          profile: 'default',
+          reviveBuffer: 'recent scrollback',
+          title: 'server'
+        }
+      ]
     })
   })
 

@@ -27,6 +27,111 @@ async function setup() {
 }
 
 describe('individual terminal panes', () => {
+  it('filters terminal tabs by selected profile without closing shells, and All Profiles restores open tabs', async () => {
+    const s = await setup()
+    const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+    const local = s.createTerminal('/repo', { profile: 'default' })
+    const remote = s.createTerminal('/repo', { profile: 'hp-remote' })
+    const agent = s.ensureAgentTerminal('hp-process', 'Build', { profile: 'hp-remote', cwd: '/repo' })!
+    const closed = s.createTerminal('/closed', { profile: 'default' })
+    s.hideTerminal(closed)
+    s.selectTerminal(local)
+    const entries = s.$terminals.get()
+    const panes = () => s.model.allPaneIds(s.tree.$layoutTree.get()!)
+
+    expect(panes()).toContain(s.terminalPaneId(local))
+    expect(panes()).not.toContain(s.terminalPaneId(remote))
+    $activeGatewayProfile.set('hp-remote')
+    expect(panes()).not.toContain(s.terminalPaneId(local))
+    expect(panes()).toEqual(expect.arrayContaining([s.terminalPaneId(remote), s.terminalPaneId(agent)]))
+    expect(s.$terminals.get()).toBe(entries)
+    expect(s.$activeTerminalId.get()).toBe(remote)
+    s.cycleTerminal(1)
+    expect(s.$activeTerminalId.get()).toBe(agent)
+
+    $activeGatewayProfile.set('empty-profile')
+    expect(panes()).toEqual(['workspace'])
+    expect(s.$activeTerminalId.get()).toBeNull()
+    $showAllProfiles.set(true)
+    expect(panes()).toEqual(
+      expect.arrayContaining([s.terminalPaneId(local), s.terminalPaneId(remote), s.terminalPaneId(agent)])
+    )
+    expect(panes()).not.toContain(s.terminalPaneId(closed))
+    expect(s.$terminals.get()).toBe(entries)
+    $showAllProfiles.set(false)
+    $activeGatewayProfile.set('default')
+    expect(panes()).toEqual(['workspace', s.terminalPaneId(local)])
+  })
+
+  it('captures the creation profile and never selects a same-cwd shell from another backend', async () => {
+    const s = await setup()
+    const { $activeGatewayProfile } = await import('@/store/profile')
+    const { $currentCwd } = await import('@/store/session')
+    const local = s.createTerminal('/shared')
+    $activeGatewayProfile.set('hp-remote')
+    const remote = s.createTerminal('/other')
+    expect(s.$terminals.get().find(term => term.id === remote)?.profile).toBe('hp-remote')
+    $currentCwd.set('/shared')
+    expect(s.$activeTerminalId.get()).toBe(remote)
+    s.selectTerminal(local)
+    expect(s.$activeTerminalId.get()).toBe(remote)
+    expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(local))
+    s.closeTerminal(remote)
+    expect(s.$activeTerminalId.get()).toBeNull()
+    expect(s.$terminals.get().map(term => term.id)).toEqual([local])
+  })
+
+  it('matches session cwd only against the active backend even in All Profiles', async () => {
+    const s = await setup()
+    const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+    const { $currentCwd } = await import('@/store/session')
+    const local = s.createTerminal('/shared', { profile: 'default' })
+    $activeGatewayProfile.set('hp-remote')
+    const remote = s.createTerminal('/shared')
+    const other = s.createTerminal('/other')
+    $showAllProfiles.set(true)
+    $currentCwd.set('/shared')
+    expect(s.$activeTerminalId.get()).toBe(remote)
+    s.selectTerminal(local)
+    $currentCwd.set('/other')
+    expect(s.$activeTerminalId.get()).toBe(other)
+    s.selectTerminal(local)
+    $currentCwd.set('/shared')
+    expect(s.$activeTerminalId.get()).toBe(remote)
+  })
+
+  it('opens a newly requested agent output on its foreground profile without reassigning existing owners', async () => {
+    const s = await setup()
+    const { $activeGatewayProfile } = await import('@/store/profile')
+    $activeGatewayProfile.set('hp-remote')
+    s.openAgentTerminal('foreground-process', 'Build')
+    const terminal = s.$terminals.get()[0]
+    expect(terminal.profile).toBe('hp-remote')
+    expect(s.$openTerminals.get().map(term => term.id)).toContain(terminal.id)
+    $activeGatewayProfile.set('default')
+    s.openAgentTerminal('foreground-process', 'Build')
+    expect(s.$terminals.get()[0].profile).toBe('hp-remote')
+    expect(s.$openTerminals.get()).toEqual([])
+  })
+
+  it('treats legacy unowned entries as default, not whichever remote profile is selected', async () => {
+    window.localStorage.setItem(
+      'hermes.desktop.terminals.v1',
+      JSON.stringify({
+        activeTerminalId: 'legacy',
+        terminals: [{ id: 'legacy', title: 'Shell', cwd: '/repo', auto: true }]
+      })
+    )
+    const s = await setup()
+    const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+    expect(s.$openTerminals.get().map(term => term.id)).toEqual(['legacy'])
+    $activeGatewayProfile.set('hp-remote')
+    expect(s.$openTerminals.get()).toEqual([])
+    $showAllProfiles.set(true)
+    expect(s.$openTerminals.get().map(term => term.id)).toEqual(['legacy'])
+    expect(s.$terminals.get()[0].profile).toBeUndefined()
+  })
+
   it('gives each interactive and read-only terminal one main tab without stealing focus for agent work', async () => {
     const s = await setup()
     const first = s.createTerminal('/repo')
