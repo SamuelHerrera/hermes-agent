@@ -21,12 +21,15 @@ import {
   SIDEBAR_MAX_WIDTH
 } from '@/store/layout'
 import { setPaneWidthOverride } from '@/store/panes'
+import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
 import { allPaneIds, type LayoutNode } from '../model'
 import { paneChrome } from '../renderer/track-model'
 import { $layoutTree, closeTabPane, isSessionStripPane } from '../store'
 
+import { reconcileColumns } from './columns'
+import { scrollDropEdge, ScrollDropOverlay, setScrollDropTarget } from './drop-overlay'
 import { generateScrollGrid, type ScrollGridLayout, scrollGridWindowRect } from './grid'
 import {
   $activeScrollWorkspaceId,
@@ -56,6 +59,7 @@ export function ScrollWindowWorkspace() {
   const workspaces = useStore($scrollWindowWorkspaces)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
+  const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
   const viewportRef = useRef<HTMLDivElement>(null)
   const windowWidthProbeRef = useRef<HTMLDivElement>(null)
 
@@ -63,7 +67,12 @@ export function ScrollWindowWorkspace() {
   const [draggingWindowId, setDraggingWindowId] = useState<null | string>(null)
 
   const paneById = useMemo(() => new Map(panes.map(pane => [pane.id, pane])), [panes])
-  const availableWindowIds = useMemo(() => treeWindowIds(tree).filter(id => paneById.has(id)), [paneById, tree])
+
+  const availableWindowIds = useMemo(
+    () => treeWindowIds(tree).filter(id => paneById.has(id) && !(id === 'workspace' && workspaceEmpty)),
+    [paneById, tree, workspaceEmpty]
+  )
+
   const availableWindowKey = availableWindowIds.join('\u0000')
   const sidebarPane = paneById.get('sessions')
 
@@ -74,6 +83,10 @@ export function ScrollWindowWorkspace() {
   const workspace = workspaces.find(item => item.id === activeWorkspaceId) ?? workspaces[0]
   const windowIds = workspace.windowIds.filter(id => availableWindowIds.includes(id))
 
+  const columnSizesKey = reconcileColumns(workspace.columns, windowIds)
+    .map(column => column.length)
+    .join(',')
+
   const layout = useMemo<ScrollGridLayout>(
     () =>
       generateScrollGrid({
@@ -83,10 +96,10 @@ export function ScrollWindowWorkspace() {
         maxWindowWidth: layoutFrame.maxWindowWidth,
         viewportHeight: Math.max(1, layoutFrame.height - GAP * 2),
         viewportWidth: Math.max(1, layoutFrame.width - GAP * 2),
-        rows: workspace.rowCount,
+        columnSizes: columnSizesKey ? columnSizesKey.split(',').map(Number) : undefined,
         windowCount: Math.max(1, windowIds.length)
       }),
-    [layoutFrame.height, layoutFrame.width, layoutFrame.maxWindowWidth, windowIds.length, workspace.rowCount]
+    [layoutFrame.height, layoutFrame.width, layoutFrame.maxWindowWidth, windowIds.length, columnSizesKey]
   )
 
   useLayoutEffect(() => {
@@ -116,9 +129,11 @@ export function ScrollWindowWorkspace() {
     measure()
     const observer = new ResizeObserver(measure)
     observer.observe(element)
+
     if (windowWidthProbeRef.current) {
       observer.observe(windowWidthProbeRef.current)
     }
+
     return () => observer.disconnect()
   }, [])
 
@@ -310,7 +325,7 @@ export function ScrollWindowWorkspace() {
         </aside>
       ) : null}
       <div
-        className="relative z-0 h-full min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3 [scrollbar-gutter:stable]"
+        className="relative z-0 h-full min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain p-3 [scrollbar-gutter:stable]"
         data-scroll-window-viewport=""
         data-session-anchor="workspace"
         ref={viewportRef}
@@ -355,28 +370,38 @@ export function ScrollWindowWorkspace() {
                   )}
                   data-scroll-window={windowId}
                   key={windowId}
-                  onDragOver={event => {
+                  onDragLeave={event => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setScrollDropTarget(null)
+                    }
+                  }}
+                  onDragOverCapture={event => {
                     if (!draggingWindowId || draggingWindowId === windowId) {
                       return
                     }
 
                     event.preventDefault()
+                    event.stopPropagation()
                     event.dataTransfer.dropEffect = 'move'
+                    setScrollDropTarget({
+                      windowId,
+                      edge: scrollDropEdge(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
+                    })
                   }}
-                  onDrop={event => {
-                    const sourceWindowId =
-                      event.dataTransfer.getData(SCROLL_WINDOW_DRAG_TYPE) || event.dataTransfer.getData('text/plain')
+                  onDropCapture={event => {
+                    const sourceWindowId = event.dataTransfer.getData(SCROLL_WINDOW_DRAG_TYPE)
 
-                    if (!sourceWindowId || sourceWindowId === windowId) {
+                    if (!draggingWindowId || sourceWindowId !== draggingWindowId || sourceWindowId === windowId) {
                       return
                     }
 
                     const targetRect = event.currentTarget.getBoundingClientRect()
-                    const createRow = event.clientY > targetRect.top + targetRect.height * 0.72
+                    const edge = scrollDropEdge(targetRect, event.clientX, event.clientY)
 
                     event.preventDefault()
                     event.stopPropagation()
-                    reorderScrollWindowWindow(sourceWindowId, windowId, { createRow })
+                    reorderScrollWindowWindow(sourceWindowId, windowId, edge)
+                    setScrollDropTarget(null)
                     requestAnimationFrame(() => setDraggingWindowId(null))
                   }}
                   onPointerDown={() => focusScrollWindowWindow(windowId)}
@@ -386,7 +411,10 @@ export function ScrollWindowWorkspace() {
                     className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
                     data-scroll-window-header=""
                     draggable
-                    onDragEnd={() => setDraggingWindowId(null)}
+                    onDragEnd={() => {
+                      setDraggingWindowId(null)
+                      setScrollDropTarget(null)
+                    }}
                     onDragStart={event => {
                       event.dataTransfer.setData(SCROLL_WINDOW_DRAG_TYPE, windowId)
                       event.dataTransfer.setData('text/plain', windowId)
@@ -408,19 +436,17 @@ export function ScrollWindowWorkspace() {
                     >
                       {title}
                     </span>
-                    {windowId !== 'workspace' ? (
-                      <button
-                        aria-label="Close window"
-                        className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
-                        onClick={event => {
-                          event.stopPropagation()
-                          closeTabPane(windowId)
-                        }}
-                        type="button"
-                      >
-                        ×
-                      </button>
-                    ) : null}
+                    <button
+                      aria-label="Close window"
+                      className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
+                      onClick={event => {
+                        event.stopPropagation()
+                        closeTabPane(windowId)
+                      }}
+                      type="button"
+                    >
+                      ×
+                    </button>
                   </div>
                   <div className="relative min-h-0 flex-1 overflow-hidden" data-scroll-window-pane="">
                     {pane?.render ? (
@@ -437,6 +463,7 @@ export function ScrollWindowWorkspace() {
                       </div>
                     )}
                   </div>
+                  {draggingWindowId && draggingWindowId !== windowId ? <ScrollDropOverlay windowId={windowId} /> : null}
                 </section>
               )
             })}

@@ -25,10 +25,15 @@ vi.mock('@/store/profile', () => ({
   // The layout store reads the sidebar's profile scope; this suite only cares
   // about the empty-workspace request.
   $showAllProfiles: atom(false),
+  $profileScope: atom('default'),
+  $activeGatewayProfile: atom('default'),
+  ALL_PROFILES: '*',
+  normalizeProfileKey: (name: string) => name || 'default',
   requestEmptyWorkspace: () => requestEmptyWorkspace(),
   setShowAllProfiles: () => {}
 }))
 
+import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows/store'
 import { $previewTabs, closeRightRail, openPreview, type PreviewTarget } from '@/store/preview'
 import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
 
@@ -60,6 +65,7 @@ beforeEach(() => {
   $selectedStoredSessionId.set(null)
   $activeSessionId.set(null)
   $workspaceIsPage.set(false)
+  $layoutSurfaceMode.set('tabbed')
   closeFocusedSessionTab.mockReturnValue(false)
   closeFocusedToolTab.mockReturnValue(false)
   hideLoneTreeTab.mockReturnValue(true)
@@ -96,6 +102,23 @@ describe('closeActiveTab', () => {
  * draft. The gesture used to dead-end whenever main was the only tab.
  */
 describe('closeWorkspaceTab', () => {
+  it('closes the primary scroll card without promoting or closing a neighbor', () => {
+    $layoutSurfaceMode.set('scroll-windows')
+    loadedMainOnly()
+    nextSessionTileForWorkspace.mockReturnValue('stored-b')
+    const load = vi.fn()
+    expect(closeWorkspaceTab(load)).toBe(true)
+    expect(load).not.toHaveBeenCalled()
+    expect(closeSessionTile).not.toHaveBeenCalled()
+    expect(requestEmptyWorkspace).toHaveBeenCalledOnce()
+  })
+
+  it('closes even an empty primary scroll draft while preserving neighbors', () => {
+    $layoutSurfaceMode.set('scroll-windows')
+    hideLoneTreeTab.mockReturnValue(false)
+    expect(closeWorkspaceTab()).toBe(true)
+    expect(requestEmptyWorkspace).toHaveBeenCalledOnce()
+  })
   it('shifts the next stacked session into main', () => {
     loadedMainOnly()
     nextSessionTileForWorkspace.mockReturnValue('stored-b')

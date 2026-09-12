@@ -14,6 +14,73 @@ test.describe('scroll-window layout surface', () => {
     await fixture.cleanup()
   })
 
+  test('closes the primary card and supports previewed independent splits and unsplitting', async ({}, testInfo) => {
+    const { page } = fixture
+    await fixture.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(2900, 1100))
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K')
+    await page.getByPlaceholder(/search/i).fill('scroll window')
+    await page.mouse.move(8, 8)
+    await page.locator('[data-slot="command-item"]').filter({ hasText: 'Toggle scroll-window layout' }).click()
+    await page.keyboard.press('Escape')
+    const windows = page.locator('[data-scroll-window]')
+    await expect(windows).toHaveCount(1)
+    for (let count = 2; count <= 3; count++) {
+      await selectCreateAction(page, 'New session')
+      await expect(windows).toHaveCount(count)
+    }
+    const ids = await windows.evaluateAll(elements => elements.map(el => el.getAttribute('data-scroll-window')!))
+    const card = (id: string) => page.locator(`[data-scroll-window="${id}"]`)
+    const originalHeight = (await card(ids[1]).boundingBox())!.height
+    const drag = async (source: string, target: string, edge: 'bottom' | 'right') => {
+      const header = (await card(source).locator('[data-scroll-window-header]').boundingBox())!
+      const box = (await card(target).boundingBox())!
+      await page.mouse.move(header.x + 80, header.y + 15)
+      await page.mouse.down()
+      await page.mouse.move(header.x + 100, header.y + 20, { steps: 6 })
+      const x = edge === 'bottom' ? box.x + box.width / 2 : box.x + box.width - 15
+      const y = edge === 'bottom' ? box.y + box.height - 15 : box.y + box.height / 2
+      await page.mouse.move(x, y, { steps: 15 })
+      await page.mouse.move(x, y, { steps: 2 })
+      const preview = card(target).locator(`[data-scroll-drop-preview="${edge}"]`)
+      await expect(preview).toBeVisible()
+      await expect(preview).toHaveCSS('border-top-style', 'dashed')
+      await expect
+        .poll(async () => {
+          const previewBox = (await preview.boundingBox())!
+          return edge === 'bottom' ? previewBox.height / box.height : previewBox.width / box.width
+        })
+        .toBeLessThan(0.51)
+      await page.screenshot({ path: testInfo.outputPath(`drop-preview-${edge}.png`) })
+      await page.mouse.up()
+      await expect(page.locator('[data-scroll-drop-preview]')).toHaveCount(0)
+    }
+
+    await drag(ids[2], ids[0], 'bottom')
+    await expect.poll(async () => (await card(ids[0]).boundingBox())!.height).toBeLessThan(originalHeight)
+    expect((await card(ids[1]).boundingBox())!.height).toBe(originalHeight)
+    expect((await card(ids[2]).boundingBox())!.x).toBe((await card(ids[0]).boundingBox())!.x)
+    await page.screenshot({ path: testInfo.outputPath('independent-column-split.png') })
+    await drag(ids[2], ids[1], 'right')
+    await expect.poll(async () => (await card(ids[0]).boundingBox())!.height).toBe(originalHeight)
+    expect(
+      new Set(await windows.evaluateAll(elements => elements.map(el => el.getBoundingClientRect().top))).size
+    ).toBe(1)
+
+    await card('workspace').getByRole('button', { name: 'Close window', exact: true }).click()
+    await expect(card('workspace')).toHaveCount(0)
+    await expect(windows).toHaveCount(2)
+    expect(await windows.evaluateAll(elements => elements.map(el => el.getAttribute('data-scroll-window')))).toEqual(
+      ids.slice(1)
+    )
+    await windows.first().getByRole('button', { name: 'Close window', exact: true }).click()
+    await expect(windows).toHaveCount(1)
+    await windows.first().getByRole('button', { name: 'Close window', exact: true }).click()
+    await expect(windows).toHaveCount(0)
+    await expect(page.getByText('No chat windows here yet')).toBeVisible()
+    await selectCreateAction(page, 'New session')
+    await expect(windows).toHaveCount(1)
+  })
+
   test('toggles into an isolated scroll-window workspace and back through the command palette', async ({}, testInfo) => {
     const { page } = fixture
     await page.setViewportSize({ width: 1900, height: 1000 })
@@ -126,16 +193,18 @@ test.describe('scroll-window layout surface', () => {
       .locator('[data-scroll-window]')
       .evaluateAll(elements => elements.map(element => element.getAttribute('data-scroll-window')))
 
+    await viewport.evaluate(element => {
+      element.scrollLeft = 0
+    })
+    const target = page.locator('[data-scroll-window]').nth(1)
+    const targetBox = (await target.boundingBox())!
     await page
-      .locator('[data-scroll-window]')
-      .nth(1)
-      .evaluate((target, sourceId) => {
-        const dataTransfer = new DataTransfer()
-        dataTransfer.setData('application/x-hermes-scroll-window', sourceId ?? '')
-        dataTransfer.setData('text/plain', sourceId ?? '')
-        target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
-        target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))
-      }, idsBeforeDrag[0])
+      .locator('[data-scroll-window-header]')
+      .first()
+      .dragTo(target, {
+        sourcePosition: { x: 80, y: 15 },
+        targetPosition: { x: targetBox.width - 15, y: targetBox.height / 2 }
+      })
 
     await expect
       .poll(() =>

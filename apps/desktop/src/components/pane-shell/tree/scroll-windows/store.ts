@@ -2,6 +2,7 @@ import { atom } from 'nanostores'
 
 import { readJson, readKey, writeJson, writeKey } from '@/lib/storage'
 
+import { legacyColumns, moveColumnWindow, reconcileColumns, type ScrollDropEdge } from './columns'
 import type { ScrollGridLayout } from './grid'
 
 export type LayoutSurfaceMode = 'tabbed' | 'scroll-windows'
@@ -10,7 +11,7 @@ export interface ScrollWindowWorkspaceState {
   id: string
   windowIds: string[]
   focusedWindowId: null | string
-  rowCount: number
+  columns: string[][]
   scrollLeft: number
   scrollTop: number
   grid: ScrollGridLayout | null
@@ -30,7 +31,7 @@ function validMode(value: string | null): LayoutSurfaceMode {
 }
 
 function emptyWorkspace(id: string): ScrollWindowWorkspaceState {
-  return { focusedWindowId: null, grid: null, id, rowCount: 1, scrollLeft: 0, scrollTop: 0, windowIds: [] }
+  return { focusedWindowId: null, grid: null, id, columns: [], scrollLeft: 0, scrollTop: 0, windowIds: [] }
 }
 
 function coerceWorkspace(value: unknown, id: string): ScrollWindowWorkspaceState {
@@ -38,7 +39,7 @@ function coerceWorkspace(value: unknown, id: string): ScrollWindowWorkspaceState
     return emptyWorkspace(id)
   }
 
-  const raw = value as Partial<ScrollWindowWorkspaceState>
+  const raw = value as Partial<ScrollWindowWorkspaceState> & { rowCount?: number }
 
   const windowIds = Array.isArray(raw.windowIds)
     ? raw.windowIds.filter((item): item is string => typeof item === 'string')
@@ -55,14 +56,21 @@ function coerceWorkspace(value: unknown, id: string): ScrollWindowWorkspaceState
   const scrollTop = typeof raw.scrollTop === 'number' && Number.isFinite(raw.scrollTop) ? Math.max(0, raw.scrollTop) : 0
   const rowCount = typeof raw.rowCount === 'number' && Number.isFinite(raw.rowCount) ? Math.max(1, raw.rowCount) : 1
 
+  const columns = reconcileColumns(
+    Array.isArray(raw.columns)
+      ? raw.columns.filter(Array.isArray).map(column => column.filter((id): id is string => typeof id === 'string'))
+      : legacyColumns(windowIds, rowCount),
+    windowIds
+  )
+
   return {
     focusedWindowId,
     grid: null,
     id,
-    rowCount,
+    columns,
     scrollLeft,
     scrollTop,
-    windowIds
+    windowIds: columns.flat()
   }
 }
 
@@ -80,10 +88,10 @@ function loadWorkspaces(): ScrollWindowWorkspaceState[] {
 function persistWorkspaces(workspaces: readonly ScrollWindowWorkspaceState[]): void {
   writeJson(
     WORKSPACES_KEY,
-    workspaces.map(({ focusedWindowId, id, rowCount, scrollLeft, scrollTop, windowIds }) => ({
+    workspaces.map(({ focusedWindowId, id, columns, scrollLeft, scrollTop, windowIds }) => ({
       focusedWindowId,
       id,
-      rowCount,
+      columns,
       scrollLeft,
       scrollTop,
       windowIds
@@ -143,7 +151,7 @@ export function syncScrollWindowWindows(availableWindowIds: readonly string[]): 
   let changed = false
 
   const next = $scrollWindowWorkspaces.get().map(workspace => {
-    const windowIds = workspace.windowIds.filter(id => availableSet.has(id))
+    const windowIds = workspace.windowIds.filter(id => availableSet.has(id) && !assigned.has(id))
 
     windowIds.forEach(id => assigned.add(id))
 
@@ -158,7 +166,7 @@ export function syncScrollWindowWindows(availableWindowIds: readonly string[]): 
       return {
         ...workspace,
         focusedWindowId,
-        rowCount: Math.max(1, Math.min(workspace.rowCount, Math.max(1, windowIds.length))),
+        columns: reconcileColumns(workspace.columns, windowIds),
         windowIds
       }
     }
@@ -175,7 +183,8 @@ export function syncScrollWindowWindows(availableWindowIds: readonly string[]): 
     next[targetIndex >= 0 ? targetIndex : 0] = {
       ...workspace,
       focusedWindowId: workspace.focusedWindowId ?? missing[0],
-      windowIds: [...workspace.windowIds, ...missing]
+      windowIds: [...workspace.windowIds, ...missing],
+      columns: [...workspace.columns, ...missing.map(id => [id])]
     }
     changed = true
   }
@@ -198,18 +207,9 @@ export function focusScrollWindowWindow(windowId: string): void {
 export function reorderScrollWindowWindow(
   sourceWindowId: string,
   targetWindowId: string,
-  options: { createRow?: boolean } = {}
+  edge: ScrollDropEdge = 'left'
 ): void {
   if (sourceWindowId === targetWindowId) {
-    if (options.createRow) {
-      const workspaceId = $activeScrollWorkspaceId.get()
-
-      updateWorkspace(workspaceId, workspace => ({
-        ...workspace,
-        rowCount: Math.min(workspace.windowIds.length, workspace.rowCount + 1)
-      }))
-    }
-
     return
   }
 
@@ -223,15 +223,9 @@ export function reorderScrollWindowWindow(
       return workspace
     }
 
-    const windowIds = [...workspace.windowIds]
-    const [source] = windowIds.splice(sourceIndex, 1)
-    windowIds.splice(targetIndex, 0, source)
+    const columns = moveColumnWindow(workspace.columns, sourceWindowId, targetWindowId, edge)
 
-    const rowCount = options.createRow
-      ? Math.min(windowIds.length, workspace.rowCount + 1)
-      : Math.max(1, Math.min(workspace.rowCount, windowIds.length))
-
-    return { ...workspace, focusedWindowId: sourceWindowId, rowCount, windowIds }
+    return { ...workspace, focusedWindowId: sourceWindowId, columns, windowIds: columns.flat() }
   })
 }
 

@@ -1,7 +1,13 @@
 import { mainChatOccupied } from '@/app/open-session'
 import { closeActiveTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { $workspaceIsPage } from '@/app/routes'
-import { closeFocusedSessionTab, closeFocusedToolTab, hideLoneTreeTab, isClosingAllTreeTabs } from '@/components/pane-shell/tree/store'
+import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows/store'
+import {
+  closeFocusedSessionTab,
+  closeFocusedToolTab,
+  hideLoneTreeTab,
+  isClosingAllTreeTabs
+} from '@/components/pane-shell/tree/store'
 import { isFocusWithin } from '@/lib/keybinds/combo'
 import { requestEmptyWorkspace } from '@/store/profile'
 import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
@@ -29,6 +35,14 @@ import { closeSessionTile, nextSessionTileForWorkspace } from '@/store/session-s
  * into main"; omitting it disables the promotion half.
  */
 export function closeWorkspaceTab(loadSessionIntoWorkspace?: (storedSessionId: string) => void): boolean {
+  // Scroll cards are independent windows, not tabs stacked in the backing tree.
+  // Close this host without consuming/promoting a neighboring card.
+  if ($layoutSurfaceMode.get() === 'scroll-windows' && !$workspaceIsPage.get()) {
+    requestEmptyWorkspace('workspace.close-scroll-window')
+
+    return true
+  }
+
   // Order matters — close the tile FIRST so the selection homes to the
   // workspace instead of re-fronting the tile.
   if (loadSessionIntoWorkspace && !isClosingAllTreeTabs()) {

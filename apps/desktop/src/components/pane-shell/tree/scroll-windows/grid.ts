@@ -7,6 +7,7 @@ export interface ScrollGridInput {
   minWindowHeight: number
   gap: number
   rows?: number
+  columnSizes?: number[]
 }
 
 export interface ScrollGridLayout {
@@ -18,6 +19,7 @@ export interface ScrollGridLayout {
   viewportHeight: number
   canvasWidth: number
   canvasHeight: number
+  rects?: { height: number; width: number; left: number; top: number }[]
 }
 
 /**
@@ -34,6 +36,7 @@ export function generateScrollGrid({
   minWindowWidth,
   maxWindowWidth = Number.POSITIVE_INFINITY,
   rows: requestedRows = 1,
+  columnSizes,
   viewportHeight,
   viewportWidth,
   windowCount
@@ -48,6 +51,32 @@ export function generateScrollGrid({
 
   const windowHeight = Math.max(minWindowHeight, Math.floor((height - spacing * Math.max(0, rows - 1)) / rows))
 
+  if (columnSizes?.length && columnSizes.every(size => Number.isInteger(size) && size > 0)) {
+    const rects = columnSizes.flatMap((size, column) => {
+      const stackHeight = Math.max(minWindowHeight * size + spacing * (size - 1), height)
+      const paneHeight = (stackHeight - spacing * (size - 1)) / size
+
+      return Array.from({ length: size }, (_, row) => ({
+        height: paneHeight,
+        width: windowWidth,
+        left: column * (windowWidth + spacing),
+        top: row * (paneHeight + spacing)
+      }))
+    })
+
+    return {
+      canvasHeight: Math.max(height, ...rects.map(rect => rect.top + rect.height)),
+      canvasWidth: columnSizes.length * windowWidth + spacing * (columnSizes.length - 1),
+      columns: columnSizes.length,
+      rows: Math.max(...columnSizes),
+      viewportHeight: height,
+      viewportWidth: width,
+      windowHeight: height,
+      windowWidth,
+      rects
+    }
+  }
+
   return {
     canvasHeight: rows * windowHeight + spacing * Math.max(0, rows - 1),
     canvasWidth: columns * windowWidth + spacing * Math.max(0, columns - 1),
@@ -61,6 +90,9 @@ export function generateScrollGrid({
 }
 
 export function scrollGridWindowRect(layout: ScrollGridLayout, index: number, gap: number) {
+  if (layout.rects?.[index]) {
+    return layout.rects[index]
+  }
   const column = index % layout.columns
   const row = Math.floor(index / layout.columns)
 
