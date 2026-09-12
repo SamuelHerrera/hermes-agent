@@ -76,9 +76,12 @@ def test_memory_manager_registers_session_for_archive_flush():
 
 @pytest.mark.asyncio
 async def test_session_archive_endpoint_flushes_memory_before_hiding(monkeypatch):
+    from tui_gateway import session_archive
+
     db = _FakeDb()
     events = []
 
+    monkeypatch.setattr(session_archive, "stop_archived_session_work", lambda db, sid: {})
     monkeypatch.setattr(sessions, "_open_session_db_for_profile", lambda profile, read_only=False: db)
     monkeypatch.setattr(
         sessions,

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
+import { $terminals, createTerminal, ensureAgentTerminal, selectTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { group } from '@/components/pane-shell/tree/model'
 import { $layoutTree, revealTreePane } from '@/components/pane-shell/tree/store'
 import {
@@ -2511,6 +2512,7 @@ describe('resumeSession warm-cache mapping integrity', () => {
 describe('archiveSession delegate visibility', () => {
   afterEach(() => {
     cleanup()
+    $terminals.set([])
     $emptyWorkspaceRequest.set(0)
     $layoutTree.set(null)
     setSessions([])
@@ -2555,6 +2557,14 @@ describe('archiveSession delegate visibility', () => {
     ])
     vi.mocked(setSessionArchived).mockResolvedValue({ ok: true })
 
+    const manual = createTerminal('/repo')
+    ensureAgentTerminal('archive-parent-proc', 'Parent server', { ownerSessionId: 'parent', profile: 'default', cwd: '/repo' })
+    const childTerminal = ensureAgentTerminal('archive-child-proc', 'Child server', { ownerSessionId: 'child', profile: 'default', cwd: '/repo' })!
+    selectTerminal(childTerminal)
+    const otherTerminal = ensureAgentTerminal('archive-other-proc', 'Other server', { ownerSessionId: 'unrelated', profile: 'default', cwd: '/repo' })!
+    const foreignTerminal = ensureAgentTerminal('archive-foreign-proc', 'Foreign server', { ownerSessionId: 'parent', profile: 'foreign', cwd: '/repo' })!
+    $sessionTiles.set([{ storedSessionId: 'child' }, { storedSessionId: 'grandchild' }])
+
     let handle: HarnessHandle | null = null
     render(<Harness onReady={value => (handle = value)} requestGateway={async () => ({}) as never} />)
     await waitFor(() => expect(handle).not.toBeNull())
@@ -2565,6 +2575,9 @@ describe('archiveSession delegate visibility', () => {
 
     expect($sessions.get().map(session => session.id)).toEqual(['unrelated'])
     expect([...$removedSessionIds.get()].sort()).toEqual(['child', 'grandchild', 'parent'])
+    expect($terminals.get().map(terminal => terminal.id)).toEqual([manual, otherTerminal, foreignTerminal])
+    expect(ensureAgentTerminal('archive-child-proc', 'Late process snapshot')).toBeNull()
+    expect($sessionTiles.get()).toEqual([])
   })
 
   it('promotes the next stacked chat tab instead of opening a New Session tab when archiving main', async () => {

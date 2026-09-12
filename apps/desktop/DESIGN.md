@@ -50,8 +50,10 @@ one-off at the call site.
 - **Pages are durable destinations.** Chat, Skills, Messaging, and Artifacts
   remain in shell chrome. Do not hide a distinct product noun inside an
   unrelated page.
-- **Route overlays are short tasks.** Settings, Command Center, Cron, Profiles,
-  Agents, and Starmap render as `OverlayView` cards and return to the previous
+- **Settings is a closeable workspace tab.** All settings entry points reuse
+  one tab, with independent section/deep-link state, leaving chats in place.
+- **Route overlays are short tasks.** Profiles, Agents, and Starmap render as
+  `OverlayView` cards and return to the previous
   route on close. Model/session pickers and dialogs layer above the current
   surface; they are not navigation stacks.
 - **Panes are working context.** Preview, files, review, and terminal remain

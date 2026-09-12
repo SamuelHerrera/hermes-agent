@@ -52,6 +52,7 @@ import {
   refreshActiveProfile
 } from '@/store/profile'
 import { $startWorkSessionRequest, followActiveSessionCwd } from '@/store/projects'
+import { closeRouteTile } from '@/store/route-tiles'
 import {
   $activeSessionId,
   $connection,
@@ -252,7 +253,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     openStarmap,
     profilesOpen,
     resetOverlayReturnRoute,
-    settingsOpen,
     starmapOpen,
     toggleCommandCenter
   } = useOverlayRouting()
@@ -1022,12 +1022,29 @@ export function ContribWiring({ children }: { children: ReactNode }) {
 
   const api = useMemo<WiringApi>(
     () => ({
+      settings: (
+        <Suspense fallback={null}>
+          <SettingsView
+            onClose={() => closeRouteTile(SETTINGS_ROUTE)}
+            onConfigSaved={() => {
+              void refreshHermesConfig()
+              void refreshCurrentModel()
+              void queryClient.invalidateQueries({ queryKey: ['model-options'] })
+            }}
+            onMainModelChanged={(provider, model) => {
+              applySavedMainModel(provider, model)
+              void refreshCurrentModel()
+              void queryClient.invalidateQueries({ queryKey: ['model-options'] })
+            }}
+          />
+        </Suspense>
+      ),
       chatRoutes: chatRoutesNode,
       sidebar: sidebarNode,
       statusbar: statusbarNode,
       terminal: terminalNode
     }),
-    [chatRoutesNode, sidebarNode, statusbarNode, terminalNode]
+    [chatRoutesNode, sidebarNode, statusbarNode, terminalNode, refreshHermesConfig, refreshCurrentModel, applySavedMainModel, queryClient]
   )
 
   // The REAL titlebar tool clusters (sidebar/flip toggles, haptics, keybinds,
@@ -1126,25 +1143,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       <FileActionDialogs />
       <RemoteFolderPicker />
       <FindBar />
-
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsView
-            gateway={gateway}
-            onClose={closeOverlayToPreviousRoute}
-            onConfigSaved={() => {
-              void refreshHermesConfig()
-              void refreshCurrentModel()
-              void queryClient.invalidateQueries({ queryKey: ['model-options'] })
-            }}
-            onMainModelChanged={(provider, model) => {
-              applySavedMainModel(provider, model)
-              void refreshCurrentModel()
-              void queryClient.invalidateQueries({ queryKey: ['model-options'] })
-            }}
-          />
-        </Suspense>
-      )}
 
       {agentsOpen && (
         <Suspense fallback={null}>

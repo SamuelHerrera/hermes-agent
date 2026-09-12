@@ -5,6 +5,7 @@ import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 
 import { readActivePreview } from '@/app/chat/right-rail/preview-reader'
 import { writeAgentTerminalChunk } from '@/app/right-sidebar/terminal/agent-terminal-stream'
+import { clearArchivedTerminals } from '@/app/right-sidebar/terminal/archive'
 import { readActiveTerminal } from '@/app/right-sidebar/terminal/buffer'
 import { closeAgentTerminalByProc } from '@/app/right-sidebar/terminal/terminals'
 import { burstVibeHearts } from '@/components/chat/vibe-hearts'
@@ -361,6 +362,11 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         // apply — background profile sockets watch their own homes.
         const fromActiveChangeProfile =
           !event.profile || normalizeProfileKey(event.profile) === normalizeProfileKey($activeGatewayProfile.get())
+
+        if (event.type === 'sessions.changed' && payload?.archive_cleanup) {
+          const archived = payload.archive_cleanup
+          clearArchivedTerminals(archived.session_ids, archived.profile, archived.process_ids)
+        }
 
         if (fromActiveChangeProfile) {
           if (event.type === 'pet.changed') {

@@ -2,6 +2,8 @@ import { useStore } from '@nanostores/react'
 import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 import type { NavigateFunction } from 'react-router'
 
+import { archivedTerminalIds } from '@/app/right-sidebar/terminal/archive'
+import { closeTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { revealTreePane } from '@/components/pane-shell/tree/store'
 import { deleteSession, getAllSessionMessages, getLatestSessionMessages, setSessionArchived } from '@/hermes'
 import { useI18n } from '@/i18n'
@@ -1889,7 +1891,8 @@ export function useSessionActions({
         .filter(session => archivedFamilyIds.some(id => sessionMatchesStoredId(session, id)))
 
       const archived = archivedFamily.find(session => sessionMatchesStoredId(session, storedSessionId))
-      const wasSelected = selectedStoredSessionId === storedSessionId
+      const terminalIds = archivedTerminalIds(archivedFamilyIds, archived?.profile)
+      const wasSelected = archivedFamilyIds.some(id => id === selectedStoredSessionId)
       const previousPinned = $pinnedSessionIds.get()
       // Pins are keyed on the durable lineage-root id; the stored id may be the
       // live tip after compression. Drop both so the pin can't linger.
@@ -1918,14 +1921,21 @@ export function useSessionActions({
 
       try {
         await setSessionArchived(storedSessionId, true, archived?.profile)
-        // An archived session is hidden from the sidebar; its tile must go too.
-        const tiledRuntimeId = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
-        closeSessionTile(storedSessionId)
 
-        if (tiledRuntimeId) {
-          runtimeIdByStoredSessionIdRef.current.delete(storedSessionId)
-          sessionStateByRuntimeIdRef.current.delete(tiledRuntimeId)
-          dropSessionState(tiledRuntimeId)
+        for (const id of terminalIds) {
+          closeTerminal(id)
+        }
+
+        // Remove the whole family's tiles, not only the parent's tab.
+        for (const id of archivedFamilyIds) {
+          const tiledRuntimeId = runtimeIdByStoredSessionIdRef.current.get(id)
+          closeSessionTile(id)
+
+          if (tiledRuntimeId) {
+            runtimeIdByStoredSessionIdRef.current.delete(id)
+            sessionStateByRuntimeIdRef.current.delete(tiledRuntimeId)
+            dropSessionState(tiledRuntimeId)
+          }
         }
 
         notify({ durationMs: 2_000, kind: 'success', message: copy.archived })

@@ -27,7 +27,6 @@ import { notifyError } from '@/store/notifications'
 import { useRouteEnumParam } from '../hooks/use-route-enum-param'
 import { OverlayIconButton } from '../overlays/overlay-chrome'
 import { OverlayMain, OverlayNav, type OverlayNavGroup, OverlaySplitLayout } from '../overlays/overlay-split-layout'
-import { OverlayView } from '../overlays/overlay-view'
 import { SKILLS_ROUTE } from '../routes'
 
 import { AboutSettings } from './about-settings'
@@ -294,9 +293,9 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
   )
 
   return (
-    <OverlayView closeLabel={t.settings.closeSettings} onClose={onClose}>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)" data-settings-surface="">
       <OverlaySplitLayout>
-        <OverlayNav footer={navFooter} groups={navGroups} />
+        <OverlayNav embedded footer={navFooter} groups={navGroups} />
 
         <OverlayMain className="px-0 pb-0">
           {activeView === 'config:appearance' ? (
@@ -335,7 +334,7 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
           )}
         </OverlayMain>
       </OverlaySplitLayout>
-    </OverlayView>
+    </div>
   )
 }
 

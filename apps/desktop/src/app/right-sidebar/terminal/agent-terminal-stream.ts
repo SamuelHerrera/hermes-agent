@@ -11,12 +11,30 @@ const backlog = new Map<string, string>()
 const commandHeaders = new Map<string, string>()
 const lastSnapshots = new Map<string, string>()
 const seededCommands = new Set<string>()
+const discarded = new Set<string>()
+
+export function discardAgentTerminalOutput(procId: string): void {
+  discarded.add(procId)
+  writers.delete(procId)
+  backlog.delete(procId)
+  commandHeaders.delete(procId)
+  lastSnapshots.delete(procId)
+  seededCommands.delete(procId)
+}
+
+export function restoreAgentTerminalOutput(procId: string): void {
+  discarded.delete(procId)
+}
 
 const MAX_BACKLOG = 256_000
 
 /** A live agent terminal registers its xterm write and replays the backlog.
  *  Returns an idempotent unregister. */
 export function registerAgentTerminalWriter(procId: string, write: Writer): () => void {
+  if (discarded.has(procId)) {
+    return () => {}
+  }
+
   writers.set(procId, write)
 
   const history = backlog.get(procId)
@@ -35,7 +53,7 @@ export function registerAgentTerminalWriter(procId: string, write: Writer): () =
 /** Append a streamed chunk: buffer it (capped) for future opens and write it to
  *  the live terminal, if one is mounted. */
 export function writeAgentTerminalChunk(procId: string, chunk: string): void {
-  if (!procId || !chunk) {
+  if (!procId || !chunk || discarded.has(procId)) {
     return
   }
 
@@ -49,7 +67,7 @@ export function writeAgentTerminalChunk(procId: string, chunk: string): void {
 export function seedAgentTerminalCommand(procId: string, command: string): void {
   const trimmed = command.trim()
 
-  if (!procId || !trimmed || seededCommands.has(procId)) {
+  if (!procId || !trimmed || seededCommands.has(procId) || discarded.has(procId)) {
     return
   }
 
@@ -64,7 +82,7 @@ export function seedAgentTerminalCommand(procId: string, command: string): void 
  *  after output already exists. If it extends our current backlog, append only
  *  the delta; if the registry's rolling tail slid, reset to that tail. */
 export function syncAgentTerminalSnapshot(procId: string, output: string): void {
-  if (!procId || !output) {
+  if (!procId || !output || discarded.has(procId)) {
     return
   }
 

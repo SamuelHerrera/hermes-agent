@@ -14,6 +14,7 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { $cronJobs } from '@/store/cron'
 import { $routeTiles, closeRouteTile, type RouteTile } from '@/store/route-tiles'
 
+import { WiredPane } from '../contrib/context'
 import { jobTitle } from '../cron/job-state'
 import { openSession } from '../open-session'
 import {
@@ -24,9 +25,11 @@ import {
   isCronRoute,
   MESSAGING_ROUTE,
   ROUTES_AREA,
+  SETTINGS_ROUTE,
   SKILLS_ROUTE,
   WEBHOOKS_ROUTE
 } from '../routes'
+import { SettingsTabRoute } from '../settings/tab-route'
 
 import { paneMirror } from './pane-mirror'
 
@@ -45,6 +48,10 @@ const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> 
     title: 'Command Center'
   },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
+  [SETTINGS_ROUTE]: {
+    render: () => <SettingsTabRoute><WiredPane part="settings" /></SettingsTabRoute>,
+    title: 'Settings'
+  },
   [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' },
   [WEBHOOKS_ROUTE]: { render: () => <WebhooksView />, title: 'Webhooks' }
 }

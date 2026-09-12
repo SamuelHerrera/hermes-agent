@@ -8,7 +8,7 @@ import { $currentCwd } from '@/store/session'
 
 import { setTerminalTakeover } from '../store'
 
-import { seedAgentTerminalCommand } from './agent-terminal-stream'
+import { discardAgentTerminalOutput, restoreAgentTerminalOutput, seedAgentTerminalCommand } from './agent-terminal-stream'
 
 /** One in-app terminal tab. `id` is the renderer-side handle (distinct from the
  *  PTY session id the main process mints); each instance owns its own shell. */
@@ -246,6 +246,7 @@ export function ensureAgentTerminal(
  *  the user had closed it. Opens the pane. */
 export function openAgentTerminal(procId: string, title: string): void {
   surfacedProcs.add(procId)
+  restoreAgentTerminalOutput(procId)
   seedAgentTerminalCommand(procId, title)
   let id = findByProc(procId)?.id
 
@@ -372,6 +373,10 @@ export function closeTerminal(id: string): void {
     return
   }
 
+  if (list[index].kind === 'agent' && list[index].procId) {
+    discardAgentTerminalOutput(list[index].procId!)
+  }
+
   const next = list.filter(term => term.id !== id)
   $terminals.set(next)
 
@@ -401,11 +406,31 @@ export function closeAgentTerminalByProc(procId: string): boolean {
   return true
 }
 
+/** Archive cleanup suppresses late discovery even if this window never opened it. */
+export function removeAgentTerminalByProc(procId: string): void {
+  surfacedProcs.add(procId)
+  discardAgentTerminalOutput(procId)
+  const term = findByProc(procId)
+
+  if (term) {
+    closeTerminal(term.id)
+  }
+}
+
+/** Closing a manual tab ends its shell; agent tabs only detach their output. */
+export function closeTerminalTab(id: string): void {
+  if ($terminals.get().find(term => term.id === id)?.kind === 'user') {
+    closeTerminal(id)
+  } else {
+    hideTerminal(id)
+  }
+}
+
 export function closeActiveTerminal(): void {
   const id = $activeTerminalId.get()
 
   if (id) {
-    hideTerminal(id)
+    closeTerminalTab(id)
   }
 }
 

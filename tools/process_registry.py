@@ -371,6 +371,7 @@ class ProcessSession:
     task_id: str = ""                           # Task/sandbox isolation key
     origin_turn_id: str = ""                     # Unique parent agent turn
     session_key: str = ""                       # Gateway session key (for reset protection)
+    profile_home: str = field(default_factory=lambda: str(get_hermes_home().resolve()))
     pid: Optional[int] = None                   # OS process ID
     process: Optional[subprocess.Popen] = None  # Popen handle (local only)
     env_ref: Any = None                         # Reference to the environment object
@@ -2580,6 +2581,7 @@ class ProcessRegistry:
                             "task_id": s.task_id,
                             "origin_turn_id": s.origin_turn_id,
                             "session_key": s.session_key,
+                            "profile_home": s.profile_home,
                             "watcher_platform": s.watcher_platform,
                             "watcher_chat_id": s.watcher_chat_id,
                             "watcher_user_id": s.watcher_user_id,
@@ -2671,6 +2673,7 @@ class ProcessRegistry:
                 task_id=entry.get("task_id", ""),
                 origin_turn_id=entry.get("origin_turn_id", ""),
                 session_key=entry.get("session_key", ""),
+                profile_home=entry.get("profile_home") or str(get_hermes_home().resolve()),
                 pid=pid,
                 host_start_time=recorded_start,
                 pid_scope=pid_scope,

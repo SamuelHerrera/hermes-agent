@@ -728,7 +728,14 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
                 # Title too long, invalid characters, or already in use.
                 raise HTTPException(status_code=400, detail=str(e))
         if body.archived is not None:
+            cleanup = None
             if body.archived:
+                from tui_gateway.session_archive import stop_archived_session_work
+
+                try:
+                    cleanup = await asyncio.to_thread(stop_archived_session_work, db, sid)
+                except Exception as exc:
+                    raise HTTPException(status_code=409, detail=f"Archive cleanup failed: {exc}") from exc
                 try:
                     flush_session_archive(sid, wait=True, timeout=10.0)
                 except Exception:
@@ -738,6 +745,13 @@ async def rename_session_endpoint(session_id: str, body: SessionRename):
                         exc_info=True,
                     )
             db.set_session_archived(sid, body.archived)
+            if cleanup:
+                from hermes_cli.profiles import get_active_profile
+                from tui_gateway.server import _broadcast_global_event
+
+                _broadcast_global_event("sessions.changed", {"archive_cleanup": {
+                    **cleanup, "profile": body.profile or get_active_profile(),
+                }})
         if body.pinned is not None:
             db.set_session_pinned(sid, body.pinned)
         result = {"ok": True, "title": db.get_session_title(sid) or ""}

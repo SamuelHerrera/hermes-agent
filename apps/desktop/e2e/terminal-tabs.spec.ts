@@ -69,7 +69,7 @@ test.afterEach(async () => {
   release.cleanup()
 })
 
-test('manual shells occupy individual top-level tabs and reopen without losing the live shell', async () => {
+test('manual tabs retain shells while switching and stop and clear them on close', async () => {
   const page = fixture.page
   await page.keyboard.press('Control+`')
   const tabs = page.locator('[data-tree-tab^="terminal-instance:"]')
@@ -106,8 +106,7 @@ test('manual shells occupy individual top-level tabs and reopen without losing t
     .toMatch(/CWD=[^\r\n]*\/terminal-project/)
   await expect(page.locator('[role="tablist"][aria-label="Terminals"]')).toHaveCount(0)
 
-  await page.locator(`[data-tree-tab="${firstPane}"]`).click({ button: 'middle' })
-  await expect(tabs).toHaveCount(1)
+  await expect(tabs).toHaveCount(2)
   await expect(host).toHaveAttribute('aria-hidden', 'true')
 
   const homeToggle = page.getByRole('button', { name: 'Show Home sessions', exact: true }).first()
@@ -157,7 +156,29 @@ test('manual shells occupy individual top-level tabs and reopen without losing t
   await expect(row.locator('button[aria-pressed]')).toHaveText(shellTitle)
   await expect(project.locator('[data-project-summary-kind="terminals"]')).toHaveText('1')
 
-  // Remove our manual shells, not merely their views, before the agent case.
+  // Assert OS process death, not only disappearance of the xterm host.
+  const pidFile = path.join(fixture.sandbox.root, 'manual-shell.pid')
+  const childPidFile = path.join(fixture.sandbox.root, 'manual-child.pid')
+  await host.locator('.xterm-helper-textarea').focus()
+  await page.keyboard.type(`printf '%s' $$ > '${pidFile}'; sleep 120 & printf '%s' $! > '${childPidFile}'; wait`)
+  await page.keyboard.press('Enter')
+  await expect.poll(() => fs.existsSync(childPidFile) && fs.readFileSync(childPidFile, 'utf8').length > 0).toBe(true)
+  const pids = [pidFile, childPidFile].map(file => Number(fs.readFileSync(file, 'utf8')))
+  const alive = (pid: number) => {
+    try { process.kill(pid, 0); return true } catch { return false }
+  }
+  expect(pids.every(pid => pid > 0 && alive(pid))).toBe(true)
+  await page.locator(`[data-tree-tab="${firstPane}"]`).click({ button: 'middle' })
+  await expect(host).toHaveCount(0)
+  await expect(row).toHaveCount(0)
+  await expect.poll(() => pids.map(alive), { timeout: 15_000 }).toEqual([false, false])
+  expect(await page.evaluate(id => {
+    const saved = JSON.parse(localStorage.getItem('hermes.desktop.terminals.v1') ?? '{}')
+    return saved.terminals?.some((term: { id: string }) => term.id === id) ?? false
+  }, id)).toBe(false)
+  await page.screenshot({ path: 'test-results/terminal-closed-process-stopped.png' })
+
+  // The remaining manual shell is removed via the sidebar deletion path.
   const deletes = page.locator('[data-sidebar-terminal] button[aria-label^="Delete:"]')
 
   while (await deletes.count()) {
@@ -257,9 +278,12 @@ test('agent process gets a connected sidebar child and opens its tab only on sel
   await page.keyboard.press('Enter')
   const tabs = page.locator('[data-tree-tab^="terminal-instance:"]')
   await expect(page.locator('[data-persistent-terminal][aria-hidden="false"]')).toHaveCount(0)
-  await expect(page.getByText('Both tasks are running in the background now.', { exact: true })).toBeVisible({
-    timeout: 30_000
-  })
+  await expect.poll(async () => {
+    // Smart mode may request approval for this fixture's bounded shell loop.
+    const run = page.getByRole('button', { name: /^Run(?:\s|$)/ }).first()
+    if (await run.isVisible()) await run.click()
+    return page.getByText('Both tasks are running in the background now.', { exact: true }).isVisible()
+  }, { timeout: 30_000 }).toBe(true)
   await expect(tabs).toHaveCount(0)
   await composer.fill('/title Terminal owner')
   await page.keyboard.press('Enter')
@@ -322,4 +346,34 @@ test('agent process gets a connected sidebar child and opens its tab only on sel
   await expect(project.locator('[data-project-summary-kind="terminals"]')).toHaveText('1')
   await expect(page.locator('[data-project-summary-kind="children"]')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/terminal-chat-child.png' })
+  const running = JSON.parse(fs.readFileSync(path.join(fixture.sandbox.hermesHome, 'processes.json'), 'utf8')) as { id: string; pid: number }[]
+  expect(running.length).toBeGreaterThan(0)
+  await page.evaluate(async () => {
+    const w = window as typeof window & {
+      hermesDesktop: { getConnection: () => Promise<{ wsUrl: string }> }
+      archiveEvents?: unknown[]
+      archiveObserver?: WebSocket
+    }
+    w.archiveEvents = []
+    w.archiveObserver = new WebSocket((await w.hermesDesktop.getConnection()).wsUrl)
+    w.archiveObserver.onmessage = event => {
+      const frame = JSON.parse(String(event.data))
+      if (frame.params?.payload?.archive_cleanup) w.archiveEvents!.push(frame.params.payload.archive_cleanup)
+    }
+    await new Promise<void>((resolve, reject) => {
+      w.archiveObserver!.onopen = () => resolve()
+      w.archiveObserver!.onerror = () => reject(new Error('Archive observer socket failed'))
+    })
+  })
+  const owner = page.locator('[data-session-row-primary]').filter({ hasText: 'Terminal owner' }).first()
+    .locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " row-hover ")][1]')
+  await owner.getByRole('button', { name: /^Archive/ }).click()
+  await expect(host).toHaveCount(0)
+  await expect(page.locator('[data-session-terminals] [data-sidebar-terminal]')).toHaveCount(0)
+  await expect(tabs).toHaveCount(1) // the independent manual shell stays open
+  await expect.poll(() => running.map(({ pid }) => {
+    try { process.kill(pid, 0); return true } catch { return false }
+  }), { timeout: 15_000 }).toEqual(running.map(() => false))
+  await expect.poll(() => page.evaluate(() => (window as typeof window & { archiveEvents?: unknown[] }).archiveEvents?.length)).toBeGreaterThan(0)
+  await page.screenshot({ path: 'test-results/archive-terminal-family-cleaned.png' })
 })

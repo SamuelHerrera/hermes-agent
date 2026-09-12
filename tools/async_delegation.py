@@ -848,6 +848,7 @@ def dispatch_async_delegation(
         "completed_at": None,
         "interrupt_fn": interrupt_fn,
         "progress_fn": progress_fn,
+        "profile_home": str(get_hermes_home().resolve()),
         # Stale-monitor bookkeeping (see _stale_monitor_loop).
         "_progress_token": None,
         "_progress_ts": dispatched_at,
@@ -1098,6 +1099,7 @@ def dispatch_async_delegation_batch(
         "completed_at": None,
         "interrupt_fn": interrupt_fn,
         "is_batch": True,
+        "profile_home": str(get_hermes_home().resolve()),
         "progress_fn": progress_fn,
         "_progress_token": None,
         "_progress_ts": dispatched_at,
@@ -1558,6 +1560,7 @@ def interrupt_for_session(
     origin_ui_session_id: str = "",
     parent_session_id: str = "",
     reason: str = "session_end",
+    profile_home: str = "",
 ) -> int:
     """Signal running async delegations owned by ONE session to stop.
 
@@ -1576,6 +1579,7 @@ def interrupt_for_session(
       session id rotates.
 
     Returns how many were interrupted.
+    ``profile_home`` optionally constrains cross-profile archive cleanup.
     """
     if not session_key and not origin_ui_session_id and not parent_session_id:
         return 0
@@ -1584,6 +1588,7 @@ def interrupt_for_session(
         targets = [
             r for r in _records.values()
             if r.get("status") in ("running", "stalling")
+            and (not profile_home or r.get("profile_home") == profile_home)
             and _matches_session_selectors(
                 r,
                 session_key=session_key,

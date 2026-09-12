@@ -32,6 +32,7 @@ export type ChatMessage = {
 }
 
 export type GatewayEventPayload = {
+  archive_cleanup?: { session_ids: string[]; process_ids: string[]; profile: string }
   text?: string
   rendered?: string
   status?: string

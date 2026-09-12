@@ -31,6 +31,7 @@ _Thread = threading.Thread
 MUTATOR_ROUTE_TABLE: dict[str, str] = {
     "prompt.submit": "turn-path",
     "session.interrupt": "turn-path",
+    "session.archive": "run-concurrent",
     "reload.mcp": "run-concurrent",
     "session.save": "run-concurrent",
     "session.compress": "idle-gated",

@@ -670,6 +670,16 @@ class ComputeHost:
             if route_name == "reload.mcp":
                 self._handle_reload_mcp({**frame, "type": "reload_mcp"})
                 return
+            if route_name == "session.archive":
+                from tui_gateway.session_archive import stop_archived_session_work
+
+                with server._session_db(session) as db:
+                    if db is None:
+                        raise RuntimeError("Session database unavailable")
+                    result = stop_archived_session_work(db, str(frame["session_id"]))
+                self.emit({"type": "control.ack", "sid": sid, "request_id": request_id,
+                           "route_name": route_name, "result": result})
+                return
             if route_name == "session.save":
                 response = server._methods["session.save"](
                     request_id,

@@ -169,7 +169,6 @@ export interface SidebarNavChildrenProps {
 export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
   'agents',
   'profiles',
-  'settings',
   'starmap'
 ])
 
@@ -272,7 +271,8 @@ export function appViewForPath(pathname: string): AppView {
 export function isWorkspacePageRoute(to: string): boolean {
   const view = appViewForPath(to)
 
-  return view !== 'chat' && !isOverlayView(view)
+  // Settings is a dedicated route tile; its URL is handed off by shell routing.
+  return view !== 'chat' && view !== 'settings' && !isOverlayView(view)
 }
 
 /** True while the workspace pane shows a FULL PAGE (skills/messaging/
@@ -301,6 +301,10 @@ function revealWorkspacePane(): void {
  * statusbar/titlebar `to` targets, back/forward, and cold-start restore.
  */
 export function syncWorkspaceRoute(pathname: string): void {
+  if (routePathname(pathname) === SETTINGS_ROUTE) {
+    return
+  }
+
   const isPage = isWorkspacePageRoute(pathname)
 
   if (isPage !== $workspaceIsPage.get()) {

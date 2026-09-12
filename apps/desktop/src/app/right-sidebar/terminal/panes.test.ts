@@ -177,18 +177,16 @@ describe('individual terminal panes', () => {
     expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(id))?.active).toBe(s.terminalPaneId(id))
   })
 
-  it('closes the tab non-destructively and reopens the same terminal from navigation', async () => {
+  it('removes a closed manual terminal and its persisted scrollback', async () => {
     const s = await setup()
     const id = s.createTerminal('/repo', { projectId: 'project', profile: 'default' })
     s.updateTerminalReviveBuffer(id, 'kept history')
     s.tree.closeTabPane(s.terminalPaneId(id))
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(id))
-    expect(s.$terminals.get()).toEqual([
-      expect.objectContaining({ id, hidden: true, reviveBuffer: 'kept history', projectId: 'project' })
-    ])
+    expect(s.$terminals.get()).toEqual([])
     s.selectTerminal(id)
-    expect(s.$terminals.get()).toHaveLength(1)
-    expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(id))?.active).toBe(s.terminalPaneId(id))
+    expect(s.$terminals.get()).toEqual([])
+    expect(window.localStorage.getItem('hermes.desktop.terminals.v1')).toBeNull()
   })
 
   it('does not re-open a closed agent tab when process snapshots repeat', async () => {
@@ -204,7 +202,7 @@ describe('individual terminal panes', () => {
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).toContain(s.terminalPaneId(id))
   })
 
-  it('supports moving terminals into separate zones and closing all tabs without killing shells', async () => {
+  it('removes manual terminals when closing all tabs in their zone without touching another zone', async () => {
     const s = await setup()
     const first = s.createTerminal('/repo')
     const second = s.createTerminal('/other')
@@ -214,8 +212,7 @@ describe('individual terminal panes', () => {
       s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(second))?.id
     )
     s.tree.closeAllTreeTabs(s.terminalPaneId(second))
-    expect(s.$terminals.get().find(terminal => terminal.id === second)?.hidden).toBe(true)
-    expect(s.$terminals.get().find(terminal => terminal.id === first)?.hidden).not.toBe(true)
+    expect(s.$terminals.get().map(terminal => terminal.id)).toEqual([first])
   })
 
   it('persists closed manual entries and their project ownership across relaunch', async () => {

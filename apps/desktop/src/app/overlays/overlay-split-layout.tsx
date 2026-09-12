@@ -152,10 +152,10 @@ export interface OverlayNavGroup extends OverlayNavLink {
 // dropdown in PageSearchShell), so every OverlaySplitLayout pane degrades the
 // same way instead of stacking its whole sidebar. Drop it in as the first
 // child of an OverlaySplitLayout, before OverlayMain.
-export function OverlayNav({ footer, groups }: { footer?: ReactNode; groups: OverlayNavGroup[] }) {
+export function OverlayNav({ embedded = false, footer, groups }: { embedded?: boolean; footer?: ReactNode; groups: OverlayNavGroup[] }) {
   return (
     <>
-      <OverlaySidebar className={RAIL_HIDDEN}>
+      <OverlaySidebar className={cn(RAIL_HIDDEN, embedded && 'pt-2')}>
         {groups.map(group => (
           <Fragment key={group.id}>
             {group.gapBefore && <div aria-hidden className="h-2" />}
@@ -186,7 +186,8 @@ export function OverlayNav({ footer, groups }: { footer?: ReactNode; groups: Ove
           and the height matches the strip so the trigger lines up with the X. */}
       <div
         className={cn(
-          'pointer-events-none relative z-20 h-[calc(var(--titlebar-height)+0.1875rem)] items-center justify-between gap-2 pl-3 pr-12',
+          'pointer-events-none relative z-20 items-center justify-between gap-2 pl-3',
+          embedded ? 'min-h-8 py-2 pr-3' : 'h-[calc(var(--titlebar-height)+0.1875rem)] pr-12',
           BAR_HIDDEN
         )}
       >
