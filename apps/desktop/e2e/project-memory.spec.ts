@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import type { Page } from '@playwright/test'
 
-import { setupMockBackend, waitForAppReady } from './fixtures'
+import { selectCreateAction, setupMockBackend, waitForAppReady } from './fixtures'
 import { expect, test } from './test'
 
 // Each request uses a separate socket, proving persistence is shared between
@@ -77,7 +77,7 @@ test('project removal remembers settings across clients and the simplified creat
     }, folder)
     await fixture.page.reload()
     await waitForAppReady(fixture)
-    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await selectCreateAction(fixture.page, 'New project')
     const form = fixture.page.getByRole('dialog')
     await expect(form.getByRole('textbox')).toHaveCount(1)
     await expect(form.getByText('Idea', { exact: true })).toHaveCount(0)
@@ -135,13 +135,13 @@ test('project removal remembers settings across clients and the simplified creat
     expect(fs.readFileSync(path.join(folder, 'IDEA.md'), 'utf8')).toBe('Existing user document\n')
     await expect(fixture.page.getByText('Renamed workspace', { exact: true }).first()).toBeVisible()
     await fixture.page.screenshot({ path: testInfo.outputPath('restored-project.png') })
-    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await selectCreateAction(fixture.page, 'New project')
     await expect(recents).toHaveCount(0)
     await form.getByRole('button', { name: 'Cancel', exact: true }).click()
     await rpc(fixture.page, 'projects.delete', { id: original.project.id })
     await fixture.page.reload()
     await waitForAppReady(fixture)
-    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await selectCreateAction(fixture.page, 'New project')
     await expect(recents.getByText('Renamed workspace', { exact: true })).toBeVisible()
     await fixture.page.screenshot({ path: testInfo.outputPath('recent-projects.png') })
     await recents.getByRole('button', { name: 'Remove from recent projects: Renamed workspace', exact: true }).click()
@@ -150,7 +150,7 @@ test('project removal remembers settings across clients and the simplified creat
     await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
     await fixture.page.reload()
     await waitForAppReady(fixture)
-    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await selectCreateAction(fixture.page, 'New project')
     await expect(recents).toHaveCount(0)
     await fixture.page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
     const kept = await rpc<{ project: Project }>(fixture.page, 'projects.create', {
@@ -164,7 +164,7 @@ test('project removal remembers settings across clients and the simplified creat
     await rpc(fixture.page, 'projects.delete', { id: original.project.id })
     await fixture.page.reload()
     await waitForAppReady(fixture)
-    await fixture.page.getByRole('button', { name: 'New project', exact: true }).click()
+    await selectCreateAction(fixture.page, 'New project')
     await recents.getByRole('button', { name: 'Open project: Renamed workspace', exact: true }).click()
     await expect(fixture.page.getByRole('dialog')).toHaveCount(0)
     const reopened = await rpc<{ project: Project }>(fixture.page, 'projects.get', { id: original.project.id })

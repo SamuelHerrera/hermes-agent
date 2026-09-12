@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $keepAwake } from '@/store/keep-awake'
 import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
+import { $projectDialog, closeProjectDialog } from '@/store/projects'
 
 import type { StatusbarItem } from './statusbar-controls'
 import { TitlebarControls } from './titlebar-controls'
@@ -21,6 +22,7 @@ afterEach(() => {
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
   act(() => $keepAwake.set(false))
   act(() => setSidebarOpen(true))
+  act(() => closeProjectDialog())
   cleanup()
   vi.clearAllMocks()
 })
@@ -56,14 +58,49 @@ describe('TitlebarControls', () => {
     expect(container.querySelector('[data-sidebar-toolbar-backdrop]')).toBeNull()
   })
 
-  it('surfaces New project in the main titlebar app controls', () => {
+  it('combines session, project and terminal actions under the plus menu', async () => {
+    const onNewSession = vi.fn()
+    const onNewTerminal = vi.fn()
     render(
       <MemoryRouter>
-        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+        <TitlebarControls
+          onNewSession={onNewSession}
+          onOpenSettings={vi.fn()}
+          statusbarItems={[{ id: 'terminal', title: 'New terminal', onSelect: onNewTerminal, variant: 'action' }]}
+        />
       </MemoryRouter>
     )
 
-    expect(screen.getByRole('button', { name: 'New project' }).querySelector('.codicon-new-folder')).toBeTruthy()
+    const plus = screen.getByRole('button', { name: 'Create new' })
+    expect(plus.querySelector('.codicon-add')).toBeTruthy()
+
+    for (const label of ['New session', 'New project', 'New terminal']) {
+      expect(screen.queryByRole('button', { name: label })).toBeNull()
+    }
+
+    const openMenu = () => {
+      fireEvent.pointerDown(plus, { button: 0, pointerType: 'mouse' })
+      fireEvent.pointerUp(plus, { button: 0, pointerType: 'mouse' })
+      fireEvent.click(plus)
+    }
+
+    openMenu()
+    expect(onNewSession).not.toHaveBeenCalled()
+    expect(onNewTerminal).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['New session', 'New project', 'New terminal'])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New session' }))
+    expect(onNewSession).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New project' }))
+    expect($projectDialog.get()?.mode).toBe('create')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'New terminal' }))
+    expect(onNewTerminal).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
   })
 
   it('toggles keep-awake directly from the app toolbar', () => {
@@ -151,9 +188,7 @@ describe('TitlebarControls', () => {
       'Codex usage unavailable',
       'Mute haptics',
       'Approval mode: Off',
-      'Show terminal',
-      'New project',
-      'New session'
+      'Create new'
     ])
     expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
@@ -206,9 +241,7 @@ describe('TitlebarControls', () => {
       'Codex usage unavailable',
       'Mute haptics',
       'Approval mode: Off',
-      'Show terminal',
-      'New project',
-      'New session'
+      'Create new'
     ])
   })
 
@@ -239,6 +272,6 @@ describe('TitlebarControls', () => {
     })
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull())
-    expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Create new' })).toBeTruthy()
   })
 })

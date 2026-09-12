@@ -206,6 +206,7 @@ export const en: Translations = {
     muteHaptics: 'Mute haptics',
     unmuteHaptics: 'Unmute haptics',
     openSettings: 'Settings',
+    createNew: 'Create new',
     openStarmap: 'Open memory graph',
     enterHud: 'HUD mode',
     exitHud: 'Exit HUD mode',

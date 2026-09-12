@@ -589,6 +589,11 @@ export async function setupPackagedApp(): Promise<PackagedAppFixture> {
 
 // ─── Wait helpers ──────────────────────────────────────────────────────
 
+export async function selectCreateAction(page: Page, action: 'New session' | 'New project' | 'New terminal'): Promise<void> {
+  await page.getByLabel('App controls', { exact: true }).getByRole('button', { name: 'Create new', exact: true }).click()
+  await page.getByRole('menuitem', { name: action, exact: true }).click()
+}
+
 /**
  * Wait for the desktop app to finish booting and show the main chat UI.
  *

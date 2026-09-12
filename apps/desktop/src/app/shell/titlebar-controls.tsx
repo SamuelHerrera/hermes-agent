@@ -603,9 +603,11 @@ export function TitlebarControls({
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         {pinnedSystemTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
         {approvalStatusbarItem && <TitlebarStatusbarItemButton item={approvalStatusbarItem} navigate={navigate} />}
-        {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
-        {pinnedWorkspacePageTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
-        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
+        <TitlebarCreateMenu
+          navigate={navigate}
+          terminal={terminalStatusbarItem}
+          tools={[...(newChatTool ? [newChatTool] : []), ...pinnedWorkspacePageTools]}
+        />
       </div>
     </>
   )
@@ -625,6 +627,43 @@ function MenuRow({ icon, label }: { icon?: ReactNode; label: ReactNode }) {
       {icon ? <span className="grid size-4 shrink-0 place-items-center">{icon}</span> : null}
       <span className="min-w-0 truncate">{label}</span>
     </>
+  )
+}
+
+function TitlebarCreateMenu({
+  navigate,
+  terminal,
+  tools
+}: {
+  navigate: ReturnType<typeof useNavigate>
+  terminal?: StatusbarItem
+  tools: readonly TitlebarTool[]
+}) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const close = () => setOpen(false)
+
+  return (
+    <DropdownMenu onOpenChange={setOpen} open={open}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={t.titlebar.createNew}
+          className={cn(titlebarButtonClass, 'bg-transparent data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground')}
+          onPointerDown={event => event.stopPropagation()}
+          size="icon-titlebar"
+          type="button"
+          variant="ghost"
+        >
+          <TitlebarIcon name="add" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-44">
+        {tools.map(tool => (
+          <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
+        ))}
+        {terminal && <TitlebarOverflowStatusbarItem item={terminal} navigate={navigate} onClose={close} />}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

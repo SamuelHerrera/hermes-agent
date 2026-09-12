@@ -176,6 +176,7 @@ export const ar = defineLocale({
     muteHaptics: 'كتم الاهتزازات',
     unmuteHaptics: 'تفعيل الاهتزازات',
     openSettings: 'الإعدادات',
+    createNew: 'إنشاء جديد',
     openStarmap: 'فتح خريطة الذاكرة',
     enterHud: 'وضع HUD',
     exitHud: 'إنهاء وضع HUD',

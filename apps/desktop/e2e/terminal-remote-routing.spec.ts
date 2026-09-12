@@ -6,6 +6,7 @@ import {
   buildAppEnv,
   createSandbox,
   launchDesktop,
+  selectCreateAction,
   waitForAppReady,
   writeEnvFile,
   writeMockProviderConfig,
@@ -159,7 +160,7 @@ for (const initialProfile of [localProfile, remoteProfile]) {
         await selectProfile(profile)
         await expect(tabs).toHaveCount(0)
         // Use the visible toolbar action after the profile menu closes.
-        await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+        await selectCreateAction(page, 'New terminal')
         await expect(tabs).toHaveCount(1)
         const pane = (await tabs.first().getAttribute('data-tree-tab'))!
         const id = pane.slice('terminal-instance:'.length)

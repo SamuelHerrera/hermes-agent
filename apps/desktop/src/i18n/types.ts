@@ -248,6 +248,7 @@ export interface Translations {
     muteHaptics: string
     unmuteHaptics: string
     openSettings: string
+    createNew: string
     openStarmap: string
     enterHud: string
     exitHud: string

@@ -1,6 +1,6 @@
 import { expect, test } from './test'
 
-import { type MockBackendFixture, setupMockBackend, waitForAppReady } from './fixtures'
+import { type MockBackendFixture, selectCreateAction, setupMockBackend, waitForAppReady } from './fixtures'
 
 test.describe('scroll-window layout surface', () => {
   let fixture: MockBackendFixture
@@ -45,11 +45,11 @@ test.describe('scroll-window layout surface', () => {
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B')
     await expect(page.getByRole('button', { name: 'Hide sidebar' })).toBeVisible()
 
-    await page.getByRole('button', { exact: true, name: 'New session' }).click()
+    await selectCreateAction(page, 'New session')
     await expect(page.locator('[data-scroll-window]')).toHaveCount(2)
 
     for (let count = 3; count <= 6; count += 1) {
-      await page.getByRole('button', { exact: true, name: 'New session' }).click()
+      await selectCreateAction(page, 'New session')
       await expect(page.locator('[data-scroll-window]')).toHaveCount(count)
     }
 

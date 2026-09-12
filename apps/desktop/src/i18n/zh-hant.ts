@@ -201,6 +201,7 @@ export const zhHant = defineLocale({
     muteHaptics: '靜音觸感回饋',
     unmuteHaptics: '開啟觸感回饋',
     openSettings: '設定',
+    createNew: '新增',
     openStarmap: '開啟記憶圖譜'
   },
 
