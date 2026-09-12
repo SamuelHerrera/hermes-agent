@@ -1,6 +1,8 @@
 import { useStore } from '@nanostores/react'
+import type { ComponentProps } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
 
 import { scrollGridWindowRect } from './grid'
@@ -12,8 +14,36 @@ import {
   SCROLL_WINDOW_WORKSPACE_IDS,
   setActiveScrollWorkspace
 } from './store'
+import { scrollWindowColorBackground, useScrollWindowColor } from './window-color'
 
 const GAP = 12
+const MAP_WIDTH = 160
+const MAP_HEIGHT = 22
+
+interface MinimapWindowProps extends ComponentProps<'button'> {
+  windowId: string
+  iconSize: number
+}
+
+function MinimapWindow({ windowId, iconSize, style, ...props }: MinimapWindowProps) {
+  const color = useScrollWindowColor(windowId)
+
+  const icon = windowId.startsWith('terminal-instance:')
+    ? 'terminal'
+    : windowId === 'workspace' || windowId.startsWith('session-tile:')
+      ? 'comment'
+      : null
+
+  return (
+    <button
+      {...props}
+      data-scroll-minimap-window={windowId}
+      style={{ ...style, ...(color ? { backgroundColor: scrollWindowColorBackground(color) } : {}) }}
+    >
+      {icon && iconSize >= 6 ? <Codicon name={icon} size={iconSize} /> : null}
+    </button>
+  )
+}
 
 export function ScrollWindowsMinimap() {
   const mode = useStore($layoutSurfaceMode)
@@ -28,52 +58,56 @@ export function ScrollWindowsMinimap() {
   const layout = workspace.grid
 
   if (!layout || workspace.windowIds.length === 0) {
-    return <div className="text-[0.68rem] font-medium text-(--ui-text-tertiary)">Workspace {workspace.id}</div>
+    return null
   }
 
   // Include the viewport's outer padding and any unused space after short strips.
   // Every rectangle uses the same scroll-content origin and scale as the real DOM.
   const viewportWidth = layout.viewportWidth + GAP * 2
   const viewportHeight = layout.viewportHeight + GAP * 2
-  const scaleX = 120 / Math.max(viewportWidth, layout.canvasWidth + GAP * 2)
-  const scaleY = 14 / Math.max(viewportHeight, layout.canvasHeight + GAP * 2)
-  const viewportLeft = Math.max(0, Math.min(120 - viewportWidth * scaleX, workspace.scrollLeft * scaleX))
-  const viewportTop = Math.max(0, Math.min(14 - viewportHeight * scaleY, workspace.scrollTop * scaleY))
+  const scaleX = MAP_WIDTH / Math.max(viewportWidth, layout.canvasWidth + GAP * 2)
+  const scaleY = MAP_HEIGHT / Math.max(viewportHeight, layout.canvasHeight + GAP * 2)
+  const viewportLeft = Math.max(0, Math.min(MAP_WIDTH - viewportWidth * scaleX, workspace.scrollLeft * scaleX))
+  const viewportTop = Math.max(0, Math.min(MAP_HEIGHT - viewportHeight * scaleY, workspace.scrollTop * scaleY))
 
   return (
-    <div className="flex items-center gap-2 rounded-md bg-(--ui-sidebar-surface-background)/85 px-2 py-1 shadow-sm backdrop-blur">
-      <span className="text-[0.62rem] font-semibold text-(--ui-text-tertiary)">W{workspace.id}</span>
-      <div className="relative h-[14px] w-[120px] overflow-hidden rounded-md bg-(--ui-control-active-background)">
-        {workspace.windowIds.map((windowId, index) => {
-          const rect = scrollGridWindowRect(layout, index, GAP)
+    <div
+      aria-label={`Workspace ${workspace.id} overview`}
+      className="relative overflow-hidden"
+      data-scroll-minimap=""
+      style={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
+    >
+      {workspace.windowIds.map((windowId, index) => {
+        const rect = scrollGridWindowRect(layout, index, GAP)
 
-          return (
-            <button
-              aria-label={`Scroll to window ${index + 1}`}
-              className="absolute rounded-sm bg-(--ui-text-tertiary)/35 transition-colors hover:bg-(--ui-text-secondary)"
-              key={windowId}
-              onClick={() => requestScrollWindowIntoView(windowId)}
-              style={{
-                height: rect.height * scaleY,
-                left: (rect.left + GAP) * scaleX,
-                top: (rect.top + GAP) * scaleY,
-                width: rect.width * scaleX
-              }}
-              type="button"
-            />
-          )
-        })}
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute rounded-sm border border-(--ui-accent) bg-(--ui-accent)/10"
-          style={{
-            height: viewportHeight * scaleY,
-            left: viewportLeft,
-            top: viewportTop,
-            width: viewportWidth * scaleX
-          }}
-        />
-      </div>
+        return (
+          <MinimapWindow
+            aria-label={`Scroll to window ${index + 1}`}
+            className="absolute flex items-center justify-center overflow-hidden rounded-sm bg-(--ui-text-tertiary)/35 text-(--ui-text-primary) transition-[filter] hover:brightness-125"
+            iconSize={Math.min(10, rect.width * scaleX - 2, rect.height * scaleY - 2)}
+            key={windowId}
+            onClick={() => requestScrollWindowIntoView(windowId)}
+            style={{
+              height: rect.height * scaleY,
+              left: (rect.left + GAP) * scaleX,
+              top: (rect.top + GAP) * scaleY,
+              width: rect.width * scaleX
+            }}
+            type="button"
+            windowId={windowId}
+          />
+        )
+      })}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute rounded-sm border border-(--ui-accent)"
+        style={{
+          height: viewportHeight * scaleY,
+          left: viewportLeft,
+          top: viewportTop,
+          width: viewportWidth * scaleX
+        }}
+      />
     </div>
   )
 }

@@ -93,6 +93,16 @@ test('scroll windows show project-colored headers and working terminal cards', a
   await expect.poll(() => header.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(
     await chatHeader.evaluate(el => getComputedStyle(el).backgroundColor)
   )
+  const minimap = page.locator('[data-scroll-minimap]')
+  await expect(minimap).toHaveCSS('border-top-width', '0px')
+  await expect(minimap).not.toContainText('W1')
+  for (const [windowId, icon] of [['workspace', 'comment'], [`terminal-instance:${id}`, 'terminal']]) {
+    const mini = minimap.locator(`[data-scroll-minimap-window="${windowId}"]`)
+    await expect(mini.locator(`.codicon-${icon}`)).toBeVisible()
+    await expect.poll(() => mini.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(
+      await header.evaluate(el => getComputedStyle(el).backgroundColor)
+    )
+  }
   const host = page.locator(`[data-persistent-terminal="${id}"]`)
   await expect(host.locator('.xterm')).toBeVisible({ timeout: 30_000 })
   await host.locator('textarea').focus()
