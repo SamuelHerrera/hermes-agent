@@ -210,7 +210,7 @@ export function ScrollWindowWorkspace() {
 
     const rect = scrollGridWindowRect(layout, index, GAP)
     focusScrollWindowWindow(revealWindowId)
-    element.scrollTo({ behavior: 'smooth', left: rect.left, top: rect.top })
+    element.scrollTo({ behavior: 'auto', left: rect.left, top: rect.top })
     $scrollWindowRevealRequest.set(null)
   }, [layout, windowIds, workspaces, workspace.id, revealWindowId])
 
