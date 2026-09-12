@@ -30,20 +30,20 @@ describe('TitlebarControls', () => {
     render(<MemoryRouter><TitlebarControls onOpenSettings={vi.fn()} /></MemoryRouter>)
     const toggle = screen.getByRole('button', { name: 'Hide sidebar' })
     expect(toggle.closest('[data-titlebar-sidebar-toggle]')).toBeTruthy()
-    expect(within(screen.getByLabelText('App controls')).queryByRole('button', { name: 'Hide sidebar' })).toBeNull()
+    expect(within(screen.getByLabelText('App controls')).getByRole('button', { name: 'Hide sidebar' })).toBe(toggle)
     fireEvent.click(toggle)
     expect($sidebarOpen.get()).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }))
     expect($sidebarOpen.get()).toBe(true)
   })
-  it('aligns the sidebar app controls flush with the pane tab row', () => {
+  it('places app controls on the main header row', () => {
     render(
       <MemoryRouter>
         <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
       </MemoryRouter>
     )
 
-    expect(screen.getByLabelText('App controls').style.top).toBe('var(--titlebar-height, 34px)')
+    expect(screen.getByLabelText('App controls').style.top).toBe('calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))')
   })
 
   it('leaves the aligned sidebar toolbar row visually transparent', () => {
@@ -144,16 +144,18 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
+      'Hide sidebar',
       'More app actions',
       'Profiles',
       'Keep computer awake: Off',
       'Codex usage unavailable',
+      'Mute haptics',
       'Approval mode: Off',
       'Show terminal',
       'New project',
       'New session'
     ])
-    expect(appControls.children[0]).toBe(more)
+    expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
@@ -165,7 +167,7 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
-    expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Mute haptics' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeTruthy()
@@ -176,7 +178,7 @@ describe('TitlebarControls', () => {
     expect(menuItems.at(-1)?.textContent).toContain('Settings')
   })
 
-  it('reveals lower-priority toolbar actions when the sidebar is widened', () => {
+  it('keeps lower-priority actions menu-only when the sidebar is widened', () => {
     act(() => setSidebarWidth(320))
 
     render(
@@ -197,11 +199,10 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
+      'Hide sidebar',
       'More app actions',
       'Profiles',
       'Keep computer awake: Off',
-      'Capabilities',
-      'Messaging',
       'Codex usage unavailable',
       'Mute haptics',
       'Approval mode: Off',
@@ -211,7 +212,7 @@ describe('TitlebarControls', () => {
     ])
   })
 
-  it('reacts to live sidebar resize previews before the drag is committed', async () => {
+  it('does not expand the toolbar during sidebar resize previews', async () => {
     render(
       <MemoryRouter>
         <TitlebarControls
@@ -231,7 +232,7 @@ describe('TitlebarControls', () => {
       window.dispatchEvent(new CustomEvent('hermes:sidebar-live-width', { detail: { width: 380 } }))
     })
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Capabilities' })).toBeTruthy())
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull())
 
     act(() => {
       window.dispatchEvent(new CustomEvent('hermes:sidebar-live-width', { detail: { width: 210 } }))

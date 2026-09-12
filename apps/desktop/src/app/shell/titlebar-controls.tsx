@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { type ComponentProps, type MouseEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
+import { type ComponentProps, type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
@@ -30,11 +30,7 @@ import { cn } from '@/lib/utils'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
-import {
-  $sidebarOpen,
-  $sidebarWidth,
-  toggleSidebarOpen
-} from '@/store/layout'
+import { $sidebarOpen, toggleSidebarOpen } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $activeGatewayProfile,
@@ -92,19 +88,9 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
-const SIDEBAR_LIVE_RESIZE_EVENT = 'hermes:sidebar-live-width'
-const SIDEBAR_TOOLBAR_EDGE_INSET = 18
-const SIDEBAR_TOOLBAR_FIT_SAFETY = 8
-const TITLEBAR_TOOL_WIDTH = 24
-const PROFILE_TOOL_WIDTH = 37
-const TERMINAL_TOOL_WIDTH = 27
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
-}
-
-function isFeedbackStatusbarItem(item: StatusbarItem): boolean {
-  return `${item.id} ${item.title ?? ''} ${item.label ?? ''} ${item.toggleLabel ?? ''}`.toLowerCase().includes('feedback')
 }
 
 export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): boolean {
@@ -113,95 +99,6 @@ export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): 
 
 export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
-
-function toolbarWidthFromSidebarWidth(sidebarWidth: number): number {
-  return Math.max(0, sidebarWidth - SIDEBAR_TOOLBAR_EDGE_INSET)
-}
-
-function fitBudgetFromToolbarWidth(toolbarWidth: number): number {
-  return Math.max(0, toolbarWidth - SIDEBAR_TOOLBAR_FIT_SAFETY)
-}
-
-function useSidebarToolbarBudget(sidebarWidth: number): {
-  budget: number
-  ref: RefObject<HTMLDivElement | null>
-  width: string
-} {
-  const ref = useRef<HTMLDivElement>(null)
-  const fallbackToolbarWidth = toolbarWidthFromSidebarWidth(sidebarWidth)
-  const [liveToolbarWidth, setLiveToolbarWidth] = useState<number | null>(null)
-  const effectiveToolbarWidth = liveToolbarWidth ?? fallbackToolbarWidth
-  const [budget, setBudget] = useState(fitBudgetFromToolbarWidth(effectiveToolbarWidth))
-
-  useEffect(() => {
-    setBudget(fitBudgetFromToolbarWidth(effectiveToolbarWidth))
-  }, [effectiveToolbarWidth])
-
-  useEffect(() => {
-    const syncLiveWidth = (event: Event) => {
-      const width = (event as CustomEvent<{ width?: number }>).detail?.width
-
-      if (typeof width !== 'number' || !Number.isFinite(width)) {
-        return
-      }
-
-      setLiveToolbarWidth(toolbarWidthFromSidebarWidth(width))
-    }
-
-    window.addEventListener(SIDEBAR_LIVE_RESIZE_EVENT, syncLiveWidth)
-
-    return () => window.removeEventListener(SIDEBAR_LIVE_RESIZE_EVENT, syncLiveWidth)
-  }, [])
-
-  useEffect(() => {
-    const element = ref.current
-
-    if (!element) {
-      return undefined
-    }
-
-    let observer: ResizeObserver | null = null
-    let frame = 0
-
-    const sync = () => {
-      const next = Math.max(0, element.getBoundingClientRect().width)
-
-      if (next <= 0) {
-        return
-      }
-
-      const nextBudget = fitBudgetFromToolbarWidth(next)
-      setBudget(current => (Math.abs(current - nextBudget) < 1 ? current : nextBudget))
-    }
-
-    const schedule = () => {
-      window.cancelAnimationFrame(frame)
-      frame = window.requestAnimationFrame(sync)
-    }
-
-    sync()
-    window.addEventListener('resize', schedule)
-
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(schedule)
-      observer.observe(element)
-    }
-
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.removeEventListener('resize', schedule)
-      observer?.disconnect()
-    }
-  }, [])
-
-  return {
-    budget,
-    ref,
-    width: liveToolbarWidth === null
-      ? `max(0px, calc(var(--workspace-left, ${sidebarWidth}px) - ${SIDEBAR_TOOLBAR_EDGE_INSET}px))`
-      : `${liveToolbarWidth}px`
-  }
-}
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
   codexUsage?: CodexUsageData | null
@@ -212,6 +109,7 @@ interface TitlebarControlsProps extends ComponentProps<'div'> {
   tools?: readonly TitlebarTool[]
   onOpenSettings: () => void
   onNewSession?: () => void
+  onWidthChange?: (width: number) => void
 }
 
 /**
@@ -385,7 +283,8 @@ export function TitlebarControls({
   statusbarItems = [],
   tools = [],
   onOpenSettings,
-  onNewSession
+  onNewSession,
+  onWidthChange
 }: TitlebarControlsProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -395,14 +294,26 @@ export function TitlebarControls({
   const keepAwake = useStore($keepAwake)
   const keepAwakeBusy = useStore($keepAwakeBusy)
   const sidebarOpen = useStore($sidebarOpen)
-  const sidebarWidth = useStore($sidebarWidth)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const overlayOpen = isOverlayView(appViewForPath(location.pathname))
 
-  const {
-    budget: toolbarBudget,
-    ref: toolbarRef,
-    width: toolbarWidth
-  } = useSidebarToolbarBudget(sidebarWidth)
+  // Keep native drag strips and contributed header content clear of the actual
+  // cluster, including profile/terminal controls with nonstandard widths.
+  useLayoutEffect(() => {
+    const element = toolbarRef.current
+
+    if (!element || !onWidthChange) {
+      return
+    }
+
+    const sync = () => onWidthChange(element.getBoundingClientRect().width)
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [onWidthChange, overlayOpen])
 
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
@@ -547,7 +458,7 @@ export function TitlebarControls({
       ]
     : []
 
-  // Static system tools — always pinned to the screen's right edge.
+  // Only haptics stays inline; other system actions live in the menu.
   const systemTools: TitlebarTool[] = [
     {
       className: 'group/tool',
@@ -606,7 +517,7 @@ export function TitlebarControls({
   // visually own the window. These control clusters are `fixed` at a higher
   // z-index than the overlay card, so they'd otherwise bleed over it — hide them
   // and let the overlay's own chrome (close button, drag region) take over.
-  if (isOverlayView(appViewForPath(location.pathname))) {
+  if (overlayOpen) {
     return null
   }
 
@@ -632,108 +543,18 @@ export function TitlebarControls({
   const terminalStatusbarItem = pinnedStatusbarItemsById.get('terminal')
   const approvalStatusbarItem = pinnedStatusbarItemsById.get('approval-mode')
 
-  type ToolbarInlineItem =
-    | { id: string; kind: 'statusbar'; item: StatusbarItem; width: number }
-    | { id: string; kind: 'tool'; tool: TitlebarTool; width: number }
-
-  const fixedSidebarToolbarWidth =
-    leftToolbarTools.filter(tool => !tool.hidden).length * TITLEBAR_TOOL_WIDTH +
-    TITLEBAR_TOOL_WIDTH +
-    PROFILE_TOOL_WIDTH +
-    TITLEBAR_TOOL_WIDTH
-
-  const actionableMenuStatusbarItems = visibleStatusbarItems.filter(
+  const overflowStatusbarItems = visibleStatusbarItems.filter(
     item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
   )
 
-  const alwaysOverflowStatusbarItems = actionableMenuStatusbarItems.filter(isFeedbackStatusbarItem)
-  const expandableStatusbarItems = actionableMenuStatusbarItems.filter(item => !isFeedbackStatusbarItem(item))
-
-  const expandableToolbarItems: ToolbarInlineItem[] = [
-    ...expandableStatusbarItems.map(item => ({ id: item.id, item, kind: 'statusbar' as const, width: TITLEBAR_TOOL_WIDTH })),
-    ...overflowWorkspacePageTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
-    ...visibleLocalServiceTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
-    ...overflowSystemTools.map(tool => ({ id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH }))
+  const overflowOptionalToolbarTools = [
+    ...overflowWorkspacePageTools,
+    ...visibleLocalServiceTools,
+    ...overflowSystemTools
   ]
-
-  const coreToolbarItems: ToolbarInlineItem[] = [
-    ...pinnedSystemTools.map(tool => ({ group: 'system' as const, id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
-    ...(approvalStatusbarItem
-      ? [{ id: approvalStatusbarItem.id, item: approvalStatusbarItem, kind: 'statusbar' as const, width: TITLEBAR_TOOL_WIDTH }]
-      : []),
-    ...(terminalStatusbarItem
-      ? [{ id: terminalStatusbarItem.id, item: terminalStatusbarItem, kind: 'statusbar' as const, width: TERMINAL_TOOL_WIDTH }]
-      : []),
-    ...[...pinnedWorkspacePageTools]
-      .reverse()
-      .map(tool => ({ group: 'workspace' as const, id: tool.id, kind: 'tool' as const, tool, width: TITLEBAR_TOOL_WIDTH })),
-    ...(newChatTool
-      ? [{ group: 'workspace' as const, id: newChatTool.id, kind: 'tool' as const, tool: newChatTool, width: TITLEBAR_TOOL_WIDTH }]
-      : [])
-  ]
-
-  const visibleCoreToolbarIds = new Set<string>()
-  const visibleExpandableToolbarIds = new Set<string>()
-  let remainingToolbarWidth = toolbarBudget - fixedSidebarToolbarWidth
-
-  for (const item of [...coreToolbarItems].reverse()) {
-    if (remainingToolbarWidth >= item.width) {
-      visibleCoreToolbarIds.add(item.id)
-      remainingToolbarWidth -= item.width
-    }
-  }
-
-  for (const item of expandableToolbarItems) {
-    if (remainingToolbarWidth >= item.width) {
-      visibleExpandableToolbarIds.add(item.id)
-      remainingToolbarWidth -= item.width
-    }
-  }
-
-  const visibleExpandableToolbarItems = expandableToolbarItems.filter(item => visibleExpandableToolbarIds.has(item.id))
-  const visibleCoreToolbarItems = coreToolbarItems.filter(item => visibleCoreToolbarIds.has(item.id))
-
-  const toolbarItems = [...expandableToolbarItems, ...coreToolbarItems]
-
-  const isToolbarItemOverflowed = (item: ToolbarInlineItem) =>
-    !visibleExpandableToolbarIds.has(item.id) && !visibleCoreToolbarIds.has(item.id)
-
-  const overflowOptionalToolbarTools = toolbarItems.flatMap(item =>
-    item.kind === 'tool' && item.id !== 'settings' && isToolbarItemOverflowed(item) ? [item.tool] : []
-  )
-
-  const overflowSettingsTool = toolbarItems.find(
-    item => item.kind === 'tool' && item.id === 'settings' && isToolbarItemOverflowed(item)
-  )
-
-  if (overflowSettingsTool?.kind === 'tool') {
-    overflowOptionalToolbarTools.push(overflowSettingsTool.tool)
-  }
-
-  const overflowStatusbarItems = [
-    ...toolbarItems.flatMap(item => (item.kind === 'statusbar' && isToolbarItemOverflowed(item) ? [item.item] : [])),
-    ...alwaysOverflowStatusbarItems
-  ]
-
-  const renderToolbarInlineItem = (item: ToolbarInlineItem) =>
-    item.kind === 'tool' ? (
-      <TitlebarToolButton key={`tool:${item.id}`} navigate={navigate} tool={item.tool} />
-    ) : (
-      <TitlebarStatusbarItemButton item={item.item} key={`status:${item.id}`} navigate={navigate} />
-    )
 
   return (
     <>
-      <div
-        className={titlebarToolClusterClass}
-        data-titlebar-sidebar-toggle
-        style={{
-          left: 'var(--titlebar-controls-left, 14px)',
-          top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
-        }}
-      >
-        <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
-      </div>
       {/*
         Pane-scoped tools (preview's monitor / devtools / refresh / X) render
         as their own fixed cluster. AppShell sets --shell-preview-toolbar-gap
@@ -758,17 +579,16 @@ export function TitlebarControls({
 
       <div
         aria-label={t.shell.appControls}
-        className={cn(
-          titlebarToolClusterClass,
-          // This toolbar overlays the full-height sidebar scroll rail by
-          // design: no backing strip or layout spacer adds margin or shortens
-          // the scrollbar. Keep only the toolbar itself opaque for legibility.
-          'left-2.5 overflow-hidden rounded-md bg-(--ui-sidebar-surface-background)',
-          !sidebarOpen && 'hidden'
-        )}
+        className={titlebarToolClusterClass}
         ref={toolbarRef}
-        style={{ top: 'var(--titlebar-height, 34px)', width: toolbarWidth }}
+        style={{
+          left: 'var(--titlebar-controls-left, 14px)',
+          top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
+        }}
       >
+        <span data-titlebar-sidebar-toggle>
+          <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
+        </span>
         <TitlebarOverflowMenu
           navigate={navigate}
           statusbarItems={overflowStatusbarItems}
@@ -780,9 +600,12 @@ export function TitlebarControls({
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
-        {visibleExpandableToolbarItems.map(renderToolbarInlineItem)}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-        {visibleCoreToolbarItems.map(renderToolbarInlineItem)}
+        {pinnedSystemTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
+        {approvalStatusbarItem && <TitlebarStatusbarItemButton item={approvalStatusbarItem} navigate={navigate} />}
+        {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
+        {pinnedWorkspacePageTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
+        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
       </div>
     </>
   )

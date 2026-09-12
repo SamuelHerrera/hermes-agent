@@ -10,7 +10,7 @@
 
 import { useStore } from '@nanostores/react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type CSSProperties, lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef } from 'react'
+import { type CSSProperties, lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { ProjectDialog } from '@/app/chat/sidebar/project-dialog'
@@ -1052,6 +1052,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   // sets, computed here from the live connection. Page-registered tools
   // (preview's monitor/devtools cluster, …) arrive as registry contributions.
   const leftTitlebarTools = useTitlebarToolContributions('left')
+  const [appControlsWidth, setAppControlsWidth] = useState(0)
   const rightTitlebarTools = useTitlebarToolContributions('right')
   const connection = useStore($connection)
   const controlsPos = titlebarControlsPosition(connection?.windowButtonPosition, Boolean(connection?.isFullscreen))
@@ -1067,8 +1068,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   }
 
   const titlebarToolsRight = titlebarToolsRightCss(nativeOverlayWidth, titlebarChrome)
-  // App-level controls live in the fixed sidebar toolbar now, below the
-  // draggable titlebar. Reserve the right titlebar strip only for pane-registered
+  // App controls share the left titlebar cluster with the sidebar toggle.
+  // Reserve the right titlebar strip only for pane-registered
   // tools (preview monitor/devtools/etc.) so the chat title keeps its space.
   const paneToolCount = rightTitlebarTools.filter(tool => !tool.hidden).length
   const systemToolsWidth = '0px'
@@ -1081,6 +1082,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
         style={
           {
             '--titlebar-controls-left': `${controlsPos.left}px`,
+            '--titlebar-app-controls-width': `${appControlsWidth}px`,
             '--titlebar-controls-top': `${controlsPos.top}px`,
             '--titlebar-controls-y-nudge': titlebarControlsYNudge(titlebarChrome),
             '--titlebar-tools-right': titlebarToolsRight,
@@ -1102,6 +1104,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
               openNewSessionTab()
             }}
             onOpenSettings={() => navigate(SETTINGS_ROUTE)}
+            onWidthChange={setAppControlsWidth}
             statusbarItems={statusbarVisible ? statusbarItems : []}
             statusbarLeftItems={statusbarVisible ? leftStatusbarItems : []}
             tools={rightTitlebarTools}
