@@ -336,8 +336,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
       // The open find bar owns ⌘G / ⌘⇧G / Escape. Its own capture-phase
       // listener runs those actions; bail here so the registry doesn't ALSO
-      // fire the action bound to the same combo (⌘G = view.toggleReview,
-      // Escape = composer.cancel, which would abort a live turn). Both
+      // fire the action bound to the same combo (e.g. ⌘G = view.toggleReview). Both
       // listeners are on `window`, so stopPropagation in the bar can't
       // suppress this one — the dispatcher has to yield explicitly.
       if ($findInPage.get().active && findBarClaimsCombo(combo)) {

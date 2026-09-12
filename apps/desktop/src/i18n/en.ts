@@ -316,7 +316,7 @@ export const en: Translations = {
       'composer.slash': 'Slash command palette',
       'composer.help': 'Quick help',
       'composer.history': 'Cycle popover / history',
-      'composer.cancel': 'Close popover · cancel run'
+      'composer.cancel': 'Close popover · cancel edit'
     }
   },
 
@@ -2116,7 +2116,7 @@ export const en: Translations = {
       'composer.sendNewline': 'send · Shift+Enter for newline',
       'composer.sendQueued': 'send next queued turn',
       'keybinds.openPanel': 'all keyboard shortcuts',
-      'composer.cancel': 'close popover · cancel run',
+      'composer.cancel': 'close popover · cancel edit',
       'composer.history': 'cycle popover / history'
     },
     attachUrlTitle: 'Attach a URL',

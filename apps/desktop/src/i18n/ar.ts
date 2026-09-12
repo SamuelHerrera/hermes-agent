@@ -276,7 +276,7 @@ export const ar = defineLocale({
       'composer.slash': 'لوحة الأوامر المائلة',
       'composer.help': 'مساعدة سريعة',
       'composer.history': 'التنقل في النافذة المنبثقة / السجل',
-      'composer.cancel': 'إغلاق النافذة المنبثقة · إلغاء التشغيل'
+      'composer.cancel': 'إغلاق النافذة المنبثقة · إلغاء التحرير'
     }
   },
   language: {
@@ -1752,7 +1752,7 @@ export const ar = defineLocale({
       'composer.sendNewline': 'إرسال · Shift+Enter لسطر جديد',
       'composer.sendQueued': 'إرسال الدور التالي في قائمة الانتظار',
       'keybinds.openPanel': 'كل اختصارات لوحة المفاتيح',
-      'composer.cancel': 'إغلاق النافذة المنبثقة · إلغاء التشغيل',
+      'composer.cancel': 'إغلاق النافذة المنبثقة · إلغاء التحرير',
       'composer.history': 'التنقل في النافذة المنبثقة / السجل'
     },
     attachUrlTitle: 'إرفاق رابط',

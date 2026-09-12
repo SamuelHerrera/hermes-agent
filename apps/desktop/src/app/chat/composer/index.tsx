@@ -54,7 +54,6 @@ import { useAtCompletions } from './hooks/use-at-completions'
 import { useComposerBranch } from './hooks/use-composer-branch'
 import { useComposerDraft } from './hooks/use-composer-draft'
 import { useComposerDrop } from './hooks/use-composer-drop'
-import { useComposerEscCancel } from './hooks/use-composer-esc-cancel'
 import { useComposerMetrics } from './hooks/use-composer-metrics'
 import { useComposerPlaceholder } from './hooks/use-composer-placeholder'
 import { useComposerPopout } from './hooks/use-composer-popout'
@@ -901,7 +900,7 @@ export function ChatBar({
       // the first Enter put the words in the queue, a second sends them now
       // (promote + interrupt + drain on settle), mirroring the idle empty-Enter
       // drain above. With nothing queued it stays a no-op — interrupting is
-      // explicit (Stop/Esc), never a stray Enter after sending. Gate on the live
+      // explicit (Stop), never a stray Enter after sending. Gate on the live
       // DOM payload (not the render-lagged composer state) so a message typed
       // fast / via IME while busy still reaches submitDraft() and gets queued
       // instead of being mistaken for an empty Enter.
@@ -920,23 +919,10 @@ export function ChatBar({
       return
     }
 
-    if (event.key === 'Escape') {
-      // Editing a queued turn → Esc cancels the edit, restoring the prior draft.
-      if (queueEdit) {
-        event.preventDefault()
-        exitQueuedEdit('cancel')
-
-        return
-      }
-
-      // Otherwise Esc interrupts the running turn (Stop-button parity) — unless
-      // the turn is parked waiting on the user, where Esc must not discard the
-      // pending prompt. An explicit halt, so it parks the queue too.
-      if (busy && !awaitingInput) {
-        event.preventDefault()
-        triggerHaptic('cancel')
-        void Promise.resolve(haltRun())
-      }
+    // Escape dismisses edits/popovers only; stopping a run requires Stop.
+    if (event.key === 'Escape' && queueEdit) {
+      event.preventDefault()
+      exitQueuedEdit('cancel')
     }
   }
 
@@ -970,10 +956,6 @@ export function ChatBar({
   // branch-off/convert/list/switch actions; draft travels into the new session.
   const { handleBranchOff, handleConvertBranch, handleListBranches, handleSwitchBranch, openInWorktree } =
     useComposerBranch({ clearDraft, cwd, draftRef })
-
-  // Global Esc-to-cancel when the chat (not the composer input) has focus.
-  // Same explicit-halt semantics as the Stop button: park the queue.
-  useComposerEscCancel({ awaitingInput, busy, onCancel: haltRun, target: scope.target })
 
   const {
     conversation,

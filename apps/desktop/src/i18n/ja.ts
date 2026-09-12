@@ -1927,7 +1927,7 @@ export const ja = defineLocale({
       'composer.sendNewline': '送信 · 改行は Shift+Enter',
       'composer.sendQueued': '次のキュー済みターンを送信',
       'keybinds.openPanel': 'すべてのキーボードショートカット',
-      'composer.cancel': 'ポップオーバーを閉じる · 実行をキャンセル',
+      'composer.cancel': 'ポップオーバーを閉じる · 編集をキャンセル',
       'composer.history': 'ポップオーバー / 履歴を切り替え'
     },
     attachUrlTitle: 'URL を添付',

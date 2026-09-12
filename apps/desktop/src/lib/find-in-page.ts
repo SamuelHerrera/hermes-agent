@@ -90,12 +90,11 @@ export function findBarKeyAction(event: FindBarKeyEvent, options: { inInput?: bo
  * Combos the open find bar owns, in canonical `comboFromEvent` form.
  *
  * The global keybind dispatcher (app/hooks/use-keybinds.ts) consults this
- * before routing a combo to the registry. Without it, three real collisions
+ * before routing a combo to the registry. Without it, bound actions can
  * fire alongside the find bar:
  * - `mod+g` → `view.toggleReview` (⌘G is the review pane's default).
  * - `mod+shift+g` → whatever a user has bound there.
- * - `escape` → `composer.cancel`, which would abort a running turn while the
- *   user only meant to dismiss the find bar.
+ * - `escape` → any user-bound action, instead of only dismissing the find bar.
  *
  * `stopPropagation` cannot solve this: both listeners sit on `window` in the
  * capture phase, and propagation control does not suppress sibling listeners

@@ -1869,7 +1869,7 @@ export const zhHant = defineLocale({
       'composer.sendNewline': '傳送 · Shift+Enter 換行',
       'composer.sendQueued': '傳送下一個排隊的回合',
       'keybinds.openPanel': '所有鍵盤快捷鍵',
-      'composer.cancel': '關閉彈出視窗 · 取消執行',
+      'composer.cancel': '關閉彈出視窗 · 取消編輯',
       'composer.history': '循環彈出視窗 / 歷史記錄'
     },
     attachUrlTitle: '附加 URL',

@@ -306,7 +306,7 @@ export const zh: Translations = {
       'composer.slash': '斜杠命令面板',
       'composer.help': '快速帮助',
       'composer.history': '切换弹窗/历史',
-      'composer.cancel': '关闭弹窗·取消运行'
+      'composer.cancel': '关闭弹窗·取消编辑'
     }
   },
 
@@ -2306,7 +2306,7 @@ export const zh: Translations = {
       'composer.sendNewline': '发送 · Shift+Enter 换行',
       'composer.sendQueued': '发送下一条排队的回合',
       'keybinds.openPanel': '所有键盘快捷键',
-      'composer.cancel': '关闭弹窗 · 取消运行',
+      'composer.cancel': '关闭弹窗 · 取消编辑',
       'composer.history': '循环弹窗 / 历史'
     },
     attachUrlTitle: '附加 URL',
