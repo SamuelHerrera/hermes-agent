@@ -41,7 +41,7 @@ test.describe('scroll-window layout surface', () => {
       const y = edge === 'bottom' ? box.y + box.height - 15 : box.y + box.height / 2
       await page.mouse.move(x, y, { steps: 15 })
       await page.mouse.move(x, y, { steps: 2 })
-      const preview = card(target).locator(`[data-scroll-drop-preview="${edge}"]`)
+      const preview = page.locator(`[data-scroll-drop-window="${target}"] [data-scroll-drop-preview="${edge}"]`)
       await expect(preview).toBeVisible()
       await expect(preview).toHaveCSS('border-top-style', 'dashed')
       await expect

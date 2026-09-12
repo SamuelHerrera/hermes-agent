@@ -43,6 +43,7 @@ import {
 } from './model'
 import { FLOATING_PLACEMENT } from './renderer/floating-rect'
 import { rootChildSide } from './renderer/track-model'
+import { requestScrollWindowIntoView } from './scroll-windows/store'
 
 // v2: v1 trees were saved against placeholder panes with index-order zone
 // assignment (chat could land in a corner cell). Retire them wholesale.
@@ -1124,6 +1125,10 @@ export function revealTreePane(paneId: string) {
   }
 
   const side = treeSideOfPane(paneId)
+
+  if (isMainStripPane(paneId)) {
+    requestScrollWindowIntoView(paneId)
+  }
 
   if (side && $collapsedTreeSides.get().has(side)) {
     // Un-collapse the COLUMN, never the side's bound store: on the right that

@@ -7,6 +7,16 @@ beforeEach(() => {
 })
 
 describe('scroll workspace persistence', () => {
+  it('retains a reveal requested before a terminal card mounts, only in scroll mode', async () => {
+    const store = await import('./store')
+    store.requestScrollWindowIntoView('terminal-instance:one')
+    expect(store.$scrollWindowRevealRequest.get()).toBeNull()
+    store.$layoutSurfaceMode.set('scroll-windows')
+    store.requestScrollWindowIntoView('terminal-instance:one')
+    store.syncScrollWindowWindows(['workspace', 'terminal-instance:one'])
+    expect(store.$scrollWindowRevealRequest.get()).toBe('terminal-instance:one')
+    expect(store.$scrollWindowWorkspaces.get()[0].windowIds).toContain('terminal-instance:one')
+  })
   it('migrates a legacy grid, persists independent stacks and restores them unchanged', async () => {
     localStorage.setItem(key, JSON.stringify([{ id: '1', windowIds: ['a', 'b', 'c', 'd'], rowCount: 2 }]))
     const store = await import('./store')

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { type MockBackendFixture, setupMockBackend, waitForAppReady } from './fixtures'
+import { type MockBackendFixture, selectCreateAction, setupMockBackend, waitForAppReady } from './fixtures'
 import { createBackgroundReleaseHandle } from './mock-server'
 import { expect, test } from './test'
 
@@ -37,7 +37,7 @@ test.beforeEach(async () => {
             jsonrpc: '2.0',
             id: 1,
             method: 'projects.create',
-            params: { name: 'Terminal test', folders: [folder] }
+            params: { name: 'Terminal test', folders: [folder], color: '#e35d91' }
           })
         )
 
@@ -67,6 +67,83 @@ test.afterEach(async () => {
 
   await fixture?.cleanup()
   release.cleanup()
+})
+
+test('scroll windows show project-colored headers and working terminal cards', async ({}, testInfo) => {
+  const { page } = fixture
+  await fixture.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(2100, 900))
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K')
+  await page.getByPlaceholder(/search/i).fill('scroll window')
+  await page.mouse.move(8, 8)
+  await page.locator('[data-slot="command-item"]').filter({ hasText: 'Toggle scroll-window layout' }).click()
+  await page.keyboard.press('Escape')
+  const project = page.locator('[data-sessions-project]').filter({
+    has: page.getByRole('button', { name: 'Open Terminal test', exact: true })
+  })
+  await project.getByRole('button', { name: 'Open Terminal test', exact: true }).click()
+  const chatHeader = page.locator('[data-scroll-window="workspace"] [data-scroll-window-header]')
+  await expect(chatHeader).toHaveAttribute('data-scroll-window-project-color', '#e35d91')
+  await page.getByRole('button', { name: 'Actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New terminal', exact: true }).click()
+  const card = page.locator('[data-scroll-window^="terminal-instance:"]')
+  await expect(card).toHaveCount(1)
+  const id = (await card.getAttribute('data-scroll-window'))!.slice('terminal-instance:'.length)
+  const header = card.locator('[data-scroll-window-header]')
+  await expect(header).toHaveAttribute('data-scroll-window-project-color', '#e35d91')
+  await expect.poll(() => header.evaluate(el => getComputedStyle(el).backgroundColor)).toBe(
+    await chatHeader.evaluate(el => getComputedStyle(el).backgroundColor)
+  )
+  const host = page.locator(`[data-persistent-terminal="${id}"]`)
+  await expect(host.locator('.xterm')).toBeVisible({ timeout: 30_000 })
+  await host.locator('textarea').focus()
+  await page.keyboard.type('export SCROLL_SHELL=alive; printf "CWD=%s\\n" "$PWD"')
+  await page.keyboard.press('Enter')
+  const buffer = () => page.evaluate(id => {
+    const state = JSON.parse(localStorage.getItem('hermes.desktop.terminals.v1') ?? '{}')
+    return state.terminals?.find((terminal: { id: string }) => terminal.id === id)?.reviveBuffer ?? ''
+  }, id)
+  await expect.poll(buffer).toMatch(/CWD=[^\r\n]*\/terminal-project/)
+  await page.screenshot({ path: testInfo.outputPath('project-terminal-scroll.png') })
+
+  const viewport = page.locator('[data-scroll-window-viewport]')
+  await viewport.evaluate(el => { el.scrollLeft = 0 })
+  const source = (await chatHeader.boundingBox())!
+  const target = (await card.boundingBox())!
+  await page.mouse.move(source.x + 80, source.y + 15)
+  await page.mouse.down()
+  await page.mouse.move(source.x + 100, source.y + 20, { steps: 6 })
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height - 20, { steps: 15 })
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height - 20, { steps: 2 })
+  await expect(page.locator(`[data-scroll-drop-window="terminal-instance:${id}"] [data-scroll-drop-preview="bottom"]`)).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('terminal-drop-preview.png') })
+  await page.mouse.up()
+  await expect.poll(async () => (await card.boundingBox())!.height).toBeLessThan(target.height * 0.6)
+  await page.screenshot({ path: testInfo.outputPath('terminal-stack.png') })
+
+  // A fixed xterm overlay must not paint or intercept input outside its scroll viewport.
+  await selectCreateAction(page, 'New session')
+  await fixture.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1220, 900))
+  await viewport.evaluate(el => { el.scrollLeft = el.scrollWidth })
+  await expect.poll(async () => host.evaluate(el => el.getBoundingClientRect().left)).toBeLessThan(600)
+  const bounds = (await viewport.boundingBox())!
+  await expect.poll(() => page.evaluate(({ x, y }) =>
+    Boolean(document.elementFromPoint(x, y)?.closest('[data-persistent-terminal]')),
+  { x: bounds.x - 8, y: bounds.y + bounds.height / 2 })).toBe(false)
+
+  // Return from another virtual workspace via the existing sidebar terminal action.
+  await page.getByRole('button', { name: 'Switch to workspace 2', exact: true }).click()
+  await expect(card).toHaveCount(0)
+  await page.getByRole('button', { name: 'All projects', exact: true }).click()
+  await page.locator(`[data-sidebar-terminal="${id}"] button[aria-pressed]`).click()
+  await expect(card).toHaveCount(1)
+  await expect(host.locator('.xterm')).toBeVisible()
+  await host.locator('textarea').focus()
+  await page.keyboard.type('printf "LIVE=%s\\n" "$SCROLL_SHELL"')
+  await page.keyboard.press('Enter')
+  await expect.poll(buffer).toContain('LIVE=alive')
+  await card.getByRole('button', { name: 'Close window', exact: true }).click()
+  await expect(card).toHaveCount(0)
+  await expect(host).toHaveCount(0)
 })
 
 test('manual tabs retain shells while switching and stop and clear them on close', async () => {

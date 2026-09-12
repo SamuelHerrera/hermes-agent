@@ -24,7 +24,7 @@ export const SCROLL_WINDOW_WORKSPACE_COUNT = 5
 export const SCROLL_WINDOW_WORKSPACE_IDS = Array.from({ length: SCROLL_WINDOW_WORKSPACE_COUNT }, (_, index) =>
   String(index + 1)
 )
-export const SCROLL_WINDOW_SCROLL_EVENT = 'hermes:scroll-window-scroll-to-window'
+export const $scrollWindowRevealRequest = atom<string | null>(null)
 
 function validMode(value: string | null): LayoutSurfaceMode {
   return value === 'scroll-windows' ? 'scroll-windows' : 'tabbed'
@@ -256,5 +256,7 @@ export function setScrollWorkspaceGrid(id: string, grid: ScrollGridLayout | null
 }
 
 export function requestScrollWindowIntoView(windowId: string): void {
-  window.dispatchEvent(new CustomEvent(SCROLL_WINDOW_SCROLL_EVENT, { detail: { windowId } }))
+  if ($layoutSurfaceMode.get() === 'scroll-windows') {
+    $scrollWindowRevealRequest.set(windowId)
+  }
 }

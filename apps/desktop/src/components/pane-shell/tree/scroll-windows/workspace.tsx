@@ -26,17 +26,19 @@ import { $workspaceEmptyPlaceholder } from '@/store/session'
 import { PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
 import { allPaneIds, type LayoutNode } from '../model'
 import { paneChrome } from '../renderer/track-model'
-import { $layoutTree, closeTabPane, isSessionStripPane } from '../store'
+import { $layoutTree, closeTabPane, isMainStripPane } from '../store'
 
 import { reconcileColumns } from './columns'
 import { scrollDropEdge, ScrollDropOverlay, setScrollDropTarget } from './drop-overlay'
 import { generateScrollGrid, type ScrollGridLayout, scrollGridWindowRect } from './grid'
+import { ScrollWindowHeader } from './header'
 import {
   $activeScrollWorkspaceId,
+  $scrollWindowRevealRequest,
   $scrollWindowWorkspaces,
   focusScrollWindowWindow,
   reorderScrollWindowWindow,
-  SCROLL_WINDOW_SCROLL_EVENT,
+  setActiveScrollWorkspace,
   setScrollWorkspaceGrid,
   setScrollWorkspaceScroll,
   syncScrollWindowWindows
@@ -49,7 +51,7 @@ const MIN_WINDOW_HEIGHT = 280
 const SCROLL_WINDOW_DRAG_TYPE = 'application/x-hermes-scroll-window'
 
 function treeWindowIds(tree: LayoutNode | null): string[] {
-  return tree ? allPaneIds(tree).filter(isSessionStripPane) : []
+  return tree ? allPaneIds(tree).filter(isMainStripPane) : []
 }
 
 export function ScrollWindowWorkspace() {
@@ -57,6 +59,7 @@ export function ScrollWindowWorkspace() {
   const panes = useContributions('panes')
   const activeWorkspaceId = useStore($activeScrollWorkspaceId)
   const workspaces = useStore($scrollWindowWorkspaces)
+  const revealWindowId = useStore($scrollWindowRevealRequest)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
@@ -186,23 +189,30 @@ export function ScrollWindowWorkspace() {
       return undefined
     }
 
-    const onScrollToWindow = (event: Event) => {
-      const windowId = (event as CustomEvent<{ windowId?: string }>).detail?.windowId
-      const index = windowId ? windowIds.indexOf(windowId) : -1
-
-      if (!windowId || index < 0) {
-        return
-      }
-
-      const rect = scrollGridWindowRect(layout, index, GAP)
-      focusScrollWindowWindow(windowId)
-      element.scrollTo({ behavior: 'smooth', left: rect.left, top: rect.top })
+    if (!revealWindowId) {
+      return
     }
 
-    window.addEventListener(SCROLL_WINDOW_SCROLL_EVENT, onScrollToWindow)
+    const owner = workspaces.find(item => item.windowIds.includes(revealWindowId))
 
-    return () => window.removeEventListener(SCROLL_WINDOW_SCROLL_EVENT, onScrollToWindow)
-  }, [layout, windowIds])
+    if (owner && owner.id !== workspace.id) {
+      setActiveScrollWorkspace(owner.id)
+
+      return
+    }
+
+    const index = windowIds.indexOf(revealWindowId)
+
+    // A new pane's reveal can precede its contribution/card commit.
+    if (index < 0) {
+      return
+    }
+
+    const rect = scrollGridWindowRect(layout, index, GAP)
+    focusScrollWindowWindow(revealWindowId)
+    element.scrollTo({ behavior: 'smooth', left: rect.left, top: rect.top })
+    $scrollWindowRevealRequest.set(null)
+  }, [layout, windowIds, workspaces, workspace.id, revealWindowId])
 
   useEffect(() => {
     const element = viewportRef.current
@@ -281,7 +291,10 @@ export function ScrollWindowWorkspace() {
   }
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 bg-(--ui-editor-surface-background)">
+    <div
+      className="relative flex min-h-0 min-w-0 flex-1 bg-(--ui-editor-surface-background)"
+      data-scroll-window-dragging={draggingWindowId || undefined}
+    >
       {/* Match the existing composer cap plus its side gutters and the window border.
           Resolve rem/CSS tokens in the renderer and observe changes with the viewport. */}
       <div
@@ -291,6 +304,11 @@ export function ScrollWindowWorkspace() {
         style={{ width: 'calc(var(--composer-width) + 2rem + 2px)' }}
       />
       <style>{`
+        /* Persistent xterm hosts live outside the card DOM. During a card drag,
+           let hit testing reach the card's drop surface underneath them. */
+        body:has([data-scroll-window-dragging]) [data-persistent-terminal] {
+          pointer-events: none !important;
+        }
         [data-scroll-window-pane] :is(aside, [data-slot=sidebar]) {
           border-left-width: 0;
           border-right-width: 0;
@@ -407,7 +425,7 @@ export function ScrollWindowWorkspace() {
                   onPointerDown={() => focusScrollWindowWindow(windowId)}
                   style={style}
                 >
-                  <div
+                  <ScrollWindowHeader
                     className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
                     data-scroll-window-header=""
                     draggable
@@ -426,6 +444,7 @@ export function ScrollWindowWorkspace() {
                       )
                       setDraggingWindowId(windowId)
                     }}
+                    windowId={windowId}
                   >
                     <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-[0.65rem] font-semibold text-(--ui-text-secondary)">
                       {index + 1}
@@ -447,7 +466,7 @@ export function ScrollWindowWorkspace() {
                     >
                       ×
                     </button>
-                  </div>
+                  </ScrollWindowHeader>
                   <div className="relative min-h-0 flex-1 overflow-hidden" data-scroll-window-pane="">
                     {pane?.render ? (
                       <PaneGroupContext.Provider value={`scroll-${workspace.id}-${windowId}`}>
