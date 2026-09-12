@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { generateScrollGrid } from './grid'
+import { generateScrollGrid, scrollGridWindowRect } from './grid'
 
 const base = {
   gap: 12,
@@ -9,6 +9,37 @@ const base = {
 }
 
 describe('generateScrollGrid', () => {
+  it('caps windows without shrinking the viewport or leaving full-width gaps', () => {
+    const maxWindowWidth = 814
+    const layout = generateScrollGrid({
+      ...base,
+      maxWindowWidth,
+      viewportHeight: 720,
+      viewportWidth: 2400,
+      windowCount: 3
+    })
+
+    expect(layout.windowWidth).toBe(maxWindowWidth)
+    expect(layout.viewportWidth).toBe(2400)
+    expect(layout.canvasWidth).toBe(3 * maxWindowWidth + 2 * base.gap)
+    expect(scrollGridWindowRect(layout, 1, base.gap).left).toBe(maxWindowWidth + base.gap)
+    expect(layout.rows).toBe(1)
+  })
+
+  it('fits smaller viewports while preserving the minimum usable width', () => {
+    for (const viewportWidth of [240, 600]) {
+      const layout = generateScrollGrid({
+        ...base,
+        maxWindowWidth: 814,
+        viewportHeight: 720,
+        viewportWidth,
+        windowCount: 1
+      })
+
+      expect(layout.windowWidth).toBe(Math.max(base.minWindowWidth, viewportWidth))
+    }
+  })
+
   it('keeps a single chat as one full window', () => {
     expect(generateScrollGrid({ ...base, viewportHeight: 720, viewportWidth: 1280, windowCount: 1 })).toMatchObject({
       columns: 1,

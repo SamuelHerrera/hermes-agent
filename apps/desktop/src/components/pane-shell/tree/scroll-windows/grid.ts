@@ -3,6 +3,7 @@ export interface ScrollGridInput {
   viewportHeight: number
   windowCount: number
   minWindowWidth: number
+  maxWindowWidth?: number
   minWindowHeight: number
   gap: number
   rows?: number
@@ -31,6 +32,7 @@ export function generateScrollGrid({
   gap,
   minWindowHeight,
   minWindowWidth,
+  maxWindowWidth = Number.POSITIVE_INFINITY,
   rows: requestedRows = 1,
   viewportHeight,
   viewportWidth,
@@ -42,7 +44,7 @@ export function generateScrollGrid({
   const spacing = Math.max(0, gap)
   const rows = Math.max(1, Math.min(count, Math.floor(requestedRows)))
   const columns = Math.ceil(count / rows)
-  const windowWidth = width
+  const windowWidth = Math.max(minWindowWidth, Math.min(width, Math.floor(maxWindowWidth)))
 
   const windowHeight = Math.max(minWindowHeight, Math.floor((height - spacing * Math.max(0, rows - 1)) / rows))
 

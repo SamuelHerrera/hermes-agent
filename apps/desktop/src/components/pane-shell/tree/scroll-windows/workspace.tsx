@@ -58,8 +58,9 @@ export function ScrollWindowWorkspace() {
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const viewportRef = useRef<HTMLDivElement>(null)
+  const windowWidthProbeRef = useRef<HTMLDivElement>(null)
   const measuredWorkspaceIdRef = useRef<string | null>(null)
-  const [layoutFrame, setLayoutFrame] = useState({ height: 720, width: 1280 })
+  const [layoutFrame, setLayoutFrame] = useState({ height: 720, width: 1280, maxWindowWidth: Number.POSITIVE_INFINITY })
   const [draggingWindowId, setDraggingWindowId] = useState<null | string>(null)
 
   const paneById = useMemo(() => new Map(panes.map(pane => [pane.id, pane])), [panes])
@@ -81,12 +82,13 @@ export function ScrollWindowWorkspace() {
         gap: GAP,
         minWindowHeight: MIN_WINDOW_HEIGHT,
         minWindowWidth: MIN_WINDOW_WIDTH,
+        maxWindowWidth: layoutFrame.maxWindowWidth,
         viewportHeight: Math.max(1, layoutFrame.height - GAP * 2 - SCROLLBAR_CROSS_AXIS_GUTTER),
         viewportWidth: Math.max(1, layoutFrame.width - GAP * 2),
         rows: workspace.rowCount,
         windowCount: Math.max(1, windowIds.length)
       }),
-    [layoutFrame.height, layoutFrame.width, windowIds.length, workspace.rowCount]
+    [layoutFrame.height, layoutFrame.width, layoutFrame.maxWindowWidth, windowIds.length, workspace.rowCount]
   )
 
   useLayoutEffect(() => {
@@ -99,9 +101,17 @@ export function ScrollWindowWorkspace() {
     measuredWorkspaceIdRef.current = activeWorkspaceId
     const rect = element.getBoundingClientRect()
     setLayoutFrame(current => {
-      const next = { height: Math.max(1, rect.height), width: Math.max(1, rect.width) }
+      const next = {
+        height: Math.max(1, rect.height),
+        width: Math.max(1, rect.width),
+        maxWindowWidth: windowWidthProbeRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY
+      }
 
-      return Math.abs(current.height - next.height) < 1 && Math.abs(current.width - next.width) < 1 ? current : next
+      return Math.abs(current.height - next.height) < 1 &&
+        Math.abs(current.width - next.width) < 1 &&
+        current.maxWindowWidth === next.maxWindowWidth
+        ? current
+        : next
     })
   }, [activeWorkspaceId, windowIds.length, windowIdsKey])
 
@@ -247,6 +257,14 @@ export function ScrollWindowWorkspace() {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 bg-(--ui-editor-surface-background)">
+      {/* Match the existing composer cap plus its side gutters and the window border.
+          Resolve rem/CSS tokens in the renderer, then freeze with the layout frame. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none invisible absolute h-0"
+        ref={windowWidthProbeRef}
+        style={{ width: 'calc(var(--composer-width) + 2rem + 2px)' }}
+      />
       <style>{`
         [data-scroll-window-pane] :is(aside, [data-slot=sidebar]) {
           border-left-width: 0;

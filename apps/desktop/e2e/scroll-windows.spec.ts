@@ -14,8 +14,12 @@ test.describe('scroll-window layout surface', () => {
     await fixture.cleanup()
   })
 
-  test('toggles into an isolated scroll-window workspace and back through the command palette', async () => {
+  test('toggles into an isolated scroll-window workspace and back through the command palette', async ({}, testInfo) => {
     const { page } = fixture
+    await page.setViewportSize({ width: 1900, height: 1000 })
+    const composer = page.locator('[data-slot="composer-surface"]:visible').first()
+    await expect(composer).toBeVisible()
+    const originalComposerWidth = (await composer.boundingBox())!.width
     const passiveWheelErrors: string[] = []
 
     page.on('console', message => {
@@ -40,6 +44,17 @@ test.describe('scroll-window layout surface', () => {
     await expect(page.getByRole('region', { name: 'Window 1' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Hide sidebar' })).toBeVisible()
 
+    const firstWindow = page.locator('[data-scroll-window]').first()
+    const windowBox = (await firstWindow.boundingBox())!
+    const composerBox = (await firstWindow.locator('[data-slot="composer-surface"]').boundingBox())!
+    const viewportBox = (await page.locator('[data-scroll-window-viewport]').boundingBox())!
+    const gutterWidth = await page.evaluate(() => 2 * parseFloat(getComputedStyle(document.documentElement).fontSize))
+
+    expect(composerBox.width).toBeCloseTo(originalComposerWidth, 0)
+    expect(windowBox.width).toBeCloseTo(originalComposerWidth + gutterWidth + 2, 0)
+    expect(windowBox.width).toBeLessThan(viewportBox.width)
+    await page.screenshot({ path: testInfo.outputPath('capped-chat-window.png') })
+
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B')
     await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible()
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B')
@@ -47,6 +62,9 @@ test.describe('scroll-window layout surface', () => {
 
     await selectCreateAction(page, 'New session')
     await expect(page.locator('[data-scroll-window]')).toHaveCount(2)
+    const secondWindowBox = (await page.locator('[data-scroll-window]').nth(1).boundingBox())!
+    const firstWindowBox = (await firstWindow.boundingBox())!
+    expect(secondWindowBox.x - firstWindowBox.x - firstWindowBox.width).toBeCloseTo(12, 0)
 
     for (let count = 3; count <= 6; count += 1) {
       await selectCreateAction(page, 'New session')
