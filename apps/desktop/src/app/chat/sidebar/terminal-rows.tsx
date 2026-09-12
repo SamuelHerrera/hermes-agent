@@ -10,6 +10,7 @@ import { closeTerminal, selectTerminal, type TerminalEntry } from '@/app/right-s
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
+import { TreeStem } from '@/components/ui/tree-stem'
 import type { SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
@@ -77,7 +78,7 @@ export function TerminalSidebarRows({ terminals }: { terminals: readonly Termina
   )
 }
 
-function TerminalSidebarRow({ terminal }: { terminal: TerminalEntry }) {
+function TerminalSidebarRow({ terminal, branchStem }: { terminal: TerminalEntry; branchStem?: string }) {
   const { t } = useI18n()
   const selected = useStore($focusedTerminalId) === terminal.id
 
@@ -100,8 +101,13 @@ function TerminalSidebarRow({ terminal }: { terminal: TerminalEntry }) {
       <Tip label={[terminal.title, terminal.restoreCwd || terminal.cwd].filter(Boolean).join(' — ')}>
         <SidebarRowBody aria-pressed={selected} className="z-0 pr-2 py-1" onClick={() => selectTerminal(terminal.id)}>
           <SidebarRowLead>
-            <Codicon name={terminal.kind === 'agent' ? 'output' : 'terminal'} size="0.875rem" />
+            {branchStem ? (
+              <TreeStem>{branchStem}</TreeStem>
+            ) : (
+              <Codicon name={terminal.kind === 'agent' ? 'output' : 'terminal'} size="0.875rem" />
+            )}
           </SidebarRowLead>
+          {branchStem ? <Codicon name="output" size="0.875rem" /> : null}
           <SidebarRowLabel className="group-hover/terminal:text-foreground">{terminal.title}</SidebarRowLabel>
         </SidebarRowBody>
       </Tip>
@@ -109,12 +115,24 @@ function TerminalSidebarRow({ terminal }: { terminal: TerminalEntry }) {
   )
 }
 
-export function SessionTerminalRows({ session }: { session: SessionInfo }) {
+export function SessionTerminalRows({
+  session,
+  hasFollowingBranches = false
+}: {
+  session: SessionInfo
+  hasFollowingBranches?: boolean
+}) {
   const children = useSessionTerminalChildren(session)
 
   return children.length ? (
     <SidebarRowNest data-session-terminals={session.id}>
-      <TerminalSidebarRows terminals={children} />
+      {children.map((terminal, index) => (
+        <TerminalSidebarRow
+          branchStem={index === children.length - 1 && !hasFollowingBranches ? '└─ ' : '├─ '}
+          key={terminal.id}
+          terminal={terminal}
+        />
+      ))}
     </SidebarRowNest>
   ) : null
 }

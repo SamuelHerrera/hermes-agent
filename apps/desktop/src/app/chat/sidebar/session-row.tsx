@@ -666,7 +666,9 @@ function SidebarSessionRowImpl({
           ) : null}
         </SidebarRowShell>
       </SessionContextMenu>
-      {nestedChildrenCollapsed ? null : <SessionTerminalRows session={session} />}
+      {nestedChildrenCollapsed ? null : (
+        <SessionTerminalRows hasFollowingBranches={hasBranchChildren} session={session} />
+      )}
     </div>
   )
 }

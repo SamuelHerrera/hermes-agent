@@ -249,18 +249,18 @@ db.close()
   await terminalRow.getByRole('button', { name: /^Delete:/ }).click()
 })
 
-test('agent process gets its own tab and a sidebar child under its chat without taking focus', async () => {
+test('agent process gets a connected sidebar child and opens its tab only on selection', async () => {
   const page = fixture.page
   await page.getByRole('button', { name: 'New session in Terminal test', exact: true }).click()
   const composer = page.locator('[contenteditable="true"]:visible').first()
   await composer.fill('E2E_SIDEBAR_CROSS')
   await page.keyboard.press('Enter')
   const tabs = page.locator('[data-tree-tab^="terminal-instance:"]')
-  await expect(tabs).toHaveCount(1, { timeout: 60_000 })
   await expect(page.locator('[data-persistent-terminal][aria-hidden="false"]')).toHaveCount(0)
   await expect(page.getByText('Both tasks are running in the background now.', { exact: true })).toBeVisible({
     timeout: 30_000
   })
+  await expect(tabs).toHaveCount(0)
   await composer.fill('/title Terminal owner')
   await page.keyboard.press('Enter')
   // Rehydrate the authoritative project overview and the still-running process.
@@ -273,7 +273,29 @@ test('agent process gets its own tab and a sidebar child under its chat without 
   }
 
   const child = page.locator('[data-session-terminals] [data-sidebar-terminal]').first()
+  const expandChildren = page.getByRole('button', { name: 'Expand child chats', exact: true })
+
+  if (await expandChildren.count()) {
+    await expandChildren.first().click()
+  }
+
   await expect(child).toBeVisible({ timeout: 5_000 })
+  const stem = child.locator('[data-tree-stem]')
+  await expect(stem).toBeVisible()
+  await expect(stem).toHaveText(/[├└]─/)
+  await expect(stem).toHaveAttribute('aria-hidden', 'true')
+  const branchStem = page.locator('[data-session-project-dot] [data-tree-stem]').first()
+  await expect(branchStem).toBeVisible()
+
+  const stemStyle = (element: Element) => {
+    const style = getComputedStyle(element)
+
+    return { color: style.color, fontFamily: style.fontFamily, fontSize: style.fontSize }
+  }
+
+  expect(await stem.evaluate(stemStyle)).toEqual(await branchStem.evaluate(stemStyle))
+  await expect(stem).toHaveText('├─')
+  await expect(branchStem).toHaveText('└─')
   const id = await child.getAttribute('data-sidebar-terminal')
   await child.locator('button').filter({ hasText: /.+/ }).first().click()
   const host = page.locator(`[data-persistent-terminal="${id}"]`)

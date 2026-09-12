@@ -121,6 +121,34 @@ it('does not place agent terminals under the same chat id in another profile', (
   expect(container.querySelector('[data-sidebar-terminal]')).toBeNull()
 })
 
+it('draws branch stems for terminal children and ends only the final sibling', () => {
+  ensureAgentTerminal('first', 'Build', { ownerSessionId: session.id, cwd: '/repo' })
+  ensureAgentTerminal('second', 'Tests', { ownerSessionId: session.id, cwd: '/repo' })
+  const { container, rerender, getByRole } = render(<SessionTerminalRows session={session} />)
+  const stems = () => Array.from(container.querySelectorAll('[data-tree-stem]'), node => node.textContent)
+
+  expect(stems()).toEqual(['├─ ', '└─ '])
+  expect(getByRole('button', { name: 'Build' })).not.toBeNull()
+  expect(getByRole('button', { name: 'Tests' })).not.toBeNull()
+  expect(container.querySelectorAll('.codicon-output')).toHaveLength(2)
+
+  rerender(<SessionTerminalRows hasFollowingBranches session={session} />)
+  expect(stems()).toEqual(['├─ ', '├─ '])
+
+  act(() => $terminals.set($terminals.get().slice(0, 1)))
+  rerender(<SessionTerminalRows session={session} />)
+  expect(stems()).toEqual(['└─ '])
+})
+
+it('leaves standalone manual terminals without chat branch stems', () => {
+  const { container } = render(
+    <TerminalSidebarRows terminals={[{ id: 'manual', title: 'Shell', kind: 'user', auto: true, cwd: '/repo' }]} />
+  )
+
+  expect(container.querySelector('[data-tree-stem]')).toBeNull()
+  expect(container.querySelector('.codicon-terminal')).not.toBeNull()
+})
+
 it('keeps manual ownership at the original project even after the live shell changes cwd', () => {
   expect(
     terminalProjectId(

@@ -3,6 +3,7 @@ import { useStore } from '@nanostores/react'
 import { Codicon } from '@/components/ui/codicon'
 import { useStatusPulseRef } from '@/components/ui/status-pulse'
 import { Tip } from '@/components/ui/tooltip'
+import { TreeStem } from '@/components/ui/tree-stem'
 import { type Translations, useI18n } from '@/i18n'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
@@ -250,11 +251,7 @@ export function SessionProjectDot({
 
   return (
     <span className={cn('flex items-center gap-0.5', className)} data-session-project-dot>
-      {branchStem ? (
-        <span aria-hidden className="shrink-0 font-mono text-[0.625rem] leading-none text-(--ui-text-quaternary)">
-          {branchStem}
-        </span>
-      ) : null}
+      {branchStem ? <TreeStem>{branchStem}</TreeStem> : null}
       {isLoadingDotState(dotState) ? (
         <LoadingProjectDot color={color} r={r} state={dotState} />
       ) : (
@@ -368,11 +365,7 @@ export function SessionStatusDot({ storedSessionId, session, branchStem, classNa
 
   return (
     <span className={cn('flex items-center gap-0.5', className)}>
-      {branchStem ? (
-        <span aria-hidden className="shrink-0 font-mono text-[0.625rem] leading-none text-(--ui-text-quaternary)">
-          {branchStem}
-        </span>
-      ) : null}
+      {branchStem ? <TreeStem>{branchStem}</TreeStem> : null}
       {dotState === 'idle' ? (
         // Rendered even with no color to paint: an empty dot of the same size
         // keeps every row's title on one left edge, so a session finishing
