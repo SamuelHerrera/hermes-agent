@@ -38,6 +38,14 @@ describe('scroll-window wheel axis locking', () => {
     expect(scrollWindowHorizontalDelta(wheel({ deltaX: 12, deltaY: 18, timeStamp: 24 }), state)).toBe(12)
   })
 
+  it('waits through tiny ambiguous movement before accepting horizontal intent over windows', () => {
+    const state = createScrollWheelAxisState()
+
+    expect(scrollWindowHorizontalDelta(wheel({ deltaX: 2, deltaY: 2, timeStamp: 10 }), state)).toBe(0)
+    expect(scrollWindowHorizontalDelta(wheel({ deltaX: 12, deltaY: 3, timeStamp: 24 }), state)).toBe(12)
+    expect(scrollWindowHorizontalDelta(wheel({ deltaX: 10, deltaY: 12, timeStamp: 38 }), state)).toBe(10)
+  })
+
   it('starts a new gesture after the wheel stream goes idle', () => {
     const state = createScrollWheelAxisState()
 

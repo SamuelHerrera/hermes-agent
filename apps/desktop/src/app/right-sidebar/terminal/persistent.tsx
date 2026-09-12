@@ -99,6 +99,22 @@ export function PersistentTerminalHost({
 
     const rendererPaused = () => pauseController?.isPaused() ?? document.visibilityState === 'hidden'
 
+    const applyRectStyle = (next: Rect) => {
+      const overlay = overlayRef.current
+
+      if (!overlay) {
+        return
+      }
+
+      overlay.style.top = `${next.top}px`
+      overlay.style.left = `${next.left}px`
+      overlay.style.width = `${next.width}px`
+      overlay.style.height = `${next.height}px`
+      overlay.style.visibility = !next.hidden && next.width > 0 && next.height > 0 ? 'visible' : 'hidden'
+      overlay.style.opacity = !next.hidden && next.width > 0 && next.height > 0 ? '1' : '0'
+      overlay.style.pointerEvents = !next.hidden && next.width > 0 && next.height > 0 ? 'auto' : 'none'
+    }
+
     const cancelFrame = () => {
       if (frame !== 0) {
         window.cancelAnimationFrame(frame)
@@ -130,6 +146,7 @@ export function PersistentTerminalHost({
 
       if (!sameRect(prev, next)) {
         prev = next
+        applyRectStyle(next)
         setRect(next)
 
         if (next.width > 0 && next.height > 0) {
@@ -192,7 +209,15 @@ export function PersistentTerminalHost({
 
     observer?.observe(slot)
 
-    const handleScroll = () => scheduleMeasure('scroll')
+    const handleScroll = (event: Event) => {
+      if (event.currentTarget instanceof HTMLElement && event.currentTarget.hasAttribute('data-scroll-window-viewport')) {
+        measure('scroll-window-scroll')
+
+        return
+      }
+
+      scheduleMeasure('scroll')
+    }
     const scrollTargets: Array<HTMLElement | Window> = [window]
     window.addEventListener('scroll', handleScroll)
 

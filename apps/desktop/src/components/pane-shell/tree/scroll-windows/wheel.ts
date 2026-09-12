@@ -1,13 +1,27 @@
 export interface ScrollWheelAxisState {
   axis: 'horizontal' | 'vertical' | null
+  cumulativeX: number
+  cumulativeY: number
   lastEventAt: number
 }
 
-export const createScrollWheelAxisState = (): ScrollWheelAxisState => ({ axis: null, lastEventAt: 0 })
+export const createScrollWheelAxisState = (): ScrollWheelAxisState => ({
+  axis: null,
+  cumulativeX: 0,
+  cumulativeY: 0,
+  lastEventAt: 0
+})
 
 const GESTURE_RESET_MS = 180
-const MIN_HORIZONTAL_DELTA = 4
-const HORIZONTAL_DOMINANCE = 1.25
+const MIN_AXIS_DELTA = 8
+const HORIZONTAL_DOMINANCE = 1.1
+const VERTICAL_DOMINANCE = 1.35
+
+function resetGesture(state: ScrollWheelAxisState): void {
+  state.axis = null
+  state.cumulativeX = 0
+  state.cumulativeY = 0
+}
 
 export function scrollWindowHorizontalDelta(event: WheelEvent, state: ScrollWheelAxisState): number {
   const now = event.timeStamp || performance.now()
@@ -17,7 +31,7 @@ export function scrollWindowHorizontalDelta(event: WheelEvent, state: ScrollWhee
   const absY = Math.abs(deltaY)
 
   if (now - state.lastEventAt > GESTURE_RESET_MS) {
-    state.axis = null
+    resetGesture(state)
   }
 
   state.lastEventAt = now
@@ -36,13 +50,16 @@ export function scrollWindowHorizontalDelta(event: WheelEvent, state: ScrollWhee
     return deltaX
   }
 
-  if (absX >= MIN_HORIZONTAL_DELTA && absX >= absY * HORIZONTAL_DOMINANCE) {
+  state.cumulativeX += absX
+  state.cumulativeY += absY
+
+  if (state.cumulativeX >= MIN_AXIS_DELTA && state.cumulativeX >= state.cumulativeY * HORIZONTAL_DOMINANCE) {
     state.axis = 'horizontal'
 
     return deltaX
   }
 
-  if (absY > 0 || absX > 0) {
+  if (state.cumulativeY >= MIN_AXIS_DELTA && state.cumulativeY >= state.cumulativeX * VERTICAL_DOMINANCE) {
     state.axis = 'vertical'
   }
 
