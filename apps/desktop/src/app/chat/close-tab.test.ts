@@ -35,7 +35,14 @@ vi.mock('@/store/profile', () => ({
 
 import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows/store'
 import { $previewTabs, closeRightRail, openPreview, type PreviewTarget } from '@/store/preview'
-import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
+import {
+  $activeSessionId,
+  $selectedStoredSessionId,
+  getRememberedRoute,
+  getRememberedSessionId,
+  setRememberedRoute,
+  setRememberedSessionId
+} from '@/store/session'
 
 import { $workspaceIsPage } from '../routes'
 
@@ -105,12 +112,16 @@ describe('closeWorkspaceTab', () => {
   it('closes the primary scroll card without promoting or closing a neighbor', () => {
     $layoutSurfaceMode.set('scroll-windows')
     loadedMainOnly()
+    setRememberedSessionId('stored-a', 'default')
+    setRememberedRoute('/stored-a', 'default')
     nextSessionTileForWorkspace.mockReturnValue('stored-b')
     const load = vi.fn()
     expect(closeWorkspaceTab(load)).toBe(true)
     expect(load).not.toHaveBeenCalled()
     expect(closeSessionTile).not.toHaveBeenCalled()
     expect(requestEmptyWorkspace).toHaveBeenCalledOnce()
+    expect(getRememberedSessionId('default')).toBeNull()
+    expect(getRememberedRoute('default')).toBe('/')
   })
 
   it('closes even an empty primary scroll draft while preserving neighbors', () => {
@@ -147,10 +158,14 @@ describe('closeWorkspaceTab', () => {
 
   it('drops a lone loaded main to a fresh draft and closes its tab chrome', () => {
     loadedMainOnly()
+    setRememberedSessionId('stored-a', 'default')
+    setRememberedRoute('/stored-a', 'default')
 
     expect(closeWorkspaceTab(vi.fn())).toBe(true)
     expect(requestEmptyWorkspace).toHaveBeenCalledTimes(1)
     expect(hideLoneTreeTab).toHaveBeenCalledWith('workspace')
+    expect(getRememberedSessionId('default')).toBeNull()
+    expect(getRememberedRoute('default')).toBe('/')
   })
 
   it('empties main even with no session loader wired and closes its tab chrome', () => {

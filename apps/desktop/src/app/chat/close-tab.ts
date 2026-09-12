@@ -1,6 +1,6 @@
 import { mainChatOccupied } from '@/app/open-session'
 import { closeActiveTerminal } from '@/app/right-sidebar/terminal/terminals'
-import { $workspaceIsPage } from '@/app/routes'
+import { $workspaceIsPage, NEW_CHAT_ROUTE } from '@/app/routes'
 import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows/store'
 import {
   closeFocusedSessionTab,
@@ -9,9 +9,21 @@ import {
   isClosingAllTreeTabs
 } from '@/components/pane-shell/tree/store'
 import { isFocusWithin } from '@/lib/keybinds/combo'
-import { requestEmptyWorkspace } from '@/store/profile'
-import { $activeSessionId, $selectedStoredSessionId } from '@/store/session'
+import { $activeGatewayProfile, requestEmptyWorkspace } from '@/store/profile'
+import { $activeSessionId, $selectedStoredSessionId, setRememberedRoute, setRememberedSessionId } from '@/store/session'
 import { closeSessionTile, nextSessionTileForWorkspace } from '@/store/session-states'
+
+function forgetClosedWorkspaceSession(): void {
+  const closed = $selectedStoredSessionId.get()
+
+  if (!closed) {
+    return
+  }
+
+  const profile = $activeGatewayProfile.get()
+  setRememberedSessionId(null, profile)
+  setRememberedRoute(NEW_CHAT_ROUTE, profile)
+}
 
 /**
  * Close the MAIN tab. The workspace pane itself can't leave the tree, so
@@ -38,6 +50,7 @@ export function closeWorkspaceTab(loadSessionIntoWorkspace?: (storedSessionId: s
   // Scroll cards are independent windows, not tabs stacked in the backing tree.
   // Close this host without consuming/promoting a neighboring card.
   if ($layoutSurfaceMode.get() === 'scroll-windows' && !$workspaceIsPage.get()) {
+    forgetClosedWorkspaceSession()
     requestEmptyWorkspace('workspace.close-scroll-window')
 
     return true
@@ -64,6 +77,7 @@ export function closeWorkspaceTab(loadSessionIntoWorkspace?: (storedSessionId: s
     return hideLoneTreeTab('workspace')
   }
 
+  forgetClosedWorkspaceSession()
   requestEmptyWorkspace('workspace.close-tab')
   hideLoneTreeTab('workspace')
 
