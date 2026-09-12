@@ -26,7 +26,7 @@ import { $workspaceEmptyPlaceholder } from '@/store/session'
 import { PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
 import { allPaneIds, type LayoutNode } from '../model'
 import { paneChrome } from '../renderer/track-model'
-import { $layoutTree, closeTabPane, isMainStripPane } from '../store'
+import { $hiddenTreePanes, $layoutTree, closeTabPane, isMainStripPane } from '../store'
 
 import { reconcileColumns } from './columns'
 import { scrollDropEdge, ScrollDropOverlay, setScrollDropTarget } from './drop-overlay'
@@ -57,6 +57,7 @@ function treeWindowIds(tree: LayoutNode | null): string[] {
 
 export function ScrollWindowWorkspace() {
   const tree = useStore($layoutTree)
+  const hiddenTreePanes = useStore($hiddenTreePanes)
   const panes = useContributions('panes')
   const activeWorkspaceId = useStore($activeScrollWorkspaceId)
   const workspaces = useStore($scrollWindowWorkspaces)
@@ -77,6 +78,11 @@ export function ScrollWindowWorkspace() {
     [paneById, tree, workspaceEmpty]
   )
 
+  const visibleWindowIds = useMemo(
+    () => availableWindowIds.filter(id => !hiddenTreePanes.has(id)),
+    [availableWindowIds, hiddenTreePanes]
+  )
+
   const availableWindowKey = availableWindowIds.join('\u0000')
   const sidebarPane = paneById.get('sessions')
 
@@ -85,7 +91,7 @@ export function ScrollWindowWorkspace() {
   }, [availableWindowIds, availableWindowKey])
 
   const workspace = workspaces.find(item => item.id === activeWorkspaceId) ?? workspaces[0]
-  const windowIds = workspace.windowIds.filter(id => availableWindowIds.includes(id))
+  const windowIds = workspace.windowIds.filter(id => visibleWindowIds.includes(id))
 
   const columnSizesKey = reconcileColumns(workspace.columns, windowIds)
     .map(column => column.length)

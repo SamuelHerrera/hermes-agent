@@ -59,11 +59,13 @@ describe('individual terminal panes', () => {
     expect(panes()).toEqual(
       expect.arrayContaining([s.terminalPaneId(local), s.terminalPaneId(remote), s.terminalPaneId(agent)])
     )
-    expect(panes()).not.toContain(s.terminalPaneId(closed))
+    expect(panes()).toContain(s.terminalPaneId(closed))
+    expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(closed))).toBe(true)
     expect(s.$terminals.get()).toBe(entries)
     $showAllProfiles.set(false)
     $activeGatewayProfile.set('default')
-    expect(panes()).toEqual(['workspace', s.terminalPaneId(local)])
+    expect(panes()).toEqual(['workspace', s.terminalPaneId(local), s.terminalPaneId(closed)])
+    expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(closed))).toBe(true)
   })
 
   it('captures the creation profile and never selects a same-cwd shell from another backend', async () => {
@@ -177,16 +179,19 @@ describe('individual terminal panes', () => {
     expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(id))?.active).toBe(s.terminalPaneId(id))
   })
 
-  it('removes a closed manual terminal and its persisted scrollback', async () => {
+  it('hides a closed manual terminal tab and reopens it with ownership and scrollback', async () => {
     const s = await setup()
     const id = s.createTerminal('/repo', { projectId: 'project', profile: 'default' })
     s.updateTerminalReviveBuffer(id, 'kept history')
     s.tree.closeTabPane(s.terminalPaneId(id))
-    expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(id))
-    expect(s.$terminals.get()).toEqual([])
+    expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).toContain(s.terminalPaneId(id))
+    expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(id))).toBe(true)
+    expect(s.$terminals.get()).toEqual([
+      expect.objectContaining({ hidden: true, id, projectId: 'project', reviveBuffer: 'kept history' })
+    ])
     s.selectTerminal(id)
-    expect(s.$terminals.get()).toEqual([])
-    expect(window.localStorage.getItem('hermes.desktop.terminals.v1')).toBeNull()
+    expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(id))).toBe(false)
+    expect(s.$terminals.get()).toEqual([expect.objectContaining({ id, projectId: 'project', reviveBuffer: 'kept history' })])
   })
 
   it('does not re-open a closed agent tab when process snapshots repeat', async () => {
@@ -202,7 +207,7 @@ describe('individual terminal panes', () => {
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).toContain(s.terminalPaneId(id))
   })
 
-  it('removes manual terminals when closing all tabs in their zone without touching another zone', async () => {
+  it('hides manual terminals when closing all tabs in their zone without touching another zone', async () => {
     const s = await setup()
     const first = s.createTerminal('/repo')
     const second = s.createTerminal('/other')
@@ -212,7 +217,10 @@ describe('individual terminal panes', () => {
       s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(second))?.id
     )
     s.tree.closeAllTreeTabs(s.terminalPaneId(second))
-    expect(s.$terminals.get().map(terminal => terminal.id)).toEqual([first])
+    expect(s.$terminals.get().map(terminal => [terminal.id, terminal.hidden])).toEqual([
+      [first, undefined],
+      [second, true]
+    ])
   })
 
   it('persists closed manual entries and their project ownership across relaunch', async () => {

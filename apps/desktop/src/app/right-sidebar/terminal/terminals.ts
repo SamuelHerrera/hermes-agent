@@ -1,7 +1,7 @@
 import { atom, computed } from 'nanostores'
 
 import { findGroupOfPane } from '@/components/pane-shell/tree/model'
-import { $layoutTree, noteActiveTreeGroup, revealTreePane } from '@/components/pane-shell/tree/store'
+import { $layoutTree, noteActiveTreeGroup, revealTreePane, setTreePaneHidden } from '@/components/pane-shell/tree/store'
 import { readKey, writeKey } from '@/lib/storage'
 import { $activeGatewayProfile, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import { $currentCwd } from '@/store/session'
@@ -169,6 +169,12 @@ export const $openTerminals = computed([$terminals, $profileScope], (list, scope
   list.filter(term => !term.hidden && (scope === ALL_PROFILES || normalizeProfileKey(term.profile) === scope))
 )
 export const terminalPaneId = (id: string) => `terminal-instance:${id}`
+export const $terminalPanes = computed([$terminals, $profileScope], (list, scope) =>
+  list.filter(
+    term =>
+      (term.kind === 'user' || !term.hidden) && (scope === ALL_PROFILES || normalizeProfileKey(term.profile) === scope)
+  )
+)
 
 $terminals.subscribe(list => persistTerminals(list, $activeTerminalId.get()))
 $activeTerminalId.subscribe(active => persistTerminals($terminals.get(), active))
@@ -304,6 +310,11 @@ export function selectTerminal(id: string): void {
 }
 
 export function hideTerminal(id: string): void {
+  if (!$terminals.get().some(term => term.id === id)) {
+    return
+  }
+
+  setTreePaneHidden(terminalPaneId(id), true)
   $terminals.set($terminals.get().map(term => (term.id === id ? { ...term, hidden: true } : term)))
 }
 
@@ -417,13 +428,11 @@ export function removeAgentTerminalByProc(procId: string): void {
   }
 }
 
-/** Closing a manual tab ends its shell; agent tabs only detach their output. */
+/** Closing a tab detaches it from the workspace while keeping the sidebar entry
+ *  and shell/output available to reopen. Sidebar delete/explicit close still
+ *  removes the terminal entry and disposes manual shells. */
 export function closeTerminalTab(id: string): void {
-  if ($terminals.get().find(term => term.id === id)?.kind === 'user') {
-    closeTerminal(id)
-  } else {
-    hideTerminal(id)
-  }
+  hideTerminal(id)
 }
 
 export function closeActiveTerminal(): void {

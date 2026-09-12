@@ -2,11 +2,11 @@ import { paneMirror } from '@/app/chat/pane-mirror'
 import { Codicon } from '@/components/ui/codicon'
 
 import { TerminalPaneChrome } from './chrome'
-import { $openTerminals, $terminals, closeTerminalTab, type TerminalEntry } from './terminals'
+import { $terminalPanes, $terminals, closeTerminalTab, type TerminalEntry } from './terminals'
 
 /** One shell/process is one ordinary, movable workspace tab. */
 export const watchTerminalPanes = paneMirror<TerminalEntry>({
-  source: $openTerminals,
+  source: $terminalPanes,
   key: terminal => terminal.id,
   prefix: 'terminal-instance',
   dir: () => 'center',
