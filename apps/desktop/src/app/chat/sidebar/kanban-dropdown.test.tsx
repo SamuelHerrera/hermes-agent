@@ -145,14 +145,14 @@ afterEach(() => {
 })
 
 describe('Sidebar project chrome', () => {
-  it('lets the scrolling content rail occupy the full sidebar height', () => {
+  it('lets the scrolling content rail start at the top of the sidebar', () => {
     const { container } = renderSidebar()
     const sidebar = container.querySelector<HTMLElement>('[data-slot="sidebar"]')
     const content = container.querySelector<HTMLElement>('[data-slot="sidebar-content"]')
 
     expect(container.querySelector('[data-sidebar-toolbar-spacer]')).toBeNull()
     expect(sidebar?.firstElementChild).toBe(content)
-    expect(content?.className).toContain('pt-[calc(var(--titlebar-control-height,24px)+0.375rem)]')
+    expect(content?.className).not.toContain('pt-[')
   })
 
   it('renders the project overview directly without a redundant Projects header', () => {
