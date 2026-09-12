@@ -48,9 +48,12 @@ interface PersistedTerminalEntry {
   projectId?: string
   profile?: string
   hidden?: boolean
+  kind?: 'agent' | 'user'
   auto: boolean
   cwd: string
   id: string
+  ownerSessionId?: string
+  procId?: string
   restoreCwd?: string
   reviveBuffer?: string
   title: string
@@ -77,10 +80,12 @@ function sanitizePersistedTerminal(value: unknown): PersistedTerminalEntry | nul
   const id = typeof record.id === 'string' ? record.id.trim() : ''
   const title = typeof record.title === 'string' ? record.title.trim() : ''
   const cwd = typeof record.cwd === 'string' ? record.cwd : ''
+  const kind = record.kind === 'agent' ? 'agent' : 'user'
+  const procId = typeof record.procId === 'string' ? record.procId.trim() : ''
   const restoreCwd = typeof record.restoreCwd === 'string' && record.restoreCwd ? record.restoreCwd : undefined
   const reviveBuffer = typeof record.reviveBuffer === 'string' ? record.reviveBuffer : undefined
 
-  if (!id) {
+  if (!id || (kind === 'agent' && !procId)) {
     return null
   }
 
@@ -88,11 +93,14 @@ function sanitizePersistedTerminal(value: unknown): PersistedTerminalEntry | nul
     auto: typeof record.auto === 'boolean' ? record.auto : true,
     cwd,
     id,
+    kind,
+    ...(typeof record.ownerSessionId === 'string' ? { ownerSessionId: record.ownerSessionId } : {}),
     ...(typeof record.projectId === 'string' ? { projectId: record.projectId } : {}),
     ...(typeof record.profile === 'string' ? { profile: record.profile } : {}),
+    ...(procId ? { procId } : {}),
     ...(record.hidden === true ? { hidden: true } : {}),
-    ...(restoreCwd ? { restoreCwd } : {}),
-    ...(reviveBuffer ? { reviveBuffer } : {}),
+    ...(restoreCwd && kind === 'user' ? { restoreCwd } : {}),
+    ...(reviveBuffer && kind === 'user' ? { reviveBuffer } : {}),
     title: title || 'Terminal'
   }
 }
@@ -134,16 +142,19 @@ function loadPersistedTerminals(): PersistedTerminalState {
 // well before the renderer tears down, so app quit needs no unload hook.
 function persistTerminals(list: readonly TerminalEntry[], activeTerminalId: null | string) {
   const terminals = list
-    .filter(term => term.kind === 'user')
+    .filter(term => term.kind === 'user' || !term.hidden)
     .map(term => ({
       auto: term.auto,
       cwd: term.cwd,
       id: term.id,
+      ...(term.kind === 'agent' ? { kind: 'agent' as const } : {}),
+      ...(term.ownerSessionId ? { ownerSessionId: term.ownerSessionId } : {}),
       ...(term.projectId ? { projectId: term.projectId } : {}),
       ...(term.profile ? { profile: term.profile } : {}),
+      ...(term.procId ? { procId: term.procId } : {}),
       ...(term.hidden ? { hidden: true } : {}),
-      ...(term.restoreCwd ? { restoreCwd: term.restoreCwd } : {}),
-      ...(term.reviveBuffer ? { reviveBuffer: term.reviveBuffer } : {}),
+      ...(term.kind === 'user' && term.restoreCwd ? { restoreCwd: term.restoreCwd } : {}),
+      ...(term.kind === 'user' && term.reviveBuffer ? { reviveBuffer: term.reviveBuffer } : {}),
       title: term.title
     }))
 
@@ -160,7 +171,11 @@ function persistTerminals(list: readonly TerminalEntry[], activeTerminalId: null
 const restored = loadPersistedTerminals()
 
 export const $terminals = atom<readonly TerminalEntry[]>(
-  restored.terminals.map(term => ({ ...term, kind: 'user' as const }))
+  restored.terminals.map(term =>
+    term.kind === 'agent'
+      ? { ...term, kind: 'agent' as const, hidden: term.hidden === true ? true : undefined }
+      : { ...term, kind: 'user' as const }
+  )
 )
 export const $activeTerminalId = atom<string | null>(restored.activeTerminalId)
 // Visibility is a projection, never a mutation of terminal lifetime. Persistent

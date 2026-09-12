@@ -106,6 +106,36 @@ describe('terminal store persistence', () => {
     })
   })
 
+  it('persists only agent terminal views the user opened and restores them on relaunch', async () => {
+    const { $terminals, ensureAgentTerminal, openAgentTerminal } = await loadTerminalStore()
+    const unopened = ensureAgentTerminal('proc-unopened', 'Unopened', { ownerSessionId: 'chat', cwd: '/repo' })!
+    openAgentTerminal('proc-opened', 'Build')
+    const opened = $terminals.get().find(term => term.procId === 'proc-opened')!
+
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
+      activeTerminalId: opened.id,
+      terminals: [
+        {
+          auto: false,
+          cwd: '',
+          id: opened.id,
+          kind: 'agent',
+          procId: 'proc-opened',
+          profile: 'default',
+          title: 'Build'
+        }
+      ]
+    })
+    expect($terminals.get().find(term => term.id === unopened)?.hidden).toBe(true)
+
+    vi.resetModules()
+    const restored = await loadTerminalStore()
+    expect(restored.$activeTerminalId.get()).toBe(opened.id)
+    expect(restored.$terminals.get()).toEqual([
+      expect.objectContaining({ id: opened.id, kind: 'agent', procId: 'proc-opened', hidden: undefined })
+    ])
+  })
+
   it('never attaches a revive buffer to an agent tab', async () => {
     const { $terminals, ensureAgentTerminal, updateTerminalReviveBuffer } = await loadTerminalStore()
 
