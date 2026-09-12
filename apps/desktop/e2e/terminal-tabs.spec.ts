@@ -298,6 +298,10 @@ test('agent process gets a connected sidebar child and opens its tab only on sel
   expect(await stem.evaluate(stemStyle)).toEqual(await branchStem.evaluate(stemStyle))
   await expect(stem).toHaveText('├─')
   await expect(branchStem).toHaveText('└─')
+  const terminalStemBox = (await stem.boundingBox())!
+  const chatStemBox = (await branchStem.boundingBox())!
+  await page.screenshot({ path: 'test-results/sidebar-child-alignment.png' })
+  expect(Math.abs(terminalStemBox.x - chatStemBox.x)).toBeLessThan(1)
   const id = await child.getAttribute('data-sidebar-terminal')
   await child.locator('button').filter({ hasText: /.+/ }).first().click()
   const host = page.locator(`[data-persistent-terminal="${id}"]`)

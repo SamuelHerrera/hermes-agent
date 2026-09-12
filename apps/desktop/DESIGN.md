@@ -173,6 +173,10 @@ Notes:
   shell.
 - **Rows:** `ListRow` (settings `primitives.tsx`) for label/description/action
   rows. Flat, flush-left; no per-row indentation that fights flush headers.
+- **Sidebar child rows:** chat and terminal branches use `SidebarRowBody`'s
+  `branch` inset and `SidebarRowLead`'s `branch` start-aligned, content-width
+  slot. Do not add a second nesting inset or center a stem/status cluster in
+  the fixed icon slot; both make sibling tree connectors drift.
 - **No dividers between rows** unless the list genuinely needs them; prefer
   spacing. When you do need one, it's a single `--ui-stroke-tertiary` hairline.
 

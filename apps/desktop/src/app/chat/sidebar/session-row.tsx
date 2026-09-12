@@ -471,12 +471,12 @@ function SidebarSessionRowImpl({
           onPointerLeave={cancelPrewarm}
         >
           <SidebarRowBody
+            branch={Boolean(branchStem)}
             // Every trailing figure lives in the actions slot, which the row
             // measures — so the title needs a gap from it and nothing else. Hover
             // changes what you can see in that slot, never how wide it is.
             className={cn(
               'z-0 pr-2',
-              branchStem && 'pl-3.5',
               card
                 ? 'flex-col items-stretch justify-center py-1.5 [--card-gap:0.6rem] gap-(--card-gap)'
                 : 'flex-col items-stretch justify-center gap-1 py-1'
@@ -542,7 +542,7 @@ function SidebarSessionRowImpl({
                   )}
                 </SidebarRowGrab>
               ) : (
-                <SidebarRowLead className="overflow-hidden">
+                <SidebarRowLead branch={Boolean(branchStem)} className={branchStem ? undefined : 'overflow-hidden'}>
                   {lead ?? (
                     <SessionProjectDot
                       branchStem={branchStem}

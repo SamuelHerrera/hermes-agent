@@ -99,8 +99,13 @@ function TerminalSidebarRow({ terminal, branchStem }: { terminal: TerminalEntry;
       data-sidebar-terminal={terminal.id}
     >
       <Tip label={[terminal.title, terminal.restoreCwd || terminal.cwd].filter(Boolean).join(' — ')}>
-        <SidebarRowBody aria-pressed={selected} className="z-0 pr-2 py-1" onClick={() => selectTerminal(terminal.id)}>
-          <SidebarRowLead>
+        <SidebarRowBody
+          aria-pressed={selected}
+          branch={Boolean(branchStem)}
+          className="z-0 pr-2 py-1"
+          onClick={() => selectTerminal(terminal.id)}
+        >
+          <SidebarRowLead branch={Boolean(branchStem)}>
             {branchStem ? (
               <TreeStem>{branchStem}</TreeStem>
             ) : (
@@ -125,7 +130,7 @@ export function SessionTerminalRows({
   const children = useSessionTerminalChildren(session)
 
   return children.length ? (
-    <SidebarRowNest data-session-terminals={session.id}>
+    <SidebarRowNest className="pl-0" data-session-terminals={session.id}>
       {children.map((terminal, index) => (
         <TerminalSidebarRow
           branchStem={index === children.length - 1 && !hasFollowingBranches ? '└─ ' : '├─ '}

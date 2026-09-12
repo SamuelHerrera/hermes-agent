@@ -99,8 +99,8 @@ export function SidebarRowCluster({ className, ...props }: React.ComponentProps<
 }
 
 /** Session row main tap target. */
-export function SidebarRowBody({ className, ...props }: React.ComponentProps<'button'>) {
-  return <RowButton className={cn(rowInset, 'bg-transparent text-left', className)} {...props} />
+export function SidebarRowBody({ branch, className, ...props }: React.ComponentProps<'button'> & { branch?: boolean }) {
+  return <RowButton className={cn(rowInset, 'bg-transparent text-left', branch && 'pl-3.5', className)} {...props} />
 }
 
 /** Tappable label — underline/truncate live on the inner span, not the button. */
@@ -118,8 +118,10 @@ export function SidebarRowLink({
 }
 
 /** Fixed leading column (dot, icon, drag handle). */
-export function SidebarRowLead({ className, ...props }: React.ComponentProps<'span'>) {
-  return <span className={cn(rowLead, className)} {...props} />
+export function SidebarRowLead({ branch, className, ...props }: React.ComponentProps<'span'> & { branch?: boolean }) {
+  // A stem plus status dot can exceed the normal icon slot. Anchor the stem
+  // at the row inset rather than centering (and clipping) the wider cluster.
+  return <span className={cn(rowLead, branch && 'w-auto justify-items-start', className)} {...props} />
 }
 
 /** Standard row label typography. */
