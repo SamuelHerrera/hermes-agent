@@ -37,6 +37,7 @@ describe('generateScrollGrid', () => {
       })
 
       expect(layout.windowWidth).toBe(Math.max(base.minWindowWidth, viewportWidth))
+      expect(layout.viewportWidth).toBe(viewportWidth)
     }
   })
 

@@ -31,12 +31,14 @@ export function ScrollWindowsMinimap() {
     return <div className="text-[0.68rem] font-medium text-(--ui-text-tertiary)">Workspace {workspace.id}</div>
   }
 
-  const viewportWidth = Math.max(1, Math.min(layout.canvasWidth, layout.viewportWidth ?? layout.windowWidth))
-  const viewportHeight = Math.max(1, Math.min(layout.canvasHeight, layout.viewportHeight ?? layout.canvasHeight))
-  const scaleX = 120 / Math.max(1, layout.canvasWidth)
-  const scaleY = 14 / Math.max(1, layout.canvasHeight)
-  const viewportLeft = Math.min(120 - Math.max(7, viewportWidth * scaleX), workspace.scrollLeft * scaleX)
-  const viewportTop = Math.min(14 - Math.max(5, viewportHeight * scaleY), workspace.scrollTop * scaleY)
+  // Include the viewport's outer padding and any unused space after short strips.
+  // Every rectangle uses the same scroll-content origin and scale as the real DOM.
+  const viewportWidth = layout.viewportWidth + GAP * 2
+  const viewportHeight = layout.viewportHeight + GAP * 2
+  const scaleX = 120 / Math.max(viewportWidth, layout.canvasWidth + GAP * 2)
+  const scaleY = 14 / Math.max(viewportHeight, layout.canvasHeight + GAP * 2)
+  const viewportLeft = Math.max(0, Math.min(120 - viewportWidth * scaleX, workspace.scrollLeft * scaleX))
+  const viewportTop = Math.max(0, Math.min(14 - viewportHeight * scaleY, workspace.scrollTop * scaleY))
 
   return (
     <div className="flex items-center gap-2 rounded-md bg-(--ui-sidebar-surface-background)/85 px-2 py-1 shadow-sm backdrop-blur">
@@ -52,10 +54,10 @@ export function ScrollWindowsMinimap() {
               key={windowId}
               onClick={() => requestScrollWindowIntoView(windowId)}
               style={{
-                height: Math.max(3, rect.height * scaleY),
-                left: rect.left * scaleX,
-                top: rect.top * scaleY,
-                width: Math.max(7, rect.width * scaleX)
+                height: rect.height * scaleY,
+                left: (rect.left + GAP) * scaleX,
+                top: (rect.top + GAP) * scaleY,
+                width: rect.width * scaleX
               }}
               type="button"
             />
@@ -65,10 +67,10 @@ export function ScrollWindowsMinimap() {
           aria-hidden="true"
           className="pointer-events-none absolute rounded-sm border border-(--ui-accent) bg-(--ui-accent)/10"
           style={{
-            height: Math.max(5, viewportHeight * scaleY),
+            height: viewportHeight * scaleY,
             left: viewportLeft,
             top: viewportTop,
-            width: Math.max(7, viewportWidth * scaleX)
+            width: viewportWidth * scaleX
           }}
         />
       </div>

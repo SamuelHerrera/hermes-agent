@@ -148,12 +148,12 @@ test.describe('scroll-window layout surface', () => {
     const firstBoxBeforeResize = await page.locator('[data-scroll-window]').first().boundingBox()
 
     await page.setViewportSize({ height: 700, width: 1000 })
-    await page.waitForTimeout(150)
-
-    const firstBoxAfterResize = await page.locator('[data-scroll-window]').first().boundingBox()
-
-    expect(Math.round(firstBoxAfterResize?.width ?? 0)).toBe(Math.round(firstBoxBeforeResize?.width ?? 0))
-    expect(Math.round(firstBoxAfterResize?.height ?? 0)).toBe(Math.round(firstBoxBeforeResize?.height ?? 0))
+    await expect
+      .poll(async () => (await page.locator('[data-scroll-window]').first().boundingBox())!.width)
+      .toBeLessThan(firstBoxBeforeResize!.width)
+    await expect
+      .poll(async () => (await page.locator('[data-scroll-window]').first().boundingBox())!.height)
+      .toBeLessThan(firstBoxBeforeResize!.height)
 
     await page.locator('button[aria-label="Switch to workspace 2"]').click()
     await expect(page.locator('button[aria-label="Switch to workspace 2"]')).toHaveAttribute('aria-pressed', 'true')
@@ -166,5 +166,96 @@ test.describe('scroll-window layout surface', () => {
     await page.locator('[data-slot="command-item"]').filter({ hasText: 'Toggle scroll-window layout' }).click()
 
     await expect(page.locator('[data-scroll-window-viewport]')).toHaveCount(0)
+  })
+
+  test('grows small windows to the chat cap and maps the live visible area through resize and scroll', async ({}, testInfo) => {
+    const { page } = fixture
+    // Resize the native window too: emulated viewports leave Electron's
+    // window-controls-overlay bounds stale and can overlap the minimap.
+    const resize = async (width: number, height: number) => {
+      await fixture.app.evaluate(
+        ({ BrowserWindow }, size) => {
+          BrowserWindow.getAllWindows()[0].setSize(size.width, size.height)
+        },
+        { width, height }
+      )
+    }
+    await resize(800, 600)
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K')
+    await page.getByPlaceholder(/search/i).fill('scroll window')
+    await page.mouse.move(8, 8)
+    await page.locator('[data-slot="command-item"]').filter({ hasText: 'Toggle scroll-window layout' }).click()
+    await page.keyboard.press('Escape')
+    const windows = page.locator('[data-scroll-window]')
+    await expect(windows).toHaveCount(1)
+    const smallBox = (await windows.first().boundingBox())!
+    for (let count = 2; count <= 3; count += 1) {
+      await selectCreateAction(page, 'New session')
+      await expect(windows).toHaveCount(count)
+    }
+    const ids = await windows.evaluateAll(elements =>
+      elements.map(element => element.getAttribute('data-scroll-window'))
+    )
+    await resize(1900, 1000)
+    await expect.poll(async () => (await windows.first().boundingBox())!.width).toBeGreaterThan(smallBox.width)
+    await expect.poll(async () => (await windows.first().boundingBox())!.height).toBeGreaterThan(smallBox.height)
+
+    const assertMinimap = async () => {
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const viewport = document.querySelector<HTMLElement>('[data-scroll-window-viewport]')!
+            const miniWindow = document.querySelector<HTMLElement>('button[aria-label="Scroll to window 1"]')!
+            const map = miniWindow.parentElement!
+            const indicator = map.querySelector<HTMLElement>('span[aria-hidden]')!
+            const mapBox = map.getBoundingClientRect()
+            const indicatorBox = indicator.getBoundingClientRect()
+            const firstWindow = document.querySelector<HTMLElement>('[data-scroll-window]')!
+            const windowBox = firstWindow.getBoundingClientRect()
+            const viewportBox = viewport.getBoundingClientRect()
+            const miniBox = miniWindow.getBoundingClientRect()
+            const scale = mapBox.width / viewport.scrollWidth
+            return Math.max(
+              Math.abs(indicatorBox.width - viewport.clientWidth * scale),
+              Math.abs(indicatorBox.x - mapBox.x - viewport.scrollLeft * scale),
+              Math.abs(miniBox.width - windowBox.width * scale),
+              Math.abs(miniBox.x - mapBox.x - (windowBox.x - viewportBox.x + viewport.scrollLeft) * scale),
+              Math.abs(indicatorBox.height - (viewport.clientHeight / viewport.scrollHeight) * mapBox.height)
+            )
+          })
+        )
+        .toBeLessThan(0.15)
+    }
+    await assertMinimap()
+    const largeBox = (await windows.first().boundingBox())!
+    const surface = (await windows.first().locator('[data-slot="composer-surface"]').boundingBox())!
+    const gutters = await page.evaluate(() => 2 * parseFloat(getComputedStyle(document.documentElement).fontSize))
+    expect(largeBox.width).toBeCloseTo(surface.width + gutters + 2, 0)
+    await page.screenshot({ path: testInfo.outputPath('resized-scroll-windows.png') })
+
+    const viewport = page.locator('[data-scroll-window-viewport]')
+    await viewport.evaluate(element => {
+      element.scrollLeft = element.scrollWidth
+    })
+    await assertMinimap()
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+B')
+    await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible()
+    await assertMinimap()
+    await resize(2400, 1100)
+    await assertMinimap()
+    expect((await windows.first().boundingBox())!.width).toBe(largeBox.width)
+    await page.getByRole('button', { name: 'Scroll to window 1', exact: true }).click()
+    await expect.poll(() => viewport.evaluate(element => element.scrollLeft)).toBe(0)
+    await assertMinimap()
+    await resize(800, 600)
+    await assertMinimap()
+    await expect.poll(async () => (await windows.first().boundingBox())!.width).toBeLessThan(largeBox.width)
+    expect(
+      await windows.evaluateAll(elements => elements.map(element => element.getAttribute('data-scroll-window')))
+    ).toEqual(ids)
+    expect(
+      new Set(await windows.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))).size
+    ).toBe(1)
+    expect(await viewport.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
   })
 })

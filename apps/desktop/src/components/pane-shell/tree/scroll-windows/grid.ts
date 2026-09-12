@@ -39,8 +39,8 @@ export function generateScrollGrid({
   windowCount
 }: ScrollGridInput): ScrollGridLayout {
   const count = Math.max(1, Math.floor(windowCount))
-  const width = Math.max(minWindowWidth, Math.floor(viewportWidth))
-  const height = Math.max(minWindowHeight, Math.floor(viewportHeight))
+  const width = Math.max(1, Math.floor(viewportWidth))
+  const height = Math.max(1, Math.floor(viewportHeight))
   const spacing = Math.max(0, gap)
   const rows = Math.max(1, Math.min(count, Math.floor(requestedRows)))
   const columns = Math.ceil(count / rows)

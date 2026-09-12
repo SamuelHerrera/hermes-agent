@@ -42,8 +42,7 @@ import {
 const GAP = 12
 const MIN_WINDOW_WIDTH = 360
 const MIN_WINDOW_HEIGHT = 280
-const WINDOW_HEADER_HEIGHT = 30
-const SCROLLBAR_CROSS_AXIS_GUTTER = 8
+
 const SCROLL_WINDOW_DRAG_TYPE = 'application/x-hermes-scroll-window'
 
 function treeWindowIds(tree: LayoutNode | null): string[] {
@@ -59,7 +58,7 @@ export function ScrollWindowWorkspace() {
   const sidebarWidth = useStore($sidebarWidth)
   const viewportRef = useRef<HTMLDivElement>(null)
   const windowWidthProbeRef = useRef<HTMLDivElement>(null)
-  const measuredWorkspaceIdRef = useRef<string | null>(null)
+
   const [layoutFrame, setLayoutFrame] = useState({ height: 720, width: 1280, maxWindowWidth: Number.POSITIVE_INFINITY })
   const [draggingWindowId, setDraggingWindowId] = useState<null | string>(null)
 
@@ -74,7 +73,6 @@ export function ScrollWindowWorkspace() {
 
   const workspace = workspaces.find(item => item.id === activeWorkspaceId) ?? workspaces[0]
   const windowIds = workspace.windowIds.filter(id => availableWindowIds.includes(id))
-  const windowIdsKey = windowIds.join('\u0000')
 
   const layout = useMemo<ScrollGridLayout>(
     () =>
@@ -83,7 +81,7 @@ export function ScrollWindowWorkspace() {
         minWindowHeight: MIN_WINDOW_HEIGHT,
         minWindowWidth: MIN_WINDOW_WIDTH,
         maxWindowWidth: layoutFrame.maxWindowWidth,
-        viewportHeight: Math.max(1, layoutFrame.height - GAP * 2 - SCROLLBAR_CROSS_AXIS_GUTTER),
+        viewportHeight: Math.max(1, layoutFrame.height - GAP * 2),
         viewportWidth: Math.max(1, layoutFrame.width - GAP * 2),
         rows: workspace.rowCount,
         windowCount: Math.max(1, windowIds.length)
@@ -94,26 +92,35 @@ export function ScrollWindowWorkspace() {
   useLayoutEffect(() => {
     const element = viewportRef.current
 
-    if (!element || windowIds.length === 0 || measuredWorkspaceIdRef.current === activeWorkspaceId) {
+    if (!element) {
       return
     }
 
-    measuredWorkspaceIdRef.current = activeWorkspaceId
-    const rect = element.getBoundingClientRect()
-    setLayoutFrame(current => {
+    const measure = () => {
       const next = {
-        height: Math.max(1, rect.height),
-        width: Math.max(1, rect.width),
+        // Client dimensions exclude native scrollbars, unlike the border box.
+        height: Math.max(1, element.clientHeight),
+        width: Math.max(1, element.clientWidth),
         maxWindowWidth: windowWidthProbeRef.current?.getBoundingClientRect().width ?? Number.POSITIVE_INFINITY
       }
 
-      return Math.abs(current.height - next.height) < 1 &&
+      setLayoutFrame(current =>
+        Math.abs(current.height - next.height) < 1 &&
         Math.abs(current.width - next.width) < 1 &&
         current.maxWindowWidth === next.maxWindowWidth
-        ? current
-        : next
-    })
-  }, [activeWorkspaceId, windowIds.length, windowIdsKey])
+          ? current
+          : next
+      )
+    }
+
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    if (windowWidthProbeRef.current) {
+      observer.observe(windowWidthProbeRef.current)
+    }
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     setScrollWorkspaceGrid(workspace.id, windowIds.length > 0 ? layout : null)
@@ -121,14 +128,17 @@ export function ScrollWindowWorkspace() {
 
   useLayoutEffect(() => {
     const element = viewportRef.current
+    const saved = $scrollWindowWorkspaces.get().find(item => item.id === workspace.id)
 
-    if (!element) {
+    if (!element || !saved) {
       return
     }
 
-    element.scrollLeft = workspace.scrollLeft
-    element.scrollTop = workspace.scrollTop
-  }, [workspace.id, workspace.scrollLeft, workspace.scrollTop])
+    // Restore only when switching workspaces. Echoing every scroll event back
+    // into the DOM interrupts native smooth scrolling from minimap navigation.
+    element.scrollLeft = saved.scrollLeft
+    element.scrollTop = saved.scrollTop
+  }, [workspace.id])
 
   useEffect(() => {
     const element = viewportRef.current
@@ -171,7 +181,7 @@ export function ScrollWindowWorkspace() {
 
       const rect = scrollGridWindowRect(layout, index, GAP)
       focusScrollWindowWindow(windowId)
-      element.scrollTo({ behavior: 'smooth', left: Math.max(0, rect.left - GAP), top: Math.max(0, rect.top - GAP) })
+      element.scrollTo({ behavior: 'smooth', left: rect.left, top: rect.top })
     }
 
     window.addEventListener(SCROLL_WINDOW_SCROLL_EVENT, onScrollToWindow)
@@ -258,7 +268,7 @@ export function ScrollWindowWorkspace() {
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 bg-(--ui-editor-surface-background)">
       {/* Match the existing composer cap plus its side gutters and the window border.
-          Resolve rem/CSS tokens in the renderer, then freeze with the layout frame. */}
+          Resolve rem/CSS tokens in the renderer and observe changes with the viewport. */}
       <div
         aria-hidden="true"
         className="pointer-events-none invisible absolute h-0"
@@ -300,7 +310,7 @@ export function ScrollWindowWorkspace() {
         </aside>
       ) : null}
       <div
-        className="relative z-0 h-full min-h-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3 [scrollbar-gutter:stable]"
+        className="relative z-0 h-full min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-contain p-3 [scrollbar-gutter:stable]"
         data-scroll-window-viewport=""
         data-session-anchor="workspace"
         ref={viewportRef}
