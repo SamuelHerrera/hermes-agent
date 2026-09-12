@@ -30,7 +30,7 @@ export function TerminalWorkspace({ onAddSelectionToChat }: TerminalWorkspacePro
     }
   }, [])
 
-  // Surface the agent's background processes as read-only tabs (once each).
+  // List background processes under their chats; tabs open only on user selection.
   // Live chunks stream via agent.terminal.output; the process-list snapshot also
   // seeds/falls back so the tab never stays blank if the stream races startup.
   useEffect(() => {

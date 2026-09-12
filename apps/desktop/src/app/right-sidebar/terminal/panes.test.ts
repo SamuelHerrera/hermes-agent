@@ -33,6 +33,9 @@ describe('individual terminal panes', () => {
     const local = s.createTerminal('/repo', { profile: 'default' })
     const remote = s.createTerminal('/repo', { profile: 'hp-remote' })
     const agent = s.ensureAgentTerminal('hp-process', 'Build', { profile: 'hp-remote', cwd: '/repo' })!
+    $activeGatewayProfile.set('hp-remote')
+    s.selectTerminal(agent)
+    $activeGatewayProfile.set('default')
     const closed = s.createTerminal('/closed', { profile: 'default' })
     s.hideTerminal(closed)
     s.selectTerminal(local)
@@ -132,21 +135,46 @@ describe('individual terminal panes', () => {
     expect(s.$terminals.get()[0].profile).toBeUndefined()
   })
 
-  it('gives each interactive and read-only terminal one main tab without stealing focus for agent work', async () => {
+  it('opens manual terminals immediately but keeps discovered agent terminals out of tabs until selected', async () => {
     const s = await setup()
     const first = s.createTerminal('/repo')
     const second = s.createTerminal('/elsewhere')
     const agent = s.ensureAgentTerminal('proc-1', 'Build', { ownerSessionId: 'chat', cwd: '/repo' })!
     const group = s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(first))!
-    expect(group.panes).toEqual([
-      'workspace',
-      s.terminalPaneId(first),
-      s.terminalPaneId(second),
-      s.terminalPaneId(agent)
-    ])
+    expect(group.panes).toEqual(['workspace', s.terminalPaneId(first), s.terminalPaneId(second)])
     expect(group.active).toBe(s.terminalPaneId(second))
+    expect(s.$activeTerminalId.get()).toBe(second)
     expect(s.registry.getArea('panes').filter(pane => pane.id === 'terminal')).toEqual([])
-    expect(s.$terminals.get().find(terminal => terminal.id === agent)?.ownerSessionId).toBe('chat')
+    expect(s.$terminals.get().find(terminal => terminal.id === agent)).toMatchObject({
+      ownerSessionId: 'chat',
+      hidden: true
+    })
+    s.cycleTerminal(1)
+    expect(s.$activeTerminalId.get()).toBe(first)
+    s.selectTerminal(agent)
+    s.ensureAgentTerminal('proc-1', 'Build', { ownerSessionId: 'chat', cwd: '/updated' })
+    expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(agent))?.active).toBe(
+      s.terminalPaneId(agent)
+    )
+    expect(s.$openTerminals.get().map(term => term.id)).toEqual([first, second, agent])
+  })
+
+  it('keeps discovery and repeated snapshots sidebar-only even with no terminal tabs or after profile switches', async () => {
+    const s = await setup()
+    const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+    const before = s.tree.$layoutTree.get()
+    const id = s.ensureAgentTerminal('unopened', 'Build')!
+    s.ensureAgentTerminal('unopened', 'Build', { ownerSessionId: 'chat', profile: 'default', cwd: '/repo' })
+    $activeGatewayProfile.set('other')
+    $showAllProfiles.set(true)
+    $activeGatewayProfile.set('default')
+    expect(s.$terminals.get()).toEqual([expect.objectContaining({ id, ownerSessionId: 'chat', hidden: true })])
+    expect(s.$openTerminals.get()).toEqual([])
+    expect(s.$activeTerminalId.get()).toBeNull()
+    expect(s.tree.$layoutTree.get()).toBe(before)
+    s.openAgentTerminal('unopened', 'Build')
+    expect(s.$terminals.get()).toHaveLength(1)
+    expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(id))?.active).toBe(s.terminalPaneId(id))
   })
 
   it('closes the tab non-destructively and reopens the same terminal from navigation', async () => {
@@ -166,6 +194,7 @@ describe('individual terminal panes', () => {
   it('does not re-open a closed agent tab when process snapshots repeat', async () => {
     const s = await setup()
     const id = s.ensureAgentTerminal('proc-closed', 'Build')!
+    s.selectTerminal(id)
     s.tree.closeTabPane(s.terminalPaneId(id))
     s.ensureAgentTerminal('proc-closed', 'Build', { ownerSessionId: 'chat', cwd: '/repo' })
     expect(s.$terminals.get()).toHaveLength(1)

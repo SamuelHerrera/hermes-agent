@@ -40,7 +40,7 @@ export interface TerminalEntry {
   projectId?: string
   profile?: string
   ownerSessionId?: string
-  /** Closing a top-level tab hides the view, not the shell or its sidebar entry. */
+  /** Sidebar-only until opened, or after closing a tab; keeps the shell/entry alive. */
   hidden?: boolean
 }
 
@@ -203,14 +203,14 @@ export function createTerminal(
   return id
 }
 
-// Procs we've already surfaced a tab for — so closing an agent tab doesn't
-// resurrect it on the next poll while the process is still running.
+// Procs we've already listed — so deleting an agent entry doesn't resurrect it
+// on the next poll while the process is still running.
 const surfacedProcs = new Set<string>()
 
 const findByProc = (procId: string) => $terminals.get().find(term => term.procId === procId)
 
-/** Auto-surface an agent background process as a read-only tab — once. Returns
- *  the tab id, or null if it was already surfaced and the user has since closed it. */
+/** List an agent background process in the sidebar without opening a tab.
+ *  Returns its id, or null if the user has deleted the previously listed entry. */
 export function ensureAgentTerminal(
   procId: string,
   title: string,
@@ -236,7 +236,7 @@ export function ensureAgentTerminal(
   const id = newId()
   $terminals.set([
     ...$terminals.get(),
-    { id, title: title || 'agent', auto: false, kind: 'agent', procId, ...ownership }
+    { id, title: title || 'agent', auto: false, kind: 'agent', procId, ...ownership, hidden: true }
   ])
 
   return id

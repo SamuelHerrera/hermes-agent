@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 
 import { $terminalNavigation } from '@/app/right-sidebar/terminal/navigation'
 import {
+  $openTerminals,
   $terminals,
   ensureAgentTerminal,
   hideTerminal,
@@ -95,7 +96,7 @@ it('resolves runtime ownership to the owning chat and preserves children when ta
   publishSessionState('runtime', createClientSessionState(session.id))
   const id = ensureAgentTerminal('sidebar-proc', 'Build', { ownerSessionId: 'runtime', cwd: '/repo' })!
 
-  const { container } = render(
+  const { container, getByRole } = render(
     <>
       <SessionTerminalRows session={session} />
       <SessionTerminalRows session={{ ...session, id: 'other' }} />
@@ -106,7 +107,11 @@ it('resolves runtime ownership to the owning chat and preserves children when ta
   expect(
     container.querySelector(`[data-session-terminals="${session.id}"] [data-sidebar-terminal="${id}"]`)
   ).not.toBeNull()
+  expect($openTerminals.get()).toEqual([])
+  act(() => getByRole('button', { name: 'Build' }).click())
+  expect($openTerminals.get().map(term => term.id)).toEqual([id])
   act(() => hideTerminal(id))
+  expect($openTerminals.get()).toEqual([])
   expect(container.querySelectorAll('[data-sidebar-terminal]')).toHaveLength(1)
 })
 
