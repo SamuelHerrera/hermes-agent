@@ -112,9 +112,23 @@ $activeScrollWorkspaceId.listen(id => writeKey(ACTIVE_WORKSPACE_KEY, id === '1' 
 $scrollWindowWorkspaces.listen(persistWorkspaces)
 
 function updateWorkspace(id: string, fn: (workspace: ScrollWindowWorkspaceState) => ScrollWindowWorkspaceState): void {
-  $scrollWindowWorkspaces.set(
-    $scrollWindowWorkspaces.get().map(workspace => (workspace.id === id ? fn(workspace) : workspace))
-  )
+  const current = $scrollWindowWorkspaces.get()
+  let changed = false
+
+  const next = current.map(workspace => {
+    if (workspace.id !== id) {
+      return workspace
+    }
+
+    const updated = fn(workspace)
+    changed ||= updated !== workspace
+
+    return updated
+  })
+
+  if (changed) {
+    $scrollWindowWorkspaces.set(next)
+  }
 }
 
 export function setLayoutSurfaceMode(mode: LayoutSurfaceMode): void {
@@ -244,11 +258,18 @@ export function cycleScrollWindowFocus(direction: 1 | -1): void {
 }
 
 export function setScrollWorkspaceScroll(id: string, scrollLeft: number, scrollTop: number): void {
-  updateWorkspace(id, workspace => ({
-    ...workspace,
-    scrollLeft: Math.max(0, scrollLeft),
-    scrollTop: Math.max(0, scrollTop)
-  }))
+  const nextLeft = Math.max(0, scrollLeft)
+  const nextTop = Math.max(0, scrollTop)
+
+  updateWorkspace(id, workspace =>
+    Math.abs(workspace.scrollLeft - nextLeft) < 1 && Math.abs(workspace.scrollTop - nextTop) < 1
+      ? workspace
+      : {
+          ...workspace,
+          scrollLeft: nextLeft,
+          scrollTop: nextTop
+        }
+  )
 }
 
 export function setScrollWorkspaceGrid(id: string, grid: ScrollGridLayout | null): void {

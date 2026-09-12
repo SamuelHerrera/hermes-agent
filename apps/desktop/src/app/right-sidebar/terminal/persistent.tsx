@@ -3,6 +3,7 @@ import { atom } from 'nanostores'
 import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { isElementInHiddenPane, PANE_HIDDEN_ATTR } from '@/components/pane-shell/pane-visibility'
+import { consumeScrollWindowWheel, createScrollWheelAxisState } from '@/components/pane-shell/tree/scroll-windows/wheel'
 import { $layoutTree } from '@/components/pane-shell/tree/store'
 import { markRightPanePerf } from '@/debug/right-pane-events'
 import { createRendererLoopPauseController } from '@/lib/renderer-loop-pause'
@@ -72,6 +73,8 @@ export function PersistentTerminalHost({
 }: PersistentTerminalProps & { terminal: TerminalEntry }) {
   const slots = useStore($slots)
   const slot = slots[terminal.id]
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const wheelAxisRef = useRef(createScrollWheelAxisState())
   const [rect, setRect] = useState<Rect | null>(null)
 
   // VS Code parity: once the pane has ever been opened, keep the terminals
@@ -231,6 +234,23 @@ export function PersistentTerminalHost({
     }
   }, [slot])
 
+  useEffect(() => {
+    const overlay = overlayRef.current
+    const viewport = slot?.closest<HTMLElement>('[data-scroll-window-viewport]') ?? null
+
+    if (!overlay || !viewport) {
+      return undefined
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      consumeScrollWindowWheel(event, viewport, wheelAxisRef.current)
+    }
+
+    overlay.addEventListener('wheel', onWheel, { capture: true, passive: false })
+
+    return () => overlay.removeEventListener('wheel', onWheel, { capture: true })
+  }, [slot])
+
   const visible = Boolean(rect && !rect.hidden && rect.width > 0 && rect.height > 0)
 
   const style: CSSProperties = {
@@ -263,6 +283,7 @@ export function PersistentTerminalHost({
       data-persistent-terminal={terminal.id}
       onFocusCapture={() => selectTerminal(terminal.id)}
       onPointerDown={() => selectTerminal(terminal.id)}
+      ref={overlayRef}
       style={style}
     >
       {mounted &&

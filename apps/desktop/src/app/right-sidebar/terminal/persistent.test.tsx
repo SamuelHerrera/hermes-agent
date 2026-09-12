@@ -152,6 +152,25 @@ function HiddenPaneHarness({ hidden }: { hidden: boolean }) {
   )
 }
 
+function ScrollWindowTerminalHarness() {
+  return (
+    <>
+      <div data-scroll-window-viewport="">
+        <TerminalSlot className="slot" terminalId="one" />
+      </div>
+      <PersistentTerminalHost
+        onAddSelectionToChat={() => undefined}
+        terminal={{ id: 'one', kind: 'user', auto: true, cwd: '', title: 'Terminal' }}
+      />
+    </>
+  )
+}
+
+function setHorizontalOverflow(element: HTMLElement) {
+  Object.defineProperty(element, 'clientWidth', { configurable: true, value: 100 })
+  Object.defineProperty(element, 'scrollWidth', { configurable: true, value: 300 })
+}
+
 describe('PersistentTerminal rect tracking', () => {
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -433,5 +452,39 @@ describe('PersistentTerminal rect tracking', () => {
     expect(overlay.style.opacity).toBe('1')
     expect(overlay.style.pointerEvents).toBe('auto')
     expect(container!.querySelector('[data-testid="terminal-workspace"]')).toBe(workspace)
+  })
+
+  it('lets horizontal wheel gestures over fixed terminal overlays scroll the scroll-window viewport', () => {
+    installRaf()
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(10, 20, 200, 100))
+
+    render(<ScrollWindowTerminalHarness />)
+
+    const viewport = container!.querySelector<HTMLElement>('[data-scroll-window-viewport]')!
+    const overlay = container!.querySelector<HTMLElement>('[data-persistent-terminal]')!
+    setHorizontalOverflow(viewport)
+
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 48, deltaY: 3 })
+    overlay.dispatchEvent(event)
+
+    expect(viewport.scrollLeft).toBe(48)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it('leaves vertical wheel gestures over terminals to xterm scrollback', () => {
+    installRaf()
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(10, 20, 200, 100))
+
+    render(<ScrollWindowTerminalHarness />)
+
+    const viewport = container!.querySelector<HTMLElement>('[data-scroll-window-viewport]')!
+    const overlay = container!.querySelector<HTMLElement>('[data-persistent-terminal]')!
+    setHorizontalOverflow(viewport)
+
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 5, deltaY: 42 })
+    overlay.dispatchEvent(event)
+
+    expect(viewport.scrollLeft).toBe(0)
+    expect(event.defaultPrevented).toBe(false)
   })
 })

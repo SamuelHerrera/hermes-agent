@@ -47,4 +47,17 @@ describe('scroll workspace persistence', () => {
     expect(second.columns).toEqual([['c', 'd']])
     expect(second.windowIds).toEqual(second.columns.flat())
   })
+  it('does not publish tiny scroll-position jitter', async () => {
+    const store = await import('./store')
+    const listener = vi.fn()
+    const unlisten = store.$scrollWindowWorkspaces.listen(listener)
+
+    store.setScrollWorkspaceScroll('1', 20, 0)
+    store.setScrollWorkspaceScroll('1', 20.4, 0.2)
+    store.setScrollWorkspaceScroll('1', 22, 0)
+    unlisten()
+
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(store.$scrollWindowWorkspaces.get()[0]).toMatchObject({ scrollLeft: 22, scrollTop: 0 })
+  })
 })

@@ -43,6 +43,7 @@ import {
   setScrollWorkspaceScroll,
   syncScrollWindowWindows
 } from './store'
+import { consumeScrollWindowWheel, createScrollWheelAxisState } from './wheel'
 
 const GAP = 12
 const MIN_WINDOW_WIDTH = 360
@@ -221,29 +222,8 @@ export function ScrollWindowWorkspace() {
       return undefined
     }
 
-    const onWheel = (event: WheelEvent) => {
-      const horizontalDelta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.shiftKey ? event.deltaY : 0
-
-      if (horizontalDelta === 0) {
-        return
-      }
-
-      const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth)
-
-      if (maxScrollLeft === 0) {
-        return
-      }
-
-      const nextScrollLeft = Math.max(0, Math.min(maxScrollLeft, element.scrollLeft + horizontalDelta))
-
-      if (nextScrollLeft === element.scrollLeft) {
-        return
-      }
-
-      event.preventDefault()
-      event.stopPropagation()
-      element.scrollLeft = nextScrollLeft
-    }
+    const wheelAxis = createScrollWheelAxisState()
+    const onWheel = (event: WheelEvent) => void consumeScrollWindowWheel(event, element, wheelAxis)
 
     element.addEventListener('wheel', onWheel, { capture: true, passive: false })
 
