@@ -639,6 +639,7 @@ export interface HermesWindowState {
   darwinMajor?: number
   isFullscreen: boolean
   isMinimized?: boolean
+  isQuitting?: boolean
   isVisible?: boolean
   nativeOverlayWidth: number
   windowButtonPosition: { x: number; y: number } | null

@@ -257,3 +257,51 @@ it('surfaces remote startup failure without spawning a local PTY', async () => {
   )
   expect(sessions.size).toBe(0)
 })
+
+it('does not remove remembered terminal tabs when app quit disposes the PTY before pagehide', async () => {
+  let fontsReady!: (font: string) => void
+  let exitCallback!: () => void
+  let windowStateCallback!: (payload: { isQuitting?: boolean }) => void
+  mocks.prepare.mockReturnValue(
+    new Promise<string>(resolve => {
+      fontsReady = resolve
+    })
+  )
+
+  const api = {
+    attach: vi.fn(async () => true),
+    start: vi.fn(async () => ({ id: 'quit-session', shell: 'shell' })),
+    write: vi.fn(),
+    dispose: vi.fn(),
+    onData: () => vi.fn(),
+    onExit: vi.fn((_id: string, callback: () => void) => {
+      exitCallback = callback
+
+      return vi.fn()
+    })
+  }
+
+  Object.defineProperty(window, 'hermesDesktop', {
+    configurable: true,
+    value: {
+      onWindowStateChanged: vi.fn(callback => {
+        windowStateCallback = callback
+
+        return vi.fn()
+      }),
+      terminal: api
+    }
+  })
+
+  const { unmount } = render(<TerminalInstance active={false} cwd="" id="keep-tab" onAddSelectionToChat={vi.fn()} />)
+  await act(async () => {
+    fontsReady('monospace')
+  })
+
+  await waitFor(() => expect(api.onExit).toHaveBeenCalled())
+  act(() => windowStateCallback({ isQuitting: true }))
+  act(() => exitCallback())
+
+  expect(closeTerminal).not.toHaveBeenCalledWith('keep-tab')
+  unmount()
+})

@@ -1,5 +1,6 @@
 interface WindowStatePayload {
   isMinimized?: boolean
+  isQuitting?: boolean
   isVisible?: boolean
 }
 

@@ -63,6 +63,10 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', markTearingDown)
 }
 
+interface TerminalWindowStatePayload {
+  isQuitting?: boolean
+}
+
 type TerminalStatus = 'closed' | 'open' | 'starting'
 
 // ⌘/Ctrl+L is a global shortcut, so a text selection in the file preview pane
@@ -442,6 +446,16 @@ export function useTerminalSession({
     onAddSelectionToChatRef.current = onAddSelectionToChat
     onShellRef.current = onShell
   }, [onAddSelectionToChat, onShell])
+
+  useEffect(
+    () =>
+      window.hermesDesktop?.onWindowStateChanged?.((payload: TerminalWindowStatePayload) => {
+        if (payload?.isQuitting) {
+          appTearingDown = true
+        }
+      }),
+    []
+  )
 
   // Live selection at call time. A redraw-heavy TUI (spinners, clocks) outruns
   // onSelectionChange, so trust xterm directly — fall back to the native

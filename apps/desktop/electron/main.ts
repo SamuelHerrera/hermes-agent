@@ -5419,6 +5419,16 @@ function sendWindowStateChanged(nextIsFullscreen?: boolean, target = mainWindow)
   webContents.send('hermes:window-state-changed', state)
 }
 
+function sendRendererQuitState() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) {
+      continue
+    }
+
+    window.webContents.send('hermes:window-state-changed', { ...getWindowState(window), isQuitting: true })
+  }
+}
+
 function buildApplicationMenu() {
   const template = []
 
@@ -13463,6 +13473,8 @@ app.on('before-quit', event => {
 
   // Kill open PTYs before environment teardown to avoid the node-pty#904
   // ThreadSafeFunction SIGABRT race.
+  sendRendererQuitState()
+
   for (const id of [...terminalSessions.keys()]) {
     disposeTerminalSession(id)
   }
