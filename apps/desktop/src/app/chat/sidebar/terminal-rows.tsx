@@ -30,14 +30,14 @@ export function terminalProjectId(terminal: TerminalEntry, projects: SidebarProj
   return projectIdForCwd(terminal.cwd, projects) ?? NO_PROJECT_ID
 }
 
-export function useProjectTerminals(project: SidebarProjectTree, includeAgent = false): readonly TerminalEntry[] {
+export function useProjectTerminals(project: SidebarProjectTree): readonly TerminalEntry[] {
   const terminals = useStore($terminalNavigation)
   const projects = useStore($projectTree)
   const profile = useStore($activeGatewayProfile)
 
   return terminals.filter(
     terminal =>
-      (includeAgent || terminal.kind === 'user') &&
+      terminal.kind === 'user' &&
       normalizeProfileKey(terminal.profile) === normalizeProfileKey(profile) &&
       terminalProjectId(terminal, projects) === project.id
   )

@@ -280,6 +280,8 @@ test('agent process gets a connected sidebar child and opens its tab only on sel
   }
 
   await expect(child).toBeVisible({ timeout: 5_000 })
+  await expect(page.locator('[data-project-summary-kind="terminals"]')).toHaveCount(0)
+  await expect(page.locator('[data-project-summary-kind="children"]')).toHaveCount(0)
   const stem = child.locator('[data-tree-stem]')
   await expect(stem).toBeVisible()
   await expect(stem).toHaveText(/[├└]─/)
@@ -306,5 +308,14 @@ test('agent process gets a connected sidebar child and opens its tab only on sel
   await child.locator('button').filter({ hasText: /.+/ }).first().click()
   await expect(tabs).toHaveCount(1)
   await expect(host.locator('.xterm')).toBeVisible()
+  // Opening a read-only child tab still must not count it as an interactive shell.
+  await expect(page.locator('[data-project-summary-kind="terminals"]')).toHaveCount(0)
+  const project = page
+    .locator('[data-sessions-project]')
+    .filter({ has: page.getByRole('button', { name: 'Open Terminal test', exact: true }) })
+  await project.getByRole('button', { name: 'Actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'New terminal', exact: true }).click()
+  await expect(project.locator('[data-project-summary-kind="terminals"]')).toHaveText('1')
+  await expect(page.locator('[data-project-summary-kind="children"]')).toHaveCount(0)
   await page.screenshot({ path: 'test-results/terminal-chat-child.png' })
 })

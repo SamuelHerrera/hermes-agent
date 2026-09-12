@@ -70,7 +70,7 @@ function ProjectSummaryCount({
   pulsing = false
 }: {
   count: number
-  dataAttr: 'archived' | 'chats' | 'children' | 'running' | 'terminals'
+  dataAttr: 'archived' | 'chats' | 'running' | 'terminals'
   icon: string
   label: string
   pulsing?: boolean
@@ -78,7 +78,6 @@ function ProjectSummaryCount({
   const countAttrs = {
     ...(dataAttr === 'archived' ? { 'data-project-archived-count': true } : {}),
     ...(dataAttr === 'chats' ? { 'data-project-chat-count': true, 'data-project-open-count': true } : {}),
-    ...(dataAttr === 'children' ? { 'data-project-child-count': true } : {}),
     ...(dataAttr === 'running' ? { 'data-project-running-count': true } : {})
   }
 
@@ -111,14 +110,13 @@ function projectCounts(project: SidebarProjectTree) {
   return {
     archivedCount: project.archivedSessionCount ?? 0,
     chatCount: project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount),
-    childCount,
     runningCount: project.runningSessionCount ?? 0
   }
 }
 
 function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
-  const { archivedCount, chatCount, childCount, runningCount } = projectCounts(project)
-  const terminals = useProjectTerminals(project, true)
+  const { archivedCount, chatCount, runningCount } = projectCounts(project)
+  const terminals = useProjectTerminals(project)
   const { t } = useI18n()
 
   return (
@@ -138,14 +136,6 @@ function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
         icon="comment-discussion"
         label={`${chatCount} top-level chat${chatCount === 1 ? '' : 's'}`}
       />
-      {childCount > 0 && (
-        <ProjectSummaryCount
-          count={childCount}
-          dataAttr="children"
-          icon="robot"
-          label={`${childCount} child/subagent chat${childCount === 1 ? '' : 's'}`}
-        />
-      )}
       <ProjectSummaryCount
         count={archivedCount}
         dataAttr="archived"

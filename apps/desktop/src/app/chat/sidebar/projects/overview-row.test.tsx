@@ -79,18 +79,33 @@ const project = { id: 'p1', label: 'Test D' } as unknown as SidebarProjectTree
 const tipTrigger = (el: HTMLElement) => el.closest('[data-slot="tooltip-trigger"]')
 
 describe('ProjectOverviewRow', () => {
-  it('counts manual and agent terminals, including closed views, but excludes other profiles and projects', () => {
-    $projectTree.set([{ ...project, path: '/repo', repos: [] }])
-    const base = { auto: true, cwd: '/repo', title: 'shell', projectId: project.id, profile: 'default' }
+  it.each([
+    { Row: ProjectOverviewRow, surface: 'overview', home: false },
+    { Row: ProjectDetailHeaderRow, surface: 'detail', home: false },
+    { Row: ProjectOverviewRow, surface: 'overview', home: true },
+    { Row: ProjectDetailHeaderRow, surface: 'detail', home: true }
+  ])('counts only interactive terminals in $surface (Home=$home), including closed views', ({ Row, home }) => {
+    const scope = {
+      ...project,
+      id: home ? '__no_project__' : project.id,
+      isNoProject: home,
+      path: home ? null : '/repo',
+      repos: []
+    }
+
+    $projectTree.set([scope, { ...project, id: 'elsewhere', path: '/elsewhere', repos: [] }])
+    const base = { auto: true, cwd: '/repo', title: 'shell', projectId: scope.id, profile: 'default' }
     $terminals.set([
       { ...base, id: 'manual', kind: 'user', hidden: true },
-      { ...base, id: 'agent', kind: 'agent', procId: 'proc' },
+      { ...base, id: 'interactive', kind: 'user' },
+      { ...base, id: 'agent', kind: 'agent', procId: 'proc', ownerSessionId: 'chat' },
+      { ...base, id: 'child-agent', kind: 'agent', procId: 'child-proc', ownerSessionId: 'subagent' },
       { ...base, id: 'other-profile', kind: 'user', profile: 'other' },
       { ...base, id: 'other-project', kind: 'user', cwd: '/elsewhere', projectId: 'elsewhere' }
     ])
-    const { container } = render(<ProjectOverviewRow project={{ ...project, path: '/repo', repos: [] }} />)
+    const { container } = render(<Row project={scope} />)
     expect(container.querySelector('[data-project-summary-kind="terminals"]')?.textContent).toBe('2')
-    act(() => $terminals.set([]))
+    act(() => $terminals.set($terminals.get().filter(terminal => terminal.kind === 'agent')))
     expect(container.querySelector('[data-project-summary-kind="terminals"]')).toBeNull()
   })
   it('wraps the "new session" add button in a Tip with the project-scoped label', () => {
@@ -159,7 +174,7 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
   })
 
-  it('shows compact icon/count metrics for chats, child/subagent, running, and archived without token total', () => {
+  it('shows compact chat, running, and archive metrics without subagent or token totals', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 
     const { container } = render(
@@ -184,7 +199,7 @@ describe('ProjectOverviewRow', () => {
 
     expect(secondary?.contains(runningCount)).toBe(true)
     expect(secondary?.contains(chatCount)).toBe(true)
-    expect(secondary?.contains(childCount)).toBe(true)
+    expect(childCount).toBeNull()
     expect(secondary?.contains(archivedCount)).toBe(true)
     expect(runningCount?.textContent).toBe('2')
     expect(runningCount?.querySelector('.codicon-sync')).toBeTruthy()
@@ -192,8 +207,7 @@ describe('ProjectOverviewRow', () => {
     expect(runningCount?.querySelector('.codicon-modifier-spin')).toBeNull()
     expect(chatCount?.textContent).toBe('7')
     expect(chatCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
-    expect(childCount?.textContent).toBe('6')
-    expect(childCount?.querySelector('.codicon-robot')).toBeTruthy()
+    expect(secondary?.querySelector('.codicon-robot')).toBeNull()
     expect(archivedCount?.textContent).toBe('4')
     expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
     expect(secondary?.textContent).not.toContain('1.3k')
@@ -308,7 +322,7 @@ describe('ProjectOverviewRow', () => {
     expect(primary?.textContent).toContain('Test D')
     expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toBe('1')
     expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toBe('2')
-    expect(secondary?.querySelector('[data-project-child-count]')?.textContent).toBe('3')
+    expect(secondary?.querySelector('[data-project-child-count]')).toBeNull()
     expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toBe('1')
     expect(secondary?.textContent).not.toContain('Run')
     expect(secondary?.textContent).not.toContain('Chats')
