@@ -2,7 +2,7 @@ import { KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/c
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 
 import { PlatformAvatar } from '@/app/messaging/platform-icon'
@@ -26,15 +26,13 @@ import {
   SidebarMenuSubItem
 } from '@/components/ui/sidebar'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
-import { useContributions } from '@/contrib/react/use-contributions'
-import { getCronJobRuns, searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
+import { searchSessions, type SessionInfo, type SessionSearchResult } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { comboTokens } from '@/lib/keybinds/combo'
 import { resolveProfileColor } from '@/lib/profile-color'
 import { sessionMatchesSearch } from '@/lib/session-search'
 import { normalizeSessionSource, sessionSourceLabel } from '@/lib/session-source'
 import { cn } from '@/lib/utils'
-import { $cronJobs } from '@/store/cron'
 import { $bindings } from '@/store/keybinds'
 import {
   $dismissedAutoProjectIds,
@@ -127,21 +125,10 @@ import { $archivedSessions, loadArchivedSessions } from '@/store/sidebar-archive
 import { $sidebarSessionRankIds } from '@/store/sidebar-sort'
 import { $subagentsBySession, activeSubagentSessionRows } from '@/store/subagents'
 
-import { jobTitle } from '../../cron/job-state'
-import {
-  type AppView,
-  CRON_ROUTE,
-  cronJobRoute,
-  routePathname,
-  routeSessionId,
-  SIDEBAR_NAV_AREA,
-  type SidebarNavChildContribution,
-  type SidebarNavChildrenProps
-} from '../../routes'
+import { type AppView, type SidebarNavChildContribution } from '../../routes'
 import type { SidebarNavItem } from '../../types'
 
 import { SidebarLoadMoreRow } from './load-more-row'
-import { contributedNavItems } from './nav-contributions'
 import { orderByIds, reconcileOrderIds, resolveManualSessionOrderIds, sameIds } from './order'
 import {
   excludeProjectSessions,
@@ -269,12 +256,6 @@ export function ChatSidebar({
   const { t } = useI18n()
   const s = t.sidebar
   const { pathname } = useLocation()
-  // Contributed nav rows (plugins pairing a page with a sidebar entry) render
-  // below the built-ins with the same chrome; active = at their route.
-  const navContributions = useContributions(SIDEBAR_NAV_AREA)
-
-  const contributedNav = useMemo<SidebarNavItem[]>(() => contributedNavItems(navContributions), [navContributions])
-
   const panesFlipped = useStore($panesFlipped)
   const grouping = useStore($sidebarGrouping)
   const ordering = useStore($sidebarOrdering)
@@ -302,7 +283,6 @@ export function ChatSidebar({
   const selectedSessionId = useStore($focusedStoredSessionId)
   const sessions = useStore($sessions)
   const cronSessions = useStore($cronSessions)
-  const cronJobs = useStore($cronJobs)
   const messagingSessions = useStore($messagingSessions)
   const messagingPlatformTotals = useStore($messagingPlatformTotals)
   const messagingTruncated = useStore($messagingTruncated)
@@ -1367,35 +1347,7 @@ export function ChatSidebar({
   // it over the default sort, so stale/new ids reconcile on the next render.
   const reorderProjects = (ids: string[]) => setSidebarProjectOrderIds(ids)
 
-  const CronNavChildren = useMemo<React.ComponentType<SidebarNavChildrenProps> | undefined>(() => {
-    if (cronJobs.length === 0) {
-      return undefined
-    }
-
-    return function CronNavChildrenComponent({ renderItem }: SidebarNavChildrenProps) {
-      return <CronNavJobs onOpenJob={onManageCronJob} onOpenRun={onOpenSessionTab} renderItem={renderItem} />
-    }
-  }, [cronJobs.length, onManageCronJob, onOpenSessionTab])
-
-  const navItems = useMemo<SidebarNavItem[]>(() => {
-    const items = [...SIDEBAR_NAV]
-
-    if (cronJobs.length > 0) {
-      items.push({
-        id: 'cron',
-        label: s.nav.cron,
-        icon: props => <Codicon name="watch" {...props} />,
-        children: CronNavChildren,
-        openAsTile: true,
-        route: CRON_ROUTE,
-        adornment: function CronNavCount() {
-          return <span className="text-[0.6875rem] tabular-nums text-(--ui-text-tertiary)">{cronJobs.length}</span>
-        }
-      })
-    }
-
-    return [...items, ...contributedNav]
-  }, [CronNavChildren, contributedNav, cronJobs.length, s.nav.cron])
+  const navItems = SIDEBAR_NAV
 
   // Sortable rows carry live session ids; the pinned store is keyed by durable
   // (lineage-root) ids, so translate before persisting the new order.
@@ -1878,148 +1830,6 @@ export function ChatSidebar({
       <WorktreeDialog />
     </Sidebar>
   )
-}
-
-function CronNavJobs({
-  onOpenJob,
-  onOpenRun,
-  renderItem
-}: {
-  onOpenJob: (jobId: string) => void
-  onOpenRun: (sessionId: string) => void
-  renderItem: (item: SidebarNavChildContribution) => React.ReactNode
-}) {
-  const { pathname } = useLocation()
-  const jobs = useStore($cronJobs)
-  const focusedSessionId = useStore($focusedStoredSessionId)
-  const [expandedJobIds, setExpandedJobIds] = useState<Record<string, boolean>>({})
-  const activePath = routePathname(pathname)
-  const activeSessionId = routeSessionId(pathname) ? focusedSessionId : null
-  const sorted = useMemo(() => [...jobs].sort((a, b) => jobTitle(a).localeCompare(jobTitle(b))), [jobs])
-
-  const toggleJob = useCallback((jobId: string) => {
-    setExpandedJobIds(current => ({ ...current, [jobId]: !current[jobId] }))
-  }, [])
-
-  return (
-    <>
-      {sorted.map(job => {
-        const title = jobTitle(job)
-        const expanded = Boolean(expandedJobIds[job.id])
-
-        return (
-          <Fragment key={job.id}>
-            {renderItem({
-              active: activePath === cronJobRoute(job.id),
-              disclosure: {
-                ariaLabel: `${expanded ? 'Collapse' : 'Expand'} executions for ${title}`,
-                expanded,
-                onToggle: () => toggleJob(job.id)
-              },
-              id: `cron-job-${job.id}`,
-              label: title,
-              onSelect: () => onOpenJob(job.id)
-            })}
-            {expanded ? (
-              <CronNavJobRuns
-                activeSessionId={activeSessionId}
-                jobId={job.id}
-                onOpenRun={onOpenRun}
-                renderItem={renderItem}
-              />
-            ) : null}
-          </Fragment>
-        )
-      })}
-    </>
-  )
-}
-
-function CronNavJobRuns({
-  activeSessionId,
-  jobId,
-  onOpenRun,
-  renderItem
-}: {
-  activeSessionId: null | string
-  jobId: string
-  onOpenRun: (sessionId: string) => void
-  renderItem: (item: SidebarNavChildContribution) => React.ReactNode
-}) {
-  const [loading, setLoading] = useState(true)
-  const [runs, setRuns] = useState<SessionInfo[]>([])
-
-  useEffect(() => {
-    let cancelled = false
-
-    setLoading(true)
-    void getCronJobRuns(jobId, 5)
-      .then(result => {
-        if (!cancelled) {
-          setRuns(result)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRuns([])
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [jobId])
-
-  if (loading) {
-    return renderItem({
-      depth: 1,
-      id: `cron-runs-loading-${jobId}`,
-      label: 'Loading executions…'
-    })
-  }
-
-  if (runs.length === 0) {
-    return renderItem({
-      depth: 1,
-      id: `cron-runs-empty-${jobId}`,
-      label: 'No executions yet'
-    })
-  }
-
-  return (
-    <>
-      {runs.map(run =>
-        renderItem({
-          active: run.id === activeSessionId,
-          depth: 1,
-          id: `cron-run-${jobId}-${run.id}`,
-          label: cronRunLabel(run),
-          onSelect: () => onOpenRun(run.id)
-        })
-      )}
-    </>
-  )
-}
-
-function cronRunLabel(run: SessionInfo): string {
-  const seconds = run.last_active || run.started_at
-
-  if (!seconds) {
-    return run.title?.trim() || run.id
-  }
-
-  const date = new Date(seconds * 1000)
-
-  if (Number.isNaN(date.valueOf())) {
-    return run.title?.trim() || run.id
-  }
-
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
 interface MessagingSection {

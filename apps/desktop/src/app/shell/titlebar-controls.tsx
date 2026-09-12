@@ -22,11 +22,13 @@ import {
 import { ProfileGlyph } from '@/components/ui/profile-glyph'
 import { Tip, TipKeybindLabel } from '@/components/ui/tooltip'
 import { ContribRender } from '@/contrib/react/boundary'
+import { useContributions } from '@/contrib/react/use-contributions'
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { MoreVertical } from '@/lib/icons'
 import { resolveProfileColor } from '@/lib/profile-color'
 import { cn } from '@/lib/utils'
+import { $cronJobs } from '@/store/cron'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
@@ -54,10 +56,14 @@ import type { ProfileInfo } from '@/types/hermes'
 import {
   appViewForPath,
   ARTIFACTS_ROUTE,
+  CRON_ROUTE,
   isOverlayView,
   MESSAGING_ROUTE,
+  routePathname,
+  SIDEBAR_NAV_AREA,
   SKILLS_ROUTE
 } from '../routes'
+import type { SidebarNavContribution } from '../routes'
 
 import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
 import type { StatusbarItem } from './statusbar-controls'
@@ -289,6 +295,8 @@ export function TitlebarControls({
   const { t } = useI18n()
   const navigate = useNavigate()
   const location = useLocation()
+  const cronJobs = useStore($cronJobs)
+  const navContributions = useContributions(SIDEBAR_NAV_AREA)
   const modHeld = useModifierHeld()
   const hapticsMuted = useStore($hapticsMuted)
   const keepAwake = useStore($keepAwake)
@@ -402,6 +410,17 @@ export function TitlebarControls({
   // Workspace pages live in the main pane but are global app destinations, so
   // keep their affordances in the app header instead of the sessions sidebar.
   const workspacePageTools: TitlebarTool[] = [
+    ...(cronJobs.length > 0
+      ? [
+          {
+            active: appViewForPath(location.pathname) === 'cron',
+            icon: <TitlebarIcon name="watch" />,
+            id: 'cron',
+            label: t.sidebar.nav.cron,
+            onSelect: () => openRouteTile(CRON_ROUTE, 'center')
+          }
+        ]
+      : []),
     {
       icon: <TitlebarIcon name="new-folder" />,
       id: 'new-project',
@@ -436,6 +455,26 @@ export function TitlebarControls({
       onSelect: () => openRouteTile(ARTIFACTS_ROUTE, 'center')
     }
   ]
+
+  const contributedPageTools: TitlebarTool[] = navContributions.flatMap(contribution => {
+    const data = contribution.data as Partial<SidebarNavContribution> | undefined
+
+    if (!data?.path?.startsWith('/') || !data.label) {
+      return []
+    }
+
+    const path = data.path
+
+    return [
+      {
+        active: routePathname(location.pathname) === path,
+        icon: <Codicon name={data.codicon || 'plug'} size="0.875rem" />,
+        id: contribution.id,
+        label: data.label,
+        onSelect: () => openRouteTile(path, 'center')
+      }
+    ]
+  })
 
   const localServiceTools: TitlebarTool[] = canManageLocalServices
     ? [
@@ -549,6 +588,7 @@ export function TitlebarControls({
 
   const overflowOptionalToolbarTools = [
     ...overflowWorkspacePageTools,
+    ...contributedPageTools,
     ...visibleLocalServiceTools,
     ...overflowSystemTools
   ]

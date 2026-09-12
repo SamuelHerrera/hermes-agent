@@ -2,12 +2,20 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { Contribution } from '@/contrib/types'
+import { setCronJobs } from '@/store/cron'
 import { $keepAwake } from '@/store/keep-awake'
 import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
 import { $projectDialog, closeProjectDialog } from '@/store/projects'
 
 import type { StatusbarItem } from './statusbar-controls'
 import { TitlebarControls } from './titlebar-controls'
+
+const mockNavContributions = vi.hoisted<Contribution[]>(() => [])
+
+vi.mock('@/contrib/react/use-contributions', () => ({
+  useContributions: () => mockNavContributions
+}))
 
 vi.mock('@/components/pane-shell/edit-mode', () => ({
   toggleLayoutEditMode: vi.fn()
@@ -22,7 +30,9 @@ afterEach(() => {
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
   act(() => $keepAwake.set(false))
   act(() => setSidebarOpen(true))
+  act(() => setCronJobs([]))
   act(() => closeProjectDialog())
+  mockNavContributions.length = 0
   cleanup()
   vi.clearAllMocks()
 })
@@ -159,6 +169,14 @@ describe('TitlebarControls', () => {
       render: () => <span>Kanban count</span>
     }
 
+    act(() => setCronJobs([{ enabled: true, id: 'daily', name: 'Daily digest' }]))
+    mockNavContributions.push({
+      area: 'sidebar.nav',
+      data: { codicon: 'project', label: 'Kanban', openAsTile: true, path: '/kanban' },
+      id: 'kanban:nav',
+      source: 'plugin:kanban'
+    })
+
     render(
       <MemoryRouter>
         <TitlebarControls
@@ -199,9 +217,11 @@ describe('TitlebarControls', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Command Center' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
+    expect(await screen.findByRole('menuitem', { name: 'Scheduled jobs' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Kanban' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Mute haptics' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()

@@ -503,7 +503,7 @@ export function useStatusbarItems({
         id: 'review',
         onSelect: () => togglePaneVisible('review'),
         title: reviewShowing ? 'Hide changes' : 'Show changes',
-        toggleLabel: 'Changes',
+        toggleLabel: 'Git',
         variant: 'action'
       },
       {

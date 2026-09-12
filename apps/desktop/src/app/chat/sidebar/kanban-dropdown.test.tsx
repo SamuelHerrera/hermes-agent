@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import type * as React from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -205,76 +205,27 @@ describe('Sidebar project chrome', () => {
   })
 })
 
-describe('Kanban sidebar dropdown behavior', () => {
-  it('hides the expanded parent count, shows dashboard counts, and reuses the same Kanban tab', () => {
+describe('Sidebar app nav placement', () => {
+  it('keeps contributed app pages out of the sidebar so projects use the space', () => {
     setKanbanNavContribution()
 
     renderSidebar()
 
-    expect(screen.getByTitle('9 Kanban Ready tasks')).toBeTruthy()
-    expect(screen.getByTitle('4 Kanban Running tasks')).toBeTruthy()
-
-    const kanbanButton = screen.getByText('Kanban').closest('button')
-    expect(kanbanButton).toBeTruthy()
-
-    fireEvent.click(kanbanButton!)
-    fireEvent.click(kanbanButton!)
-
-    expect($routeTiles.get()).toEqual([{ dir: 'center', path: '/kanban' }])
-
-    const expandButton = screen.getByRole('button', { name: 'Expand Kanban' })
-    const chevron = expandButton.querySelector('.codicon-chevron-right')
-    expect(chevron?.className).toContain('-translate-y-px')
-    expect(chevron?.className).toContain('leading-none')
-
-    fireEvent.click(expandButton)
-
+    expect(screen.queryByText('Kanban')).toBeNull()
     expect(screen.queryByTitle('9 Kanban Ready tasks')).toBeNull()
-    expect(screen.queryByTitle('4 Kanban Running tasks')).toBeNull()
-    expect(screen.getByText('Default')).toBeTruthy()
-    expect(screen.getByTitle('2 Kanban Ready tasks')).toBeTruthy()
-    expect(screen.getByTitle('1 Kanban Running task')).toBeTruthy()
-    expect(screen.getByTitle('3 Kanban Blocked tasks')).toBeTruthy()
-
-    fireEvent.click(screen.getByText('Personal'))
-    fireEvent.click(screen.getByText('Personal'))
-
-    expect($boardSlug.get()).toBe('personal')
-    expect($routeTiles.get()).toEqual([{ dir: 'center', path: '/kanban' }])
+    expect(screen.queryByRole('button', { name: 'Expand Kanban' })).toBeNull()
   })
 
-  it('keeps cron executions behind each job disclosure and opens runs as tabs without refetching on selection', async () => {
-    const onManageCronJob = vi.fn()
-    const onOpenSessionTab = vi.fn()
-    mockGetCronJobRuns.mockResolvedValue([
-      { id: 'run-1', last_active: 1_700_000_000, title: 'First run' },
-      { id: 'run-2', last_active: 1_700_000_060, title: 'Second run' }
-    ])
+  it('keeps scheduled jobs out of the sidebar nav so project rows move up', () => {
     setCronJobs([
       { enabled: true, id: 'daily', name: 'Daily digest' },
       { enabled: true, id: 'weekly', name: 'Weekly review' }
     ])
 
-    renderSidebar({ onManageCronJob, onOpenSessionTab })
+    renderSidebar()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Expand Scheduled jobs' }))
-
-    expect(screen.getByText('Daily digest')).toBeTruthy()
-    expect(screen.queryByText('First run')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Expand Scheduled jobs' })).toBeNull()
+    expect(screen.queryByText('Daily digest')).toBeNull()
     expect(mockGetCronJobRuns).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Expand executions for Daily digest' }))
-
-    await waitFor(() => expect(screen.getAllByText(/Nov 14/).length).toBe(2))
-    expect(mockGetCronJobRuns).toHaveBeenCalledTimes(1)
-    expect(mockGetCronJobRuns).toHaveBeenCalledWith('daily', 5)
-
-    fireEvent.click(screen.getAllByText(/Nov 14/)[0])
-
-    expect(onOpenSessionTab).toHaveBeenCalledWith('run-1')
-    expect(mockGetCronJobRuns).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByText('Daily digest'))
-    expect(onManageCronJob).toHaveBeenCalledWith('daily')
   })
 })
