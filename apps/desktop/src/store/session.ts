@@ -38,6 +38,7 @@ const COMPOSER_FAST_KEY = 'hermes.desktop.composer.fast'
 const LAST_SESSION_KEY = 'hermes.desktop.lastSessionId'
 const LAST_ROUTE_KEY = 'hermes.desktop.lastRoute'
 const LAST_SESSION_TITLE_KEY = 'hermes.desktop.lastSessionTitle'
+const WORKSPACE_EMPTY_PLACEHOLDER_KEY = 'hermes.desktop.workspaceEmptyPlaceholder.v1'
 const NEW_CHAT_ROUTE_PATH = '/'
 
 const RESERVED_REMEMBERED_ROUTES = new Set([
@@ -676,7 +677,7 @@ export const $messagesEmpty = computed($messages, messages => messages.length ==
 export const $lastVisibleMessageIsUser = computed($messages, lastVisibleMessageIsUser)
 
 export const $freshDraftReady = atom(false)
-export const $workspaceEmptyPlaceholder = atom(false)
+export const $workspaceEmptyPlaceholder = atom(storedBoolean(WORKSPACE_EMPTY_PLACEHOLDER_KEY, false))
 export const $busy = atom(false)
 export const $awaitingResponse = atom(false)
 // Stored-session id whose most recent resume FAILED terminally (the gateway RPC
@@ -841,6 +842,7 @@ export const setWorkspaceEmptyPlaceholder = (next: Updater<boolean>) => {
   const previous = $workspaceEmptyPlaceholder.get()
 
   updateAtom($workspaceEmptyPlaceholder, next)
+  persistBoolean(WORKSPACE_EMPTY_PLACEHOLDER_KEY, $workspaceEmptyPlaceholder.get())
   logUatEvent('restore', 'workspace-placeholder.set', {
     next: $workspaceEmptyPlaceholder.get(),
     previous

@@ -29,6 +29,7 @@ import {
   setRememberedSessionTitle,
   setSelectedStoredSessionId,
   setSessions,
+  setWorkspaceEmptyPlaceholder,
   shouldMigrateComposerScope,
   touchSessionActivity,
   workspaceCwdForNewSession
@@ -666,6 +667,30 @@ describe('remembered route (per profile)', () => {
     expect(getRememberedRoute('default')).toBeNull()
     expect(getRememberedSessionId('default')).toBeNull()
     expect(getRememberedRoute('ai-engineer')).toBe('/session/stored-1')
+  })
+})
+
+describe('empty workspace placeholder', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setWorkspaceEmptyPlaceholder(false)
+  })
+
+  afterEach(() => {
+    localStorage.clear()
+    setWorkspaceEmptyPlaceholder(false)
+  })
+
+  it('persists across renderer reloads so close-all does not reopen a default card', async () => {
+    setWorkspaceEmptyPlaceholder(true)
+    expect(localStorage.getItem('hermes.desktop.workspaceEmptyPlaceholder.v1')).toBe('true')
+
+    vi.resetModules()
+    const restored = await import('./session')
+    expect(restored.$workspaceEmptyPlaceholder.get()).toBe(true)
+
+    restored.setWorkspaceEmptyPlaceholder(false)
+    expect(localStorage.getItem('hermes.desktop.workspaceEmptyPlaceholder.v1')).toBe('false')
   })
 })
 

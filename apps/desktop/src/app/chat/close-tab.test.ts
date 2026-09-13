@@ -38,6 +38,7 @@ import { $previewTabs, closeRightRail, openPreview, type PreviewTarget } from '@
 import {
   $activeSessionId,
   $selectedStoredSessionId,
+  $workspaceEmptyPlaceholder,
   getRememberedRoute,
   getRememberedSessionId,
   setRememberedRoute,
@@ -71,6 +72,7 @@ beforeEach(() => {
   window.localStorage.clear()
   $selectedStoredSessionId.set(null)
   $activeSessionId.set(null)
+  $workspaceEmptyPlaceholder.set(false)
   $workspaceIsPage.set(false)
   $layoutSurfaceMode.set('tabbed')
   closeFocusedSessionTab.mockReturnValue(false)
