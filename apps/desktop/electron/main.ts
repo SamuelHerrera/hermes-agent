@@ -246,6 +246,7 @@ import {
 } from './ssh-connection'
 import { createStreamThrottle } from './stream-throttle'
 import { createTerminalDelivery } from './terminal-delivery'
+import { readForegroundProcessName } from './terminal-process-title'
 import { resolveTerminalRoute } from './terminal-route'
 import { nativeOverlayWidth as computeNativeOverlayWidth, macTitleBarOverlayHeight } from './titlebar-overlay-width'
 import {
@@ -12815,7 +12816,7 @@ ipcMain.handle('hermes:terminal:process', (event, id) => {
   }
 
   try {
-    if (info.persistent) { return null }
+    if (info.persistent) { return readForegroundProcessName(info.persistent.pid) }
     return path.basename(info.pty.process || '') || null
   } catch {
     return null
