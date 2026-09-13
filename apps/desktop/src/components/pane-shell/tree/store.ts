@@ -1228,8 +1228,8 @@ export function revealTreePane(paneId: string) {
   if (hiddenNow.has(paneId)) {
     setTreePaneHidden(paneId, false)
     logUatEvent('tabs', 'pane.reveal.unhidden', { paneId })
-
-    return
+    // Reactive unhides preserve the current tab. Explicit reveal must continue
+    // below to activate this pane and restore a minimized group.
   }
 
   const tree = $layoutTree.get()
