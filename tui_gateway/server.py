@@ -12426,7 +12426,22 @@ def _projects_payload(conn) -> dict:
     return {
         "projects": [p.to_dict() for p in pdb.list_projects(conn, include_archived=True)],
         "active_id": pdb.get_active_id(conn),
+        "hidden_project_paths": _hidden_project_paths(conn, pdb),
     }
+
+
+def _hidden_project_paths(conn, pdb=None) -> list[str]:
+    """Folder roots whose sessions should stay hidden after project removal."""
+    if pdb is None:
+        from hermes_cli import projects_db as pdb
+
+    paths = {
+        str(folder.path)
+        for project in pdb.list_deleted_projects(conn)
+        for folder in project.folders
+        if str(folder.path or "").strip()
+    }
+    return sorted(paths)
 
 
 def _projects_method(name: str):

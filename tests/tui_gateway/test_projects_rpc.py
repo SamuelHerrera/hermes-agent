@@ -372,6 +372,8 @@ def test_removed_project_stays_hidden_and_readd_restores_it(tmp_path, git_repo):
     _call("projects.record_repos", {"repos": [{"root": str(repo), "label": "workspace"}]})
 
     assert _call("projects.delete", {"id": project["id"]})["active_id"] is None
+    assert str(repo) in _call("projects.list")["hidden_project_paths"]
+    assert str(repo) in _call("projects.tree", {"preview_limit": 3, "session_limit": 100})["hidden_project_paths"]
     tree, _ = server._build_project_tree(
         db, preview_limit=3, hydrate=True, session_limit=100, include_discovered=True,
     )

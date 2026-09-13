@@ -967,6 +967,7 @@ export interface ProjectInfo {
 export interface ProjectsPayload {
   projects: ProjectInfo[]
   active_id: null | string
+  hidden_project_paths?: string[]
 }
 
 export interface ProfileSoul {

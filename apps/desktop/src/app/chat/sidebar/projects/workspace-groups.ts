@@ -415,6 +415,16 @@ function isPathUnder(folder: string, target: string): boolean {
   return f.every((seg, i) => seg === t[i])
 }
 
+export function sessionIsUnderAnyPath(session: SessionInfo, folders: readonly string[]): boolean {
+  if (!folders.length) {
+    return false
+  }
+
+  const targets = [session.cwd, session.git_repo_root].filter((value): value is string => Boolean(value?.trim()))
+
+  return targets.some(target => folders.some(folder => isPathUnder(folder, target)))
+}
+
 /**
  * The project a live session belongs to (overview membership) — explicit project
  * by longest-prefix folder, else the repo root (the auto-project id). An IN-TREE

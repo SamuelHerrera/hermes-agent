@@ -115,7 +115,7 @@ def _(rid, params: dict) -> dict:
     try:
         db = _get_db()
         if db is None:
-            return _ok(rid, {"projects": [], "active_id": None, "scoped_session_ids": []})
+            return _ok(rid, {"projects": [], "active_id": None, "scoped_session_ids": [], "hidden_project_paths": []})
 
         tree, active_id = _build_project_tree(
             db,
@@ -124,9 +124,18 @@ def _(rid, params: dict) -> dict:
             session_limit=int(params.get("session_limit") or 2000),
             include_discovered=True,
         )
+        from hermes_cli import projects_db as pdb
+
+        with pdb.connect_closing() as conn:
+            hidden_project_paths = _hidden_project_paths(conn, pdb)
         return _ok(
             rid,
-            {"projects": tree["projects"], "active_id": active_id, "scoped_session_ids": tree["scoped_session_ids"]},
+            {
+                "projects": tree["projects"],
+                "active_id": active_id,
+                "scoped_session_ids": tree["scoped_session_ids"],
+                "hidden_project_paths": hidden_project_paths,
+            },
         )
     except Exception as e:
         return _err(rid, 5061, str(e))

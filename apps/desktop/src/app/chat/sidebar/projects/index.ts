@@ -19,6 +19,7 @@ export {
   overlayProjectRunningCounts,
   overlayProjectSummaryCounts,
   sessionRecency,
+  sessionIsUnderAnyPath,
   type SidebarProjectTree,
   type SidebarSessionGroup,
   type SidebarWorkspaceTree

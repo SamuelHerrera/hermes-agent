@@ -14,6 +14,7 @@ import {
   overlayLivePreviews,
   overlayProjectRunningCounts,
   overlayProjectSummaryCounts,
+  sessionIsUnderAnyPath,
   sessionProjectColor,
   type SidebarProjectTree,
   type SidebarSessionGroup,
@@ -73,6 +74,16 @@ describe('kanbanWorktreeDir', () => {
   it('returns null for non-kanban paths', () => {
     expect(kanbanWorktreeDir('/repo/src')).toBeNull()
     expect(kanbanWorktreeDir('/repo')).toBeNull()
+  })
+})
+
+describe('sessionIsUnderAnyPath', () => {
+  it('matches cwd or repo root under a removed project folder', () => {
+    expect(sessionIsUnderAnyPath(makeSession('/work/icon/src'), ['/work/icon'])).toBe(true)
+    expect(
+      sessionIsUnderAnyPath(makeSession('/tmp/worktree', { git_repo_root: '/work/icon' }), ['/work/icon'])
+    ).toBe(true)
+    expect(sessionIsUnderAnyPath(makeSession('/work/other'), ['/work/icon'])).toBe(false)
   })
 })
 

@@ -81,6 +81,7 @@ import {
 } from '@/store/profile'
 import {
   $activeProjectId,
+  $hiddenProjectPaths,
   $projects,
   $projectScope,
   $projectTree,
@@ -142,6 +143,7 @@ import {
   ProjectDetailHeaderRow,
   projectTreeCwd,
   sessionRecency as sessionTime,
+  sessionIsUnderAnyPath,
   type SidebarProjectTree,
   type SidebarSessionGroup,
   type SidebarWorkspaceTree,
@@ -315,6 +317,7 @@ export function ChatSidebar({
   const currentCwd = useStore($currentCwd)
   const gatewayState = useStore($gatewayState)
   const dismissedAutoProjects = useStore($dismissedAutoProjectIds)
+  const hiddenProjectPaths = useStore($hiddenProjectPaths)
   const newSessionCombo = useStore($bindings)['session.new']?.[0]
   const newSessionKbd = newSessionCombo ? comboTokens(newSessionCombo) : []
   const [searchQuery, setSearchQuery] = useState('')
@@ -791,6 +794,9 @@ export function ChatSidebar({
   // state on top: dismissed auto-projects, persisted repo/lane order, and the
   // overview sort. Membership is the backend tree's — never re-derived here.
   const projectModel = useMemo<SidebarProjectTree[]>(() => {
+    const visibleLiveProjectSessions = liveProjectSessions.filter(session => !sessionIsUnderAnyPath(session, hiddenProjectPaths))
+    const isHiddenProjectSession = (session: SessionInfo) =>
+      isHiddenFromProjects(session) || sessionIsUnderAnyPath(session, hiddenProjectPaths)
     const visibleProjects = overlayProjectSummaryCounts(
       filterVisibleProjects(projectTree, dismissedAutoProjects)
         // A filtered-out project drops its whole lane, header included — hiding
@@ -805,10 +811,10 @@ export function ChatSidebar({
               label: project.isNoProject ? s.projects.home : project.label,
               repos: orderRepos(project.repos)
             },
-            isHiddenFromProjects
+            isHiddenProjectSession
           )
         ),
-      liveProjectSessions,
+      visibleLiveProjectSessions,
       projects,
       session => showsRunningArc(dotStates[session.id] ?? 'idle'),
       removedSessionIds
@@ -827,6 +833,7 @@ export function ChatSidebar({
     activeProjectId,
     projectFilter,
     projectOrderIds,
+    hiddenProjectPaths,
     isHiddenFromProjects,
     liveProjectSessions,
     projects,
@@ -901,9 +908,9 @@ export function ChatSidebar({
     // presentation copy (Home is translated there), not the raw payload's.
     return excludeProjectSessions(
       { ...hydrated, label: overviewEnteredProject.label, repos: orderRepos(hydrated.repos) },
-      isHiddenFromProjects
+      session => isHiddenFromProjects(session) || sessionIsUnderAnyPath(session, hiddenProjectPaths)
     )
-  }, [overviewEnteredProject, enteredProjectTree, orderRepos, isHiddenFromProjects])
+  }, [overviewEnteredProject, enteredProjectTree, orderRepos, isHiddenFromProjects, hiddenProjectPaths])
 
   // Overlay live `$sessions` onto the entered project so a just-created session
   // (which the backend snapshot hasn't folded in yet) counts as content and
@@ -913,11 +920,14 @@ export function ChatSidebar({
   const enteredProjectContent = useMemo(
     () =>
       enteredProject
-        ? overlayLiveLanes(enteredProject, liveProjectSessions, removedSessionIds, session =>
-            showsRunningArc(dotStates[session.id] ?? 'idle')
+        ? overlayLiveLanes(
+            enteredProject,
+            liveProjectSessions.filter(session => !sessionIsUnderAnyPath(session, hiddenProjectPaths)),
+            removedSessionIds,
+            session => showsRunningArc(dotStates[session.id] ?? 'idle')
           )
         : undefined,
-    [enteredProject, liveProjectSessions, removedSessionIds, dotStates]
+    [enteredProject, liveProjectSessions, hiddenProjectPaths, removedSessionIds, dotStates]
   )
 
   const scopedRepoPaths = useMemo(
@@ -1020,13 +1030,19 @@ export function ChatSidebar({
   // matching the flat Recents list. Keyed by project id for the rows.
   const overviewPreviews = useMemo<Record<string, SessionInfo[]>>(
     () =>
-      overlayLivePreviews(projectOverview ?? [], liveProjectSessions, projects, PROJECT_OVERVIEW_SESSION_LIMIT, {
-        removed: removedSessionIds,
-        // Rank before the trim, so "3 priciest in this project" isn't "3 most
-        // recent, priciest first".
-        rankIds: sortOrderIds
-      }),
-    [projectOverview, liveProjectSessions, projects, removedSessionIds, sortOrderIds]
+      overlayLivePreviews(
+        projectOverview ?? [],
+        liveProjectSessions.filter(session => !sessionIsUnderAnyPath(session, hiddenProjectPaths)),
+        projects,
+        PROJECT_OVERVIEW_SESSION_LIMIT,
+        {
+          removed: removedSessionIds,
+          // Rank before the trim, so "3 priciest in this project" isn't "3 most
+          // recent, priciest first".
+          rankIds: sortOrderIds
+        }
+      ),
+    [projectOverview, liveProjectSessions, hiddenProjectPaths, projects, removedSessionIds, sortOrderIds]
   )
 
   const onEnterProject = useCallback(

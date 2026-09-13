@@ -113,6 +113,7 @@ export function setHomeProjectAppearance(patch: { color?: null | string; icon?: 
 // source of project membership — the desktop no longer derives it.
 export const $projectTree = atom<SidebarProjectTree[]>([])
 export const $projectTreeLoading = atom(false)
+export const $hiddenProjectPaths = atom<string[]>([])
 
 // False when the connected backend predates the projects.* JSON-RPC surface
 // (same semver label, older install). Null until the first probe.
@@ -506,6 +507,7 @@ async function activeProjectsContext(): Promise<ActiveProjectsContext> {
 function applyPayload(payload: ProjectsPayload): void {
   $projects.set(payload.projects ?? [])
   $activeProjectId.set(payload.active_id ?? null)
+  $hiddenProjectPaths.set(payload.hidden_project_paths ?? [])
 }
 
 // Pull the full project list + active pointer. Best-effort: a failure (gateway
@@ -524,6 +526,7 @@ interface ProjectTreePayload {
   projects: SidebarProjectTree[]
   active_id: null | string
   scoped_session_ids: string[]
+  hidden_project_paths?: string[]
 }
 
 // The Projects overview is the main place Samuel reads project chats. Ask the
@@ -542,6 +545,7 @@ function applyProjectTreePayload(res: ProjectTreePayload): void {
   const scoped = new Set(res.scoped_session_ids ?? [])
   $projectTree.set(res.projects ?? [])
   $activeProjectId.set(res.active_id ?? null)
+  $hiddenProjectPaths.set(res.hidden_project_paths ?? [])
   const tombstones = $removedSessionIds.get()
 
   if (tombstones.size) {
