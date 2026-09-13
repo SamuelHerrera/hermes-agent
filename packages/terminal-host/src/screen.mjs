@@ -33,8 +33,9 @@ export class Screen {
       this.record({ type: 'data', data });
     });
   }
-  resize(cols, rows) {
+  resize(cols, rows, check = () => {}) {
     return this.enqueue(() => {
+      check();
       this.term.resize(cols, rows);
       this.record({ type: 'resize', cols, rows });
     });
