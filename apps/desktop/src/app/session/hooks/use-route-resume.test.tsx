@@ -29,15 +29,23 @@ interface HarnessProps {
   selectedStoredSessionId: null | string
   selectedStoredSessionIdRef: MutableRefObject<null | string>
   startFreshSessionDraft: (focus: boolean) => unknown
+  workspaceEmptyPlaceholder?: boolean
 }
 
 function RouteResumeHarness({
   rememberedSessionRestorePending = false,
   resumeFailedSessionId = null,
   resumeExhaustedSessionId = null,
+  workspaceEmptyPlaceholder = false,
   ...props
 }: HarnessProps) {
-  useRouteResume({ ...props, rememberedSessionRestorePending, resumeExhaustedSessionId, resumeFailedSessionId })
+  useRouteResume({
+    ...props,
+    rememberedSessionRestorePending,
+    resumeExhaustedSessionId,
+    resumeFailedSessionId,
+    workspaceEmptyPlaceholder
+  })
 
   return null
 }
@@ -97,6 +105,33 @@ describe('useRouteResume', () => {
       />
     )
 
+    expect(resumeSession).not.toHaveBeenCalled()
+  })
+
+  it('does not generate a New Session draft when the workspace was intentionally closed', () => {
+    const resumeSession = vi.fn(async () => undefined)
+    const startFreshSessionDraft = vi.fn()
+
+    render(
+      <RouteResumeHarness
+        activeSessionId={null}
+        activeSessionIdRef={{ current: null }}
+        creatingSessionRef={{ current: false }}
+        currentView="chat"
+        freshDraftReady={false}
+        gatewayState="open"
+        locationPathname="/"
+        resumeSession={resumeSession}
+        routedSessionId={null}
+        runtimeIdByStoredSessionIdRef={{ current: new Map() }}
+        selectedStoredSessionId={null}
+        selectedStoredSessionIdRef={{ current: null }}
+        startFreshSessionDraft={startFreshSessionDraft}
+        workspaceEmptyPlaceholder
+      />
+    )
+
+    expect(startFreshSessionDraft).not.toHaveBeenCalled()
     expect(resumeSession).not.toHaveBeenCalled()
   })
 

@@ -65,6 +65,7 @@ import {
   $resumeFailedSessionId,
   $selectedStoredSessionId,
   $sessions,
+  $workspaceEmptyPlaceholder,
   sessionMatchesStoredId,
   sessionPinId,
   setAwaitingResponse,
@@ -205,6 +206,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     }
   }, [cronReviewRequest, navigate])
   const freshDraftReady = useStore($freshDraftReady)
+  const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
   const emptyWorkspaceRequest = useStore($emptyWorkspaceRequest)
   const resumeFailedSessionId = useStore($resumeFailedSessionId)
   const resumeExhaustedSessionId = useStore($resumeExhaustedSessionId)
@@ -760,7 +762,8 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     runtimeIdByStoredSessionIdRef,
     selectedStoredSessionId,
     selectedStoredSessionIdRef,
-    startFreshSessionDraft
+    startFreshSessionDraft,
+    workspaceEmptyPlaceholder
   })
 
   // Plugins hear the stream FIRST (isolated fan-out in contrib/events), then
