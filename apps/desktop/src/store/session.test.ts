@@ -206,6 +206,16 @@ describe('mergeSessionPage', () => {
     expect(merged.map(s => s.id)).toEqual(['pinned', 'recent'])
   })
 
+  it('does not keep an archived row that the normal recents page omitted', () => {
+    // The normal recents endpoint deliberately excludes archived sessions. The
+    // active/pinned keep-set must not resurrect an archived row into the normal
+    // sidebar after its open tab/card is closed.
+    const previous = [session({ archived: true, id: 'archived' }), session({ id: 'recent' })]
+    const incoming = [session({ id: 'recent' })]
+
+    expect(mergeSessionPage(previous, incoming, ['archived']).map(s => s.id)).toEqual(['recent'])
+  })
+
   it('keeps a pinned session matched by its lineage root after compression', () => {
     // The pin is stored on the lineage-root id, but the loaded row surfaces
     // under its live compression tip. Matching on _lineage_root_id keeps it.

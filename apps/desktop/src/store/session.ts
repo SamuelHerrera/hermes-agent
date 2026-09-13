@@ -562,6 +562,7 @@ export function mergeSessionPage(
 
   const survivors = previous.filter(
     session =>
+      session.archived !== true &&
       !incomingIds.has(session.id) &&
       !incomingLineageKeys.has(session._lineage_root_id ?? session.id) &&
       (keep.has(session.id) || (session._lineage_root_id != null && keep.has(session._lineage_root_id)))
