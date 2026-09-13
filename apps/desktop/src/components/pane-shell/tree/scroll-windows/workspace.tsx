@@ -9,6 +9,9 @@ import {
   useState
 } from 'react'
 
+import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
+import { Codicon } from '@/components/ui/codicon'
+import { paneTabCloseItems } from '@/components/ui/pane-tab'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { cn } from '@/lib/utils'
@@ -26,7 +29,17 @@ import { $workspaceEmptyPlaceholder } from '@/store/session'
 import { PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
 import { allPaneIds, type LayoutNode } from '../model'
 import { paneChrome } from '../renderer/track-model'
-import { $hiddenTreePanes, $layoutTree, closeTabPane, isMainStripPane } from '../store'
+import {
+  $hiddenTreePanes,
+  $layoutTree,
+  closeAllTreeTabs,
+  closeOtherTreeTabs,
+  closeTabPane,
+  closeTreeTabsToRight,
+  isMainStripPane,
+  reloadTreePane,
+  treeTabCloseTargets
+} from '../store'
 
 import { reconcileColumns } from './columns'
 import { scrollDropEdge, ScrollDropOverlay, setScrollDropTarget } from './drop-overlay'
@@ -50,6 +63,18 @@ const MIN_WINDOW_WIDTH = 360
 const MIN_WINDOW_HEIGHT = 280
 
 const SCROLL_WINDOW_DRAG_TYPE = 'application/x-hermes-scroll-window'
+
+function scrollWindowIcon(windowId: string): string {
+  if (windowId.startsWith('terminal-instance:')) {
+    return 'terminal'
+  }
+
+  if (windowId === 'workspace' || windowId.startsWith('session-tile:')) {
+    return 'comment'
+  }
+
+  return 'window'
+}
 
 function treeWindowIds(tree: LayoutNode | null): string[] {
   return tree ? allPaneIds(tree).filter(isMainStripPane) : []
@@ -352,8 +377,27 @@ export function ScrollWindowWorkspace() {
               const pane = paneById.get(windowId)
               const chrome = paneChrome(pane)
               const title = chrome.tabTitle?.() ?? pane?.title ?? windowId
+              const iconName = scrollWindowIcon(windowId)
               const rect = scrollGridWindowRect(layout, index, GAP)
               const focused = workspace.focusedWindowId === windowId || (!workspace.focusedWindowId && index === 0)
+              const closeable = !chrome.uncloseable || panesWithCloser.has(windowId)
+              const menuItems = (kit: MenuKit) => (
+                <>
+                  {renderActionItem(kit, {
+                    icon: 'refresh',
+                    label: 'Reload',
+                    onSelect: () => reloadTreePane(windowId)
+                  })}
+                  <kit.Separator />
+                  {paneTabCloseItems(kit, {
+                    counts: treeTabCloseTargets(windowId),
+                    onClose: closeable ? () => closeTabPane(windowId) : undefined,
+                    onCloseAll: () => closeAllTreeTabs(windowId),
+                    onCloseOthers: () => closeOtherTreeTabs(windowId),
+                    onCloseToRight: () => closeTreeTabsToRight(windowId)
+                  })}
+                </>
+              )
 
               const style: CSSProperties = {
                 height: rect.height,
@@ -363,113 +407,114 @@ export function ScrollWindowWorkspace() {
               }
 
               return (
-                <section
-                  aria-label={typeof title === 'string' ? title : `Window ${index + 1}`}
-                  className={cn(
-                    'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-(--ui-chat-surface-background) shadow-md transition-[border-color,box-shadow]',
-                    draggingWindowId === windowId && 'opacity-70',
-                    focused
-                      ? 'border-(--ui-accent) shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-accent)_55%,transparent)]'
-                      : 'border-(--ui-stroke-secondary)'
-                  )}
-                  data-scroll-window={windowId}
-                  key={windowId}
-                  onDragLeave={event => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                      setScrollDropTarget(null)
-                    }
-                  }}
-                  onDragOverCapture={event => {
-                    if (!draggingWindowId || draggingWindowId === windowId) {
-                      return
-                    }
-
-                    event.preventDefault()
-                    event.stopPropagation()
-                    event.dataTransfer.dropEffect = 'move'
-                    setScrollDropTarget({
-                      windowId,
-                      edge: scrollDropEdge(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
-                    })
-                  }}
-                  onDropCapture={event => {
-                    const sourceWindowId = event.dataTransfer.getData(SCROLL_WINDOW_DRAG_TYPE)
-
-                    if (!draggingWindowId || sourceWindowId !== draggingWindowId || sourceWindowId === windowId) {
-                      return
-                    }
-
-                    const targetRect = event.currentTarget.getBoundingClientRect()
-                    const edge = scrollDropEdge(targetRect, event.clientX, event.clientY)
-
-                    event.preventDefault()
-                    event.stopPropagation()
-                    reorderScrollWindowWindow(sourceWindowId, windowId, edge)
-                    setScrollDropTarget(null)
-                    requestAnimationFrame(() => setDraggingWindowId(null))
-                  }}
-                  onPointerDown={() => focusScrollWindowWindow(windowId)}
-                  style={style}
-                >
-                  <ScrollWindowHeader
-                    className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
-                    data-scroll-window-header=""
-                    draggable
-                    onDragEnd={() => {
-                      setDraggingWindowId(null)
-                      setScrollDropTarget(null)
-                    }}
-                    onDragStart={event => {
-                      event.dataTransfer.setData(SCROLL_WINDOW_DRAG_TYPE, windowId)
-                      event.dataTransfer.setData('text/plain', windowId)
-                      event.dataTransfer.effectAllowed = 'move'
-                      event.dataTransfer.setDragImage(
-                        event.currentTarget,
-                        event.nativeEvent.offsetX,
-                        event.nativeEvent.offsetY
-                      )
-                      setDraggingWindowId(windowId)
-                    }}
-                    windowId={windowId}
-                  >
-                    <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-[0.65rem] font-semibold text-(--ui-text-secondary)">
-                      {index + 1}
-                    </span>
-                    <span
-                      className="min-w-0 flex-1 truncate text-[0.72rem] font-medium text-(--ui-text-primary)"
-                      data-scroll-window-title=""
-                    >
-                      {title}
-                    </span>
-                    <button
-                      aria-label="Close window"
-                      className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
-                      onClick={event => {
-                        event.stopPropagation()
-                        closeTabPane(windowId)
-                      }}
-                      type="button"
-                    >
-                      ×
-                    </button>
-                  </ScrollWindowHeader>
-                  <div className="relative min-h-0 flex-1 overflow-hidden" data-scroll-window-pane="">
-                    {pane?.render ? (
-                      <PaneGroupContext.Provider value={`scroll-${workspace.id}-${windowId}`}>
-                        <PaneVisibleContext.Provider value>
-                          <ContribBoundary id={pane.id}>
-                            <ContribRender render={pane.render} />
-                          </ContribBoundary>
-                        </PaneVisibleContext.Provider>
-                      </PaneGroupContext.Provider>
-                    ) : (
-                      <div className="p-3 font-mono text-[11px] text-(--ui-text-quaternary)">
-                        Missing pane {windowId}
-                      </div>
+                <ActionsContextMenu contentClassName="w-40" items={menuItems} key={windowId}>
+                  <section
+                    aria-label={typeof title === 'string' ? title : `Window ${index + 1}`}
+                    className={cn(
+                      'absolute flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-(--ui-chat-surface-background) shadow-md transition-[border-color,box-shadow]',
+                      draggingWindowId === windowId && 'opacity-70',
+                      focused
+                        ? 'border-(--ui-accent) shadow-[0_0_0_1px_color-mix(in_srgb,var(--ui-accent)_55%,transparent)]'
+                        : 'border-(--ui-stroke-secondary)'
                     )}
-                  </div>
-                  {draggingWindowId && draggingWindowId !== windowId ? <ScrollDropOverlay windowId={windowId} /> : null}
-                </section>
+                    data-scroll-window={windowId}
+                    onDragLeave={event => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                        setScrollDropTarget(null)
+                      }
+                    }}
+                    onDragOverCapture={event => {
+                      if (!draggingWindowId || draggingWindowId === windowId) {
+                        return
+                      }
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      event.dataTransfer.dropEffect = 'move'
+                      setScrollDropTarget({
+                        windowId,
+                        edge: scrollDropEdge(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY)
+                      })
+                    }}
+                    onDropCapture={event => {
+                      const sourceWindowId = event.dataTransfer.getData(SCROLL_WINDOW_DRAG_TYPE)
+
+                      if (!draggingWindowId || sourceWindowId !== draggingWindowId || sourceWindowId === windowId) {
+                        return
+                      }
+
+                      const targetRect = event.currentTarget.getBoundingClientRect()
+                      const edge = scrollDropEdge(targetRect, event.clientX, event.clientY)
+
+                      event.preventDefault()
+                      event.stopPropagation()
+                      reorderScrollWindowWindow(sourceWindowId, windowId, edge)
+                      setScrollDropTarget(null)
+                      requestAnimationFrame(() => setDraggingWindowId(null))
+                    }}
+                    onPointerDown={() => focusScrollWindowWindow(windowId)}
+                    style={style}
+                  >
+                    <ScrollWindowHeader
+                      className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
+                      data-scroll-window-header=""
+                      draggable
+                      onDragEnd={() => {
+                        setDraggingWindowId(null)
+                        setScrollDropTarget(null)
+                      }}
+                      onDragStart={event => {
+                        event.dataTransfer.setData(SCROLL_WINDOW_DRAG_TYPE, windowId)
+                        event.dataTransfer.setData('text/plain', windowId)
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setDragImage(
+                          event.currentTarget,
+                          event.nativeEvent.offsetX,
+                          event.nativeEvent.offsetY
+                        )
+                        setDraggingWindowId(windowId)
+                      }}
+                      windowId={windowId}
+                    >
+                      <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-(--ui-text-secondary)">
+                        <Codicon name={iconName} size="0.75rem" />
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 truncate text-[0.72rem] font-medium text-(--ui-text-primary)"
+                        data-scroll-window-title=""
+                      >
+                        {title}
+                      </span>
+                      <button
+                        aria-label="Close window"
+                        className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
+                        onClick={event => {
+                          event.stopPropagation()
+                          closeTabPane(windowId)
+                        }}
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </ScrollWindowHeader>
+                    <div className="relative min-h-0 flex-1 overflow-hidden" data-scroll-window-pane="">
+                      {pane?.render ? (
+                        <PaneGroupContext.Provider value={`scroll-${workspace.id}-${windowId}`}>
+                          <PaneVisibleContext.Provider value>
+                            <ContribBoundary id={pane.id}>
+                              <ContribRender render={pane.render} />
+                            </ContribBoundary>
+                          </PaneVisibleContext.Provider>
+                        </PaneGroupContext.Provider>
+                      ) : (
+                        <div className="p-3 font-mono text-[11px] text-(--ui-text-quaternary)">
+                          Missing pane {windowId}
+                        </div>
+                      )}
+                    </div>
+                    {draggingWindowId && draggingWindowId !== windowId ? <ScrollDropOverlay windowId={windowId} /> : null}
+                  </section>
+                </ActionsContextMenu>
               )
             })}
           </div>

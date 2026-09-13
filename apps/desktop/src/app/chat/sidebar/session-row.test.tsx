@@ -486,6 +486,7 @@ describe('SidebarSessionRow', () => {
 
     expect(terminalCount?.textContent).toContain('1')
     expect(terminalCount?.querySelector('.codicon-terminal')).toBeTruthy()
+    expect(container.querySelector('[data-row-actions] [data-session-status="background"]')).toBeNull()
     expect(container.querySelector('[data-session-terminals="s1"] [data-sidebar-terminal="terminal-s1"]')).not.toBeNull()
     expect(container.querySelector('[data-session-row-primary-actions]')?.contains(toggle)).toBe(true)
 

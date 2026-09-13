@@ -25,8 +25,6 @@ vi.mock('@/i18n', () => ({
   })
 }))
 
-const tipTrigger = (el: HTMLElement) => el.closest('[data-slot="tooltip-trigger"]')
-
 const renderStatus = (storedSessionId: null | string = 's1') =>
   render(<SessionStatusIcon storedSessionId={storedSessionId} />)
 
@@ -44,7 +42,7 @@ describe('SessionStatusIcon', () => {
     expect(container.querySelector('[data-session-status]')).toBeNull()
   })
 
-  it('shows a tooltip-backed terminal icon for a running background task', () => {
+  it('renders nothing for a running background task because sidebar rows show the counted terminal badge', () => {
     publishSessionState('rt1', createClientSessionState('s1'))
     $backgroundStatusBySession.set({
       rt1: [
@@ -58,12 +56,9 @@ describe('SessionStatusIcon', () => {
     })
 
     const { container } = renderStatus()
-    const status = container.querySelector<HTMLElement>('[data-session-status="background"]')
 
-    expect(status?.querySelector('.codicon-terminal')).toBeTruthy()
-    expect(status?.getAttribute('aria-label')).toBe('Background task running')
-    expect(status?.tabIndex).toBe(0)
-    expect(tipTrigger(status as HTMLElement)).toBeTruthy()
+    expect(container.querySelector('[data-session-status="background"]')).toBeNull()
+    expect(container.querySelector('.codicon-terminal')).toBeNull()
   })
 
   it('leaves working turns to the leading project-dot spinner', () => {

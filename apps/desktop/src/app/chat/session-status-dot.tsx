@@ -275,7 +275,7 @@ export function SessionStatusIcon({ className, storedSessionId }: SessionStatusI
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
   )
 
-  if (dotState === 'idle') {
+  if (dotState === 'idle' || dotState === 'background') {
     return null
   }
 

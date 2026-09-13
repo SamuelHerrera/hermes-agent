@@ -202,9 +202,9 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
+      'Use scroll-window layout',
       'Keep computer awake: Off',
       'Codex usage unavailable',
-      'Mute haptics',
       'Approval mode: Off',
       'Create new'
     ])
@@ -222,7 +222,7 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Kanban' })).toBeTruthy()
-    expect(screen.queryByRole('menuitem', { name: 'Mute haptics' })).toBeNull()
+    expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeTruthy()
@@ -257,9 +257,9 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
+      'Use scroll-window layout',
       'Keep computer awake: Off',
       'Codex usage unavailable',
-      'Mute haptics',
       'Approval mode: Off',
       'Create new'
     ])

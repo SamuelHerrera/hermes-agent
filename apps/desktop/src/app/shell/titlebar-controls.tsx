@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
 import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
+import { $layoutSurfaceMode, toggleLayoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows'
 import { resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
@@ -93,7 +94,7 @@ export interface TitlebarTool {
 
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
-const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set(['haptics'])
+const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
@@ -234,7 +235,6 @@ function TitlebarProfileMenu() {
               isDefault={activeProfile?.is_default ?? activeKey === 'default'}
               name={activeName}
             />
-            <Codicon className="text-(--ui-text-tertiary)" name="chevron-down" size="0.625rem" />
           </Button>
         </DropdownMenuTrigger>
       </Tip>
@@ -301,6 +301,7 @@ export function TitlebarControls({
   const hapticsMuted = useStore($hapticsMuted)
   const keepAwake = useStore($keepAwake)
   const keepAwakeBusy = useStore($keepAwakeBusy)
+  const layoutSurfaceMode = useStore($layoutSurfaceMode)
   const sidebarOpen = useStore($sidebarOpen)
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
   const toolbarRef = useRef<HTMLDivElement>(null)
@@ -379,6 +380,16 @@ export function TitlebarControls({
   }
 
   const leftToolbarTools: TitlebarTool[] = [
+    {
+      active: layoutSurfaceMode === 'scroll-windows',
+      icon: <TitlebarIcon name={layoutSurfaceMode === 'scroll-windows' ? 'multiple-windows' : 'window'} />,
+      id: 'layout-surface',
+      label: layoutSurfaceMode === 'scroll-windows' ? 'Use tabbed layout' : 'Use scroll-window layout',
+      onSelect: () => {
+        triggerHaptic('tap')
+        toggleLayoutSurfaceMode()
+      }
+    },
     {
       active: keepAwake,
       disabled: keepAwakeBusy,
@@ -497,7 +508,7 @@ export function TitlebarControls({
       ]
     : []
 
-  // Only haptics stays inline; other system actions live in the menu.
+  // Lower-priority system actions live in the menu; header stays compact.
   const systemTools: TitlebarTool[] = [
     {
       className: 'group/tool',
