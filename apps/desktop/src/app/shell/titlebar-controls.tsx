@@ -95,6 +95,8 @@ export interface TitlebarTool {
 const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
+const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
+const GATEWAY_STATUSBAR_ID = 'gateway-health'
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
   return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
@@ -605,6 +607,10 @@ export function TitlebarControls({
     ...overflowSystemTools
   ]
 
+  const overflowMenuStatusbarItems = overflowStatusbarItems.filter(
+    item => item.id !== PROJECT_WORKSPACE_STATUSBAR_ID && item.id !== GATEWAY_STATUSBAR_ID
+  )
+
   return (
     <>
       {/*
@@ -643,7 +649,7 @@ export function TitlebarControls({
         </span>
         <TitlebarOverflowMenu
           navigate={navigate}
-          statusbarItems={overflowStatusbarItems}
+          statusbarItems={overflowMenuStatusbarItems}
           tools={overflowOptionalToolbarTools}
         />
         <TitlebarProfileMenu />

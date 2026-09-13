@@ -199,7 +199,27 @@ describe('TitlebarControls', () => {
           onNewSession={vi.fn()}
           onOpenSettings={vi.fn()}
           statusbarItems={[approval, terminal, kanbanApprovalBridge, kanbanCount]}
-          statusbarLeftItems={[commandCenter]}
+          statusbarLeftItems={[
+            commandCenter,
+            {
+              id: 'gateway-health',
+              label: 'Gateway',
+              menuContent: <span>Gateway status</span>,
+              toggleLabel: 'Gateway',
+              variant: 'menu'
+            },
+            {
+              id: 'workspace-cwd',
+              label: 'edu-dir-astro',
+              menuItems: [
+                { id: 'copy-workspace-path', label: 'Copy Path' },
+                { id: 'reveal-workspace-finder', label: 'Open Containing Folder' },
+                { id: 'reveal-workspace-sidebar', label: 'Reveal in filetree' }
+              ],
+              toggleLabel: 'Workspace',
+              variant: 'menu'
+            }
+          ]}
         />
       </MemoryRouter>
     )
@@ -234,6 +254,10 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('menuitem', { name: 'Command Center' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Gateway' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Workspace' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Project' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'New project' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: 'Scheduled jobs' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()

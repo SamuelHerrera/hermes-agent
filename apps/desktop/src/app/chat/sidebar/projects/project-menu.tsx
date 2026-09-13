@@ -1,6 +1,6 @@
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { createTerminal } from '@/app/right-sidebar/terminal/terminals'
 import {
@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { useI18n } from '@/i18n'
-import { $panesFlipped, dismissAutoProject } from '@/store/layout'
+import { $panesFlipped, dismissAutoProject, revealFileInTree } from '@/store/layout'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
   copyPath,
@@ -38,17 +38,45 @@ import { getConfiguredDefaultProjectDir } from '@/store/session'
 import { ProjectAppearancePicker } from './project-appearance'
 import type { SidebarProjectTree } from './workspace-groups'
 
-function terminalProjectPath(project: SidebarProjectTree): string {
-  return project.isNoProject
-    ? getConfiguredDefaultProjectDir()
-    : (project.path ?? project.repos.find(repo => repo.path)?.path ?? '')
+function terminalProjectPath(project: SidebarProjectTree, homePath = getConfiguredDefaultProjectDir()): string {
+  return project.isNoProject ? homePath : (project.path ?? project.repos.find(repo => repo.path)?.path ?? '')
 }
 
-function openProjectTerminal(project: SidebarProjectTree): void {
-  createTerminal(terminalProjectPath(project), {
+function openProjectTerminal(project: SidebarProjectTree, homePath: string): void {
+  createTerminal(terminalProjectPath(project, homePath), {
     projectId: project.id,
     profile: normalizeProfileKey($activeGatewayProfile.get())
   })
+}
+
+function useHomeProjectPath(project: SidebarProjectTree): string {
+  const [homePath, setHomePath] = useState(() => (project.isNoProject ? getConfiguredDefaultProjectDir() : ''))
+
+  useEffect(() => {
+    if (!project.isNoProject || homePath) {
+      return
+    }
+
+    let cancelled = false
+
+    const settings = window.hermesDesktop?.settings?.getDefaultProjectDir
+
+    if (!settings) {
+      return
+    }
+
+    void settings().then(result => {
+      if (!cancelled) {
+        setHomePath(result.resolvedCwd?.trim() || result.dir?.trim() || '')
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [homePath, project.isNoProject])
+
+  return project.isNoProject ? homePath : ''
 }
 
 // Shared per-project state + handlers, so the kebab dropdown and the row's
@@ -59,17 +87,20 @@ function openProjectTerminal(project: SidebarProjectTree): void {
 // set active.
 function useProjectActions({
   project,
+  homePath,
   isActive,
   scoped,
   onExitScope
 }: {
   project: SidebarProjectTree
+  homePath: string
   isActive: boolean
   scoped: boolean
   onExitScope?: () => void
 }) {
   const { t } = useI18n()
   const p = t.sidebar.projects
+  const f = t.fileMenu
   const target = { id: project.id, name: project.label }
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
@@ -111,14 +142,14 @@ function useProjectActions({
           }
         ]
 
-  const actionPath = terminalProjectPath(project)
+  const actionPath = terminalProjectPath(project, homePath)
 
   const pathItems: ActionItemSpec[] = [
     {
       icon: 'terminal',
       key: 'terminal',
       label: t.keybinds.actions['view.newTerminal'],
-      onSelect: () => openProjectTerminal(project)
+      onSelect: () => openProjectTerminal(project, homePath)
     },
     {
       disabled: !actionPath,
@@ -126,6 +157,13 @@ function useProjectActions({
       key: 'reveal',
       label: p.reveal,
       onSelect: () => void revealPath(actionPath)
+    },
+    {
+      disabled: !actionPath,
+      icon: 'list-tree',
+      key: 'reveal-sidebar',
+      label: f.revealInSidebar,
+      onSelect: () => revealFileInTree(actionPath)
     },
     {
       disabled: !actionPath,
@@ -192,8 +230,10 @@ export function ProjectMenu({
   // Open toward the content area: right when the sidebar is on the left, left
   // when the panes are flipped (sidebar on the right).
   const panesFlipped = useStore($panesFlipped)
+  const homePath = useHomeProjectPath(project)
 
   const { confirmDialog, dangerItem, identityItems, pathItems } = useProjectActions({
+    homePath,
     isActive,
     onExitScope,
     project,
@@ -322,8 +362,10 @@ export function ProjectContextMenu({
 }: ProjectContextMenuProps) {
   const { t } = useI18n()
   const p = t.sidebar.projects
+  const homePath = useHomeProjectPath(project)
 
   const { confirmDialog, dangerItem, identityItems, pathItems } = useProjectActions({
+    homePath,
     isActive,
     onExitScope,
     project,

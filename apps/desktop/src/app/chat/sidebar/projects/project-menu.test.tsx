@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createTerminal } from '@/app/right-sidebar/terminal/terminals'
+import { revealFileInTree } from '@/store/layout'
 import { copyPath, setHomeProjectAppearance } from '@/store/projects'
+import { getConfiguredDefaultProjectDir } from '@/store/session'
 
 import { ProjectMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
@@ -10,6 +12,7 @@ import type { SidebarProjectTree } from './workspace-groups'
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  window.hermesDesktop = undefined as unknown as typeof window.hermesDesktop
 })
 
 // jsdom doesn't implement ResizeObserver; Radix's PopoverContent/Arrow use it
@@ -32,6 +35,7 @@ vi.mock('@/i18n', () => ({
     t: {
       keybinds: { actions: { 'view.newTerminal': 'New terminal' } },
       common: { cancel: 'Cancel', confirm: 'Confirm', done: 'Done', loading: 'Loading…' },
+      fileMenu: { revealInSidebar: 'Reveal in filetree' },
       sidebar: {
         projects: {
           copyPath: 'Copy path',
@@ -61,7 +65,8 @@ vi.mock('@/store/layout', () => ({
       return () => {}
     }
   },
-  dismissAutoProject: vi.fn()
+  dismissAutoProject: vi.fn(),
+  revealFileInTree: vi.fn()
 }))
 
 vi.mock('@/store/projects', () => ({
@@ -117,6 +122,25 @@ describe('ProjectMenu', () => {
       profile: 'default'
     })
   })
+
+  it('loads the Home folder path before enabling folder actions', async () => {
+    vi.mocked(getConfiguredDefaultProjectDir).mockReturnValueOnce('').mockReturnValue('/home/default')
+    window.hermesDesktop = {
+      settings: {
+        getDefaultProjectDir: vi.fn(async () => ({ defaultLabel: '/Users/samuel', dir: null, resolvedCwd: '/Users/samuel' }))
+      }
+    } as unknown as typeof window.hermesDesktop
+
+    render(<ProjectMenu isActive={false} project={{ ...project, id: '__no_project__', isNoProject: true }} />)
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Copy path' }).getAttribute('data-disabled')).toBe('')
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Copy path' }).getAttribute('data-disabled')).toBeNull())
+
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy path' }))
+    expect(copyPath).toHaveBeenCalledWith('/Users/samuel')
+  })
+
   it('does not wrap the kebab trigger in a Tip', () => {
     render(<ProjectMenu isActive={false} project={project} />)
 
@@ -177,6 +201,7 @@ describe('ProjectMenu', () => {
     expect(await screen.findByRole('menuitem', { name: 'Appearance' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: 'Reveal in file manager' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Reveal in filetree' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Set active' })).toBeNull()
@@ -185,6 +210,10 @@ describe('ProjectMenu', () => {
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Copy path' }))
     expect(copyPath).toHaveBeenCalledWith('/home/default')
+
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reveal in filetree' }))
+    expect(revealFileInTree).toHaveBeenCalledWith('/home/default')
   })
 
   it('stores Home appearance locally instead of adopting it as a projects.db row', async () => {
