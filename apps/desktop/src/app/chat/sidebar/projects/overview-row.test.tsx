@@ -174,7 +174,7 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
   })
 
-  it('shows compact chat, running, and archive metrics without subagent or token totals', () => {
+  it('shows compact running, non-running chat, and archive metrics without subagent or token totals', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 
     const { container } = render(
@@ -205,8 +205,8 @@ describe('ProjectOverviewRow', () => {
     expect(runningCount?.querySelector('.codicon-sync')).toBeTruthy()
     expect(runningCount?.querySelector('[data-project-live-pulse]')).toBeTruthy()
     expect(runningCount?.querySelector('.codicon-modifier-spin')).toBeNull()
-    expect(chatCount?.textContent).toBe('7')
-    expect(chatCount?.querySelector('.codicon-comment-discussion')).toBeTruthy()
+    expect(chatCount?.textContent).toBe('5')
+    expect(chatCount?.querySelector('.codicon-comment')).toBeTruthy()
     expect(secondary?.querySelector('.codicon-robot')).toBeNull()
     expect(archivedCount?.textContent).toBe('4')
     expect(archivedCount?.querySelector('.codicon-archive')).toBeTruthy()
@@ -321,7 +321,7 @@ describe('ProjectOverviewRow', () => {
     expect(container.querySelector('[data-sessions-project-detail-header] img')).toBeTruthy()
     expect(primary?.textContent).toContain('Test D')
     expect(secondary?.querySelector('[data-project-running-count]')?.textContent).toBe('1')
-    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toBe('2')
+    expect(secondary?.querySelector('[data-project-chat-count]')?.textContent).toBe('1')
     expect(secondary?.querySelector('[data-project-child-count]')).toBeNull()
     expect(secondary?.querySelector('[data-project-archived-count]')?.textContent).toBe('1')
     expect(secondary?.textContent).not.toContain('Run')

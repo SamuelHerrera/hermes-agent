@@ -106,11 +106,13 @@ function ProjectSummaryCount({
 function projectCounts(project: SidebarProjectTree) {
   const totalActiveCount = project.sessionCount ?? 0
   const childCount = project.childSessionCount ?? 0
+  const runningCount = project.runningSessionCount ?? 0
+  const topLevelChatCount = project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount)
 
   return {
     archivedCount: project.archivedSessionCount ?? 0,
-    chatCount: project.chatSessionCount ?? Math.max(0, totalActiveCount - childCount),
-    runningCount: project.runningSessionCount ?? 0
+    chatCount: Math.max(0, topLevelChatCount - runningCount),
+    runningCount
   }
 }
 
@@ -133,8 +135,8 @@ function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
       <ProjectSummaryCount
         count={chatCount}
         dataAttr="chats"
-        icon="comment-discussion"
-        label={`${chatCount} top-level chat${chatCount === 1 ? '' : 's'}`}
+        icon="comment"
+        label={`${chatCount} non-running chat${chatCount === 1 ? '' : 's'}`}
       />
       <ProjectSummaryCount
         count={archivedCount}
