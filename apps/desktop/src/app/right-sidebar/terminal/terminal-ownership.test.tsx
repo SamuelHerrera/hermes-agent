@@ -45,11 +45,15 @@ vi.mock('@xterm/xterm', () => ({
 }))
 vi.mock('@xterm/addon-fit', () => ({
   FitAddon: class {
+    activate() {}
+    dispose() {}
     fit() {}
   }
 }))
 vi.mock('@xterm/addon-serialize', () => ({
   SerializeAddon: class {
+    activate() {}
+    dispose() {}
     serialize() {
       return ''
     }
@@ -62,7 +66,7 @@ vi.mock('@xterm/addon-webgl', () => ({
     clearTextureAtlas() {}
   }
 }))
-vi.mock('./links', () => ({ terminalLinkHandler: {}, terminalWebLinksAddon: () => ({}) }))
+vi.mock('./links', () => ({ terminalLinkHandler: {}, terminalWebLinksAddon: () => ({ activate: vi.fn(), dispose: vi.fn() }) }))
 vi.mock('./terminal-font', () => ({ prepareTerminalFontFamily: mocks.prepare }))
 vi.mock('./use-terminal-font', async () => {
   const { useRef } = await import('react')
@@ -73,7 +77,10 @@ vi.mock('@/themes/context', () => ({ useTheme: () => ({ renderedMode: 'dark', th
 vi.mock('@/i18n', () => ({ useI18n: () => ({ t: {} }) }))
 vi.mock('./buffer', () => ({ makeTerminalReader: vi.fn(), registerTerminalReader: () => vi.fn() }))
 vi.mock('./terminals', () => ({
+  $terminals: { get: () => [] },
   closeTerminal: vi.fn(),
+  forgetTerminalHandle: vi.fn(),
+  rememberTerminalHost: vi.fn(),
   reportTerminalShell: vi.fn(),
   updateTerminalRestoreCwd: vi.fn(),
   updateTerminalReviveBuffer: vi.fn()
@@ -116,7 +123,9 @@ it('passes the immutable restored owner through instance and font await to spawn
   await act(async () => {
     fontsReady('monospace')
   })
-  await waitFor(() => expect(api.start).toHaveBeenCalledWith({ profile: 'A', cols: 80, rows: 24, cwd: '/restored' }))
+  await waitFor(() =>
+    expect(api.start).toHaveBeenCalledWith(expect.objectContaining({ profile: 'A', cols: 80, rows: 24, cwd: '/restored' }))
+  )
   act(() => mocks.input('pwd\r'))
   expect(api.write).toHaveBeenCalledWith('owner-A-session', 'pwd\r')
   expect(api.start).toHaveBeenCalledOnce()
@@ -188,6 +197,7 @@ async function installTerminalIpc(open: () => Promise<unknown>) {
   new Function(...Object.keys(electronMock), ts.transpile(preloadSource.replace(/^import .*from 'electron'\n/, '')))(
     ...Object.values(electronMock)
   )
+  ipc.bridge.hermesDesktop.terminal.persistent = false
   Object.defineProperty(window, 'hermesDesktop', { configurable: true, value: ipc.bridge.hermesDesktop })
 
   return sessions

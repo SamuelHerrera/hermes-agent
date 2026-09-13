@@ -315,6 +315,47 @@ function transferHasDropCandidates(t: DataTransfer): boolean {
   return false
 }
 
+export function createHostPlaybackGate(write: (data: string, callback: () => void) => void) {
+  let depth = 0
+
+  const suppress = <T,>(run: () => T): T => {
+    depth += 1
+
+    try {
+      return run()
+    } finally {
+      depth -= 1
+    }
+  }
+
+  const writePlayback = (data: string) =>
+    new Promise<void>((resolve, reject) => {
+      if (!data) {
+        resolve()
+
+        return
+      }
+
+      depth += 1
+
+      try {
+        write(data, () => {
+          depth -= 1
+          resolve()
+        })
+      } catch (error) {
+        depth -= 1
+        reject(error)
+      }
+    })
+
+  return {
+    isSuppressed: () => depth > 0,
+    suppress,
+    writePlayback
+  }
+}
+
 function collectDroppedPaths(t: DataTransfer): string[] {
   const seen = new Set<string>()
 
@@ -805,7 +846,19 @@ export function useTerminalSession({
 
     fitRef.current = fitAndResize
 
+    // In persistent mode there are two xterm parsers: the terminal-host parser
+    // attached to the real PTY, and this renderer mirror. Output replayed into
+    // the mirror can generate terminal replies (DSR, DA, status queries, etc.)
+    // via onData. The host parser already sent the real reply to the PTY, so
+    // never echo mirror-generated replies back as user input during hydration or
+    // live event playback. Physical keyboard/paste still flows normally.
+    const hostPlayback = createHostPlaybackGate((data, done) => term.write(data, done))
+
     const dataDisposable = term.onData(data => {
+      if (hostPlayback.isSuppressed()) {
+        return
+      }
+
       hasSessionActivityRef.current = true
       const id = sessionIdRef.current
 
@@ -928,7 +981,7 @@ export function useTerminalSession({
 
           if (session.reference && session.snapshot && terminalApi.read && terminalApi.checkpoint) {
             rememberTerminalHost(id, session.reference, session.id)
-            hydrateTerminalState(term, session.snapshot)
+            hostPlayback.suppress(() => hydrateTerminalState(term, session.snapshot))
             let sequence = session.snapshot.seq
             let liveSessionId = session.id
             let timer: ReturnType<typeof setTimeout> | undefined
@@ -939,12 +992,12 @@ export function useTerminalSession({
                 const next = await terminalApi.start({ persistent: true, reference: session.reference, requestId: id, profile: ownerRef.current })
                 if (disposed) { void terminalApi.dispose(next.id); return }
                 if (!next.snapshot || !next.reference) { void terminalApi.dispose(next.id); throw new Error('HOST_LOST') }
-                hydrateTerminalState(term, next.snapshot)
                 const previous = liveSessionId
                 liveSessionId = next.id
                 sessionIdRef.current = next.id
                 sequence = next.snapshot.seq
                 rememberTerminalHost(id, next.reference, next.id)
+                hostPlayback.suppress(() => hydrateTerminalState(term, next.snapshot))
                 void terminalApi.dispose(previous).catch(() => {})
                 setStatus('open')
                 fitAndResize(initialActiveRef.current)
@@ -966,7 +1019,7 @@ export function useTerminalSession({
                 for (const event of result.events) {
                   if (event.seq <= sequence) { continue }
                   if (event.type === 'resize') { term.resize(event.cols!, event.rows!) }
-                  else { await new Promise<void>(resolve => term.write(event.data || '', resolve)) }
+                  else { await hostPlayback.writePlayback(event.data || '') }
                   sequence = event.seq
                   if (disposed) { return }
                 }
@@ -979,7 +1032,7 @@ export function useTerminalSession({
                   try {
                     const snapshot = await terminalApi.checkpoint!(liveSessionId)
                     if (disposed) { return }
-                    hydrateTerminalState(term, snapshot)
+                    hostPlayback.suppress(() => hydrateTerminalState(term, snapshot))
                     sequence = snapshot.seq
                     timer = setTimeout(() => void poll(), 50)
                     return
