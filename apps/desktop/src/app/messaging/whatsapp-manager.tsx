@@ -11,7 +11,19 @@ import { runGatewayRestart } from '@/store/system-actions'
 
 import { WhatsAppPairing } from './whatsapp-pairing'
 
-type Settings = { enabled: boolean; mode: string; dm_policy: string; allowed_users: string }
+interface Settings {
+  enabled: boolean
+  mode: string
+  dm_policy: string
+  allowed_users: string
+  send_read_receipts?: boolean
+  reply_prefix?: string
+  group_policy?: string
+  group_allow_from?: string
+  require_mention?: boolean
+  free_response_chats?: string
+  mention_patterns?: string[]
+}
 type Status = {
   settings: Settings
   paired: boolean
@@ -171,7 +183,7 @@ export function WhatsAppManager({ onUnavailable }: { onUnavailable?: (unavailabl
             )}
             {status.bridge.send_read_receipts !== undefined && (
               <>
-                <dt>Read receipts</dt>
+                <dt>Read receipts (running)</dt>
                 <dd>{status.bridge.send_read_receipts ? 'On' : 'Off'}</dd>
               </>
             )}
@@ -179,6 +191,11 @@ export function WhatsAppManager({ onUnavailable }: { onUnavailable?: (unavailabl
           <p className="text-xs text-muted-foreground">
             A saved paired session is not proof of a live connection. Refresh checks the bridge without sending a
             message or changing the session.
+          </p>
+          <h4 className="font-semibold">Saved configuration</h4>
+          <p className="text-xs text-muted-foreground">
+            Saving does not change the running gateway. Restart it to apply edits; live status above shows only what the
+            bridge reports.
           </p>
           <label className="flex items-center gap-3">
             WhatsApp enabled
@@ -235,7 +252,119 @@ export function WhatsAppManager({ onUnavailable }: { onUnavailable?: (unavailabl
             Comma-separated phone numbers or WhatsApp IDs. Existing aliases are preserved. An empty allowlist grants
             nobody under the allowlist policy.
           </p>
-          <div className="flex flex-wrap gap-2">
+          {values.send_read_receipts !== undefined && (
+            <fieldset className="grid gap-3 rounded-md border p-3" disabled={busy}>
+              <legend className="px-1 font-semibold">Message behavior</legend>
+              <label className="flex items-center justify-between gap-3">
+                Send read receipts
+                <Switch
+                  aria-label="Send read receipts"
+                  checked={values.send_read_receipts}
+                  onCheckedChange={v => field('send_read_receipts', v)}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Mark accepted messages as read (blue ticks), before the reply finishes. Rejected messages are not marked
+                read. Off preserves privacy.
+              </p>
+              <label className="grid gap-1">
+                Reply header
+                <textarea
+                  aria-label="Reply header"
+                  className="min-h-20 rounded-md border border-input bg-background p-2 text-sm"
+                  onChange={e => field('reply_prefix', e.target.value)}
+                  value={values.reply_prefix ?? ''}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Used in self-chat mode; bot mode sends without a header. Leave empty to remove it. Line breaks are
+                preserved.
+              </p>
+            </fieldset>
+          )}
+          {values.group_policy !== undefined && (
+            <fieldset className="grid gap-3 rounded-md border p-3" disabled={busy}>
+              <legend className="px-1 font-semibold">Group conversations</legend>
+              <label className="grid gap-1">
+                Group policy
+                <select
+                  aria-label="Group policy"
+                  className={control}
+                  onChange={e => field('group_policy', e.target.value)}
+                  value={values.group_policy}
+                >
+                  <option value="pairing">Pairing — legacy setting, groups blocked</option>
+                  <option value="allowlist">Allowlist only</option>
+                  <option value="disabled">Disabled — no groups</option>
+                  <option value="open">Open — all groups</option>
+                </select>
+              </label>
+              {values.group_policy === 'open' && (
+                <p className="text-sm text-amber-600">
+                  Open allows all groups through the group policy. Use an allowlist for a private assistant.
+                </p>
+              )}
+              <label className="grid gap-1">
+                Allowed groups
+                <Input
+                  aria-label="Allowed groups"
+                  onChange={e => field('group_allow_from', e.target.value)}
+                  value={values.group_allow_from ?? ''}
+                />
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Comma-separated group IDs (ending in @g.us). An empty allowlist permits no groups under allowlist
+                policy.
+              </p>
+              <label className="flex items-center justify-between gap-3">
+                Require a mention in groups
+                <Switch
+                  aria-label="Require a mention in groups"
+                  checked={values.require_mention ?? false}
+                  onCheckedChange={v => field('require_mention', v)}
+                />
+              </label>
+              <details className="grid gap-3">
+                <summary className="cursor-pointer text-sm font-medium">Advanced group settings</summary>
+                <div className="mt-3 grid gap-3">
+                  <label className="grid gap-1">
+                    Mention patterns
+                    <textarea
+                      aria-label="Mention patterns"
+                      className="min-h-20 rounded-md border border-input bg-background p-2 text-sm"
+                      onChange={e => field('mention_patterns', e.target.value.split('\n'))}
+                      value={(values.mention_patterns ?? []).join('\n')}
+                    />
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    One case-insensitive regular expression per line. These count as mentions; invalid patterns cannot
+                    be saved.
+                  </p>
+                  <label className="grid gap-1">
+                    Chats that do not require a mention
+                    <Input
+                      aria-label="Chats that do not require a mention"
+                      onChange={e => field('free_response_chats', e.target.value)}
+                      value={values.free_response_chats ?? ''}
+                    />
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Comma-separated chat IDs. These exceptions do not bypass access policies.
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Per-user conversation isolation is a gateway-wide setting, not a WhatsApp-only setting. This panel
+                    does not change it.
+                  </p>
+                </div>
+              </details>
+            </fieldset>
+          )}
+          {values.send_read_receipts === undefined && (
+            <p className="text-sm text-muted-foreground">
+              Update this backend to manage read receipts and group behavior.
+            </p>
+          )}
+          <div className="sticky bottom-0 flex flex-wrap gap-2 bg-background py-2">
             <Button disabled={busy || !Object.keys(edits).length} onClick={() => void save()}>
               Save changes
             </Button>

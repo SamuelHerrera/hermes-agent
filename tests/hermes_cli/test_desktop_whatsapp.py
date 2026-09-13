@@ -3,6 +3,72 @@ import pytest
 import yaml
 
 
+def test_behavior_controls_roundtrip_into_runtime():
+    from hermes_cli import web_server as ws
+    from hermes_constants import get_hermes_home
+    from gateway.config import load_gateway_config, Platform
+    from plugins.platforms.whatsapp.adapter import WhatsAppAdapter
+    home = get_hermes_home()
+    (home / 'config.yaml').write_text('platforms:\n  whatsapp:\n    enabled: true\n    extra:\n      dm_policy: allowlist\n      allow_from: [owner]\n')
+    fields = dict(send_read_receipts=True, reply_prefix='', group_policy='allowlist',
+                  group_allow_from='123@g.us', require_mention=True,
+                  free_response_chats='456@g.us')
+    asyncio.run(ws.update_desktop_whatsapp(ws.DesktopWhatsAppUpdate(**fields)))
+    settings = asyncio.run(ws.get_desktop_whatsapp())['settings']
+    for key, value in fields.items():
+        assert settings[key] == value
+    runtime = load_gateway_config().platforms[Platform.WHATSAPP]
+    adapter = WhatsAppAdapter(runtime)
+    assert adapter._send_read_receipts is True
+    assert adapter._reply_prefix == ''
+    assert adapter._group_policy == 'allowlist'
+    assert adapter._group_allow_from == {'123@g.us'}
+    assert adapter._whatsapp_require_mention() is True
+    assert adapter._whatsapp_free_response_chats() == {'456@g.us'}
+    assert adapter._allow_from == {'owner'}
+
+
+def test_mention_patterns_validate_and_reach_adapter():
+    from hermes_cli import web_server as ws
+    from hermes_constants import get_hermes_home
+    from gateway.config import load_gateway_config, Platform
+    from plugins.platforms.whatsapp.adapter import WhatsAppAdapter
+    from pydantic import ValidationError
+    (get_hermes_home() / 'config.yaml').write_text('platforms:\n  whatsapp:\n    enabled: true\n')
+    with pytest.raises(ValidationError):
+        ws.DesktopWhatsAppUpdate(mention_patterns=['['])
+    asyncio.run(ws.update_desktop_whatsapp(ws.DesktopWhatsAppUpdate(mention_patterns=['hey hermes', '^bot:'])))
+    assert asyncio.run(ws.get_desktop_whatsapp())['settings']['mention_patterns'] == ['hey hermes', '^bot:']
+    adapter = WhatsAppAdapter(load_gateway_config().platforms[Platform.WHATSAPP])
+    assert any(p.search('HEY HERMES') for p in adapter._mention_patterns)
+
+
+@pytest.mark.parametrize('field,old,new', [
+    ('send_read_receipts', True, False), ('reply_prefix', 'old', ''),
+    ('group_policy', 'open', 'disabled'), ('group_allow_from', ['old@g.us'], ''),
+    ('require_mention', True, False), ('mention_patterns', ['old'], []),
+])
+def test_behavior_edits_clear_shadowing_values_without_touching_other_fields(field, old, new):
+    import copy
+    from hermes_cli import web_server as ws
+    from hermes_constants import get_hermes_home
+    from gateway.config import load_gateway_config, Platform
+    block = {field: old, 'extra': {field: old}, 'dm_policy': 'allowlist', 'allow_from': ['owner']}
+    cfg = {'whatsapp': copy.deepcopy(block), 'platforms': {'whatsapp': copy.deepcopy(block)},
+           'gateway': {'platforms': {'whatsapp': copy.deepcopy(block)}}}
+    home = get_hermes_home()
+    (home / 'config.yaml').write_text(yaml.safe_dump(cfg))
+    before = asyncio.run(ws.get_desktop_whatsapp())['settings']
+    expected_old = ','.join(old) if field == 'group_allow_from' else old
+    assert before[field] == expected_old
+    asyncio.run(ws.update_desktop_whatsapp(ws.DesktopWhatsAppUpdate(**{field: new})))
+    after = asyncio.run(ws.get_desktop_whatsapp())['settings']
+    assert after == {**before, field: new}
+    runtime = load_gateway_config().platforms[Platform.WHATSAPP]
+    assert runtime.extra[field] == ([] if field == 'group_allow_from' else new)
+    assert runtime.extra['allow_from'] == ['owner']
+
+
 @pytest.mark.parametrize('layout', ['platforms', 'legacy', 'gateway-platforms', 'gateway-direct'])
 def test_settings_reads_match_runtime_precedence(layout):
     from hermes_cli import web_server as ws
