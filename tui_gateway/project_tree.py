@@ -53,8 +53,9 @@ DEFAULT_BRANCH_LABEL = "main"
 
 # The synthetic bucket holding every session no project claimed — a chat with no
 # cwd at all, or one whose folder can't be promoted (the bare home dir, HERMES
-# state, a workspace that has since been deleted). Without it those sessions are
-# invisible in the grouped view. The desktop labels it "Home"; the id/flag stay
+# state). Workspaces the user explicitly removed are filtered before this bucket
+# so deleting a project does not re-home its chats under Home. The desktop labels
+# it "Home"; the id/flag stay
 # named for what the bucket MEANS, since that's what membership keys off.
 NO_PROJECT_ID = "__no_project__"
 NO_PROJECT_LABEL = "Home"
@@ -672,6 +673,7 @@ def build_tree(
     hydrate: bool = False,
     is_junk_root: Optional[Callable[[str], bool]] = None,
     is_junk_cwd: Optional[Callable[[str], bool]] = None,
+    is_hidden_cwd: Optional[Callable[[str], bool]] = None,
     exists: Optional[Exists] = None,
 ) -> dict:
     """Build the authoritative project tree.
@@ -689,7 +691,9 @@ def build_tree(
     bare home dir, the HERMES_HOME subtree). ``is_junk_cwd`` is the narrower
     policy for non-git session folders: selected descendants may be intentional
     workspaces even when their parent tree contains Hermes state. User-created
-    projects are honored regardless. ``exists`` reports whether a directory is
+    projects are honored regardless. ``is_hidden_cwd`` suppresses rows whose
+    workspace belongs to an explicitly hidden/removed project, instead of falling
+    through to Home. ``exists`` reports whether a directory is
     still on disk, so a session whose workspace was DELETED (a removed worktree,
     a scratch dir under /tmp) doesn't get promoted to a phantom AUTO project;
     omit it (remote backends) to keep every candidate.
@@ -702,6 +706,7 @@ def build_tree(
     active_projects = [p for p in projects if not p.get("archived")]
     _junk = is_junk_root or (lambda _root: False)
     _junk_cwd = is_junk_cwd or (lambda _cwd: False)
+    _hidden_cwd = is_hidden_cwd or (lambda _cwd: False)
     _exists = exists or (lambda _path: True)
     folder_index = _FolderIndex(active_projects)
     sessions = _with_delegate_children(sessions)
@@ -709,6 +714,10 @@ def build_tree(
     by_project: dict[str, list[dict]] = {}
     unowned: list[dict] = []
     for session in sessions:
+        cwd = (session.get("cwd") or "").strip()
+        repo_root = _session_repo_root(session, resolve) if cwd else ""
+        if (cwd and _hidden_cwd(cwd)) or (repo_root and _hidden_cwd(repo_root)):
+            continue
         owner = _project_for_session(session, folder_index, resolve)
         if owner:
             by_project.setdefault(owner["id"], []).append(session)
@@ -916,6 +925,7 @@ def build_tree(
             hydrate=False,
             is_junk_root=is_junk_root,
             is_junk_cwd=is_junk_cwd,
+            is_hidden_cwd=is_hidden_cwd,
             exists=exists,
         )
         archived_tree = build_tree(
@@ -927,6 +937,7 @@ def build_tree(
             hydrate=False,
             is_junk_root=is_junk_root,
             is_junk_cwd=is_junk_cwd,
+            is_hidden_cwd=is_hidden_cwd,
             exists=exists,
         )
         active_sources = {project["id"]: project for project in count_tree["projects"]}

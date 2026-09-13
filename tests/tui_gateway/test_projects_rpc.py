@@ -376,7 +376,14 @@ def test_removed_project_stays_hidden_and_readd_restores_it(tmp_path, git_repo):
         db, preview_limit=3, hydrate=True, session_limit=100, include_discovered=True,
     )
     assert not any(p.get("path") == str(repo) for p in tree["projects"])
-    assert "remembered-session" in tree["scoped_session_ids"]
+    assert "remembered-session" not in tree["scoped_session_ids"]
+    home = next((p for p in tree["projects"] if p["id"] == project_tree.NO_PROJECT_ID), None)
+    assert home is None or all(
+        s["id"] != "remembered-session"
+        for repo_node in home["repos"]
+        for group in repo_node["groups"]
+        for s in group["sessions"]
+    )
 
     restored = _call("projects.create", {"name": "New name", "folders": [str(repo)], "use": True})["project"]
     assert restored["id"] == project["id"]

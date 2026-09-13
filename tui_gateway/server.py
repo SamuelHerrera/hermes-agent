@@ -12996,7 +12996,8 @@ def _build_project_tree(
         preview_limit=preview_limit,
         hydrate=hydrate,
         is_junk_root=lambda root: _is_repo_junk(root) or _is_removed_workspace(root),
-        is_junk_cwd=lambda cwd: _is_session_cwd_junk(cwd) or _is_removed_workspace(cwd),
+        is_junk_cwd=_is_session_cwd_junk,
+        is_hidden_cwd=_is_removed_workspace,
         exists=_dir_exists_cached,
     )
     return tree, active_id
