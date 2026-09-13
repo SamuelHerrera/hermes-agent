@@ -1,5 +1,53 @@
 import asyncio
 import time
+import pytest
+
+
+@pytest.mark.parametrize('body_profile,expected', [(None, 'work'), ('other', 'other')])
+@pytest.mark.parametrize('paired', [True, False])
+def test_start_onboarding_honors_query_profile_without_touching_primary(monkeypatch, tmp_path, body_profile, expected, paired):
+    import json
+    from hermes_cli import web_server as ws, profiles
+    from hermes_constants import get_hermes_home
+    from starlette.testclient import TestClient
+    home = get_hermes_home()
+    monkeypatch.setattr(profiles, '_get_profiles_root', lambda: home / 'profiles')
+    monkeypatch.setattr(profiles, '_get_default_hermes_home', lambda: home)
+    monkeypatch.setattr(ws, '_whatsapp_onboarding_sessions', {})
+    launched = []
+    # Record the worker's arguments instead of starting any pairing process.
+    monkeypatch.setattr(ws, '_run_whatsapp_pairing', lambda *args: launched.append(args))
+    for name, directory in [('primary', home), ('work', home / 'profiles/work'), ('other', home / 'profiles/other')]:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / 'config.yaml').write_text('{}\n')
+        if paired or name == 'primary':
+            session = directory / 'platforms/whatsapp/session'
+            session.mkdir(parents=True)
+            (session / 'creds.json').write_text(json.dumps({'me': {'id': '1555@s.whatsapp.net', 'name': name}}))
+    original = {p: p.read_bytes() for p in home.rglob('*') if p.is_file()}
+    client = TestClient(ws.app)
+    client.headers[ws._SESSION_HEADER_NAME] = ws._SESSION_TOKEN
+    body = {'mode': 'bot'}
+    if body_profile:
+        body['profile'] = body_profile
+    response = client.post('/api/messaging/whatsapp/onboarding/start?profile=work', json=body)
+    assert response.status_code == 200
+    result = response.json()
+    record = ws._whatsapp_onboarding_sessions[result['pairing_id']]
+    assert record.profile == expected
+    assert record.session_path == str(home / 'profiles' / expected / 'platforms/whatsapp/session')
+    if paired:
+        assert result['account_name'] == expected
+        assert not launched
+    else:
+        # A fake worker may still be scheduled when the response arrives.
+        for _ in range(100):
+            if launched:
+                break
+            time.sleep(0.001)
+        assert launched == [(result['pairing_id'], home / 'profiles' / expected / 'platforms/whatsapp/session', 'bot')]
+    assert {p: p.read_bytes() for p in home.rglob('*') if p.is_file()} == original
+    assert get_hermes_home() == home
 
 
 class _FakeProc:

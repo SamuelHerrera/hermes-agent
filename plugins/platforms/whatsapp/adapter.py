@@ -680,7 +680,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             # Start the bridge process in its own process group.
             # Route output to a log file so QR codes, errors, and reconnection
             # messages are preserved for troubleshooting.
-            whatsapp_mode = _wenv("WHATSAPP_MODE", "self-chat")
+            whatsapp_mode = self._resolved_bridge_settings()["WHATSAPP_MODE"]
             self._bridge_log = self._session_path.parent / "bridge.log"
             bridge_log_fh = open(self._bridge_log, "a", encoding="utf-8")
             self._bridge_log_fh = bridge_log_fh
@@ -700,7 +700,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             # vars.  Inject the resolved WHATSAPP_* values so the Node bridge
             # (which reads process.env.WHATSAPP_MODE etc.) sees the profile's
             # own configuration instead of falling back to self-chat defaults.
-            _profile_wa_mode = _wenv("WHATSAPP_MODE", "self-chat")
+            _profile_wa_mode = whatsapp_mode
             if _profile_wa_mode:
                 bridge_env["WHATSAPP_MODE"] = _profile_wa_mode
             for _key in (
@@ -719,6 +719,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 _v = _wenv(_key)
                 if _v:
                     bridge_env[_key] = _v
+            bridge_env.update(self._resolved_bridge_settings())
             # Pass the profile-aware cache directories so the bridge writes
             # media where the Python side reads it.  Without these the bridge
             # hardcodes ~/.hermes/{image,audio,document}_cache, which diverges
@@ -871,6 +872,20 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             self._close_bridge_log()
             await self._notify_fatal_error()
         return self.fatal_error_message or message
+
+    def _resolved_bridge_settings(self) -> dict[str, str]:
+        """Resolve persisted settings for both bridge argv and child env."""
+        extra = self.config.extra if isinstance(self.config.extra, dict) else {}
+        resolved = {"WHATSAPP_MODE": str(extra.get("mode") or _wenv("WHATSAPP_MODE", "self-chat"))}
+        if "dm_policy" in extra:
+            resolved["WHATSAPP_DM_POLICY"] = str(extra["dm_policy"])
+        if "allow_from" in extra or "allowFrom" in extra:
+            raw = extra.get("allow_from", extra.get("allowFrom"))
+            resolved["WHATSAPP_ALLOWED_USERS"] = ",".join(self._coerce_allow_list(raw))
+            # The bridge accepts either alias. An explicit empty canonical list
+            # must not inherit a grant via the older alias in process.env.
+            resolved["WHATSAPP_ALLOW_FROM"] = resolved["WHATSAPP_ALLOWED_USERS"]
+        return resolved
 
     async def disconnect(self) -> None:
         """Stop the WhatsApp bridge and clean up any orphaned processes."""

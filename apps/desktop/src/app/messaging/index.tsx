@@ -39,6 +39,7 @@ import { ListRow } from '../settings/primitives'
 import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 
 import { PlatformAvatar } from './platform-icon'
+import { WhatsAppManager } from './whatsapp-manager'
 
 interface MessagingViewProps extends React.ComponentProps<'section'> {
   setStatusbarItemGroup?: SetStatusbarItemGroup
@@ -141,6 +142,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
+  const [whatsappLegacy, setWhatsAppLegacy] = useState(false)
   const platformIds = useMemo(() => platforms?.map(p => p.id) ?? [], [platforms])
   const [selectedId, setSelectedId] = useRouteEnumParam('platform', platformIds, platformIds[0] ?? '')
 
@@ -436,6 +438,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                   onToggle={enabled => void handleToggle(selected, enabled)}
                   platform={selected}
                   saving={saving}
+                  whatsappLegacy={whatsappLegacy}
                 />
               )
             }
@@ -457,9 +460,11 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                   }))
                 }
                 onRevoke={setPendingRevoke}
+                onWhatsAppUnavailable={setWhatsAppLegacy}
                 pending={pendingByPlatform[selected.id] ?? []}
                 platform={selected}
                 saving={saving}
+                whatsappLegacy={whatsappLegacy}
               />
             )}
           </DetailColumn>
@@ -528,6 +533,8 @@ function PlatformRow({
 }
 
 function PlatformDetail({
+  whatsappLegacy,
+  onWhatsAppUnavailable,
   approved,
   approving,
   edits,
@@ -539,6 +546,8 @@ function PlatformDetail({
   platform,
   saving
 }: {
+  whatsappLegacy: boolean
+  onWhatsAppUnavailable: (unavailable: boolean) => void
   approved: PairingUser[]
   approving: null | string
   edits: Record<string, string>
@@ -640,115 +649,122 @@ function PlatformDetail({
         </section>
       )}
 
-      <section>
-        <SectionTitle>{m.getCredentials}</SectionTitle>
-        <p className="mt-1 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
-          {introCopy(platform, m)}
-        </p>
-        {platform.docs_url && (
-          <div className="mt-3">
-            <Button asChild size="sm" variant="textStrong">
-              <a
-                href={platform.docs_url}
-                onClick={event => {
-                  // Route through the validated external opener instead of
-                  // letting Electron resolve the anchor. A packaged build's
-                  // empty/relative href resolves to the app's own
-                  // index.html file path, which shell.openPath then fails to
-                  // open ("file not found"). Plugin platforms (Teams, etc.)
-                  // ship no docs_url, so this guard + handler keeps the
-                  // button from ever pointing at a local bundle path.
-                  event.preventDefault()
-                  openExternalLink(platform.docs_url)
-                }}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {m.openSetupGuide}
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
-          </div>
-        )}
-      </section>
-
-      <section>
-        <SectionTitle>{m.required}</SectionTitle>
-        <div className="mt-3 grid gap-1">
-          {requiredFields.length > 0 ? (
-            requiredFields.map(field => (
-              <MessagingField
-                edits={edits}
-                field={field}
-                key={field.key}
-                onClear={onClear}
-                onEdit={onEdit}
-                saving={saving}
-              />
-            ))
-          ) : (
-            <p className="text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
-              {m.noTokenNeeded}
+      {platform.id === 'whatsapp' && <WhatsAppManager onUnavailable={onWhatsAppUnavailable} />}
+      {(platform.id !== 'whatsapp' || whatsappLegacy) && (
+        <>
+          <section>
+            <SectionTitle>{m.getCredentials}</SectionTitle>
+            <p className="mt-1 text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
+              {introCopy(platform, m)}
             </p>
-          )}
-        </div>
-      </section>
+            {platform.docs_url && (
+              <div className="mt-3">
+                <Button asChild size="sm" variant="textStrong">
+                  <a
+                    href={platform.docs_url}
+                    onClick={event => {
+                      // Route through the validated external opener instead of
+                      // letting Electron resolve the anchor. A packaged build's
+                      // empty/relative href resolves to the app's own
+                      // index.html file path, which shell.openPath then fails to
+                      // open ("file not found"). Plugin platforms (Teams, etc.)
+                      // ship no docs_url, so this guard + handler keeps the
+                      // button from ever pointing at a local bundle path.
+                      event.preventDefault()
+                      openExternalLink(platform.docs_url)
+                    }}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {m.openSetupGuide}
+                    <ExternalLink className="size-3.5" />
+                  </a>
+                </Button>
+              </div>
+            )}
+          </section>
 
-      {optionalFields.length > 0 && (
-        <section>
-          <SectionTitle>{m.recommended}</SectionTitle>
-          <div className="mt-3 grid gap-1">
-            {optionalFields.map(field => (
-              <MessagingField
-                edits={edits}
-                field={field}
-                key={field.key}
-                onClear={onClear}
-                onEdit={onEdit}
-                saving={saving}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {hiddenCount > 0 && (
-        <section>
-          <button
-            className="flex w-full items-center justify-between gap-2 py-0.5 text-left text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => setShowAdvanced(value => !value)}
-            type="button"
-          >
-            <span>{m.advanced(hiddenCount)}</span>
-            <DisclosureCaret open={showAdvanced} size="0.875rem" />
-          </button>
-          {showAdvanced && (
+          <section>
+            <SectionTitle>{m.required}</SectionTitle>
             <div className="mt-3 grid gap-1">
-              {advancedFields.map(field => (
-                <MessagingField
-                  edits={edits}
-                  field={field}
-                  key={field.key}
-                  onClear={onClear}
-                  onEdit={onEdit}
-                  saving={saving}
-                />
-              ))}
+              {requiredFields.length > 0 ? (
+                requiredFields.map(field => (
+                  <MessagingField
+                    edits={edits}
+                    field={field}
+                    key={field.key}
+                    onClear={onClear}
+                    onEdit={onEdit}
+                    saving={saving}
+                  />
+                ))
+              ) : (
+                <p className="text-[length:var(--conversation-caption-font-size)] leading-(--conversation-caption-line-height) text-(--ui-text-tertiary)">
+                  {m.noTokenNeeded}
+                </p>
+              )}
             </div>
+          </section>
+
+          {optionalFields.length > 0 && (
+            <section>
+              <SectionTitle>{m.recommended}</SectionTitle>
+              <div className="mt-3 grid gap-1">
+                {optionalFields.map(field => (
+                  <MessagingField
+                    edits={edits}
+                    field={field}
+                    key={field.key}
+                    onClear={onClear}
+                    onEdit={onEdit}
+                    saving={saving}
+                  />
+                ))}
+              </div>
+            </section>
           )}
-        </section>
+
+          {hiddenCount > 0 && (
+            <section>
+              <button
+                className="flex w-full items-center justify-between gap-2 py-0.5 text-left text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => setShowAdvanced(value => !value)}
+                type="button"
+              >
+                <span>{m.advanced(hiddenCount)}</span>
+                <DisclosureCaret open={showAdvanced} size="0.875rem" />
+              </button>
+              {showAdvanced && (
+                <div className="mt-3 grid gap-1">
+                  {advancedFields.map(field => (
+                    <MessagingField
+                      edits={edits}
+                      field={field}
+                      key={field.key}
+                      onClear={onClear}
+                      onEdit={onEdit}
+                      saving={saving}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+        </>
       )}
     </>
   )
 }
 
 function PlatformActionBar({
+  whatsappLegacy,
   hasEdits,
   onSave,
   onToggle,
   platform,
   saving
 }: {
+  whatsappLegacy: boolean
   hasEdits: boolean
   onSave: () => void
   onToggle: (enabled: boolean) => void
@@ -758,6 +774,10 @@ function PlatformActionBar({
   const { t } = useI18n()
   const m = t.messaging
   const isSavingEnv = saving === `env:${platform.id}`
+
+  if (platform.id === 'whatsapp' && !whatsappLegacy) {
+    return null
+  }
 
   return (
     <>

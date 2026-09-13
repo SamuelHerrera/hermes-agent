@@ -7808,7 +7808,7 @@ _PLATFORM_OVERRIDES: dict[str, dict[str, Any]] = {
     "whatsapp": {
         "name": "WhatsApp",
         "description": "Use Hermes through the bundled WhatsApp bridge with QR-based auth.",
-        "docs_url": "https://github.com/tulir/whatsmeow",
+        "docs_url": "https://hermes-agent.nousresearch.com/docs/user-guide/messaging/whatsapp",
         "env_vars": (
             "WHATSAPP_ENABLED",
             "WHATSAPP_MODE",
@@ -8548,11 +8548,28 @@ def _messaging_platform_payload(
     }
     if whatsapp_setup is not None:
         payload["whatsapp_setup"] = whatsapp_setup
+        # A gateway snapshot may outlive its bridge. Verify the actual child
+        # before advertising a live WhatsApp connection.
+        if payload['state'] == 'connected':
+            from hermes_cli.desktop_whatsapp import _settings, _bridge_health
+            _, extra = _settings(sys.modules[__name__])
+            session = Path(extra.get('session_path') or _whatsapp_session_path())
+            bridge = _bridge_health(session, int(extra.get('bridge_port', 3000)))
+            payload['state'] = bridge['state'] if gateway_running else 'gateway_stopped'
+
     return payload
 
 
 def _write_platform_enabled(platform_id: str, enabled: bool) -> None:
     write_platform_config_field(platform_id, "enabled", enabled)
+
+
+from hermes_cli.desktop_whatsapp import (
+    DesktopWhatsAppUpdate, get_desktop_whatsapp, update_desktop_whatsapp,
+)
+
+app.get("/api/messaging/whatsapp/manage")(get_desktop_whatsapp)
+app.put("/api/messaging/whatsapp/manage")(update_desktop_whatsapp)
 
 
 _WHATSAPP_ONBOARDING_TTL_SECONDS = 600
@@ -8876,8 +8893,21 @@ def _supersede_whatsapp_onboarding_sessions(session_path: Path) -> None:
 
 
 def _whatsapp_onboarding_payload(pairing_id: str, record: _WhatsAppOnboardingSession) -> dict[str, Any]:
+    qr_image = None
+    if record.qr_payload and record.status not in _WHATSAPP_ONBOARDING_TERMINAL_STATUSES:
+        try:
+            import base64
+            import io
+            import qrcode
+            import qrcode.image.svg
+            output = io.BytesIO()
+            qrcode.make(record.qr_payload, image_factory=qrcode.image.svg.SvgPathImage).save(output)
+            qr_image = 'data:image/svg+xml;base64,' + base64.b64encode(output.getvalue()).decode('ascii')
+        except ImportError:
+            pass  # Older installs can still use the CLI QR setup.
     return {
         "pairing_id": pairing_id,
+        "qr_image": qr_image,
         "status": record.status,
         "qr_payload": record.qr_payload,
         "expires_at": record.expires_at,
@@ -8912,10 +8942,10 @@ def _restart_gateway_after_whatsapp_onboarding(profile: Optional[str] = None) ->
 
 
 @app.post("/api/messaging/whatsapp/onboarding/start")
-async def start_whatsapp_onboarding(body: WhatsAppOnboardingStart):
+async def start_whatsapp_onboarding(body: WhatsAppOnboardingStart, profile: Optional[str] = None):
     mode = _normalize_whatsapp_onboarding_mode(body.mode)
     allowed_users = _normalize_whatsapp_allowed_users(body.allowed_users)
-    effective_profile = body.profile
+    effective_profile = body.profile or profile
 
     with _config_profile_scope(effective_profile):
         session_path = _whatsapp_session_path()
