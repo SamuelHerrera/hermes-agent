@@ -342,7 +342,7 @@ export function CommandCenterView({
   )
 
   const content = (
-    <OverlaySplitLayout>
+    <OverlaySplitLayout className={!showNav ? 'grid-cols-1' : undefined}>
       {showNav && <OverlayNav groups={navGroups} />}
 
       <OverlayMain>
