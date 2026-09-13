@@ -7,6 +7,7 @@ import type { Contribution } from '@/contrib/types'
 import { setCronJobs } from '@/store/cron'
 import { $keepAwake } from '@/store/keep-awake'
 import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
+import { $activeGatewayProfile, $profiles, $showAllProfiles } from '@/store/profile'
 import { $projectDialog, closeProjectDialog } from '@/store/projects'
 
 import type { StatusbarItem } from './statusbar-controls'
@@ -34,6 +35,9 @@ afterEach(() => {
   act(() => setSidebarOpen(true))
   act(() => setCronJobs([]))
   act(() => closeProjectDialog())
+  act(() => $profiles.set([]))
+  act(() => $activeGatewayProfile.set('default'))
+  act(() => $showAllProfiles.set(false))
   mockNavContributions.length = 0
   cleanup()
   vi.clearAllMocks()
@@ -318,6 +322,44 @@ describe('TitlebarControls', () => {
       'Approval mode: Off',
       'Create new'
     ])
+  })
+
+  it('uses the all-profiles glyph in the titlebar when all profiles is selected', () => {
+    act(() => {
+      $profiles.set([
+        {
+          has_env: false,
+          is_default: true,
+          model: null,
+          name: 'default',
+          path: '/home/user/.hermes',
+          provider: null,
+          skill_count: 0
+        },
+        {
+          has_env: false,
+          is_default: false,
+          model: null,
+          name: 'hp-local',
+          path: '/home/user/.hermes/profiles/hp-local',
+          provider: null,
+          skill_count: 0
+        }
+      ])
+      $activeGatewayProfile.set('default')
+      $showAllProfiles.set(true)
+    })
+
+    render(
+      <MemoryRouter>
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    const profileButton = screen.getByRole('button', { name: 'Profiles' })
+
+    expect(profileButton.querySelector('.codicon-layers')).toBeTruthy()
+    expect(profileButton.querySelector('.codicon-home')).toBeNull()
   })
 
   it('does not expand the toolbar during sidebar resize previews', async () => {

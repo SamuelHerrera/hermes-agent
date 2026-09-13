@@ -184,6 +184,34 @@ function profileDisplayName(profile: ProfileInfo | undefined, activeKey: string)
   return activeKey || 'default'
 }
 
+function TitlebarProfileTriggerGlyph({
+  activeColor,
+  activeKey,
+  activeName,
+  activeProfile,
+  showAllProfiles
+}: {
+  activeColor: null | string
+  activeKey: string
+  activeName: string
+  activeProfile: ProfileInfo | undefined
+  showAllProfiles: boolean
+}) {
+  if (showAllProfiles) {
+    return <Codicon aria-hidden="true" className="text-(--ui-text-tertiary)" name="layers" size="0.875rem" />
+  }
+
+  return (
+    <ProfileGlyph
+      aria-hidden="true"
+      className="size-3.5"
+      color={activeColor}
+      isDefault={activeProfile?.is_default ?? activeKey === 'default'}
+      name={activeName}
+    />
+  )
+}
+
 /** Compact titlebar profile switcher: active profile image + dropdown list.
  *  Profile creation/import stay out of this chrome by design. */
 function TitlebarProfileMenu() {
@@ -232,12 +260,12 @@ function TitlebarProfileMenu() {
             type="button"
             variant="ghost"
           >
-            <ProfileGlyph
-              aria-hidden="true"
-              className="size-3.5"
-              color={activeColor}
-              isDefault={activeProfile?.is_default ?? activeKey === 'default'}
-              name={activeName}
+            <TitlebarProfileTriggerGlyph
+              activeColor={activeColor}
+              activeKey={activeKey}
+              activeName={activeName}
+              activeProfile={activeProfile}
+              showAllProfiles={showAllProfiles}
             />
           </Button>
         </DropdownMenuTrigger>
