@@ -44,7 +44,6 @@ import {
   PanelBody,
   PanelDetail,
   PanelEmpty,
-  PanelHeader,
   PanelList,
   PanelListRow,
   PanelMeta,
@@ -372,7 +371,6 @@ export function WebhooksView({ onClose }: WebhooksViewProps) {
         </>
       ) : (
         <>
-          <PanelHeader subtitle={w.hint} title={w.subscriptions(subscriptions.length)} />
           {banners}
           <PanelBody>
             <PanelList

@@ -62,7 +62,6 @@ import {
   PanelBody,
   PanelDetail,
   PanelEmpty,
-  PanelHeader,
   PanelList,
   PanelListRow,
   type PanelMenuItem,
@@ -509,8 +508,6 @@ export function CronView({
 
   return (
     <Panel closeLabel={c.close} onClose={onClose}>
-      <PanelHeader subtitle={c.count(totalCount)} title={c.title} />
-
       {loading && jobs.length === 0 ? (
         <PageLoader label={c.loading} />
       ) : totalCount === 0 && visibleBlueprints.length === 0 ? (

@@ -12,7 +12,6 @@ import { lazy, type ReactNode, Suspense } from 'react'
 import { Codicon } from '@/components/ui/codicon'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
-import { Globe } from '@/lib/icons'
 import { $cronJobs } from '@/store/cron'
 import { $routeTiles, closeRouteTile, type RouteTile } from '@/store/route-tiles'
 
@@ -66,10 +65,6 @@ function cronTitle(path: string): string {
 }
 
 function BuiltinRouteTabLead({ path }: { path: string }) {
-  if (path === WEBHOOKS_ROUTE) {
-    return <Globe className="size-3" />
-  }
-
   const icon = isCronRoute(path) ? 'clockface' : BUILTIN_PAGES[path]?.icon
 
   return icon ? <Codicon name={icon} size="0.75rem" /> : null
