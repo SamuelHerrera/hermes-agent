@@ -4,7 +4,7 @@ import type { ComponentProps } from 'react'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
-import { toggleFileBrowserOpen } from '@/store/layout'
+import { $fileBrowserOpen, setFileBrowserOpen, toggleFileBrowserOpen } from '@/store/layout'
 
 import { allPaneIds } from '../model'
 import { $activeTabbedScreen, $tabbedScreenTrees } from '../screens'
@@ -119,12 +119,14 @@ export function ScrollWindowsMinimap() {
 
 export function ScrollWindowsWorkspaceChips() {
   const mode = useStore($layoutSurfaceMode)
+  const fileBrowserOpen = useStore($fileBrowserOpen)
   const filesVisible = useStore($paneVisible('files'))
   const scrollWorkspaceId = useStore($activeScrollWorkspaceId)
   const tabbedScreenId = useStore($activeTabbedScreen)
   const tabbedTrees = useStore($tabbedScreenTrees)
   const workspaces = useStore($scrollWindowWorkspaces)
   const activeWorkspaceId = mode === 'tabbed' ? tabbedScreenId : scrollWorkspaceId
+  const fileToggleActive = mode === 'scroll-windows' ? fileBrowserOpen : filesVisible
 
   const counts = new Map(
     mode === 'tabbed'
@@ -163,13 +165,13 @@ export function ScrollWindowsWorkspaceChips() {
         )
       })}
       <Button
-        aria-label={filesVisible ? 'Hide files' : 'Show files'}
-        aria-pressed={filesVisible}
+        aria-label={fileToggleActive ? 'Hide files' : 'Show files'}
+        aria-pressed={fileToggleActive}
         className={cn(
           'text-muted-foreground/85 hover:bg-(--ui-control-hover-background) hover:text-foreground',
-          filesVisible && 'bg-(--ui-control-active-background) text-(--ui-text-primary)'
+          fileToggleActive && 'bg-(--ui-control-active-background) text-(--ui-text-primary)'
         )}
-        onClick={toggleFileBrowserOpen}
+        onClick={() => (mode === 'scroll-windows' ? setFileBrowserOpen(!fileBrowserOpen) : toggleFileBrowserOpen())}
         size="icon-titlebar"
         type="button"
         variant="ghost"

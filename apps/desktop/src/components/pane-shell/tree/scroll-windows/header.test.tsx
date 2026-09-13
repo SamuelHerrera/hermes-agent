@@ -6,6 +6,7 @@ import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-g
 import { $terminals } from '@/app/right-sidebar/terminal/terminals'
 import { CRON_ROUTE, SKILLS_ROUTE, WEBHOOKS_ROUTE } from '@/app/routes'
 import { registry } from '@/contrib/registry'
+import { setFileBrowserOpen } from '@/store/layout'
 import { $projectTree } from '@/store/projects'
 import { $routeTiles } from '@/store/route-tiles'
 import { $currentCwd, $selectedStoredSessionId, $sessions } from '@/store/session'
@@ -180,6 +181,40 @@ describe('scroll card project headers', () => {
 
     expect(await screen.findByRole('menuitem', { name: /^close$/i })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /close others/i })).toBeTruthy()
+  })
+
+  it('keeps the global files rail visible in scroll-window mode', () => {
+    disposers.push(
+      registry.register({
+        area: 'panes',
+        data: { placement: 'left' },
+        id: 'sessions',
+        render: () => <div>Sessions rail</div>,
+        title: 'Sessions'
+      }),
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main', uncloseable: true },
+        id: 'workspace',
+        render: () => <div>Chat body</div>,
+        title: 'Chat'
+      }),
+      registry.register({
+        area: 'panes',
+        data: { placement: 'right' },
+        id: 'files',
+        render: () => <div>Files rail</div>,
+        title: 'Files'
+      })
+    )
+    declareDefaultTree(group(['workspace'], { active: 'workspace', id: 'grp-main' }))
+    setFileBrowserOpen(true)
+
+    const { container } = render(<ScrollWindowWorkspace />)
+
+    expect(screen.getByText('Files rail')).toBeTruthy()
+    expect(container.querySelector('[data-scroll-window-files]')).toBeTruthy()
+    expect(container.querySelector('[data-scroll-window-files] [data-scroll-window-header]')).toBeNull()
   })
 
   it('shows built-in page icons in tab strips and scroll-window cards', () => {

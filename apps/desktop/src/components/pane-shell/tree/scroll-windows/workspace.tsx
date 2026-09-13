@@ -16,9 +16,13 @@ import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { cn } from '@/lib/utils'
 import {
+  $fileBrowserOpen,
   $sidebarOpen,
   $sidebarWidth,
   CHAT_SIDEBAR_PANE_ID,
+  FILE_BROWSER_DEFAULT_WIDTH,
+  FILE_BROWSER_MAX_WIDTH,
+  FILE_BROWSER_MIN_WIDTH,
   setSidebarResizing,
   SIDEBAR_DEFAULT_WIDTH,
   SIDEBAR_MAX_WIDTH
@@ -89,6 +93,7 @@ export function ScrollWindowWorkspace() {
   const workspaces = useStore($scrollWindowWorkspaces)
   const revealWindowId = useStore($scrollWindowRevealRequest)
   const panesWithCloser = useStore($panesWithCloser)
+  const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
@@ -112,6 +117,7 @@ export function ScrollWindowWorkspace() {
 
   const availableWindowKey = availableWindowIds.join('\u0000')
   const sidebarPane = paneById.get('sessions')
+  const filesPane = paneById.get('files')
 
   useEffect(() => {
     syncScrollWindowWindows(availableWindowIds)
@@ -524,6 +530,21 @@ export function ScrollWindowWorkspace() {
           </div>
         )}
       </div>
+      {fileBrowserOpen && filesPane?.render ? (
+        <aside
+          className="relative z-10 flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)"
+          data-scroll-window-files=""
+          style={{ maxWidth: FILE_BROWSER_MAX_WIDTH, minWidth: FILE_BROWSER_MIN_WIDTH, width: FILE_BROWSER_DEFAULT_WIDTH }}
+        >
+          <PaneGroupContext.Provider value="scroll-files">
+            <PaneVisibleContext.Provider value>
+              <ContribBoundary id={filesPane.id}>
+                <ContribRender render={filesPane.render} />
+              </ContribBoundary>
+            </PaneVisibleContext.Provider>
+          </PaneGroupContext.Provider>
+        </aside>
+      ) : null}
     </div>
   )
 }

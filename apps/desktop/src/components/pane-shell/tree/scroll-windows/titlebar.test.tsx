@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 beforeEach(() => {
@@ -42,4 +42,21 @@ it('renders the files toggle after the desktop workspace buttons', async () => {
     'Switch to workspace 5',
     'Hide files'
   ])
+})
+
+it('drives the files rail directly while scroll-window mode is active', async () => {
+  const { ScrollWindowsWorkspaceChips } = await setup()
+  const { $fileBrowserOpen } = await import('@/store/layout')
+  const { setLayoutSurfaceMode } = await import('./store')
+
+  setLayoutSurfaceMode('scroll-windows')
+  render(<ScrollWindowsWorkspaceChips />)
+
+  const button = screen.getByRole('button', { name: 'Show files' })
+  expect($fileBrowserOpen.get()).toBe(false)
+
+  fireEvent.click(button)
+
+  expect($fileBrowserOpen.get()).toBe(true)
+  expect(screen.getByRole('button', { name: 'Hide files' })).toBeTruthy()
 })

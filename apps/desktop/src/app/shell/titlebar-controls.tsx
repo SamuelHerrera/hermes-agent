@@ -414,7 +414,7 @@ export function TitlebarControls({
   const leftToolbarTools: TitlebarTool[] = [
     {
       active: layoutSurfaceMode === 'scroll-windows',
-      icon: <TitlebarIcon name={layoutSurfaceMode === 'scroll-windows' ? 'multiple-windows' : 'window'} />,
+      icon: <TitlebarIcon name={layoutSurfaceMode === 'scroll-windows' ? 'layout' : 'multiple-windows'} />,
       id: 'layout-surface',
       label: layoutSurfaceMode === 'scroll-windows' ? 'Use tabbed layout' : 'Use scroll-window layout',
       onSelect: () => {
