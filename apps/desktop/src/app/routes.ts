@@ -10,7 +10,6 @@ type NavigateLike = (to: string, options?: { replace?: boolean }) => void
 export const SESSION_ROUTE_PREFIX = '/'
 export const NEW_CHAT_ROUTE = '/'
 export const SETTINGS_ROUTE = '/settings'
-export const COMMAND_CENTER_ROUTE = '/command-center'
 export const SKILLS_ROUTE = '/skills'
 export const MESSAGING_ROUTE = '/messaging'
 export const WEBHOOKS_ROUTE = '/webhooks'
@@ -24,7 +23,6 @@ export type AppView =
   | 'agents'
   | 'artifacts'
   | 'chat'
-  | 'command-center'
   | 'cron'
   // A contributed (plugin) full page at its own route — NOT chat. Without this
   // distinction contributed paths fell through appViewForPath's 'chat' default,
@@ -41,7 +39,6 @@ export type AppView =
 export type AppRouteId =
   | 'agents'
   | 'artifacts'
-  | 'command-center'
   | 'cron'
   | 'messaging'
   | 'new'
@@ -60,7 +57,6 @@ export interface AppRoute {
 export const APP_ROUTES = [
   { id: 'new', path: NEW_CHAT_ROUTE, view: 'chat' },
   { id: 'settings', path: SETTINGS_ROUTE, view: 'settings' },
-  { id: 'command-center', path: COMMAND_CENTER_ROUTE, view: 'command-center' },
   { id: 'skills', path: SKILLS_ROUTE, view: 'skills' },
   { id: 'messaging', path: MESSAGING_ROUTE, view: 'messaging' },
   { id: 'webhooks', path: WEBHOOKS_ROUTE, view: 'webhooks' },
@@ -72,7 +68,8 @@ export const APP_ROUTES = [
 ] as const satisfies readonly AppRoute[]
 
 const APP_VIEW_BY_PATH = new Map<string, AppView>(APP_ROUTES.map(route => [route.path, route.view]))
-const RESERVED_PATHS: ReadonlySet<string> = new Set(APP_ROUTES.map(route => route.path))
+const LEGACY_RESERVED_PATHS = ['/command-center']
+const RESERVED_PATHS: ReadonlySet<string> = new Set([...APP_ROUTES.map(route => route.path), ...LEGACY_RESERVED_PATHS])
 
 // ── Contributed routes — the `routes` registry area ─────────────────────────
 // A contribution mounts a FULL PAGE in the workspace pane at `data.path`

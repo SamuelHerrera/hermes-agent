@@ -583,6 +583,7 @@ export function TitlebarControls({
   const visibleStatusbarItems = [...statusbarLeftItems, ...statusbarItems].filter(
     item =>
       !item.hidden &&
+      item.id !== 'command-center' &&
       (item.lockedVisible || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
   )
 

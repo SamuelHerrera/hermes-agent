@@ -18,7 +18,6 @@ import {
   AGENTS_ROUTE,
   appViewForPath,
   ARTIFACTS_ROUTE,
-  COMMAND_CENTER_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
   navigateToWorkspacePage,
@@ -99,7 +98,6 @@ describe('classification of targets carrying a query', () => {
     [`${SKILLS_ROUTE}?tab=toolsets`, 'skills'],
     [`${SKILLS_ROUTE}?tab=mcp&server=ctx7`, 'skills'],
     [`${SETTINGS_ROUTE}?tab=keys`, 'settings'],
-    [`${COMMAND_CENTER_ROUTE}?section=system`, 'command-center'],
     [`${CRON_ROUTE}/daily`, 'cron']
   ])('%s is not a session route', (to, view) => {
     expect(routeSessionId(to)).toBeNull()
@@ -147,12 +145,6 @@ describe('syncWorkspaceRoute', () => {
     expect(fronted()).toBe(true)
   })
 
-  it('fronts on the command center page route', () => {
-    syncWorkspaceRoute(COMMAND_CENTER_ROUTE)
-
-    expect($workspaceIsPage.get()).toBe(true)
-    expect(fronted()).toBe(true)
-  })
 
   it('fronts on a cron job page route', () => {
     syncWorkspaceRoute(`${CRON_ROUTE}/daily`)
@@ -268,14 +260,6 @@ describe('openWorkspacePageRoute', () => {
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('opens command center as a center tab', () => {
-    const navigate = vi.fn()
-
-    openWorkspacePageRoute(navigate, COMMAND_CENTER_ROUTE)
-
-    expect(openRouteTile).toHaveBeenCalledWith(COMMAND_CENTER_ROUTE, 'center')
-    expect(navigate).not.toHaveBeenCalled()
-  })
 
   it('still navigates chat and overlay routes normally', () => {
     const navigate = vi.fn()

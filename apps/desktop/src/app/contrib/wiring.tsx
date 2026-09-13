@@ -246,7 +246,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     agentsOpen,
     chatOpen,
     closeOverlayToPreviousRoute,
-    commandCenterOpen,
     currentView,
     openAgents,
     openCommandCenterSection,
@@ -320,7 +319,6 @@ export function ContribWiring({ children }: { children: ReactNode }) {
   const { leftStatusbarItems, statusbarItems } = useStatusbarItems({
     agentsOpen,
     chatOpen,
-    commandCenterOpen,
     extraLeftItems: extraLeftStatusbarItems,
     extraRightItems: extraRightStatusbarItems,
     freshDraftReady,
@@ -329,8 +327,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     openAgents,
     openCommandCenterSection,
     requestGateway,
-    statusSnapshot,
-    toggleCommandCenter
+    statusSnapshot
   })
 
   const openProviderSettings = useCallback(() => navigate(`${SETTINGS_ROUTE}?tab=providers`), [navigate])

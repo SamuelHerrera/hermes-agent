@@ -45,7 +45,6 @@ import {
   Palette,
   PawPrint,
   Plus,
-  RefreshCw,
   Settings,
   Settings2,
   SlidersHorizontal,
@@ -57,7 +56,7 @@ import {
 } from '@/lib/icons'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
-import { resolveVersionStatus } from '@/lib/version-status'
+
 import { $repoWorktrees } from '@/store/coding-status'
 import {
   $commandPaletteOpen,
@@ -69,17 +68,7 @@ import { $bindings, bindingsFor } from '@/store/keybinds'
 import { $dismissedAutoProjectIds, filterVisibleProjects } from '@/store/layout'
 import { openPetGenerate } from '@/store/pet-generate'
 import { $projectTree, goToProject, openFolderAsProject, requestStartWorkSession } from '@/store/projects'
-import { $connection } from '@/store/session'
-import { runGatewayRestart } from '@/store/system-actions'
-import {
-  $backendUpdateApply,
-  $backendUpdateStatus,
-  $desktopVersion,
-  $updateApply,
-  $updateStatus,
-  requestActiveUpdate,
-  UPDATE_UI_DISABLED_FOR_LOCAL_FORK
-} from '@/store/updates'
+
 import { canOpenNewWindow, openNewWindow } from '@/store/windows'
 import { luminance } from '@/themes/color'
 import { type ThemeMode, useTheme } from '@/themes/context'
@@ -89,7 +78,6 @@ import { openSession, openSessionIntentFromModifiers } from '../open-session'
 import {
   AGENTS_ROUTE,
   ARTIFACTS_ROUTE,
-  COMMAND_CENTER_ROUTE,
   CRON_ROUTE,
   MESSAGING_ROUTE,
   NEW_CHAT_ROUTE,
@@ -535,34 +523,6 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState<string | null>(null)
 
-  // The Update row names the same install the statusbar names — same target
-  // selection, same resolver. Reduced to the label string: an in-flight apply
-  // rewrites these stores on every progress line, and only a changed string
-  // should rebuild the palette's groups.
-  const connection = useStore($connection)
-  const desktopVersion = useStore($desktopVersion)
-  const clientStatus = useStore($updateStatus)
-  const clientApply = useStore($updateApply)
-  const backendStatus = useStore($backendUpdateStatus)
-  const backendApply = useStore($backendUpdateApply)
-
-  const updateVersionLabel = useMemo(() => {
-    const backend = connection?.mode === 'remote'
-    const apply = backend ? backendApply : clientApply
-    const status = backend ? backendStatus : clientStatus
-
-    return resolveVersionStatus({
-      applying: apply.applying || apply.stage === 'restart',
-      behind: status?.behind ?? 0,
-      copy: t.shell.statusbar,
-      remote: backend,
-      restarting: apply.stage === 'restart',
-      sha: status?.currentSha?.slice(0, 7) ?? null,
-      target: backend ? 'backend' : 'client',
-      updateAvailable: status?.updateAvailable,
-      version: backend ? status?.currentVersion : desktopVersion?.appVersion
-    }).label
-  }, [backendApply, backendStatus, clientApply, clientStatus, connection?.mode, desktopVersion?.appVersion, t])
 
   // cmdk's onSelect doesn't forward the triggering event — keep the last
   // click/keydown modifiers so session rows can honour ⌘-Enter / ⌘-click.
@@ -779,6 +739,13 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             run: go(SETTINGS_ROUTE)
           },
           {
+            icon: MessageCircle,
+            id: 'nav-sessions',
+            keywords: ['sessions', 'recent', 'history', 'chat', 'open'],
+            label: cc.sections.sessions,
+            to: 'sessions'
+          },
+          {
             action: 'nav.skills',
             icon: Wrench,
             id: 'nav-skills',
@@ -851,51 +818,6 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
           ]
         : []),
       {
-        heading: cc.commandCenter,
-        items: [
-          {
-            icon: Archive,
-            id: 'cc-sessions',
-            keywords: ['command center', 'sessions', 'pin'],
-            label: cc.sections.sessions,
-            run: go(`${COMMAND_CENTER_ROUTE}?section=sessions`)
-          },
-          {
-            icon: Activity,
-            id: 'cc-system',
-            keywords: ['command center', 'system', 'status', 'logs'],
-            label: cc.sections.system,
-            run: go(`${COMMAND_CENTER_ROUTE}?section=system`)
-          },
-          {
-            icon: BarChart3,
-            id: 'cc-usage',
-            keywords: ['command center', 'usage', 'tokens', 'cost'],
-            label: cc.sections.usage,
-            run: go(`${COMMAND_CENTER_ROUTE}?section=usage`)
-          },
-          {
-            icon: RefreshCw,
-            id: 'cc-restart-gateway',
-            keywords: ['gateway', 'restart', 'messaging', 'reconnect', 'system'],
-            label: cc.restartGateway,
-            run: () => void runGatewayRestart()
-          },
-          ...(UPDATE_UI_DISABLED_FOR_LOCAL_FORK
-            ? []
-            : [
-                {
-                  detail: updateVersionLabel,
-                  icon: Download,
-                  id: 'cc-update-hermes',
-                  keywords: ['update', 'upgrade', 'hermes', 'version', 'system', 'restart'],
-                  label: cc.updateHermes,
-                  run: () => requestActiveUpdate()
-                }
-              ])
-        ]
-      },
-      {
         // Declared before Settings: cmdk keeps group order, so this keeps the
         // theme/mode pickers on top for "theme"/"color" queries instead of
         // buried under a fuzzy Settings match.
@@ -941,6 +863,27 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
             label: settingsSectionLabel(section),
             run: go(settingsTab(`config:${section.id}`))
           })),
+          {
+            icon: Activity,
+            id: 'set-system-status',
+            keywords: ['settings', 'system', 'status', 'logs', 'gateway'],
+            label: cc.sections.system,
+            run: go(settingsTab('system-status'))
+          },
+          {
+            icon: BarChart3,
+            id: 'set-usage',
+            keywords: ['settings', 'usage', 'tokens', 'cost', 'analytics'],
+            label: cc.sections.usage,
+            run: go(settingsTab('usage'))
+          },
+          {
+            icon: Wrench,
+            id: 'set-maintenance',
+            keywords: ['settings', 'maintenance', 'cleanup', 'repair'],
+            label: cc.sections.maintenance,
+            run: go(settingsTab('maintenance'))
+          },
           ...NON_CONFIG_SETTINGS.map(entry => ({
             icon: entry.icon,
             id: `set-${entry.tab}`,
@@ -962,8 +905,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
     projectTree,
     selectTick,
     settingsSectionLabel,
-    t,
-    updateVersionLabel
+    t
   ])
 
   // The long, granular lists (settings fields, API keys, MCP servers, archived
@@ -1230,6 +1172,27 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
           }
         ]
       },
+      sessions: {
+        title: t.commandCenter.sections.sessions,
+        placeholder: t.commandCenter.searchPlaceholder,
+        groups: [
+          {
+            heading: t.commandCenter.sections.sessions,
+            items: sessions.map(session => ({
+              icon: MessageCircle,
+              id: `sessions-page-${session.id}`,
+              keywords: [
+                'chat',
+                'session',
+                ...(session.preview ? [session.preview] : []),
+                ...(session.git_branch ? [session.git_branch] : [])
+              ],
+              label: session.title,
+              runWithEvent: goSession(session.id)
+            }))
+          }
+        ]
+      },
       // Server-driven page: browse petdex gallery, adopt/switch, toggle off.
       pets: {
         title: t.commandCenter.pets.title,
@@ -1244,7 +1207,7 @@ function CommandPaletteBody({ onExited }: { onExited: () => void }) {
         groups: []
       }
     }),
-    [availableThemes, mode, resolvedMode, setMode, setTheme, t, themeName]
+    [availableThemes, goSession, mode, resolvedMode, sessions, setMode, setTheme, t, themeName]
   )
 
   const activePage = page ? subPages[page] : null

@@ -8,8 +8,8 @@ import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from
 import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import {
-  Archive,
   Activity,
+  Archive,
   BarChart3,
   Bell,
   Download,

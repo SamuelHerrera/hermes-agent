@@ -232,7 +232,7 @@ describe('TitlebarControls', () => {
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
     fireEvent.click(more)
 
-    expect(await screen.findByRole('menuitem', { name: 'Command Center' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Command Center' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: 'Scheduled jobs' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
