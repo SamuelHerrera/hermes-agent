@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { watchRouteTiles } from '@/app/chat/route-tile'
 import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $terminals } from '@/app/right-sidebar/terminal/terminals'
-import { CRON_ROUTE, SKILLS_ROUTE } from '@/app/routes'
+import { CRON_ROUTE, SKILLS_ROUTE, WEBHOOKS_ROUTE } from '@/app/routes'
 import { registry } from '@/contrib/registry'
 import { $projectTree } from '@/store/projects'
 import { $routeTiles } from '@/store/route-tiles'
@@ -183,17 +183,17 @@ describe('scroll card project headers', () => {
   })
 
   it('shows built-in page icons in tab strips and scroll-window cards', () => {
-    $routeTiles.set([{ path: SKILLS_ROUTE, dir: 'center' }, { path: CRON_ROUTE, dir: 'center' }])
+    $routeTiles.set([{ path: SKILLS_ROUTE, dir: 'center' }, { path: CRON_ROUTE, dir: 'center' }, { path: WEBHOOKS_ROUTE, dir: 'center' }])
     watchRouteTiles()
 
-    const node = group(['route-tile:/skills', 'route-tile:/cron'], { active: 'route-tile:/skills', id: 'grp-main' })
+    const node = group(['route-tile:/skills', 'route-tile:/cron', 'route-tile:/webhooks'], { active: 'route-tile:/skills', id: 'grp-main' })
     declareDefaultTree(node)
     $scrollWindowWorkspaces.set([
       {
         id: '1',
         focusedWindowId: 'route-tile:/skills',
-        windowIds: ['route-tile:/skills', 'route-tile:/cron'],
-        columns: [['route-tile:/skills'], ['route-tile:/cron']],
+        windowIds: ['route-tile:/skills', 'route-tile:/cron', 'route-tile:/webhooks'],
+        columns: [['route-tile:/skills'], ['route-tile:/cron'], ['route-tile:/webhooks']],
         scrollLeft: 0,
         scrollTop: 0,
         grid: null
@@ -203,10 +203,12 @@ describe('scroll card project headers', () => {
     const tabbed = render(<TreeGroup node={node} />)
     expect(tabbed.container.querySelector('[data-tree-tab="route-tile:/skills"] .codicon-symbol-misc')).toBeTruthy()
     expect(tabbed.container.querySelector('[data-tree-tab="route-tile:/cron"] .codicon-clockface')).toBeTruthy()
+    expect(tabbed.container.querySelector('[data-tree-tab="route-tile:/webhooks"] svg')).toBeTruthy()
     tabbed.unmount()
 
     const scroll = render(<ScrollWindowWorkspace />)
     expect(scroll.container.querySelector('[data-scroll-window="route-tile:/skills"] .codicon-symbol-misc')).toBeTruthy()
     expect(scroll.container.querySelector('[data-scroll-window="route-tile:/cron"] .codicon-clockface')).toBeTruthy()
+    expect(scroll.container.querySelector('[data-scroll-window="route-tile:/webhooks"] svg')).toBeTruthy()
   })
 })
