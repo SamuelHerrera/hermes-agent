@@ -69,6 +69,7 @@ import { useSlashCompletions } from './hooks/use-slash-completions'
 import { useSessionStatusPresence } from './hooks/use-status-presence'
 import { ActionBadges } from './micro-actions'
 import { chipTypedPathOnSpace, pathifyRefs } from './path-refs'
+import { PendingClarifyBanner } from './pending-clarify-banner'
 import { QueuePanel } from './queue-panel'
 import {
   beginComposerComposition,
@@ -1200,6 +1201,7 @@ export function ChatBar({
             sessionId={statusSessionId}
             threadScrollKey={threadScrollKey}
           />
+          <PendingClarifyBanner gateway={gateway ?? null} sessionId={statusSessionId} />
           <ComposerPrimitive.Root
             className={cn(
               'group/composer relative w-full overflow-visible rounded-2xl',
