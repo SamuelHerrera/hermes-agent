@@ -11985,6 +11985,104 @@ def _get_cron_job_sync(job_id: str, profile: Optional[str] = None):
 
 
 
+def _cron_iso_epoch(value: Optional[str]) -> float:
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _cron_output_file_for_execution(home: Path, job_id: str, started_at: float) -> Optional[str]:
+    if started_at <= 0:
+        return None
+    output_dir = home / "cron" / "output" / job_id
+    try:
+        candidates = [p for p in output_dir.glob("*.md") if p.is_file()]
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    best: Optional[Path] = None
+    best_delta = 121.0
+    for path in candidates:
+        try:
+            stamp = datetime.strptime(path.stem, "%Y-%m-%d_%H-%M-%S").timestamp()
+        except ValueError:
+            continue
+        delta = abs(stamp - started_at)
+        if delta < best_delta:
+            best = path
+            best_delta = delta
+    return str(best) if best is not None else None
+
+
+def _list_cron_execution_rows_sync(
+    *, home: Path, job_id: str, job_name: str, limit: int
+) -> List[Dict[str, Any]]:
+    """Return durable cron execution rows shaped like session-list rows.
+
+    Script-only/no-agent cron jobs do not create agent sessions, so the old
+    run-history endpoint could show one old session per day while hiding the
+    hourly executions that actually happened. The executions ledger is the
+    scheduler's authoritative per-fire audit trail; project it into the same
+    lightweight shape the desktop already renders.
+    """
+    db_path = home / "cron" / "executions.db"
+    if not db_path.exists():
+        return []
+    import sqlite3
+
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute(
+            """SELECT * FROM executions
+               WHERE job_id=?
+               ORDER BY claimed_at DESC, id DESC
+               LIMIT ?""",
+            (job_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    shaped: List[Dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        started_at = _cron_iso_epoch(record.get("started_at") or record.get("claimed_at"))
+        ended_at = _cron_iso_epoch(record.get("finished_at")) or None
+        status = str(record.get("status") or "unknown")
+        error = record.get("error")
+        if started_at:
+            title_dt = datetime.fromtimestamp(started_at)
+            title_time = f"{title_dt:%b} {title_dt.day} {title_dt:%H:%M}"
+        else:
+            title_time = status
+        output_path = _cron_output_file_for_execution(home, job_id, started_at)
+        shaped.append({
+            "id": f"cron_exec_{record.get('id')}",
+            "title": f"{job_name} · {title_time}",
+            "preview": error or f"Cron execution {status}",
+            "source": "cron",
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "last_active": ended_at or started_at,
+            "message_count": 0,
+            "tool_call_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "model": None,
+            "is_active": status in {"claimed", "running"},
+            "archived": False,
+            "cron_execution_id": record.get("id"),
+            "cron_execution_status": status,
+            "cron_execution_error": error,
+            "cron_output_path": output_path,
+        })
+    return shaped
+
+
 def _list_cron_job_runs_sync(job_id: str, profile: Optional[str] = None, limit: int = 20):
     """Run sessions produced by a cron job, newest first.
 
@@ -12003,15 +12101,30 @@ def _list_cron_job_runs_sync(job_id: str, profile: Optional[str] = None, limit: 
     selected = profile or _find_cron_job_profile(job_id)
     # job_id may be a human name; resolve to the canonical id used in run-session ids.
     canonical = job_id
+    job_name = job_id
     if selected:
         job = _call_cron_for_profile(selected, "get_job", job_id)
         if job and job.get("id"):
             canonical = str(job["id"])
+            job_name = str(job.get("name") or canonical)
 
     try:
         limit_n = max(1, min(int(limit), 100))
     except (TypeError, ValueError):
         limit_n = 20
+
+    _profile_name, profile_home = _cron_profile_home(selected)
+    execution_runs = _list_cron_execution_rows_sync(
+        home=profile_home,
+        job_id=canonical,
+        job_name=job_name,
+        limit=limit_n,
+    )
+    if execution_runs:
+        if selected:
+            for s in execution_runs:
+                s["profile"] = selected
+        return {"runs": execution_runs, "limit": limit_n, "source": "executions"}
 
     db = _open_session_db_for_profile(selected, read_only=True)
     try:

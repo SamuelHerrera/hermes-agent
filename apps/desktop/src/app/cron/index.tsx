@@ -28,16 +28,13 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import {
-  type AutomationBlueprint,
   createCronJob,
   type CronDeliveryTarget,
   type CronJob,
   deleteCronJob,
-  getAutomationBlueprints,
   getCronDeliveryTargets,
   getCronJobRuns,
   getCronJobs,
-  instantiateAutomationBlueprint,
   pauseCronJob,
   resumeCronJob,
   type SessionInfo,
@@ -72,7 +69,6 @@ import {
 } from '../overlays/panel'
 import type { SetStatusbarItemGroup } from '../shell/statusbar-controls'
 
-import { BlueprintSlotControl, blueprintSlotHelp, cleanBlueprintFieldError, initialBlueprintValues } from './blueprints'
 import {
   cronEditorUpdates,
   jobIsScriptOnly,
@@ -87,10 +83,6 @@ const DEFAULT_DELIVER = 'local'
 // Radix <SelectItem> rejects empty-string values, so the "no override" row in
 // the model picker carries this sentinel and is mapped back to '' on save.
 const MODEL_DEFAULT_VALUE = '__default__'
-
-// "Start from" default: the manual editor (blank cron). Any other value is a
-// blueprint key. Blueprint keys never collide with this sentinel.
-const CUSTOM_TEMPLATE = 'custom'
 
 const SCHEDULE_OPTIONS: ReadonlyArray<ScheduleOption> = [
   { expr: '0 9 * * *', value: 'daily' },
@@ -373,21 +365,6 @@ export function CronView({
     [jobs, query]
   )
 
-  // Blueprint recipes render in the same list rail, below the jobs — clicking
-  // one opens the create dialog pre-seeded to that recipe. Same query key as
-  // the dialog's "Start from" dropdown, so the catalog is fetched once.
-  const blueprintsQuery = useQuery({
-    queryKey: ['cron-blueprints'],
-    queryFn: async () => (await getAutomationBlueprints()).blueprints
-  })
-
-  const visibleBlueprints = useMemo(() => {
-    const list = blueprintsQuery.data ?? []
-    const needle = query.trim().toLowerCase()
-
-    return needle ? list.filter(item => `${item.title} ${item.description}`.toLowerCase().includes(needle)) : list
-  }, [blueprintsQuery.data, query])
-
   // Detail always reflects a concrete job: the explicitly selected one, else the
   // first visible row, so the right pane is never empty while jobs exist.
   const selectedJob = useMemo(
@@ -488,29 +465,11 @@ export function CronView({
     setEditor({ mode: 'closed' })
   }
 
-  // Blueprint instantiation is a distinct backend path (fills typed slots, then
-  // creates the job) so it can't share the raw-cron onSave contract. Merge the
-  // created job into $cronJobs like every other create path. A blueprint writes a
-  // real per-profile job, and "all" is not a writable target — collapse it to
-  // 'default', matching the manual create path in handleEditorSave.
-  async function handleBlueprintCreate(blueprint: AutomationBlueprint, values: Record<string, string>) {
-    const profile = profileScope === ALL_PROFILES ? 'default' : profileScope
-    const job = await instantiateAutomationBlueprint({ blueprint: blueprint.key, values }, profile)
-
-    updateCronJobs(rows => {
-      const rest = rows.filter(row => row.id !== job.id)
-
-      return [...rest, job]
-    })
-    notify({ kind: 'success', title: c.blueprints.scheduled, message: asText(job.schedule_display) || blueprint.title })
-    setEditor({ mode: 'closed' })
-  }
-
   return (
     <Panel closeLabel={c.close} onClose={onClose}>
       {loading && jobs.length === 0 ? (
         <PageLoader label={c.loading} />
-      ) : totalCount === 0 && visibleBlueprints.length === 0 ? (
+      ) : totalCount === 0 ? (
         <PanelEmpty
           action={
             <Button onClick={() => setEditor({ mode: 'create' })} size="sm">
@@ -551,21 +510,6 @@ export function CronView({
               <p className="px-2 py-4 text-center text-xs text-muted-foreground">{c.emptyTitleSearch}</p>
             )}
             <PanelAddButton label={c.newCron} onClick={() => setEditor({ mode: 'create' })} />
-            {visibleBlueprints.length > 0 && (
-              <>
-                <PanelSectionLabel className="mt-3 px-2">{c.blueprints.tab}</PanelSectionLabel>
-                {visibleBlueprints.map(item => (
-                  <PanelListRow
-                    active={false}
-                    icon="rocket"
-                    key={item.key}
-                    onSelect={() => setEditor({ blueprintKey: item.key, mode: 'create' })}
-                    rowKey={`blueprint-${item.key}`}
-                    title={item.title}
-                  />
-                ))}
-              </>
-            )}
           </PanelList>
 
           {selectedJob ? (
@@ -585,7 +529,6 @@ export function CronView({
 
       <CronEditorDialog
         editor={editor}
-        onBlueprintCreate={handleBlueprintCreate}
         onClose={() => setEditor({ mode: 'closed' })}
         onSave={handleEditorSave}
       />
@@ -802,19 +745,25 @@ function CronJobRuns({
         <div className="py-1 text-xs text-muted-foreground">{c.noRuns}</div>
       ) : (
         <div className="flex flex-col gap-px">
-          {runs.map(run => (
-            <button
-              className="row-hover flex items-center justify-between gap-3 rounded-md px-2 py-1 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-              key={run.id}
-              onClick={() => onOpenSession?.(run.id)}
-              type="button"
-            >
-              <span className="truncate text-foreground/85">{run.title?.trim() || run.preview?.trim() || run.id}</span>
-              <span className="shrink-0 text-[0.62rem] text-muted-foreground/55 tabular-nums">
-                {formatRunTime(run.last_active || run.started_at)}
-              </span>
-            </button>
-          ))}
+          {runs.map(run => {
+            const isExecutionOnly = Boolean(run.cron_execution_id)
+
+            return (
+              <button
+                className="row-hover flex items-center justify-between gap-3 rounded-md px-2 py-1 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
+                disabled={isExecutionOnly}
+                key={run.id}
+                onClick={() => onOpenSession?.(run.id)}
+                title={run.cron_output_path || undefined}
+                type="button"
+              >
+                <span className="truncate text-foreground/85">{run.title?.trim() || run.preview?.trim() || run.id}</span>
+                <span className="shrink-0 text-[0.62rem] text-muted-foreground/55 tabular-nums">
+                  {formatRunTime(run.last_active || run.started_at)}
+                </span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -885,12 +834,10 @@ export function DeliverCheckboxes({
 
 function CronEditorDialog({
   editor,
-  onBlueprintCreate,
   onClose,
   onSave
 }: {
   editor: EditorState
-  onBlueprintCreate: (blueprint: AutomationBlueprint, values: Record<string, string>) => Promise<void>
   onClose: () => void
   onSave: (values: EditorValues) => Promise<void>
 }) {
@@ -909,43 +856,21 @@ function CronEditorDialog({
   // Per-job model override, encoded as `${providerSlug}:${model}` (split on the
   // first ':' when saving). MODEL_DEFAULT_VALUE = follow the global default.
   const [modelChoice, setModelChoice] = useState(MODEL_DEFAULT_VALUE)
-  // Blueprint fills typed slots (time/enum/weekdays/text) instead of the raw
-  // cron fields; the backend renders the prompt + schedule from them.
-  const [slotValues, setSlotValues] = useState<Record<string, string>>({})
-  // Create mode can start from a ready-made blueprint instead of a blank cron.
-  // CUSTOM_TEMPLATE (default) = the manual editor; any other value is a
-  // blueprint key that swaps the form for that blueprint's typed slots.
-  const [templateChoice, setTemplateChoice] = useState(CUSTOM_TEMPLATE)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<null | string>(null)
 
-  // The blueprint catalog powers the create dialog's "Start from" dropdown; it's
-  // meaningless when editing an existing job, so skip the fetch there.
-  const blueprintsQuery = useQuery({
-    queryKey: ['cron-blueprints'],
-    queryFn: async () => (await getAutomationBlueprints()).blueprints,
-    enabled: open && !isEdit
-  })
-
-  const blueprintList = blueprintsQuery.data ?? []
-
-  const blueprint =
-    templateChoice === CUSTOM_TEMPLATE ? null : (blueprintList.find(item => item.key === templateChoice) ?? null)
-
-  const isBlueprint = blueprint !== null
-
   // Same catalog the chat model picker uses: configured providers and their
-  // actually-available models only. Script-only + blueprint forms never pick a
-  // model here, so skip the fetch entirely for them.
+  // actually-available models only. Script-only forms never pick a model here,
+  // so skip the fetch entirely for them.
   const modelOptions = useQuery({
     queryKey: ['model-options', 'global'],
     queryFn: () => requestModelOptions({}),
-    enabled: open && !scriptOnlyJob && !isBlueprint
+    enabled: open && !scriptOnlyJob
   })
 
   // Single source of truth for where a cron can deliver (local + configured
   // gateways) — same endpoint the dashboard uses, so no dialog offers a platform
-  // that isn't connected. Shared by the manual editor and the blueprint form.
+  // that isn't connected.
   const deliveryTargets = useQuery({
     queryKey: ['cron-delivery-targets'],
     queryFn: getCronDeliveryTargets,
@@ -963,18 +888,9 @@ function CronEditorDialog({
     setSchedulePreset(initial ? scheduleOptionForExpr(jobScheduleExpr(initial)).value : 'daily')
     setDeliver(initial ? jobDeliver(initial) : DEFAULT_DELIVER)
     setModelChoice(initial && jobModel(initial) ? `${jobProvider(initial)}:${jobModel(initial)}` : MODEL_DEFAULT_VALUE)
-    setSlotValues({})
-    setTemplateChoice(editor.mode === 'create' ? (editor.blueprintKey ?? CUSTOM_TEMPLATE) : CUSTOM_TEMPLATE)
     setError(null)
     setSaving(false)
   }, [editor, initial, open])
-
-  // Seed the typed slots with the blueprint's defaults whenever a blueprint is
-  // picked from "Start from" (and reset them when switching back to Custom).
-  useEffect(() => {
-    setSlotValues(blueprint ? initialBlueprintValues(blueprint) : {})
-    setError(null)
-  }, [blueprint])
 
   const selectedScheduleOption =
     SCHEDULE_OPTIONS.find(candidate => candidate.value === schedulePreset) ?? SCHEDULE_OPTIONS[0]
@@ -1053,26 +969,6 @@ function CronEditorDialog({
     }
   }
 
-  async function handleBlueprintSubmit(event: React.FormEvent) {
-    event.preventDefault()
-
-    if (!blueprint) {
-      return
-    }
-
-    setSaving(true)
-    setError(null)
-
-    try {
-      await onBlueprintCreate(blueprint, slotValues)
-    } catch (err) {
-      // 422 carries the slot-level validation message; surface it inline.
-      setError(cleanBlueprintFieldError(err instanceof Error ? err.message : String(err)))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
     <Dialog onOpenChange={value => !value && !saving && onClose()} open={open}>
       <DialogContent className="max-w-lg">
@@ -1081,75 +977,7 @@ function CronEditorDialog({
           <DialogDescription>{isEdit ? c.editDesc : c.createDesc}</DialogDescription>
         </DialogHeader>
 
-        {!isEdit && blueprintList.length > 0 && (
-          <Field htmlFor="cron-template" label={c.blueprints.startFrom}>
-            <Select onValueChange={setTemplateChoice} value={templateChoice}>
-              <SelectTrigger className="h-9 rounded-md" id="cron-template">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={CUSTOM_TEMPLATE}>{c.blueprints.custom}</SelectItem>
-                {blueprintList.map(item => (
-                  <SelectItem key={item.key} value={item.key}>
-                    {item.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {blueprint?.description && <FieldHint>{blueprint.description}</FieldHint>}
-          </Field>
-        )}
-
-        {isBlueprint && blueprint ? (
-          <form className="grid gap-4" onSubmit={handleBlueprintSubmit}>
-            {blueprint.fields.map(field => {
-              const fieldId = `blueprint-${blueprint.key}-${field.name}`
-              const help = blueprintSlotHelp(field)
-
-              return (
-                <Field htmlFor={fieldId} key={field.name} label={field.label}>
-                  {field.name === 'deliver' ? (
-                    // Use the shared, backend-sourced delivery targets (same as the
-                    // manual editor) rather than the blueprint's static field.options,
-                    // so both dialogs offer exactly the connected platforms.
-                    <DeliverCheckboxes
-                      c={c}
-                      id={fieldId}
-                      onChange={next => setSlotValues(prev => ({ ...prev, [field.name]: next }))}
-                      targets={deliveryTargets.data ?? []}
-                      value={slotValues[field.name] ?? DEFAULT_DELIVER}
-                    />
-                  ) : (
-                    <BlueprintSlotControl
-                      field={field}
-                      id={fieldId}
-                      onChange={next => setSlotValues(prev => ({ ...prev, [field.name]: next }))}
-                      value={slotValues[field.name] ?? ''}
-                    />
-                  )}
-                  {help && <FieldHint>{help}</FieldHint>}
-                </Field>
-              )
-            })}
-
-            {error && (
-              <div className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <DialogFooter>
-              <Button disabled={saving} onClick={onClose} type="button" variant="outline">
-                {t.common.cancel}
-              </Button>
-              <Button disabled={saving} type="submit">
-                {saving ? c.blueprints.scheduling : c.blueprints.scheduleIt}
-              </Button>
-            </DialogFooter>
-          </form>
-        ) : (
-          <form className="grid gap-4" onSubmit={handleSubmit}>
+        <form className="grid gap-4" onSubmit={handleSubmit}>
             {scriptOnlyJob && initial && (
               <FieldHint>
                 {c.scriptOnlyEditHint} <span className="font-mono">{initial.id}</span>
@@ -1270,8 +1098,7 @@ function CronEditorDialog({
                 {saving ? t.common.saving : isEdit ? c.saveChanges : c.createAction}
               </Button>
             </DialogFooter>
-          </form>
-        )}
+        </form>
       </DialogContent>
     </Dialog>
   )
@@ -1280,9 +1107,7 @@ function CronEditorDialog({
 type EditorState =
   | { job: CronJob; mode: 'edit' }
   | { mode: 'closed' }
-  // `blueprintKey` pre-selects a blueprint in the create dialog's "Start from"
-  // dropdown (set when a recipe row in the list rail is clicked).
-  | { blueprintKey?: string; mode: 'create' }
+  | { mode: 'create' }
 
 interface EditorValues {
   deliver: string
