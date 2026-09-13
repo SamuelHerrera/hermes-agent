@@ -379,6 +379,7 @@ export function ScrollWindowWorkspace() {
               const pane = paneById.get(windowId)
               const chrome = paneChrome(pane)
               const title = chrome.tabTitle?.() ?? pane?.title ?? windowId
+              const tabLead = chrome.tabLead?.()
               const iconName = scrollWindowIcon(windowId)
               const rect = scrollGridWindowRect(layout, index, GAP)
               const focused = workspace.focusedWindowId === windowId || (!workspace.focusedWindowId && index === 0)
@@ -480,7 +481,7 @@ export function ScrollWindowWorkspace() {
                       windowId={windowId}
                     >
                       <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-(--ui-text-secondary)">
-                        <Codicon name={iconName} size="0.75rem" />
+                        {tabLead ?? <Codicon name={iconName} size="0.75rem" />}
                       </span>
                       <span
                         className="min-w-0 flex-1 truncate text-[0.72rem] font-medium text-(--ui-text-primary)"

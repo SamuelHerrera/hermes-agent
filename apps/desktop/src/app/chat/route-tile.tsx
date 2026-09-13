@@ -9,6 +9,7 @@
 
 import { lazy, type ReactNode, Suspense } from 'react'
 
+import { Codicon } from '@/components/ui/codicon'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
 import { $cronJobs } from '@/store/cron'
@@ -38,16 +39,17 @@ const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 
-// Built-in page views + their pane titles, keyed by route.
-const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
-  [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
-  [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },
+// Built-in page views + their pane titles/icons, keyed by route.
+const BUILTIN_PAGES: Record<string, { icon: string; render: () => ReactNode; title: string }> = {
+  [ARTIFACTS_ROUTE]: { icon: 'files', render: () => <ArtifactsView />, title: 'Artifacts' },
+  [MESSAGING_ROUTE]: { icon: 'comment', render: () => <MessagingView />, title: 'Messaging' },
   [SETTINGS_ROUTE]: {
+    icon: 'settings-gear',
     render: () => <SettingsTabRoute><WiredPane part="settings" /></SettingsTabRoute>,
     title: 'Settings'
   },
-  [SKILLS_ROUTE]: { render: () => <SkillsView />, title: 'Capabilities' },
-  [WEBHOOKS_ROUTE]: { render: () => <WebhooksView />, title: 'Webhooks' }
+  [SKILLS_ROUTE]: { icon: 'symbol-misc', render: () => <SkillsView />, title: 'Capabilities' },
+  [WEBHOOKS_ROUTE]: { icon: 'plug', render: () => <WebhooksView />, title: 'Webhooks' }
 }
 
 function cronTitle(path: string): string {
@@ -62,11 +64,18 @@ function cronTitle(path: string): string {
   return job ? jobTitle(job) : 'Scheduled'
 }
 
-function builtinPage(path: string): null | { render: () => ReactNode; title: string } {
+function BuiltinRouteTabLead({ path }: { path: string }) {
+  const icon = isCronRoute(path) ? 'clockface' : BUILTIN_PAGES[path]?.icon
+
+  return icon ? <Codicon name={icon} size="0.75rem" /> : null
+}
+
+function builtinPage(path: string): null | { icon: string; render: () => ReactNode; title: string } {
   if (isCronRoute(path)) {
     const jobId = cronJobIdFromRoute(path)
 
     return {
+      icon: 'clockface',
       render: () => (
         <CronView
           initialJobId={jobId}
@@ -107,6 +116,10 @@ function routeTitle(path: string): string {
  *  plugin's lead as soon as that plugin registers. */
 function RouteTabLead({ path }: { path: string }) {
   useContributions(ROUTES_AREA)
+
+  if (builtinPage(path)) {
+    return <BuiltinRouteTabLead path={path} />
+  }
 
   return contributedRoutes().find(r => r.path === path)?.tabLead?.() ?? null
 }

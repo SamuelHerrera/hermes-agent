@@ -1,14 +1,18 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { watchRouteTiles } from '@/app/chat/route-tile'
 import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $terminals } from '@/app/right-sidebar/terminal/terminals'
+import { CRON_ROUTE, SKILLS_ROUTE } from '@/app/routes'
 import { registry } from '@/contrib/registry'
 import { $projectTree } from '@/store/projects'
+import { $routeTiles } from '@/store/route-tiles'
 import { $currentCwd, $selectedStoredSessionId, $sessions } from '@/store/session'
 import { $sessionTiles } from '@/store/session-states'
 
 import { group } from '../model'
+import { TreeGroup } from '../renderer/tree-group'
 import { $layoutTree, declareDefaultTree, registerPaneCloser } from '../store'
 
 import { generateScrollGrid } from './grid'
@@ -41,6 +45,8 @@ const disposers: (() => void)[] = []
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= TestResizeObserver as unknown as typeof ResizeObserver
+  globalThis.CSS ??= {} as never
+  globalThis.CSS.escape ??= (value: string) => value
 })
 
 beforeEach(() => {
@@ -51,6 +57,7 @@ beforeEach(() => {
   $selectedStoredSessionId.set(null)
   $sessions.set([])
   $sessionTiles.set([])
+  $routeTiles.set([])
   $terminals.set([])
   $layoutSurfaceMode.set('scroll-windows')
   $activeScrollWorkspaceId.set('1')
@@ -75,6 +82,7 @@ beforeEach(() => {
   ])
 })
 afterEach(() => {
+  $routeTiles.set([])
   cleanup()
   disposers.splice(0).forEach(dispose => dispose())
 })
@@ -172,5 +180,33 @@ describe('scroll card project headers', () => {
 
     expect(await screen.findByRole('menuitem', { name: /^close$/i })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /close others/i })).toBeTruthy()
+  })
+
+  it('shows built-in page icons in tab strips and scroll-window cards', () => {
+    $routeTiles.set([{ path: SKILLS_ROUTE, dir: 'center' }, { path: CRON_ROUTE, dir: 'center' }])
+    watchRouteTiles()
+
+    const node = group(['route-tile:/skills', 'route-tile:/cron'], { active: 'route-tile:/skills', id: 'grp-main' })
+    declareDefaultTree(node)
+    $scrollWindowWorkspaces.set([
+      {
+        id: '1',
+        focusedWindowId: 'route-tile:/skills',
+        windowIds: ['route-tile:/skills', 'route-tile:/cron'],
+        columns: [['route-tile:/skills'], ['route-tile:/cron']],
+        scrollLeft: 0,
+        scrollTop: 0,
+        grid: null
+      }
+    ])
+
+    const tabbed = render(<TreeGroup node={node} />)
+    expect(tabbed.container.querySelector('[data-tree-tab="route-tile:/skills"] .codicon-symbol-misc')).toBeTruthy()
+    expect(tabbed.container.querySelector('[data-tree-tab="route-tile:/cron"] .codicon-clockface')).toBeTruthy()
+    tabbed.unmount()
+
+    const scroll = render(<ScrollWindowWorkspace />)
+    expect(scroll.container.querySelector('[data-scroll-window="route-tile:/skills"] .codicon-symbol-misc')).toBeTruthy()
+    expect(scroll.container.querySelector('[data-scroll-window="route-tile:/cron"] .codicon-clockface')).toBeTruthy()
   })
 })
