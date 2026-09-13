@@ -377,7 +377,12 @@ db.close()
 
 test('agent process gets a connected sidebar child and opens its tab only on selection', async () => {
   const page = fixture.page
+  const sessionTabs = page.locator('[data-tree-tab^="session-tile:"]')
+  const previousTabs = await sessionTabs.count()
   await page.getByRole('button', { name: 'New session in Terminal test', exact: true }).click()
+  // Session creation awaits the backend. Until its tab arrives, the visible
+  // composer still belongs to the old chat and must not receive this prompt.
+  await expect(sessionTabs).toHaveCount(previousTabs + 1)
   const composer = page.locator('[contenteditable="true"]:visible').first()
   await composer.fill('E2E_SIDEBAR_CROSS')
   await page.keyboard.press('Enter')
