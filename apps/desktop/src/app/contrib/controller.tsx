@@ -482,12 +482,7 @@ const DEFAULT_TREE = split(
   [
     group(['sessions', 'files'], { id: 'grp-sessions' }),
     group(['workspace'], { id: 'grp-main' }),
-    split(
-      'column',
-      [group(['review'], { id: 'grp-review' }), group(['terminal'], { id: 'grp-terminal' })],
-      [1.6, 1],
-      'spl-right'
-    )
+    group(['review'], { id: 'grp-review' })
   ],
   [1, 3.4, 1.05],
   'spl-root'
