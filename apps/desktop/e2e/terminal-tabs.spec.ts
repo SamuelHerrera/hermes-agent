@@ -153,10 +153,20 @@ test('scroll windows show project-colored headers and working terminal cards', a
   await expect.poll(buffer).toContain('LIVE=alive')
   await card.getByRole('button', { name: 'Close window', exact: true }).click()
   await expect(card).toHaveCount(0)
+  await expect(host).toHaveAttribute('aria-hidden', 'true')
+  const sidebarTerminal = page.locator(`[data-sidebar-terminal="${id}"]`)
+  await expect(sidebarTerminal).toBeVisible()
+  await sidebarTerminal.locator('button[aria-pressed]').click()
+  await expect(host.locator('.xterm')).toBeVisible()
+  await host.locator('textarea').focus()
+  await page.keyboard.type('printf "REOPEN=%s\\n" "$SCROLL_SHELL"')
+  await page.keyboard.press('Enter')
+  await expect.poll(buffer).toContain('REOPEN=alive')
+  await sidebarTerminal.getByRole('button', { name: /^Delete:/ }).click()
   await expect(host).toHaveCount(0)
 })
 
-test('manual tabs retain shells while switching and stop and clear them on close', async () => {
+test('manual tabs preserve shells on close and stop and clear them on sidebar deletion', async () => {
   const page = fixture.page
   await page.keyboard.press('Control+`')
   const tabs = page.locator('[data-tree-tab^="terminal-instance:"]')
@@ -256,6 +266,14 @@ test('manual tabs retain shells while switching and stop and clear them on close
   }
   expect(pids.every(pid => pid > 0 && alive(pid))).toBe(true)
   await page.locator(`[data-tree-tab="${firstPane}"]`).click({ button: 'middle' })
+  await expect(page.locator(`[data-tree-tab="${firstPane}"]`)).toHaveCount(0)
+  await expect(host).toHaveAttribute('aria-hidden', 'true')
+  await expect(row).toBeVisible()
+  expect(pids.map(alive)).toEqual([true, true])
+  await row.locator('button[aria-pressed]').click()
+  await expect(host.locator('.xterm')).toBeVisible()
+  expect(pids.map(alive)).toEqual([true, true])
+  await row.getByRole('button', { name: /^Delete:/ }).click()
   await expect(host).toHaveCount(0)
   await expect(row).toHaveCount(0)
   await expect.poll(() => pids.map(alive), { timeout: 15_000 }).toEqual([false, false])

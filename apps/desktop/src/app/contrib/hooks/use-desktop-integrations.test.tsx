@@ -437,16 +437,15 @@ describe('useDesktopIntegrations', () => {
       expect(navigate).toHaveBeenCalledWith('/skills', { replace: true })
     })
 
-    it('does NOT restore overlay routes (settings/command-center)', () => {
+    it('restores Settings as a persistent tab route', () => {
       window.localStorage.setItem('hermes.desktop.lastRoute.profile.default', '/settings')
 
       render({ profileReady: true, sessions: [] })
 
-      // Overlay routes should not be restored.
-      expect(navigate).not.toHaveBeenCalled()
+      expect(navigate).toHaveBeenCalledWith('/settings', { replace: true })
     })
 
-    it('does NOT persist overlay routes for next boot', () => {
+    it('persists the Settings tab route for next boot', () => {
       const { rerender } = render({
         activeProfile: 'default',
         locationPathname: '/settings',
@@ -465,8 +464,7 @@ describe('useDesktopIntegrations', () => {
         sessions: []
       })
 
-      // Overlay routes must NOT be persisted.
-      expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBeNull()
+      expect(window.localStorage.getItem('hermes.desktop.lastRoute.profile.default')).toBe('/settings')
     })
   })
 

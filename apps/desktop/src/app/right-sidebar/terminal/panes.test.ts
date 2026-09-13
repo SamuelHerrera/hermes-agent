@@ -205,6 +205,8 @@ describe('individual terminal panes', () => {
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(id))
     s.openAgentTerminal('proc-closed', 'Build')
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).toContain(s.terminalPaneId(id))
+    expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(id))).toBe(false)
+    expect(s.model.findGroupOfPane(s.tree.$layoutTree.get()!, s.terminalPaneId(id))?.active).toBe(s.terminalPaneId(id))
   })
 
   it('hides manual terminals when closing all tabs in their zone without touching another zone', async () => {
