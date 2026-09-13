@@ -116,9 +116,22 @@ class TestFileContentHash:
 
 class TestStaleBridgeHandshake:
 
+    @pytest.mark.parametrize('prefix', ['', 'Custom\\nheader', '🤖 Header\n', None])
+    def test_handshake_matches_effective_header_and_rejects_older_health(self, prefix):
+        import hashlib
 
+        adapter = _make_adapter()
+        adapter._reply_prefix = prefix
+        expected = adapter.DEFAULT_REPLY_PREFIX if prefix is None else prefix.replace('\\n', '\n')
+        health = {'sendReadReceipts': False, 'replyPrefixHash': hashlib.sha256(expected.encode()).hexdigest()}
+        assert adapter._bridge_config_matches(health)
+        assert not adapter._bridge_config_matches({'sendReadReceipts': False})
+        assert not adapter._bridge_config_matches({**health, 'sendReadReceipts': True})
+
+
+    @pytest.mark.parametrize('header_changed', [False, True])
     @pytest.mark.asyncio
-    async def test_restarts_bridge_when_read_receipt_config_changed(self, tmp_path):
+    async def test_restarts_bridge_when_runtime_config_changed(self, tmp_path, header_changed):
         from plugins.platforms.whatsapp.adapter import _file_content_hash
 
         bridge_dir = _setup_bridge_dir(tmp_path)
@@ -127,13 +140,16 @@ class TestStaleBridgeHandshake:
             bridge_script=str(bridge_dir / "bridge.js"),
             session_path=tmp_path / "session",
         )
-        adapter._send_read_receipts = True
+        adapter._send_read_receipts = not header_changed
+        if header_changed:
+            adapter._reply_prefix = 'new header\n'
         disk_hash = _file_content_hash(bridge_dir / "bridge.js")
         mock_client = _mock_health(
             {
                 "status": "connected",
                 "scriptHash": disk_hash,
                 "sendReadReceipts": False,
+                "replyPrefixHash": 'old-header-hash',
             }
         )
         mock_proc = MagicMock()
@@ -179,8 +195,9 @@ class TestDepRefreshStamp:
 
 
 class TestCacheDirEnvPassthrough:
+    @pytest.mark.parametrize('prefix', ['', 'Custom\\nheader'])
     @pytest.mark.asyncio
-    async def test_bridge_spawn_env_has_cache_dirs(self, tmp_path):
+    async def test_bridge_spawn_env_has_cache_dirs(self, tmp_path, prefix):
         bridge_dir = _setup_bridge_dir(tmp_path)
         _fresh_node_modules(bridge_dir)
         adapter = _make_adapter(
@@ -188,6 +205,7 @@ class TestCacheDirEnvPassthrough:
             session_path=tmp_path / "session",
         )
         adapter._send_read_receipts = True
+        adapter._reply_prefix = prefix
         mock_proc = MagicMock()
         mock_proc.poll.return_value = 1
         mock_proc.returncode = 1
@@ -211,3 +229,4 @@ class TestCacheDirEnvPassthrough:
         assert env["HERMES_AUDIO_CACHE_DIR"] == str(get_audio_cache_dir())
         assert env["HERMES_DOCUMENT_CACHE_DIR"] == str(get_document_cache_dir())
         assert env["WHATSAPP_SEND_READ_RECEIPTS"] == "true"
+        assert env["WHATSAPP_REPLY_PREFIX"] == prefix.replace('\\n', '\n')

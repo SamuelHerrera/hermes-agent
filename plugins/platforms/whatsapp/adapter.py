@@ -647,8 +647,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                                 # treated as stale by definition.
                                 running_hash = data.get("scriptHash", "")
                                 disk_hash = _file_content_hash(bridge_path)
-                                running_read_receipts = bool(data.get("sendReadReceipts", False))
-                                config_matches = running_read_receipts == self._send_read_receipts
+                                config_matches = self._bridge_config_matches(data)
                                 if (
                                     running_hash
                                     and disk_hash
@@ -664,7 +663,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                                 stale_reason = (
                                     f"running={running_hash or 'unversioned'}, disk={disk_hash}"
                                     if running_hash != disk_hash
-                                    else "send_read_receipts config changed"
+                                    else "bridge runtime configuration changed or unverified"
                                 )
                                 print(f"[{self.name}] Running bridge is stale ({stale_reason}), restarting")
                             else:
@@ -720,6 +719,9 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 if _v:
                     bridge_env[_key] = _v
             bridge_env.update(self._resolved_bridge_settings())
+            # Set the same effective header used by the reuse handshake last:
+            # YAML and an explicit empty prefix must beat inherited env values.
+            bridge_env["WHATSAPP_REPLY_PREFIX"] = self._resolved_reply_prefix()
             # Pass the profile-aware cache directories so the bridge writes
             # media where the Python side reads it.  Without these the bridge
             # hardcodes ~/.hermes/{image,audio,document}_cache, which diverges
@@ -872,6 +874,21 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             self._close_bridge_log()
             await self._notify_fatal_error()
         return self.fatal_error_message or message
+
+    def _resolved_reply_prefix(self) -> str:
+        value = self._reply_prefix
+        if value is None:
+            value = _wenv("WHATSAPP_REPLY_PREFIX", self.DEFAULT_REPLY_PREFIX)
+        return (self.DEFAULT_REPLY_PREFIX if value is None else value).replace("\\n", "\n")
+
+    def _bridge_config_matches(self, health: dict) -> bool:
+        import hashlib
+
+        prefix_hash = hashlib.sha256(self._resolved_reply_prefix().encode("utf-8")).hexdigest()
+        return (
+            health.get("sendReadReceipts") is self._send_read_receipts
+            and health.get("replyPrefixHash") == prefix_hash
+        )
 
     def _resolved_bridge_settings(self) -> dict[str, str]:
         """Resolve persisted settings for both bridge argv and child env."""

@@ -1111,6 +1111,7 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     scriptHash: SCRIPT_HASH,
     sendReadReceipts: SEND_READ_RECEIPTS,
+    replyPrefixHash: createHash('sha256').update(REPLY_PREFIX, 'utf8').digest('hex'),
   });
 });
 
