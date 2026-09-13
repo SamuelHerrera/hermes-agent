@@ -27,6 +27,8 @@ export function validate(method, p) {
   if (method === 'list') return;
   if (method === 'create') {
     check(string(p.requestId) && string(p.file, 4096));
+    check(p.env === undefined || (p.env && typeof p.env === 'object' && !Array.isArray(p.env) &&
+      Object.entries(p.env).every(([k, v]) => string(k, 1024) && !k.includes('=') && typeof v === 'string' && !v.includes('\0'))));
     check(p.args === undefined || (Array.isArray(p.args) && p.args.length <= 128 && p.args.every(v => typeof v === 'string' && v.length < 65536 && !v.includes('\0'))));
     check(p.cwd === undefined || string(p.cwd, 4096));
     check(p.cols === undefined || dimension(p.cols));

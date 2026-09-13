@@ -16050,6 +16050,27 @@ async def console_ws(ws: WebSocket) -> None:
                 pass
 
 
+@app.websocket("/api/persistent-terminal")
+async def persistent_terminal_ws(ws: WebSocket) -> None:
+    if _ws_auth_reason(ws)[0] is not None:
+        await ws.close(code=4401, reason="terminal authentication required")
+        return
+    if _ws_host_origin_reason(ws) is not None:
+        await ws.close(code=4403, reason="terminal host/origin rejected")
+        return
+    if _ws_client_reason(ws) is not None:
+        await ws.close(code=4408, reason="terminal peer rejected")
+        return
+    profile = ws.query_params.get("profile") or "default"
+    try:
+        profile_home = _resolve_profile_dir(profile)
+    except HTTPException:
+        await ws.close(code=4400, reason="terminal owner unavailable")
+        return
+    from hermes_cli.terminal_host import proxy_terminal_host
+    await proxy_terminal_host(ws, get_hermes_home(), profile, profile_home)
+
+
 @app.websocket("/api/terminal")
 async def terminal_ws(ws: WebSocket) -> None:
     """One authenticated desktop shell per socket; disconnect always reaps it.

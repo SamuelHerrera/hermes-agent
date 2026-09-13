@@ -26,5 +26,5 @@ export async function resolveTerminalRoute(
     throw new Error('The terminal owner SSH connection is unavailable. Try again.')
   }
 
-  return { kind: 'ssh' as const, profile, target: { ssh: state.ssh, scope }, remotePlatform: state.remotePlatform }
+  return { kind: 'ssh' as const, profile, connection, target: { ssh: state.ssh, scope }, remotePlatform: state.remotePlatform }
 }

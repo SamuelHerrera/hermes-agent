@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { connect } from './client.mjs';
 const args = process.argv.slice(2);
 const command = args[0];
@@ -14,7 +14,12 @@ try {
   }
   if (index < 0 || !args[index + 1]) throw Error('--dir is required (explicit per-user runtime directory)');
   const directory = resolve(args[index + 1]);
-  if (command === 'serve') {
+  if (command === 'install') {
+    const { ensureHost } = await import('./install.mjs');
+    const runtimeDirectory = join(directory, 'runtime');
+    const client = await ensureHost({ bundle: fileURLToPath(new URL('../../', import.meta.url)), versions: join(directory, 'versions'), directory: runtimeDirectory });
+    console.log(JSON.stringify({ installed: true, directory: runtimeDirectory, status: await client.request('status') }));
+  } else if (command === 'serve') {
     const { serve } = await import('./host.mjs'); await serve(directory);
   } else if (command === 'start') {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'serve', '--dir', directory], { detached: true, stdio: 'ignore', windowsHide: true });
@@ -26,5 +31,5 @@ try {
     }
   } else if (command === 'status' || command === 'stop') {
     console.log(JSON.stringify(await (await connect(directory)).request(command, { force: args.includes('--force') })));
-  } else throw Error('expected start, status or stop');
+  } else throw Error('expected install, start, status or stop');
 } catch (error) { console.error(error.message); process.exitCode = 1; }

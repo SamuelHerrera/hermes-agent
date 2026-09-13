@@ -203,6 +203,8 @@ import {
 import { runNativeLogin } from './native-oauth-login'
 import { loadNativeTokenSet, type NativeTokenStoreIo, persistNativeTokenSet } from './native-token-store'
 import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
+import { openRemotePersistentTerminal } from './persistent-remote-terminal'
+import { openLocalPersistentTerminal } from './persistent-terminal'
 import { createKeepAwake } from './power-save'
 import { FirstRunSetupResetError, runPrimaryBackendStartup } from './primary-backend-startup'
 import { rehomePrimaryConnection } from './primary-connection-rehome'
@@ -12376,7 +12378,8 @@ function disposeTerminalSession(id) {
   terminalSessions.delete(id)
 
   try {
-    sessionInfo.pty.kill()
+    if (sessionInfo.persistent) { void sessionInfo.persistent.detach().catch(() => {}) }
+    else { sessionInfo.pty.kill() }
   } catch {
     // Process may already be gone.
   }
@@ -12644,6 +12647,47 @@ ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
     throw new Error('Terminal window closed.')
   }
 
+  if (payload.persistent === true) {
+    const { args, command, name } = terminalShellCommand()
+    const cwd = safeTerminalCwd(payload.cwd)
+    const env = terminalShellEnv()
+    env.HERMES_HOME = route.profile === 'default' ? HERMES_HOME : path.join(HERMES_HOME, 'profiles', route.profile)
+    delete env.HERMES_PARENT_PID
+    let persistent
+    if (route.kind !== 'local') {
+      const connection = route.connection
+      const wsUrl = connection.authMode === 'oauth'
+        ? buildGatewayWsUrlWithTicket(connection.baseUrl, await mintGatewayWsTicket(connection.baseUrl))
+        : connection.wsUrl
+      const url = new URL(wsUrl)
+      url.pathname = url.pathname.replace(/\/api\/ws$/, '/api/persistent-terminal')
+      if (connection.source !== 'profile') { url.searchParams.set('profile', route.profile) }
+      persistent = await openRemotePersistentTerminal(url.toString(), {
+        reference: payload.reference, requestId: String(payload.requestId || crypto.randomUUID()),
+        cols: Math.max(2, Math.min(500, Number(payload.cols) || 80)),
+        rows: Math.max(2, Math.min(500, Number(payload.rows) || 24)), cwd: payload.cwd
+      })
+    } else { persistent = await openLocalPersistentTerminal({
+      bundle: path.join(app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked'), 'dist', 'terminal-host'),
+      home: HERMES_HOME, profile: route.profile,
+      requestId: String(payload.requestId || crypto.randomUUID()), reference: payload.reference,
+      file: command, args, cwd, env,
+      cols: Math.max(2, Math.min(500, Number(payload.cols) || 80)),
+      rows: Math.max(2, Math.min(500, Number(payload.rows) || 24))
+    }) }
+    if (persistent) {
+      if (event.sender.isDestroyed()) {
+        await persistent.detach()
+        throw new Error('Terminal window closed.')
+      }
+      const id = crypto.randomUUID()
+      terminalSessions.set(id, { persistent, webContentsId: event.sender.id, profile: route.profile, remote: route.kind !== 'local' })
+      event.sender.once('destroyed', () => disposeTerminalSession(id))
+      return { id, cwd: route.kind === 'local' ? cwd : null, shell: route.kind === 'local' ? name : 'shell', reference: persistent.reference, snapshot: persistent.snapshot }
+    }
+  }
+  if (payload.reference) { throw new Error('The saved terminal belongs to a different or unavailable host. It was not restarted.') }
+
   if (route.kind !== 'remote') {
     ensureNodePtySpawnHelper()
   }
@@ -12722,7 +12766,8 @@ ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
   })
   event.sender.once('destroyed', () => disposeTerminalSession(id))
 
-  return { cwd: remote ? null : cwd, id, shell: route.kind === 'ssh' ? 'ssh' : remote ? 'shell' : name }
+  return { cwd: remote ? null : cwd, id, shell: route.kind === 'ssh' ? 'ssh' : remote ? 'shell' : name,
+    persistenceWarning: payload.persistent ? 'This backend has no available persistent terminal host. This shell will close on disconnect.' : undefined }
 })
 
 ipcMain.handle('hermes:terminal:attach', (event, id) => {
@@ -12730,7 +12775,7 @@ ipcMain.handle('hermes:terminal:attach', (event, id) => {
   if (!info || info.webContentsId !== event.sender.id) {
     return false
   }
-  info.delivery.attach()
+  info.delivery?.attach()
   return true
 })
 
@@ -12741,6 +12786,7 @@ ipcMain.handle('hermes:terminal:write', (event, id, data) => {
     return false
   }
 
+  if (sessionInfo.persistent) { return sessionInfo.persistent.input(String(data || '')).then(() => true) }
   sessionInfo.pty.write(String(data || ''))
 
   return true
@@ -12756,6 +12802,7 @@ ipcMain.handle('hermes:terminal:resize', (event, id, size = {}) => {
   const cols = Math.max(2, Number.parseInt(String(size?.cols || 80), 10) || 80)
   const rows = Math.max(2, Number.parseInt(String(size?.rows || 24), 10) || 24)
 
+  if (sessionInfo.persistent) { return sessionInfo.persistent.resize({ cols: Math.min(500, cols), rows: Math.min(500, rows) }).then(() => true) }
   sessionInfo.pty.resize(cols, rows)
 
   return true
@@ -12768,6 +12815,7 @@ ipcMain.handle('hermes:terminal:process', (event, id) => {
   }
 
   try {
+    if (info.persistent) { return null }
     return path.basename(info.pty.process || '') || null
   } catch {
     return null
@@ -12781,7 +12829,7 @@ ipcMain.handle('hermes:terminal:cwd', async (event, id) => {
     return null
   }
 
-  return sessionInfo.remote ? null : readProcessCwd(sessionInfo.pty.pid)
+  return sessionInfo.remote ? null : readProcessCwd(sessionInfo.persistent?.pid ?? sessionInfo.pty.pid)
 })
 
 ipcMain.handle(
@@ -12790,6 +12838,14 @@ ipcMain.handle(
     terminalSessions.get(String(id || ''))?.webContentsId === event.sender.id &&
     disposeTerminalSession(String(id || ''))
 )
+
+for (const operation of ['read', 'checkpoint', 'terminate']) {
+  ipcMain.handle(`hermes:terminal:${operation}`, (event, id, after) => {
+    const info = terminalSessions.get(String(id || ''))
+    if (!info?.persistent || info.webContentsId !== event.sender.id) { throw new Error('Terminal is not owned by this window.') }
+    return info.persistent[operation](after)
+  })
+}
 
 ipcMain.handle('hermes:updates:check', async () =>
   DISABLE_UPDATE_UI_FOR_LOCAL_FORK

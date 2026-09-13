@@ -69,7 +69,7 @@ export async function serve(directory) {
       if (creates.has(key)) return creates.get(key);
       admitCreate(sessions.size, creates.size);
       const id = randomUUID();
-      const child = pty.spawn(p.file, p.args || [], { name: 'xterm-256color', cols: p.cols ?? 80, rows: p.rows ?? 24, cwd: p.cwd || process.cwd(), env: process.env, encoding: null });
+      const child = pty.spawn(p.file, p.args || [], { name: 'xterm-256color', cols: p.cols ?? 80, rows: p.rows ?? 24, cwd: p.cwd || process.cwd(), env: p.env ?? process.env, encoding: null });
       const s = { id, scope: p.scope, pty: child, generation: 0, delivery: new DeliveryRing(), screen: new Screen({ cols: p.cols ?? 80, rows: p.rows ?? 24 }) };
       s.kill = ownProcessTree(child);
       s.lifetime = new AbortController();

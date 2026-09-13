@@ -81,7 +81,7 @@ export function validateCheckpoint(s) {
     num(b.savedX); num(b.savedY); charset(b.savedCharset); attr(b.savedCurAttrData);
     map(b.tabs, v => bool(v));
     array(b.lines, l => {
-      keys(l, ['length', 'isWrapped', 'data', 'combined', 'extended']); num(l.length, 0, 1000); bool(l.isWrapped);
+      keys(l, ['length', 'isWrapped', 'data', 'combined', 'extended']); num(l.length, s.cols, 1000); bool(l.isWrapped);
       array(l.data, v => num(v, 0, 4294967295), l.length * 3);
       map(l.combined, v => string(v)); map(l.extended, v => extended(v));
       for (let x = 0; x < l.length; x++) {

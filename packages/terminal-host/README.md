@@ -1,10 +1,10 @@
 # @hermes/terminal-host (experimental core)
 
-An independent Node process owns PTYs and headless xterm state. Clients do not own its lifetime. This package has **no Electron or Python dependency** and does not integrate with Desktop/backend yet.
+An independent Node process owns PTYs and headless xterm state. Clients do not own its lifetime. This package has **no Electron or Python dependency**. Desktop attaches through its main process; remote clients use the authenticated backend WebSocket proxy.
 
 ## Install and lifecycle
 
-Requires Node >=22.22.0 and native node-pty support (ConPTY on native Windows). Dependencies are pinned. A platform-compatible Node runtime is required; this slice does not bundle one.
+Requires Node >=22.22.0 and native node-pty support (ConPTY on native Windows). Dependencies are pinned. Desktop's native staging script bundles a checksum-verified Node runtime and platform PTY dependencies; the npm-only distribution still requires installed Node.
 
 From this directory:
 
@@ -62,7 +62,7 @@ await client.request('terminate', attached.identity);
 
 `connect` reads discovery once, pins the epoch/token, and offers `epoch` plus async `request(method, params)`. It does not reconnect, respawn, retry mutations or infer fallback scopes. Errors have matching `message` and `code`. Network failure remains a transport error; do not reinterpret it as process exit. After rediscovery, pass the **persisted** epoch to attach to distinguish old state from the new host.
 
-Shell choice is explicit (`file`, `args`). On Windows use `powershell.exe` or `cmd.exe` with appropriate args. The shell inherits the host's environment; custom per-session environment is not yet exposed. Default dimensions 80x24; accepted range 2..500. Max input 64 KiB; create requires nonempty scope and requestId.
+Shell choice is explicit (`file`, `args`). On Windows use `powershell.exe` or `cmd.exe` with appropriate args. `create.env` provides a per-session environment; backend callers cannot supply it because the proxy derives it from the bound profile. Default dimensions 80x24; accepted range 2..500. Max input 64 KiB; create requires nonempty scope and requestId.
 
 ## Wire protocol v1 (also implementable in Python)
 

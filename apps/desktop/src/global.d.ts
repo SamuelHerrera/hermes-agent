@@ -361,6 +361,10 @@ declare global {
         ) => Promise<{ root: string; label: string }[]>
       }
       terminal: {
+        persistent?: boolean
+        read?: (id: string, after: number) => Promise<{ events: Array<{ seq: number; type: string; data?: string; cols?: number; rows?: number }>; exit?: unknown; failure?: string }>
+        checkpoint?: (id: string) => Promise<any>
+        terminate?: (id: string) => Promise<unknown>
         attach: (id: string) => Promise<boolean>
         /** Best-effort current working directory of the live PTY child (POSIX
          *  only; null on Windows or when unavailable). Used to reopen a tab
@@ -372,6 +376,9 @@ declare global {
         onExit: (id: string, callback: (payload: HermesTerminalExit) => void) => () => void
         resize: (id: string, size: { cols: number; rows: number }) => Promise<boolean>
         start: (options?: {
+          persistent?: boolean
+          requestId?: string
+          reference?: HermesTerminalReference
           profile?: string
           cols?: number
           cwd?: string
@@ -461,10 +468,19 @@ export interface DesktopMarketplaceThemeResult {
   themes: DesktopMarketplaceThemeFile[]
 }
 
+export interface HermesTerminalReference {
+  scope: string
+  epoch: string
+  terminalId: string
+}
+
 export interface HermesTerminalSession {
-  cwd: string
+  persistenceWarning?: string
+  cwd: string | null
   id: string
   shell: string
+  reference?: HermesTerminalReference
+  snapshot?: any
 }
 
 export interface HermesTerminalExit {

@@ -19,6 +19,35 @@ async function loadTerminalStore() {
 }
 
 describe('terminal store persistence', () => {
+  it('persists host identity without the live handle and terminates an unopened restored shell before removal', async () => {
+    const store = await loadTerminalStore()
+    const id = store.createTerminal('/repo')
+    const reference = { scope: 'local/default', epoch: 'host-epoch', terminalId: 'shell-id' }
+    store.rememberTerminalHost(id, reference, 'renderer-only-handle')
+    const persisted = JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)
+    expect(persisted.terminals[0].reference).toEqual(reference)
+    expect(JSON.stringify(persisted)).not.toContain('renderer-only-handle')
+    vi.resetModules()
+    const restored = await loadTerminalStore()
+    const previous = window.hermesDesktop
+    let finish!: () => void
+    const terminate = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    const start = vi.fn(async () => ({ id: 'temporary-attachment' }))
+    const dispose = vi.fn(async () => {})
+    Object.defineProperty(window, 'hermesDesktop', { configurable: true, value: { terminal: { start, terminate, dispose } } })
+    try {
+      restored.closeTerminal(id)
+      await vi.waitFor(() => expect(terminate).toHaveBeenCalledWith('temporary-attachment'))
+      expect(start).toHaveBeenCalledWith(expect.objectContaining({ reference, persistent: true, profile: 'default' }))
+      expect(restored.$terminals.get().some(term => term.id === id)).toBe(true)
+      finish()
+      await vi.waitFor(() => expect(restored.$terminals.get()).toEqual([]))
+      expect(dispose).toHaveBeenCalledWith('temporary-attachment')
+    } finally {
+      Object.defineProperty(window, 'hermesDesktop', { configurable: true, value: previous })
+    }
+  })
+
   it('keeps creation owners across All Profiles and persistence reload', async () => {
     const store = await loadTerminalStore()
     const profile = await import('@/store/profile')

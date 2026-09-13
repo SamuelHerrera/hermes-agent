@@ -256,6 +256,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     }
   },
   terminal: {
+    persistent: true,
+    read: (id, after) => ipcRenderer.invoke('hermes:terminal:read', id, after),
+    checkpoint: id => ipcRenderer.invoke('hermes:terminal:checkpoint', id),
+    terminate: id => ipcRenderer.invoke('hermes:terminal:terminate', id),
     attach: id => ipcRenderer.invoke('hermes:terminal:attach', id),
     process: id => ipcRenderer.invoke('hermes:terminal:process', id),
     cwd: id => ipcRenderer.invoke('hermes:terminal:cwd', id),

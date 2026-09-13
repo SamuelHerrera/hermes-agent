@@ -18,6 +18,7 @@ import { observeActiveTerminalResize } from './active-resize'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
 import { mirrorSelection, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
+import { hydrateTerminalState, loadPersistentTerminalRuntime } from './persistent-runtime'
 import { watchTerminalProcess } from './process-title'
 import {
   isAddSelectionShortcut,
@@ -28,7 +29,7 @@ import {
   terminalTheme
 } from './selection'
 import { prepareTerminalFontFamily } from './terminal-font'
-import { closeTerminal, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
+import { $terminals, closeTerminal, forgetTerminalHandle, rememberTerminalHost, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
 import { useTerminalFontController } from './use-terminal-font'
 
 // How many scrollback lines to serialize for relaunch restore. Mirrors VS Code's
@@ -440,6 +441,11 @@ export function useTerminalSession({
   const [selection, setSelection] = useState('')
   const [selectionStyle, setSelectionStyle] = useState<CSSProperties | null>(null)
   const [shellName, setShellName] = useState('shell')
+  const [runtime, setRuntime] = useState<typeof Terminal | null>(null)
+  useEffect(() => {
+    if (!window.hermesDesktop?.terminal.persistent) { return }
+    void loadPersistentTerminalRuntime().then(value => setRuntime(() => value)).catch(() => setStatus('closed'))
+  }, [])
 
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
@@ -513,6 +519,7 @@ export function useTerminalSession({
   useEffect(() => {
     const host = hostRef.current
     const terminalApi = window.hermesDesktop?.terminal
+    if (terminalApi?.persistent && !runtime) { return }
 
     if (!host || !terminalApi) {
       setStatus('closed')
@@ -524,7 +531,8 @@ export function useTerminalSession({
     const cleanup: Array<() => void> = []
     let lastSentSize: { cols: number; rows: number } | null = null
 
-    const term = new Terminal({
+    const TerminalEngine = runtime || Terminal
+    const term = new TerminalEngine({
       allowProposedApi: true,
       // ⌥-drag is our force-selection gesture (below), and xterm's default
       // alt-click-moves-cursor claims the same click, emitting one cursor
@@ -536,7 +544,7 @@ export function useTerminalSession({
       // reads soft on every platform; VS Code keeps it off and our surface
       // (--ui-bg-chrome) is opaque anyway, so withSurface paints it solid.
       allowTransparency: false,
-      convertEol: true,
+      convertEol: !terminalApi.persistent,
       cursorBlink: true,
       fontFamily: latestFontFamilyRef.current,
       fontSize: 11,
@@ -561,7 +569,7 @@ export function useTerminalSession({
       // Clamping to 4.5:1 darkens/lightens foregrounds against the background
       // at render time, matching the muted ink-like look of their terminal.
       minimumContrastRatio: 4.5,
-      scrollback: 1000,
+      scrollback: terminalApi.persistent ? 2000 : 1000,
       theme: withSurface(initialThemeRef.current)
     })
 
@@ -569,11 +577,20 @@ export function useTerminalSession({
     const serialize = new SerializeAddon()
 
     termRef.current = term
-    term.loadAddon(fit)
-    term.loadAddon(serialize)
-    term.loadAddon(new Unicode11Addon())
-    term.loadAddon(terminalWebLinksAddon())
-    term.unicode.activeVersion = '11'
+    // Presentation-only addons do not extend the checkpoint parser profile.
+    if (terminalApi.persistent) {
+      fit.activate(term)
+      serialize.activate(term)
+      const links = terminalWebLinksAddon()
+      links.activate(term)
+      cleanup.push(() => { links.dispose(); serialize.dispose(); fit.dispose() })
+    } else {
+      term.loadAddon(fit)
+      term.loadAddon(serialize)
+      term.loadAddon(terminalWebLinksAddon())
+    }
+    if (!terminalApi.persistent) { term.loadAddon(new Unicode11Addon()) }
+    if (!terminalApi.persistent) { term.unicode.activeVersion = '11' }
 
     // Replay last session's scrollback before the fresh shell boots. The process
     // is NOT revived — a new shell starts one line below the restored history.
@@ -581,7 +598,7 @@ export function useTerminalSession({
     // so the fresh prompt lands flush under the restored block.
     const initialReviveBuffer = initialReviveBufferRef.current
 
-    if (initialReviveBuffer) {
+    if (initialReviveBuffer && !terminalApi.persistent) {
       term.write(initialReviveBuffer)
       term.write('\r\n')
     }
@@ -602,7 +619,7 @@ export function useTerminalSession({
       updateTerminalRestoreCwd(id, value)
     }
 
-    const cwdOscHandlers = ([7, 9] as const).map(code =>
+    const cwdOscHandlers = (terminalApi.persistent ? [] : [7, 9] as const).map(code =>
       term.parser.registerOscHandler(code, payload => {
         recordCwd(parseOscCwd(code, payload))
 
@@ -858,13 +875,17 @@ export function useTerminalSession({
         // user last `cd`'d. Remote backends reject an invalid explicit cwd;
         // omit an unset launch directory so the backend chooses its own home.
         .start({
+          persistent: terminalApi.persistent,
+          requestId: id,
+          reference: $terminals.get().find(entry => entry.id === id)?.reference,
           profile: ownerRef.current,
           cols: term.cols,
           cwd: initialRestoreCwdRef.current || cwd || undefined,
           rows: term.rows
         })
-        .then(session => {
+        .then(async session => {
           if (disposed) {
+            if (session.reference && !$terminals.get().some(entry => entry.id === id)) { await terminalApi.terminate?.(session.id) }
             void terminalApi.dispose(session.id)
 
             return
@@ -890,7 +911,7 @@ export function useTerminalSession({
           if (terminalApi.process) {
             cleanup.push(
               watchTerminalProcess(
-                () => terminalApi.process!(session.id),
+                () => terminalApi.process!(sessionIdRef.current || session.id),
                 name => {
                   nativeTitle = true
                   onShellRef.current?.(name)
@@ -905,6 +926,78 @@ export function useTerminalSession({
 
           setStatus('open')
 
+          if (session.reference && session.snapshot && terminalApi.read && terminalApi.checkpoint) {
+            rememberTerminalHost(id, session.reference, session.id)
+            hydrateTerminalState(term, session.snapshot)
+            let sequence = session.snapshot.seq
+            let liveSessionId = session.id
+            let timer: ReturnType<typeof setTimeout> | undefined
+            cleanup.push(() => clearTimeout(timer))
+            const reconnect = async () => {
+              if (disposed) { return }
+              try {
+                const next = await terminalApi.start({ persistent: true, reference: session.reference, requestId: id, profile: ownerRef.current })
+                if (disposed) { void terminalApi.dispose(next.id); return }
+                if (!next.snapshot || !next.reference) { void terminalApi.dispose(next.id); throw new Error('HOST_LOST') }
+                hydrateTerminalState(term, next.snapshot)
+                const previous = liveSessionId
+                liveSessionId = next.id
+                sessionIdRef.current = next.id
+                sequence = next.snapshot.seq
+                rememberTerminalHost(id, next.reference, next.id)
+                void terminalApi.dispose(previous).catch(() => {})
+                setStatus('open')
+                fitAndResize(initialActiveRef.current)
+                void poll()
+              } catch (error) {
+                if (disposed) { return }
+                if (/HOST_LOST|NOT_FOUND|OWNER_MISMATCH|INVALID_CHECKPOINT|INCOMPATIBLE_XTERM/.test(String(error))) {
+                  setStatus('closed')
+                  return
+                }
+                timer = setTimeout(() => void reconnect(), 2000)
+              }
+            }
+            const poll = async () => {
+              if (disposed) { return }
+              try {
+                const result = await terminalApi.read!(liveSessionId, sequence)
+                if (disposed) { return }
+                for (const event of result.events) {
+                  if (event.seq <= sequence) { continue }
+                  if (event.type === 'resize') { term.resize(event.cols!, event.rows!) }
+                  else { await new Promise<void>(resolve => term.write(event.data || '', resolve)) }
+                  sequence = event.seq
+                  if (disposed) { return }
+                }
+                if (result.failure) { throw new Error(result.failure) }
+                if (result.exit) { setStatus('closed'); return }
+                timer = setTimeout(() => void poll(), 50)
+              } catch (error) {
+                if (disposed) { return }
+                if (String(error).includes('GAP')) {
+                  try {
+                    const snapshot = await terminalApi.checkpoint!(liveSessionId)
+                    if (disposed) { return }
+                    hydrateTerminalState(term, snapshot)
+                    sequence = snapshot.seq
+                    timer = setTimeout(() => void poll(), 50)
+                    return
+                  } catch { /* Keep the saved identity; never recreate the process. */ }
+                }
+                if (/HOST_LOST|NOT_FOUND|OWNER_MISMATCH|INVALID_CHECKPOINT|INCOMPATIBLE_XTERM/.test(String(error))) { setStatus('closed') }
+                else {
+                  setStatus('starting')
+                  timer = setTimeout(() => void reconnect(), 1000)
+                }
+              }
+            }
+            fitAndResize(initialActiveRef.current)
+            void poll()
+            return
+          }
+
+          if (session.persistenceWarning) { armedWrite(`\r\n[Hermes] ${session.persistenceWarning}\r\n`) }
           cleanup.push(
             terminalApi.onData(session.id, data => {
               armedWrite(data)
@@ -956,7 +1049,10 @@ export function useTerminalSession({
           webgl.dispose()
           webglRef.current = null
         })
-        term.loadAddon(webgl)
+        if (terminalApi.persistent) {
+          webgl.activate(term)
+          cleanup.push(() => webgl.dispose())
+        } else { term.loadAddon(webgl) }
         webglRef.current = webgl
       } catch (err) {
         console.warn('[hermes-terminal] WebGL unavailable; falling back to DOM', err)
@@ -985,11 +1081,12 @@ export function useTerminalSession({
       cleanup.forEach(run => run())
       fitRef.current = null
 
-      const id = sessionIdRef.current
+      const sessionId = sessionIdRef.current
       sessionIdRef.current = null
 
-      if (id) {
-        void terminalApi.dispose(id)
+      if (sessionId) {
+        forgetTerminalHandle(id, sessionId)
+        void terminalApi.dispose(sessionId)
       }
 
       term.dispose()
@@ -1002,7 +1099,7 @@ export function useTerminalSession({
     // `id` is stable for the instance's life (keyed by tab id), so listing it
     // doesn't re-create the shell — it just satisfies the deps check for the
     // closeTerminal(id) call in onExit.
-  }, [addSelectionToChat, cwd, id, latestFontFamilyRef, mountedRef])
+  }, [addSelectionToChat, cwd, id, latestFontFamilyRef, mountedRef, runtime])
 
   useEffect(() => {
     const term = termRef.current

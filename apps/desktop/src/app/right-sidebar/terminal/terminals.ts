@@ -2,6 +2,7 @@ import { atom, computed } from 'nanostores'
 
 import { findGroupOfPane } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup, revealTreePane, setTreePaneHidden } from '@/components/pane-shell/tree/store'
+import type { HermesTerminalReference } from '@/global'
 import { readKey, writeKey } from '@/lib/storage'
 import { $activeGatewayProfile, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import { $currentCwd } from '@/store/session'
@@ -13,6 +14,7 @@ import { discardAgentTerminalOutput, restoreAgentTerminalOutput, seedAgentTermin
 /** One in-app terminal tab. `id` is the renderer-side handle (distinct from the
  *  PTY session id the main process mints); each instance owns its own shell. */
 export interface TerminalEntry {
+  reference?: HermesTerminalReference
   id: string
   /** Display label. `auto` adopts the resolved shell name until the user renames. */
   title: string
@@ -45,6 +47,7 @@ export interface TerminalEntry {
 }
 
 interface PersistedTerminalEntry {
+  reference?: HermesTerminalReference
   projectId?: string
   profile?: string
   hidden?: boolean
@@ -91,6 +94,9 @@ function sanitizePersistedTerminal(value: unknown): PersistedTerminalEntry | nul
 
   return {
     auto: typeof record.auto === 'boolean' ? record.auto : true,
+    ...(record.reference && typeof record.reference === 'object' &&
+      ['scope', 'epoch', 'terminalId'].every(key => typeof (record.reference as Record<string, unknown>)[key] === 'string')
+      ? { reference: record.reference as HermesTerminalReference } : {}),
     cwd,
     id,
     kind,
@@ -145,6 +151,7 @@ function persistTerminals(list: readonly TerminalEntry[], activeTerminalId: null
     .filter(term => term.kind === 'user' || !term.hidden)
     .map(term => ({
       auto: term.auto,
+      ...(term.reference ? { reference: term.reference } : {}),
       cwd: term.cwd,
       id: term.id,
       ...(term.kind === 'agent' ? { kind: 'agent' as const } : {}),
@@ -391,13 +398,45 @@ export function cycleTerminal(direction: 1 | -1): void {
 
 /** Remove an entry and dispose its terminal host. Unlike a tab close, this
  *  ends a manual shell and removes its sidebar entry. */
+const liveTerminalHandles = new Map<string, string>()
+
+export function rememberTerminalHost(id: string, reference: HermesTerminalReference, handle: string): void {
+  liveTerminalHandles.set(id, handle)
+  $terminals.set($terminals.get().map(term => term.id === id ? { ...term, reference } : term))
+}
+
+export function forgetTerminalHandle(id: string, handle: string): void {
+  if (liveTerminalHandles.get(id) === handle) { liveTerminalHandles.delete(id) }
+}
+
 export function closeTerminal(id: string): void {
+  const entry = $terminals.get().find(term => term.id === id)
+  const api = typeof window === 'undefined' ? undefined : window.hermesDesktop?.terminal
+  if (!entry?.reference || !api?.terminate) {
+    removeTerminalEntry(id)
+    return
+  }
+  const handle = liveTerminalHandles.get(id)
+  const terminate = async () => {
+    const sessionId = handle || (await api.start({ persistent: true, requestId: id, reference: entry.reference, profile: entry.profile })).id
+    try { await api.terminate!(sessionId) }
+    finally { if (!handle) { await api.dispose(sessionId) } }
+  }
+  void terminate().then(() => removeTerminalEntry(id)).catch(error => {
+    if (/NOT_FOUND|HOST_LOST/.test(String(error))) { removeTerminalEntry(id) }
+    else { console.warn('Terminal was not removed because termination failed.', error) }
+  })
+}
+
+function removeTerminalEntry(id: string): void {
   const list = $terminals.get()
   const index = list.findIndex(term => term.id === id)
 
   if (index < 0) {
     return
   }
+
+  liveTerminalHandles.delete(id)
 
   if (list[index].kind === 'agent' && list[index].procId) {
     discardAgentTerminalOutput(list[index].procId!)
