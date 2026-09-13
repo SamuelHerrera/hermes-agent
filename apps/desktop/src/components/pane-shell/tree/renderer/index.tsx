@@ -23,8 +23,12 @@
 import { useStore } from '@nanostores/react'
 import { type ReactNode, useEffect } from 'react'
 
+import { isSecondaryWindow } from '@/store/windows'
+
 import { useLayoutEditHotkey } from '../../edit-mode'
 import { publishWorkspaceGeometry } from '../../geometry'
+import { PaneVisibleContext } from '../../pane-visibility'
+import { $activeTabbedScreen, $tabbedScreenTrees } from '../screens'
 import { $layoutSurfaceMode } from '../scroll-windows/store'
 import { ScrollWindowWorkspace } from '../scroll-windows/workspace'
 import { $layoutTree, trackActiveTreeGroup } from '../store'
@@ -38,6 +42,8 @@ import { TreeNode } from './tree-node'
 export function LayoutTreeRoot({ children }: { children?: ReactNode }) {
   const tree = useStore($layoutTree)
   const layoutSurfaceMode = useStore($layoutSurfaceMode)
+  const activeScreen = useStore($activeTabbedScreen)
+  const screenTrees = useStore($tabbedScreenTrees)
 
   useLayoutEditHotkey(true)
   // Track the interacted zone so ⌘W closes the right tab even when nothing is
@@ -77,7 +83,25 @@ export function LayoutTreeRoot({ children }: { children?: ReactNode }) {
       `}</style>
       {layoutSurfaceMode === 'tabbed' ? (
         <>
-          <TreeNode node={tree} root rootRow={tree.type === 'split' && tree.orientation === 'row'} />
+          {Object.entries({ ...(isSecondaryWindow() ? {} : screenTrees), [activeScreen]: tree }).map(
+            ([id, screenTree]) => (
+              <div
+                aria-hidden={id === activeScreen ? undefined : true}
+                className={id === activeScreen ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}
+                data-pane-hidden={id === activeScreen ? undefined : ''}
+                data-tabbed-screen={id}
+                key={id}
+              >
+                <PaneVisibleContext.Provider value={id === activeScreen}>
+                  <TreeNode
+                    node={screenTree}
+                    root
+                    rootRow={screenTree.type === 'split' && screenTree.orientation === 'row'}
+                  />
+                </PaneVisibleContext.Provider>
+              </div>
+            )
+          )}
           <NarrowOverlays />
           {/* Non-tiling panes: fixed cards above the tree, outside every zone. */}
           <FloatingPanes />

@@ -8,6 +8,8 @@ import {
   MESSAGING_SESSION_SOURCE_IDS,
   normalizeSessionSource
 } from '@/lib/session-source'
+import { sessionTitleDiagnostic } from '@/lib/session-title-diagnostics'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { setCronJobs } from '@/store/cron'
 import {
   $pinnedSessionIds,
@@ -150,6 +152,8 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
   const refreshSessions = useCallback(async () => {
     const requestId = refreshSessionsRequestRef.current + 1
     refreshSessionsRequestRef.current = requestId
+    const startedAt = performance.now()
+    logUatEvent('session-title', 'refresh.requested', { requestId, profileScope })
     // The loading flag exists to drive the initial skeletons (they only render
     // while the list is empty). Turn-complete / reconnect refreshes over a
     // populated list used to flip it true→false anyway, churning every
@@ -208,8 +212,32 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
         // whole list re-renders once per turn/broadcast for nothing.
         setSessions(prev => {
           const next = mergeSessionPage(prev, incoming, sessionsToKeep())
+          const unchanged = sameCronSignature(prev, next)
+          logUatEvent('session-title', 'refresh.applied', {
+            requestId,
+            profileScope,
+            durationMs: Math.round(performance.now() - startedAt),
+            incomingCount: incoming.length,
+            unchanged
+          })
+          const previousRows = new Map(prev.map(row => [JSON.stringify([row.profile, row.id]), row]))
 
-          return sameCronSignature(prev, next) ? prev : next
+          for (const row of next) {
+            const before = previousRows.get(JSON.stringify([row.profile, row.id]))
+
+            if (before?.title === row.title && before?.preview === row.preview) {
+              continue
+            }
+
+            logUatEvent('session-title', 'refresh.row-changed', {
+              requestId,
+              applied: !unchanged,
+              before: sessionTitleDiagnostic(before),
+              after: sessionTitleDiagnostic(row)
+            })
+          }
+
+          return unchanged ? prev : next
         })
         // "Is there another page?" instead of an exact total: the backend
         // reports which profiles filled their window, which costs nothing on
@@ -250,7 +278,12 @@ export function useSessionListActions({ profileScope }: UseSessionListActionsArg
         setMessagingSessions(prev => (sameCronSignature(prev, messagingRows) ? prev : messagingRows))
         // Hit the cap → at least one platform may have more on disk than loaded.
         setMessagingTruncated(result.messaging.sessions.length >= MESSAGING_SECTION_LIMIT)
+      } else {
+        logUatEvent('session-title', 'refresh.stale', { requestId, profileScope })
       }
+    } catch (error) {
+      logUatEvent('session-title', 'refresh.failed', { requestId, profileScope })
+      throw error
     } finally {
       if (showLoading && refreshSessionsRequestRef.current === requestId) {
         setSessionsLoading(false)

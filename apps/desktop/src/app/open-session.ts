@@ -16,6 +16,7 @@
  *   - `window` (⇧⌘-click) — pop into its own window; falls back to `tab` when
  *     the bridge has no session-window support.
  */
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { $activeSessionId, $selectedStoredSessionId, $workspaceEmptyPlaceholder } from '@/store/session'
 import {
   focusedSessionNeedsRoute,
@@ -99,6 +100,11 @@ export function openSession(
   }
 
   let resolved: OpenSessionIntent = intent
+  logUatEvent('session-title', 'open.requested', {
+    sessionId: storedSessionId,
+    selectedSessionId: $selectedStoredSessionId.get(),
+    intent
+  })
 
   if (resolved === 'window') {
     if (canOpenSessionWindow()) {

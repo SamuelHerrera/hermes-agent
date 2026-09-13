@@ -7,6 +7,7 @@ import { latestSessionTodos, parseTodos, type TodoItem } from '@/lib/todos'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { requestDesktopOnboardingForCredentialWarning } from '@/store/onboarding'
 import { $activeGatewayProfile, $profiles, normalizeProfileKey } from '@/store/profile'
+import { $projectTree } from '@/store/projects'
 import {
   $currentCwd,
   $sessions,
@@ -1178,6 +1179,17 @@ function upsertResolvedSession(session: SessionInfo, storedSessionId: string) {
 
 export async function resolveStoredSession(storedSessionId: string): Promise<SessionInfo | undefined> {
   const cached = $sessions.get().find(session => sessionMatchesStoredId(session, storedSessionId))
+  // Child sessions intentionally live outside recents. Use their already-owned
+  // rich tree row before an older backend's bare detail response can shadow it.
+  const treeRow = $projectTree.get()
+    .flatMap(project => [...project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions)), ...(project.previewSessions ?? [])])
+    .find(session => sessionMatchesStoredId(session, storedSessionId) && session.profile?.trim() &&
+      (!cached?.profile || normalizeProfileKey(session.profile) === normalizeProfileKey(cached.profile)))
+
+  if (treeRow && (!cached || (!cached.title?.trim() && !cached.preview?.trim()))) {
+    upsertResolvedSession(treeRow, storedSessionId)
+    return treeRow
+  }
 
   // A row with no owning profile can't route a resume when more than one
   // profile exists — a resume without a profile lands on whichever gateway is

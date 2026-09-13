@@ -30,7 +30,7 @@ interface RouteResumeOptions {
   runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>>
   selectedStoredSessionId: string | null
   selectedStoredSessionIdRef: MutableRefObject<string | null>
-  startFreshSessionDraft: (focus: boolean) => unknown
+  startFreshSessionDraft: (focus: boolean, preserveScreen?: boolean) => unknown
   workspaceEmptyPlaceholder: boolean
 }
 
@@ -215,14 +215,15 @@ export function useRouteResume({
       (selectedStoredSessionId || activeSessionId || !freshDraftReady) &&
       !rawHashLooksLikeSession()
     ) {
-      // A fresh draft is a real navigation — any later resume homes normally.
+      // Initial draft hydration must not pull focus away from a restored screen.
+      const preserveScreen = bootResumeRef.current
       bootResumeRef.current = false
       logUatEvent('restore', 'route-new-chat.fresh-draft-dispatched', {
         activeSessionId,
         freshDraftReady,
         selectedStoredSessionId
       })
-      startFreshSessionDraft(true)
+      startFreshSessionDraft(true, preserveScreen)
     }
   }, [
     activeSessionId,
