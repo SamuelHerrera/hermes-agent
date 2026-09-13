@@ -265,7 +265,6 @@ export const en: Translations = {
       'composer.voice': 'Start / stop voice conversation',
       'view.toggleSidebar': 'Toggle sessions sidebar',
       'view.toggleRightSidebar': 'Toggle file browser',
-      'view.toggleReview': 'Toggle review pane',
       'view.toggleStatusbar': 'Toggle status bar',
       'view.showFiles': 'Toggle file browser',
       'view.toggleHud': 'Toggle HUD mode',

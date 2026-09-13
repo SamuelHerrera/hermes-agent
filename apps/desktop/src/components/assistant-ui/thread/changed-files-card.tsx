@@ -24,7 +24,6 @@ import { copyFilePath, revealFile, toRelativePath } from '@/store/file-actions'
 import { revealFileInTree } from '@/store/layout'
 import { notifyError } from '@/store/notifications'
 import { openPreview } from '@/store/preview'
-import { openReviewForPath, revealReview } from '@/store/review'
 
 // ~5 rows. A turn that rewrites twenty files should still read as one card in
 // the transcript, not a wall the user has to scroll past to reach the composer.
@@ -32,9 +31,9 @@ const MAX_ROWS_HEIGHT = '9.375rem'
 
 /**
  * Cursor-style "N files changed" summary closing out the newest assistant turn:
- * one row per file it edited with that file's +/-, and a Review action opening
- * the diff pane (⌘G). A row click opens the file in Hermes' editor/preview; the
- * context menu exposes diff, external open, reveal, and copy actions.
+ * one row per file it edited with that file's +/-. A row click opens the file
+ * in Hermes' editor/preview; the context menu exposes external open, reveal,
+ * and copy actions.
  *
  * Wears the shared `WIDGET_SHELL_CLASS` so it reads as the same panel as the
  * transcript's other inline widgets rather than inventing its own chrome.
@@ -43,11 +42,9 @@ export const ChangedFilesCard: FC<{ parts: readonly unknown[] }> = ({ parts }) =
   const { t } = useI18n()
   const copy = t.assistant.thread
   const files = useMemo(() => deriveChangedFiles(parts), [parts])
-  // Review THIS surface's repo: a tile transcript pins the pane to the tile's
-  // worktree; the primary passes null (follow the active session, as before).
+  // File actions stay scoped to this transcript, including detached tiles.
   const view = useSessionView()
   const viewCwd = useStore(view.$cwd)
-  const scopeCwd = view.kind === 'primary' ? null : viewCwd || null
 
   if (files.length === 0) {
     return null
@@ -60,22 +57,10 @@ export const ChangedFilesCard: FC<{ parts: readonly unknown[] }> = ({ parts }) =
     >
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate text-(--ui-text-primary)">{copy.filesChanged(files.length)}</span>
-        <button
-          className="shrink-0 cursor-pointer text-(--ui-text-tertiary) transition-colors hover:text-(--ui-text-primary)"
-          onClick={() => revealReview(scopeCwd)}
-          type="button"
-        >
-          {copy.reviewChanges}
-        </button>
       </div>
       <FadeScroll className="-mx-1.5 mt-1.5 flex flex-col px-1.5" maxHeight={MAX_ROWS_HEIGHT}>
         {files.map(file => (
-          <ChangedFileRow
-            file={file}
-            key={file.path}
-            scopeCwd={scopeCwd}
-            viewCwd={viewCwd || null}
-          />
+          <ChangedFileRow file={file} key={file.path} viewCwd={viewCwd || null} />
         ))}
       </FadeScroll>
     </div>
@@ -94,15 +79,7 @@ function resolveActionPath(filePath: string, cwd: null | string): string {
   return `${cwd.replace(/[\\/]+$/, '')}/${filePath.replace(/^\.?[\\/]/, '')}`
 }
 
-function ChangedFileRow({
-  file,
-  scopeCwd,
-  viewCwd
-}: {
-  file: ChangedFile
-  scopeCwd: null | string
-  viewCwd: null | string
-}) {
+function ChangedFileRow({ file, viewCwd }: { file: ChangedFile; viewCwd: null | string }) {
   const { t } = useI18n()
   const actionPath = useMemo(() => resolveActionPath(file.path, viewCwd), [file.path, viewCwd])
   const actionLabel = displayPath(actionPath)
@@ -124,7 +101,6 @@ function ChangedFileRow({
   return (
     <ChangedFileContextMenu
       actionPath={actionPath}
-      onOpenChanges={() => void openReviewForPath(file.path, scopeCwd)}
       onOpenFile={openInEditor}
       triggerLabel={actionLabel}
       viewCwd={viewCwd}
@@ -145,14 +121,12 @@ function ChangedFileRow({
 function ChangedFileContextMenu({
   actionPath,
   children,
-  onOpenChanges,
   onOpenFile,
   triggerLabel,
   viewCwd
 }: {
   actionPath: string
   children: ReactNode
-  onOpenChanges: () => void
   onOpenFile: () => void
   triggerLabel: string
   viewCwd: null | string
@@ -169,11 +143,14 @@ function ChangedFileContextMenu({
       </Tip>
       <ContextMenuContent>
         <ContextMenuItem onSelect={onOpenFile}>{c.openFile}</ContextMenuItem>
-        <ContextMenuItem onSelect={onOpenChanges}>{c.openChanges}</ContextMenuItem>
-        {localFs && <ContextMenuItem onSelect={() => void openDesktopPath(actionPath)}>{m.openOutside}</ContextMenuItem>}
+        {localFs && (
+          <ContextMenuItem onSelect={() => void openDesktopPath(actionPath)}>{m.openOutside}</ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => revealFileInTree(actionPath)}>{m.revealInSidebar}</ContextMenuItem>
-        {localFs && <ContextMenuItem onSelect={() => void revealFile(actionPath)}>{m.revealFileManager}</ContextMenuItem>}
+        {localFs && (
+          <ContextMenuItem onSelect={() => void revealFile(actionPath)}>{m.revealFileManager}</ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onSelect={() => void copyFilePath(actionPath)}>{m.copyPath}</ContextMenuItem>
         {viewCwd && (

@@ -118,7 +118,6 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   // takes the nearest free single combo instead of a ⌘K ⌘S two-stroke.
   { id: 'view.toggleStatusbar', category: 'view', defaults: ['mod+shift+s'] },
   // ⌘G — "g" for git; the review pane is the source-control view.
-  { id: 'view.toggleReview', category: 'view', defaults: ['mod+g'] },
   { id: 'view.showFiles', category: 'view', defaults: [] },
   // ⌘⇧H — "h" for HUD. Enters/leaves the chrome-free floating chat: the app
   // window steps aside and a composer + live reply float over whatever the
@@ -150,13 +149,9 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   { id: 'view.findInPage', category: 'view', defaults: ['mod+f'] },
   // ⌘G / ⌘⇧G step matches — the platform-standard find-next/find-previous
   // pair (Chrome, Safari, VS Code, and Claude Desktop all ship it). No
-  // `defaults` here on purpose: ⌘G already belongs to `view.toggleReview`,
-  // and shipping a duplicate default would flag a permanent conflict in the
-  // keybinds panel. While the find bar is OPEN, its capture-phase listener
-  // claims ⌘G/⌘⇧G and stops propagation (see components/find-bar.tsx), so
-  // stepping works out of the box and the review toggle keeps the key the
-  // rest of the time. These entries exist so the panel documents the pair
-  // and a user who prefers a dedicated chord can bind one.
+  // global defaults: the open find bar claims ⌘G/⌘⇧G in capture phase.
+  // Outside find, these keys remain available to plugins and user bindings.
+  // These entries let users assign a dedicated chord if desired.
   { id: 'view.findNext', category: 'view', defaults: [] },
   { id: 'view.findPrevious', category: 'view', defaults: [] },
   { id: 'appearance.toggleMode', category: 'view', defaults: ['shift+x'] },

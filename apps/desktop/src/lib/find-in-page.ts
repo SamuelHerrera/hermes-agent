@@ -92,7 +92,7 @@ export function findBarKeyAction(event: FindBarKeyEvent, options: { inInput?: bo
  * The global keybind dispatcher (app/hooks/use-keybinds.ts) consults this
  * before routing a combo to the registry. Without it, bound actions can
  * fire alongside the find bar:
- * - `mod+g` → `view.toggleReview` (⌘G is the review pane's default).
+ * - `mod+g` → a plugin or user-bound action.
  * - `mod+shift+g` → whatever a user has bound there.
  * - `escape` → any user-bound action, instead of only dismissing the find bar.
  *

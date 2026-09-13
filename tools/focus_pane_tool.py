@@ -13,7 +13,7 @@ import json
 from tools import desktop_ui
 from tools.registry import registry, tool_error
 
-PANES = ("chat", "files", "terminal", "review", "sessions")
+PANES = ("chat", "files", "terminal", "sessions")
 
 
 def focus_pane_tool(pane: str) -> str:
@@ -36,9 +36,9 @@ FOCUS_PANE_SCHEMA = {
     "name": "focus_pane",
     "description": (
         "Reveal and focus a pane in the Hermes desktop app when the user asks to "
-        "see it — e.g. \"show me the terminal\", \"open the file browser\", \"show "
-        "the diff\". Panes: chat (the conversation), files (project file browser), "
-        "terminal (embedded shell), review (git diff), sessions (the session list). "
+        "see it, for example \"show me the terminal\" or \"open the file browser\". "
+        "Panes: chat (the conversation), files (project file browser), "
+        "terminal (embedded shell), sessions (the session list). "
         "To show a URL or file in the preview pane, use open_preview instead."
     ),
     "parameters": {

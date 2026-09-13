@@ -27,6 +27,17 @@ def test_lives_in_the_gui_surface_toolset(monkeypatch):
     assert entry.check_fn is None
 
 
+def test_retired_review_pane_is_rejected_without_emitting():
+    calls = []
+    desktop_ui.set_emitter(lambda sid, event, payload: calls.append((event, payload)))
+
+    out = json.loads(fp.focus_pane_tool("review"))
+
+    assert "error" in out
+    assert calls == []
+    assert "review" not in fp.FOCUS_PANE_SCHEMA["parameters"]["properties"]["pane"]["enum"]
+
+
 @pytest.mark.parametrize("pane", fp.PANES)
 def test_emits_pane_reveal(pane):
     calls = []

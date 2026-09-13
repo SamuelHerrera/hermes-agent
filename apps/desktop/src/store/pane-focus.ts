@@ -3,16 +3,14 @@ import { $activeTerminalId, $terminals, selectTerminal } from '@/app/right-sideb
 import { revealTreePane } from '@/components/pane-shell/tree/store'
 
 import { setFileBrowserOpen, setSidebarOpen } from './layout'
-import { openReview } from './review'
 
 // Explicit-request pane reveals, keyed to the backend `focus_pane` tool. Each
 // entry drives the pane's own reveal path (some are toggle-bound) so a revealed
-// pane matches a user-driven open. files/review are workspace-gated — a no-op
+// pane matches a user-driven open. Files are workspace-gated — a no-op
 // without a project cwd, which is the honest behavior.
 const PANE_REVEALERS: Record<string, () => void> = {
   chat: () => revealTreePane('workspace'),
   files: () => setFileBrowserOpen(true),
-  review: () => openReview(),
   sessions: () => setSidebarOpen(true),
   terminal: () => {
     const active = $activeTerminalId.get()

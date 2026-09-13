@@ -49,17 +49,7 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { registry } from '@/contrib/registry'
 import { discoverRuntimePlugins } from '@/contrib/runtime-loader'
 import { NEW_SESSION_TITLE, sessionTitle as storedSessionTitle } from '@/lib/chat-runtime'
-import {
-  Download,
-  FileText,
-  FolderOpen,
-  GitCompare,
-  LayoutDashboard,
-  PanelBottom,
-  Terminal,
-  Upload,
-  Zap
-} from '@/lib/icons'
+import { Download, FileText, FolderOpen, LayoutDashboard, PanelBottom, Terminal, Upload, Zap } from '@/lib/icons'
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { setYoloEnabled } from '@/lib/yolo-session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
@@ -78,7 +68,6 @@ import {
 import { $activeGatewayProfile } from '@/store/profile'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
 import { $projectTree } from '@/store/projects'
-import { $reviewOpen, closeReview, openReview, REVIEW_PANE_ID } from '@/store/review'
 import {
   $currentCwd,
   $rememberedSessionRestorePending,
@@ -105,7 +94,8 @@ import { watchTerminalPanes } from '../right-sidebar/terminal/panes'
 import { $workspaceIsPage } from '../routes'
 import { ShellContextMenu } from '../shell/shell-context-menu'
 
-import { FilesPane, LogsPane, ReviewPaneContent } from './panes'
+import { FilesPane, LogsPane } from './panes'
+import { watchRetiredReviewPane } from './retired-review'
 import { ContribWiring, WiredPane } from './wiring'
 
 const RESTORING_SESSION_TITLE = 'Restoring session'
@@ -239,21 +229,6 @@ registry.registerMany([
       maxWidth: FILE_BROWSER_MAX_WIDTH
     },
     render: () => idle(<FilesPane />)
-  },
-  {
-    id: 'review',
-    area: 'panes',
-    title: 'review',
-    // The second right sidebar: hidden until ⌘G ($reviewOpen) — bound below
-    // like the other chrome toggles; its zone collapses while hidden.
-    data: {
-      placement: 'right',
-      revealAliases: [REVIEW_PANE_ID],
-      width: FILE_BROWSER_DEFAULT_WIDTH,
-      minWidth: FILE_BROWSER_MIN_WIDTH,
-      maxWidth: FILE_BROWSER_MAX_WIDTH
-    },
-    render: () => idle(<ReviewPaneContent />)
   }
 ])
 
@@ -428,15 +403,6 @@ registry.registerMany([
     get: () => isPaneVisible('files'),
     set: () => togglePaneVisible('files')
   }),
-  paletteToggle({
-    id: 'view.toggleReview',
-    label: 'Toggle changes',
-    action: 'view.toggleReview',
-    icon: GitCompare,
-    keywords: ['changes', 'review', 'diff', 'git', 'source control'],
-    get: () => isPaneVisible('review'),
-    set: () => togglePaneVisible('review')
-  }),
   // Profile sharing: bundle the active profile (config, skills, theme, layout)
   // into a portable archive, or adopt someone else's. Both open native dialogs,
   // so the palette closing on select is correct.
@@ -469,8 +435,7 @@ registry.registerMany([
 // ---------------------------------------------------------------------------
 
 // The REAL default: one fixed left panel (sessions + file tree), chat main, and
-// non-navigation panels on the other side / bottom. Review collapses to nothing
-// while hidden (⌘G off).
+// non-navigation panels on the other side / bottom.
 //
 // Preview tiles are DYNAMIC panes (like session tiles), so no preset names one:
 // they're registered by watchPreviewTiles as tabs open, and dockPaneBeside lands
@@ -479,32 +444,22 @@ registry.registerMany([
 // tree, never as a tab stacked into the files sidebar.
 const DEFAULT_TREE = split(
   'row',
-  [
-    group(['sessions', 'files'], { id: 'grp-sessions' }),
-    group(['workspace'], { id: 'grp-main' }),
-    group(['review'], { id: 'grp-review' })
-  ],
-  [1, 3.4, 1.05],
+  [group(['sessions', 'files'], { id: 'grp-sessions' }), group(['workspace'], { id: 'grp-main' })],
+  [1, 3.4],
   'spl-root'
 )
 
-const FOCUS_TREE = split('row', [group(['sessions', 'files']), group(['workspace', 'review', 'terminal'])], [1, 4.6])
+const FOCUS_TREE = split('row', [group(['sessions', 'files']), group(['workspace', 'terminal'])], [1, 4.6])
 
 const TERMINAL_TREE = split(
   'column',
-  [
-    split('row', [group(['sessions', 'files']), group(['workspace']), group(['review'])], [1, 3.2, 1.2]),
-    group(['terminal'])
-  ],
+  [split('row', [group(['sessions', 'files']), group(['workspace'])], [1, 3.2]), group(['terminal'])],
   [3, 1]
 )
 
 const QUAD_TREE = split(
   'column',
-  [
-    split('row', [group(['sessions', 'files']), group(['workspace'])], [1, 3]),
-    split('row', [group(['terminal']), group(['review'])], [1.4, 1])
-  ],
+  [split('row', [group(['sessions', 'files']), group(['workspace'])], [1, 3]), group(['terminal'])],
   [3, 1]
 )
 
@@ -532,6 +487,8 @@ watchSessionTiles()
 watchRouteTiles()
 watchPreviewTiles()
 watchTerminalPanes()
+
+watchRetiredReviewPane()
 
 // Migrate the old nested terminal host out of remembered layouts.
 if ($layoutTree.get() && allPaneIds($layoutTree.get()!).includes('terminal')) {
@@ -614,7 +571,7 @@ registerLayoutResetHandler(stackSessionTilesIntoMain)
 // toggle mirrors the root row.
 // ---------------------------------------------------------------------------
 
-// HIDE-STYLE PANES (files, review, preview, terminal): the binding lives in the
+// HIDE-STYLE PANES (files, preview, terminal): the binding lives in the
 // tree store — bindPaneVisibility — so app toggles remove panels from the grid
 // instead of collapsing them to rails. Tool tabs are marked separately so ⌘W / ✕
 // still close the focused terminal/logs tab like a tab.
@@ -659,10 +616,8 @@ $panesFlipped.listen(flipped => {
 // navigation panel together.
 bindTreeSideVisibility('left', $sidebarOpen, setSidebarOpen)
 
-// Workspace-scoped surfaces: the file tree and git diff only mean something
-// inside a project. A detached chat (no cwd) hides them — their zones
-// collapse and the chat absorbs the width; picking a project brings them
-// back. The terminal is NOT workspace-gated: unlike the old shell (where it
+// The file tree is workspace-scoped. A detached chat hides it; picking a
+// project brings it back. The terminal is NOT workspace-gated: unlike the old shell (where it
 // rode the rail's row and vanished with it), its zone stands on its own.
 const $hasWorkspace = computed($currentCwd, cwd => Boolean(cwd.trim()))
 
@@ -670,7 +625,7 @@ const $hasWorkspace = computed($currentCwd, cwd => Boolean(cwd.trim()))
 // collapse — otherwise a pane revealed into that shared column would drag the
 // tree along with it.
 //
-// Both get a CLOSER and an OPENER. The closer keeps ⌘J/⌘G truthful when the
+// Files get a CLOSER and an OPENER. The closer keeps ⌘J truthful when the
 // pane is closed from the tab menu; the opener is its mirror, so bringing the
 // pane back through the tree (the toggle's reveal path, the rail, a preset)
 // writes the store too. Without the opener the boolean went stale the moment
@@ -681,13 +636,6 @@ bindPaneVisibility(
   computed([$hasWorkspace, $fileBrowserOpen], (workspace, open) => workspace && open),
   () => setFileBrowserOpen(false),
   () => setFileBrowserOpen(true)
-)
-// ⌘G — the review sidebar appears/disappears (and comes to the front).
-bindPaneVisibility(
-  'review',
-  computed([$reviewOpen, $hasWorkspace], (open, workspace) => open && workspace),
-  closeReview,
-  openReview
 )
 registry.register({
   id: 'view.showTerminal',

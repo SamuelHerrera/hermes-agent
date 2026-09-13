@@ -30,7 +30,6 @@ import { POPOUT_WIDTH_REM } from '@/store/composer-popout'
 import { parkQueuedPrompts, removeQueuedPrompt, unparkQueuedPrompts } from '@/store/composer-queue'
 import { $hudMode } from '@/store/hud'
 import { sessionBlockingPrompt } from '@/store/prompts'
-import { toggleReview } from '@/store/review'
 import { $gatewayState } from '@/store/session'
 import { $threadScrollByKey, threadScrollStateFor } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
@@ -166,10 +165,12 @@ export function ChatBar({
   const scope = useComposerScope()
   const attachments = useStore(scope.attachments.$attachments)
   const compacting = useStore(useMemo(() => sessionCompacting(sessionId ?? null), [sessionId]))
+
   const scrolledUp = useStoreSelector(
     $threadScrollByKey,
     states => threadScrollStateFor(states, threadScrollKey).scrolledUp
   )
+
   const autoSpeak = useStore($autoSpeakReplies)
   // The turn is parked on the user (clarify / approval / sudo / secret). Esc must
   // not interrupt it — there's nothing actively running to stop, and stopping
@@ -1285,10 +1286,6 @@ export function ChatBar({
                   onBranchOff={handleBranchOff}
                   onConvertBranch={handleConvertBranch}
                   onListBranches={handleListBranches}
-                  // A tile's rail reviews ITS worktree: pin the pane's scope to
-                  // this surface's cwd. Main keeps the classic follow-the-
-                  // active-session scope (null).
-                  onOpen={() => toggleReview(scope.target === 'main' ? null : (cwd ?? null))}
                   onOpenWorktree={openInWorktree}
                   onSwitchBranch={handleSwitchBranch}
                   repoPath={cwd}

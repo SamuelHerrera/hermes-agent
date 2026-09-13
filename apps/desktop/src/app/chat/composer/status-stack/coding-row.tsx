@@ -35,8 +35,6 @@ interface CodingStatusRowProps {
   onConvertBranch?: (branch: string, path?: null | string, isDefault?: boolean) => Promise<void>
   /** List the repo's local branches for the "convert a branch" picker. */
   onListBranches?: () => Promise<HermesGitBranch[]>
-  /** Open the review pane (changed files + diffs). */
-  onOpen?: () => void
   /** Jump into an existing worktree (open a fresh session anchored there). */
   onOpenWorktree?: (path: string) => void
   /** Switch the current repo checkout to another branch. */
@@ -49,14 +47,13 @@ interface CodingStatusRowProps {
  * The always-on coding-context row, the BASE of the composer status stack:
  * current branch, dirty summary (+/-), and ahead/behind. A touch more prominent
  * than the per-turn rows above it (larger branch label, accent glyph), and the
- * entry point to the review pane. Hidden when the active session isn't in a
+ * workspace context. Hidden when the active session isn't in a
  * local git repo (the probe returns null).
  */
 export const CodingStatusRow = memo(function CodingStatusRow({
   onBranchOff,
   onConvertBranch,
   onListBranches,
-  onOpen,
   onOpenWorktree,
   onSwitchBranch,
   repoPath
@@ -211,12 +208,10 @@ export const CodingStatusRow = memo(function CodingStatusRow({
           // once `status` exists, so a spinner here only ever fired on *refreshes*
           // of an already-loaded repo (window focus, turn settle), reading as an
           // annoying icon "blip" with no first-load value. Refreshes are silent.
-          // It's a button (not the whole row) so the glyph opens the review pane
-          // while the strip around it stays inert; size-3.5 fills the slot exactly.
           leading={
-            <button className="flex size-3.5 items-center justify-center" onClick={onOpen} type="button">
+            <span className="flex size-3.5 items-center justify-center">
               <Codicon className="text-(--ui-green)" name="git-branch" size="0.8rem" />
-            </button>
+            </span>
           }
         >
           <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -225,14 +220,12 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                 (`showIcon={false}`), so the row reads glyph → #number → branch. */}
             {pr && <PrTag pr={pr} showIcon={false} />}
 
-            {/* Branch name — the other half of the review-pane target. `contents`
-                so the button lays out nothing of its own: the label stays the
-                same flex child it always was, and the hit area is the text. */}
-            <button className="contents" onClick={onOpen} type="button">
+            {/* Branch context stays visible without a review-pane action. */}
+            <span className="contents">
               <span className="min-w-0 truncate text-xs font-normal text-muted-foreground/92" title={branchLabel}>
                 {branchLabel}
               </span>
-            </button>
+            </span>
 
             {/* Worktree path + copy — plain muted text, not a chip. Always visible
                 so the composer names both the branch and the folder it is running
@@ -288,11 +281,9 @@ export const CodingStatusRow = memo(function CodingStatusRow({
             )}
           </div>
 
-          {/* The counts describe what's in the review pane, so clicking them
-              opens it. `contents` again: the two spans stay direct flex children
-              of the row, keeping their gap and `ml-auto` behaviour untouched. */}
+          {/* Read-only working-tree and ahead/behind counts. */}
           {(status.ahead > 0 || status.behind > 0 || hasLineDelta || untrackedOnly) && (
-            <button className="contents" onClick={onOpen} type="button">
+            <span className="contents">
               {(status.ahead > 0 || status.behind > 0) && (
                 <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[0.68rem] leading-4 text-muted-foreground/75 tabular-nums">
                   {status.ahead > 0 && (
@@ -323,7 +314,7 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                   {s.changed(status.untracked)}
                 </span>
               ) : null}
-            </button>
+            </span>
           )}
         </StatusRow>
       </ActionsContextMenu>

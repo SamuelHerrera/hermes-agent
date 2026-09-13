@@ -260,7 +260,6 @@ export const zh: Translations = {
       'composer.voice': '开始 / 停止语音对话',
       'view.toggleSidebar': '切换会话侧边栏',
       'view.toggleRightSidebar': '切换文件浏览器',
-      'view.toggleReview': '切换审查面板',
       'view.toggleStatusbar': '切换状态栏',
       'view.showFiles': '显示文件浏览器',
       'view.showTerminal': '新建终端',

@@ -43,7 +43,6 @@ import {
   toggleShowAllProfiles
 } from '@/store/profile'
 import { openFolderAsProject } from '@/store/projects'
-import { toggleReview } from '@/store/review'
 import { $selectedStoredSessionId, setModelPickerOpen } from '@/store/session'
 import { reopenLastClosedTile } from '@/store/session-states'
 import {
@@ -223,7 +222,6 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     // ⌘J is the file-browser toggle. Terminal has its own Ctrl+` binding, so a
     // layout without a right rail should not quietly repurpose the key.
     'view.toggleRightSidebar': toggleFileBrowserOpen,
-    'view.toggleReview': toggleReview,
     'view.toggleStatusbar': toggleStatusbarVisible,
     'view.showFiles': showFiles,
     'view.toggleHud': () => toggleHud(hudTargetSessionId()),
@@ -255,7 +253,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.reopenTab': reopenLastClosedTile,
     'view.findInPage': openFindBar,
     // ⌘G / ⌘⇧G are handled by the find bar's own capture-phase listener while
-    // it is open (so they don't collide with `view.toggleReview`). These
+    // it is open (without global step bindings). These
     // registry handlers cover a user-assigned dedicated chord: stepping is a
     // no-op unless the bar is open with a query, so a bound key can't search
     // invisibly.
@@ -336,7 +334,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
 
       // The open find bar owns ⌘G / ⌘⇧G / Escape. Its own capture-phase
       // listener runs those actions; bail here so the registry doesn't ALSO
-      // fire the action bound to the same combo (e.g. ⌘G = view.toggleReview). Both
+      // fire the action bound to the same combo (including user-defined ⌘G shortcuts). Both
       // listeners are on `window`, so stopPropagation in the bar can't
       // suppress this one — the dispatcher has to yield explicitly.
       if ($findInPage.get().active && findBarClaimsCombo(combo)) {

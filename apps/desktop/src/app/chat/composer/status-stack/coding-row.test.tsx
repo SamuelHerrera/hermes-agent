@@ -27,38 +27,19 @@ describe('CodingStatusRow', () => {
     cleanup()
   })
 
-  it('opens the review pane from the branch and the diff counts, never the bar itself', () => {
-    const onOpen = vi.fn()
+  it('keeps branch and diff context as labels without native review buttons', () => {
+    const { container } = render(<CodingStatusRow repoPath="/repo" />)
 
-    const { container } = render(<CodingStatusRow onOpen={onOpen} repoPath="/repo" />)
-
-    const bar = container.querySelector<HTMLElement>('.coding-status-bar')
-
-    expect(bar).not.toBeNull()
-
-    fireEvent.click(bar!)
-    expect(onOpen).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByText('bb/hitbox'))
-    expect(onOpen).toHaveBeenCalledTimes(1)
-
-    fireEvent.click(screen.getByText('12'))
-    expect(onOpen).toHaveBeenCalledTimes(2)
-  })
-
-  it('wraps the click targets without adding a layout box', () => {
-    const { container } = render(<CodingStatusRow onOpen={() => undefined} repoPath="/repo" />)
-
-    // `display: contents` is what keeps the branch label and the counts direct
-    // flex children of the row — the hit areas cost nothing visually.
-    expect(screen.getByText('bb/hitbox').parentElement?.classList.contains('contents')).toBe(true)
-    expect(screen.getByText('12').closest('button')?.classList.contains('contents')).toBe(true)
-    // The glyph button fills the row's existing 3.5 leading slot exactly.
-    expect(container.querySelector('button[class~="size-3.5"]')).not.toBeNull()
+    expect(container.querySelector('.coding-status-bar')).not.toBeNull()
+    expect(screen.getByText('bb/hitbox').closest('button')).toBeNull()
+    expect(screen.getByText('12').closest('button')).toBeNull()
+    expect(container.querySelector('.codicon-git-branch')?.closest('button')).toBeNull()
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: 'Copy Path' })).toBeTruthy()
   })
 
   it('keeps the worktree path and copy affordance visible without hover', () => {
-    render(<CodingStatusRow onOpen={() => undefined} repoPath="/Users/someone/www/repo" />)
+    render(<CodingStatusRow repoPath="/Users/someone/www/repo" />)
 
     const path = screen.getByText('~/www/repo')
     const wrapper = path.parentElement
@@ -80,7 +61,7 @@ describe('CodingStatusRow', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     clearNotifications()
 
-    render(<CodingStatusRow onOpen={() => undefined} repoPath="/Users/someone/www/repo" />)
+    render(<CodingStatusRow repoPath="/Users/someone/www/repo" />)
 
     // Painted tildified, copied raw.
     expect(screen.getByText('~/www/repo')).toBeTruthy()

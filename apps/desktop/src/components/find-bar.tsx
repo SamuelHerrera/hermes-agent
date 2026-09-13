@@ -88,7 +88,7 @@ export function FindBar() {
   // Global accelerators while the bar is open: Escape closes, ⌘G / ⌘⇧G step.
   // Capture-phase so they win regardless of which element inside the shell
   // owns focus (composer textarea, side panel button, …). ⌘G is also bound to
-  // `view.toggleReview` in the keybinds registry — this listener runs in the
+  // a plugin or user action in the keybinds registry — this listener runs in the
   // capture phase and stops propagation, so while the find bar is open ⌘G
   // means "find next" and the review toggle does not also fire. Closing the
   // bar hands ⌘G straight back to the review pane.

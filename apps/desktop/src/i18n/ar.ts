@@ -234,7 +234,6 @@ export const ar = defineLocale({
       'composer.voice': 'بدء / إيقاف المحادثة الصوتية',
       'view.toggleSidebar': 'تبديل الشريط الجانبي للجلسات',
       'view.toggleRightSidebar': 'تبديل متصفح الملفات',
-      'view.toggleReview': 'تبديل لوحة المراجعة',
       'view.showFiles': 'إظهار متصفح الملفات',
       'view.showTerminal': 'طرفية جديدة',
       'view.newTerminal': 'طرفية جديدة',

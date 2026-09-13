@@ -208,17 +208,16 @@ describe('find-in-page keybind registration', () => {
     expect(comboAllowedInInput('mod+f')).toBe(true)
   })
 
-  it('registers the step pair unbound so it cannot conflict with view.toggleReview', () => {
+  it('keeps find stepping contextual and leaves global chords available to plugins', () => {
     const next = byId.get('view.findNext')
     const previous = byId.get('view.findPrevious')
 
     expect(next?.category).toBe('view')
     expect(previous?.category).toBe('view')
-    // mod+g stays with view.toggleReview by default; the open find bar claims
-    // it at dispatch time instead (findBarClaimsCombo above).
+    // The open find bar claims these keys at dispatch time.
     expect(next?.defaults).toEqual([])
     expect(previous?.defaults).toEqual([])
-    expect(byId.get('view.toggleReview')?.defaults).toEqual(['mod+g'])
+    expect(byId.has('view.toggleReview')).toBe(false)
   })
 
   it('every registered find action has an i18n label (keybinds panel row)', () => {

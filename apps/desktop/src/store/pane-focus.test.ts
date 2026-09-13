@@ -4,8 +4,7 @@ import { $activeTerminalId, $terminals } from '@/app/right-sidebar/terminal/term
 
 import { revealDesktopPane } from './pane-focus'
 
-const { openReview, revealTreePane, setFileBrowserOpen, setSidebarOpen, createDefaultTerminal } = vi.hoisted(() => ({
-  openReview: vi.fn(),
+const { revealTreePane, setFileBrowserOpen, setSidebarOpen, createDefaultTerminal } = vi.hoisted(() => ({
   revealTreePane: vi.fn(),
   setFileBrowserOpen: vi.fn(),
   setSidebarOpen: vi.fn(),
@@ -13,9 +12,12 @@ const { openReview, revealTreePane, setFileBrowserOpen, setSidebarOpen, createDe
 }))
 
 vi.mock('@/app/right-sidebar/terminal/actions', () => ({ createDefaultTerminal }))
-vi.mock('@/components/pane-shell/tree/store', () => ({ revealTreePane, $layoutTree: { get: () => null }, noteActiveTreeGroup: vi.fn() }))
+vi.mock('@/components/pane-shell/tree/store', () => ({
+  revealTreePane,
+  $layoutTree: { get: () => null },
+  noteActiveTreeGroup: vi.fn()
+}))
 vi.mock('./layout', () => ({ setFileBrowserOpen, setSidebarOpen }))
-vi.mock('./review', () => ({ openReview }))
 
 describe('revealDesktopPane', () => {
   beforeEach(() => {
@@ -29,8 +31,7 @@ describe('revealDesktopPane', () => {
     expect(revealTreePane).toHaveBeenCalledWith('workspace')
     revealDesktopPane('files')
     expect(setFileBrowserOpen).toHaveBeenCalledWith(true)
-    revealDesktopPane('review')
-    expect(openReview).toHaveBeenCalledOnce()
+    expect(revealDesktopPane('review')).toBe(false)
     revealDesktopPane('sessions')
     expect(setSidebarOpen).toHaveBeenCalledWith(true)
     revealDesktopPane('terminal')

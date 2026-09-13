@@ -82,7 +82,6 @@ export function useStatusbarItems({
   // minimized zone, which lit the button for a pane the user couldn't see.
 
   const filesShowing = useStore($paneVisible('files'))
-  const reviewShowing = useStore($paneVisible('review'))
   const primaryBusy = useStore($busy)
   // Draft / primary composer atom — used only while the focused surface is the
   // primary (or a draft with no runtime slice yet). A focused TILE keeps its
@@ -478,17 +477,6 @@ export function useStatusbarItems({
         variant: 'action'
       },
       {
-        actionId: 'view.toggleReview',
-        className: `w-7 justify-center px-0${reviewShowing ? ' bg-accent/55 text-foreground' : ''}`,
-        hidden: !chatOpen,
-        icon: <Codicon name="git-compare" size="0.875rem" />,
-        id: 'review',
-        onSelect: () => togglePaneVisible('review'),
-        title: reviewShowing ? 'Hide changes' : 'Show changes',
-        toggleLabel: 'Git',
-        variant: 'action'
-      },
-      {
         actionId: 'view.showTerminal',
         className: 'w-7 justify-center px-0',
         icon: <Terminal className="size-3.5" />,
@@ -511,7 +499,6 @@ export function useStatusbarItems({
       copy,
       filesShowing,
       gatewayState,
-      reviewShowing,
       t.keybinds.actions,
       turnStartedAt
     ]
