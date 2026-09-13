@@ -54,12 +54,12 @@ function cronTitle(path: string): string {
   const jobId = cronJobIdFromRoute(path)
 
   if (!jobId) {
-    return 'Scheduled jobs'
+    return 'Scheduled'
   }
 
   const job = $cronJobs.get().find(row => row.id === jobId)
 
-  return job ? jobTitle(job) : 'Scheduled job'
+  return job ? jobTitle(job) : 'Scheduled'
 }
 
 function builtinPage(path: string): null | { render: () => ReactNode; title: string } {

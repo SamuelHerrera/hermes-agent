@@ -218,6 +218,14 @@ describe('TitlebarControls', () => {
               ],
               toggleLabel: 'Workspace',
               variant: 'menu'
+            },
+            {
+              id: 'webhooks',
+              label: 'Webhooks',
+              lockedVisible: true,
+              onSelect: vi.fn(),
+              toggleLabel: 'Webhooks',
+              variant: 'action'
             }
           ]}
         />
@@ -258,17 +266,23 @@ describe('TitlebarControls', () => {
     expect(screen.queryByRole('menuitem', { name: 'Workspace' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Project' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'New project' })).toBeNull()
-    expect(await screen.findByRole('menuitem', { name: 'Scheduled jobs' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Scheduled' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Webhooks' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Capabilities' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Messaging' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Kanban' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
-    expect(await screen.findByRole('menuitem', { name: /Layout editor/ })).toBeTruthy()
-    expect(await screen.findByRole('menuitem', { name: 'HUD mode' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'More controls' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Layout editor/ })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'HUD mode' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'kanban:approval-bridge' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'kanban:count' })).toBeNull()
+
+    const labels = screen.getAllByRole('menuitem').map(item => item.textContent)
+    expect(labels.indexOf('Webhooks')).toBeGreaterThan(labels.indexOf('Scheduled'))
+    expect(labels.indexOf('Webhooks')).toBeLessThan(labels.indexOf('Capabilities'))
 
     const menuItems = screen.getAllByRole('menuitem')
     expect(menuItems.at(-1)?.textContent).toContain('Settings')

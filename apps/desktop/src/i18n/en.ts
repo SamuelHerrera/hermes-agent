@@ -1693,7 +1693,7 @@ export const en: Translations = {
 
   cron: {
     close: 'Close cron',
-    title: 'Scheduled jobs',
+    title: 'Scheduled',
     count: count => `${count} ${count === 1 ? 'job' : 'jobs'}`,
     modelImpact: {
       title: 'Scheduled jobs need review',
@@ -1895,7 +1895,7 @@ export const en: Translations = {
       skills: 'Capabilities',
       messaging: 'Messaging',
       artifacts: 'Artifacts',
-      cron: 'Scheduled jobs'
+      cron: 'Scheduled'
     },
     searchAria: 'Search sessions',
     searchPlaceholder: 'Search sessions…',
