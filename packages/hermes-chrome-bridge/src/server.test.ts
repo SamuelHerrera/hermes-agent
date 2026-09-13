@@ -375,8 +375,11 @@ describe('Hermes Chrome bridge MCP server', () => {
   })
 
   it('initializes over stdio and advertises the bridge tools', async () => {
+    const hermesHome = await mkdtemp(join(tmpdir(), 'hcb-stdio-'))
+    temporaryDirectories.push(hermesHome)
+
     const transport = new StdioClientTransport({
-      args: ['dist/server.js'],
+      args: ['dist/server.js', '--hermes-home', hermesHome],
       command: process.execPath,
       cwd: process.cwd(),
       stderr: 'pipe'
@@ -415,11 +418,13 @@ describe('Hermes Chrome bridge MCP server', () => {
 
     const binDirectory = join(installDirectory, 'node_modules', '.bin')
     const binPath = join(binDirectory, 'hermes-chrome-bridge')
+    const hermesHome = join(installDirectory, 'hermes-home')
     await mkdir(binDirectory, { recursive: true })
+    await mkdir(hermesHome, { recursive: true })
     await symlink(resolve('dist/server.js'), binPath)
 
     const transport = new StdioClientTransport({
-      args: [binPath],
+      args: [binPath, '--hermes-home', hermesHome],
       command: process.execPath,
       cwd: installDirectory,
       stderr: 'pipe'

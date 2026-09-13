@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as HermesModule from '@/hermes'
 import { getSession } from '@/hermes'
 import { $activeGatewayProfile, $profiles } from '@/store/profile'
+import { $projectTree } from '@/store/projects'
 import { $sessions } from '@/store/session'
 import type { SessionInfo } from '@/types/hermes'
 
@@ -21,6 +22,7 @@ const profiles = (...names: string[]) => names.map(name => ({ name }) as never)
 
 describe('resolveStoredSession profile ownership', () => {
   beforeEach(() => {
+    $projectTree.set([])
     $sessions.set([])
     $profiles.set(profiles('default', 'meta'))
     $activeGatewayProfile.set('meta')
@@ -28,9 +30,31 @@ describe('resolveStoredSession profile ownership', () => {
   })
 
   afterEach(() => {
+    $projectTree.set([])
     $sessions.set([])
     $profiles.set([])
     $activeGatewayProfile.set('default')
+  })
+
+  it('keeps preview and delegate identity through repeated open/refresh cycles', async () => {
+    const child = session({ id: 'child', profile: 'default', source: 'desktop', title: null,
+      preview: 'Investigate session titles', delegate_parent_session_id: 'parent' })
+    $projectTree.set([{ repos: [], previewSessions: [child] }] as never)
+    for (const rows of [[], [session({ id: 'child', profile: 'default', title: null })], []]) {
+      $sessions.set(rows)
+      const resolved = await resolveStoredSession('child')
+      expect(resolved?.preview).toBe(child.preview)
+      expect(resolved?.delegate_parent_session_id).toBe('parent')
+      expect($sessions.get()[0]).toBe(child)
+    }
+    expect(mockGetSession).not.toHaveBeenCalled()
+  })
+
+  it('does not hydrate a cached profile from another profile tree row', async () => {
+    $sessions.set([session({ id: 'child', profile: 'meta' })])
+    $projectTree.set([{ repos: [], previewSessions: [session({ id: 'child', profile: 'default', preview: 'Other' })] }] as never)
+    expect((await resolveStoredSession('child'))?.profile).toBe('meta')
+    expect($sessions.get()[0].preview).toBeUndefined()
   })
 
   it('returns a cached row that carries an owning profile', async () => {

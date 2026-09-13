@@ -568,7 +568,7 @@ export function useSessionActions({
   }, [activeSessionIdRef, getRoutedStoredSessionId, navigate, selectedStoredSessionIdRef, storedIdRotation])
 
   const startFreshSessionDraft = useCallback(
-    (options: boolean | FreshSessionDraftOptions = false) => {
+    (options: boolean | FreshSessionDraftOptions = false, preserveScreen = false) => {
       const draftOptions = typeof options === 'boolean' ? { replaceRoute: options } : options
       const source = typeof options === 'boolean' ? 'boolean-replace-route' : (options.source ?? 'unspecified')
 
@@ -618,7 +618,9 @@ export function useSessionActions({
       // is hidden, not closed: it keeps its PTYs and the overlay stops
       // painting on the pane-hidden marker, which is what actually cleared the
       // chat.
-      revealTreePane('workspace')
+      if (!preserveScreen) {
+        revealTreePane('workspace')
+      }
       // Clear the durable route intent synchronously, before React Router
       // publishes /new. Submit uses that intent to heal an existing-session
       // rebind race, so leaving the old id here could revive it on a very fast

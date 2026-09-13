@@ -5,6 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { cn } from '@/lib/utils'
 
+import { allPaneIds } from '../model'
+import { $activeTabbedScreen, $tabbedScreenTrees } from '../screens'
+import { setActiveTabbedScreen } from '../store'
+
 import { scrollGridWindowRect } from './grid'
 import {
   $activeScrollWorkspaceId,
@@ -114,14 +118,19 @@ export function ScrollWindowsMinimap() {
 
 export function ScrollWindowsWorkspaceChips() {
   const mode = useStore($layoutSurfaceMode)
-  const activeWorkspaceId = useStore($activeScrollWorkspaceId)
+  const scrollWorkspaceId = useStore($activeScrollWorkspaceId)
+  const tabbedScreenId = useStore($activeTabbedScreen)
+  const tabbedTrees = useStore($tabbedScreenTrees)
   const workspaces = useStore($scrollWindowWorkspaces)
+  const activeWorkspaceId = mode === 'tabbed' ? tabbedScreenId : scrollWorkspaceId
 
-  if (mode !== 'scroll-windows') {
-    return null
-  }
-
-  const counts = new Map(workspaces.map(workspace => [workspace.id, workspace.windowIds.length]))
+  const counts = new Map(
+    mode === 'tabbed'
+      ? Object.entries(tabbedTrees).map(
+          ([id, tree]) => [id, allPaneIds(tree).filter(pane => pane !== 'sessions').length] as const
+        )
+      : workspaces.map(workspace => [workspace.id, workspace.windowIds.length] as const)
+  )
 
   return (
     <div className="flex items-center">
@@ -140,9 +149,9 @@ export function ScrollWindowsWorkspaceChips() {
                 : 'text-muted-foreground/85 hover:bg-(--ui-control-hover-background) hover:text-foreground'
             )}
             key={id}
-            onClick={() => setActiveScrollWorkspace(id)}
+            onClick={() => (mode === 'tabbed' ? setActiveTabbedScreen(id) : setActiveScrollWorkspace(id))}
             size="icon-titlebar"
-            title={count > 0 ? `${count} window${count === 1 ? '' : 's'}` : 'Empty workspace'}
+
             type="button"
             variant="ghost"
           >

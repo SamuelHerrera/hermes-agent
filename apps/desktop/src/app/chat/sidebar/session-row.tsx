@@ -24,6 +24,7 @@ import { sessionProjectLabel } from '@/lib/session-project-label'
 import { handoffOriginSource, sessionSourceLabel } from '@/lib/session-source'
 import { coarseElapsed } from '@/lib/time'
 import { useStoreSelector } from '@/lib/use-session-slice'
+import { useSessionTitleDiagnostics } from '@/lib/use-session-title-diagnostics'
 import { cn } from '@/lib/utils'
 import { $sidebarRowMeta, $sidebarSessionTerminalOpen, toggleSidebarSessionTerminalOpen } from '@/store/layout'
 import { normalizeProfileKey } from '@/store/profile'
@@ -140,6 +141,7 @@ function SidebarSessionRowImpl({
   const r = t.sidebar.row
   const { cancelPrewarm, startPrewarm } = useProfilePrewarm(session.profile)
   const title = sessionTitle(session)
+  useSessionTitleDiagnostics('sidebar', session, title, isSelected)
   const timestamp = session.last_active || session.started_at
   const age = formatAge(timestamp, r)
   const timestampDate = new Date(timestamp * 1000)

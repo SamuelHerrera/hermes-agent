@@ -43,7 +43,14 @@ import {
 } from './model'
 import { FLOATING_PLACEMENT } from './renderer/floating-rect'
 import { rootChildSide } from './renderer/track-model'
-import { requestScrollWindowIntoView } from './scroll-windows/store'
+import {
+  $activeTabbedScreen,
+  $tabbedScreenTrees,
+  emptyTabbedScreen,
+  saveTabbedScreen,
+  tabbedScreenOwner
+} from './screens'
+import { $layoutSurfaceMode, requestScrollWindowIntoView, SCROLL_WINDOW_WORKSPACE_IDS } from './scroll-windows/store'
 
 // v2: v1 trees were saved against placeholder panes with index-order zone
 // assignment (chat could land in a corner cell). Retire them wholesale.
@@ -75,7 +82,76 @@ function persist(tree: LayoutNode | null) {
 /** The live tree (null until a default is declared). A secondary window ignores
  *  the persisted (primary) layout and boots to the default — nothing but its
  *  own routed session. */
-export const $layoutTree = atom<LayoutNode | null>(isSecondaryWindow() ? null : loadPersisted())
+export const $layoutTree = atom<LayoutNode | null>(
+  isSecondaryWindow()
+    ? null
+    : (($layoutSurfaceMode.get() === 'tabbed' ? $tabbedScreenTrees.get()[$activeTabbedScreen.get()] : null) ??
+        loadPersisted())
+)
+
+// Screens own whole split trees, including tab order and the active tab in each
+// panel. Contribution adoption must not pull another screen's panes into view.
+$layoutTree.listen(tree => {
+  if (tree && !isSecondaryWindow() && $layoutSurfaceMode.get() === 'tabbed') {
+    saveTabbedScreen(tree)
+  }
+})
+
+export function setActiveTabbedScreen(id: string): void {
+  const tree = $layoutTree.get()
+
+  if (
+    !tree ||
+    isSecondaryWindow() ||
+    $layoutSurfaceMode.get() !== 'tabbed' ||
+    id === $activeTabbedScreen.get() ||
+    !SCROLL_WINDOW_WORKSPACE_IDS.includes(id)
+  ) {
+    return
+  }
+
+  saveTabbedScreen(tree)
+  const next = $tabbedScreenTrees.get()[id] ?? emptyTabbedScreen(defaultTree ?? tree, id)
+  $activeTabbedScreen.set(id)
+  $activeTreeGroup.set(null)
+  $hoveredTreeGroup.set(null)
+  $layoutTree.set(next)
+  persist(next)
+}
+
+export function cycleTabbedScreen(direction: 1 | -1): void {
+  const ids = SCROLL_WINDOW_WORKSPACE_IDS
+  setActiveTabbedScreen(ids[(ids.indexOf($activeTabbedScreen.get()) + direction + ids.length) % ids.length])
+}
+
+let scrollModeTree: LayoutNode | null = null
+$layoutSurfaceMode.listen(mode => {
+  if (isSecondaryWindow()) {
+    return
+  }
+
+  if (mode === 'scroll-windows') {
+    const tree = $layoutTree.get()
+
+    if (tree) {
+      saveTabbedScreen(tree)
+    }
+
+    if (scrollModeTree) {
+      $layoutTree.set(scrollModeTree)
+    }
+  } else {
+    scrollModeTree = $layoutTree.get()
+    const tree = $tabbedScreenTrees.get()[$activeTabbedScreen.get()]
+
+    if (tree) {
+      $layoutTree.set(tree)
+    }
+  }
+
+  adoptContributedPanes()
+  persist($layoutTree.get())
+})
 
 function traceTree(tree: LayoutNode | null): Record<string, unknown> {
   if (!tree) {
@@ -1096,6 +1172,14 @@ export function treeSideOfPane(paneId: string): TreeSide | null {
  * open its side, unhide it, and bring it to the front of its group.
  */
 export function revealTreePane(paneId: string) {
+  if ($layoutSurfaceMode.get() === 'tabbed') {
+    const owner = tabbedScreenOwner(paneId)
+
+    if (owner) {
+      setActiveTabbedScreen(owner)
+    }
+  }
+
   const requestedTree = $layoutTree.get()
   const requestedGroup = requestedTree ? findGroupOfPane(requestedTree, paneId) : null
 
@@ -1144,8 +1228,8 @@ export function revealTreePane(paneId: string) {
   if (hiddenNow.has(paneId)) {
     setTreePaneHidden(paneId, false)
     logUatEvent('tabs', 'pane.reveal.unhidden', { paneId })
-
-    return
+    // Reactive unhides preserve the current tab. Explicit reveal must continue
+    // below to activate this pane and restore a minimized group.
   }
 
   const tree = $layoutTree.get()
@@ -1280,7 +1364,12 @@ export function declareDefaultTree(tree: LayoutNode) {
     return
   }
 
-  const next = enforceFixedLeftPanel(adoptMissingPanes(current, tree))
+  const next = enforceFixedLeftPanel(
+    adoptMissingPanes(
+      current,
+      $layoutSurfaceMode.get() === 'tabbed' && $activeTabbedScreen.get() !== '1' ? emptyTabbedScreen(tree) : tree
+    )
+  )
 
   if (next !== current) {
     commit(next, 'layout.default-merge')
@@ -1355,9 +1444,10 @@ function enforceFixedLeftPanel(tree: LayoutNode): LayoutNode {
       continue
     }
 
-    const target = panePlacement(paneId) === 'main'
-      ? { groupId: workspaceGroup.id, pos: 'center' as const }
-      : { groupId: workspaceGroup.id, pos: 'right' as const }
+    const target =
+      panePlacement(paneId) === 'main'
+        ? { groupId: workspaceGroup.id, pos: 'center' as const }
+        : { groupId: workspaceGroup.id, pos: 'right' as const }
 
     next = insertAtGroup(withoutPane, target.groupId, paneId, target.pos, undefined, false) ?? withoutPane
   }
@@ -1388,7 +1478,13 @@ function adoptContributedPanes(): void {
   // turn it into a track that steals width from a zone, which is the whole
   // thing floating exists to avoid.
   const missing = panes.filter(
-    c => !inTree.has(c.id) && !dismissed.has(c.id) && placementOf(c.id) !== FLOATING_PLACEMENT
+    c =>
+      !inTree.has(c.id) &&
+      !dismissed.has(c.id) &&
+      placementOf(c.id) !== FLOATING_PLACEMENT &&
+      ($layoutSurfaceMode.get() !== 'tabbed' ||
+        !tabbedScreenOwner(c.id) ||
+        tabbedScreenOwner(c.id) === $activeTabbedScreen.get())
   )
 
   if (missing.length === 0) {
@@ -1646,7 +1742,11 @@ export function moveTreePanes(
     tree,
     paneIds,
     paneIds.some(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId))
-      ? redirectFromFixedLeftPanel(tree, paneIds.find(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? paneIds[0], target)
+      ? redirectFromFixedLeftPanel(
+          tree,
+          paneIds.find(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? paneIds[0],
+          target
+        )
       : target,
     activeId
   )

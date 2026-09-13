@@ -32,6 +32,8 @@ import { Button } from '@/components/ui/button'
 import { transcribeAudio } from '@/hermes'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { NEW_SESSION_TITLE, sessionTitle } from '@/lib/chat-runtime'
+import { sessionTitleDiagnostic } from '@/lib/session-title-diagnostics'
+import { logUatEvent } from '@/lib/uat-diagnostics'
 import { $draftTitles, createComposerAttachmentScope, draftTitleFor, draftTitleIn } from '@/store/composer'
 import { $pinnedSessionIds, pinSession, unpinSession } from '@/store/layout'
 import { $activeGatewayProfile } from '@/store/profile'
@@ -563,6 +565,12 @@ function syncSessionTileTitles(): void {
     const title = stored ? sessionTitle(stored) : ''
 
     if (title && title !== tile.workspaceTabTitle) {
+      logUatEvent('session-title', 'tile-title.changed', {
+        ...sessionTitleDiagnostic(stored, title),
+        previousFallback: /^(unknown|untitled session|new session)$/i.test(tile.workspaceTabTitle?.trim() || ''),
+        previousPresent: Boolean(tile.workspaceTabTitle),
+        activeProfile: $activeGatewayProfile.get()
+      })
       setRememberedSessionTitle($activeGatewayProfile.get(), tile.storedSessionId, title)
       patchSessionTile(tile.storedSessionId, { workspaceTabTitle: title })
     }

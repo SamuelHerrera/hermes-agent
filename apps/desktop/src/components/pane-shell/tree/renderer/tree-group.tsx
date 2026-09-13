@@ -10,7 +10,16 @@
  */
 
 import { useStore } from '@nanostores/react'
-import { type CSSProperties, Fragment, type ReactNode, type RefObject, useEffect, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  useContext,
+  useEffect,
+  useRef,
+  useState
+} from 'react'
 
 import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
 import { Codicon } from '@/components/ui/codicon'
@@ -134,6 +143,7 @@ export function TreeGroup({
   parentAxis?: 'column' | 'row'
   railSide?: 'left' | 'right'
 }) {
+  const screenVisible = useContext(PaneVisibleContext)
   const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -249,7 +259,6 @@ export function TreeGroup({
     tabCount: shown.length
   })
 
-
   // Zone-menu close targets read the layout tree, but this component must NOT
   // subscribe to it: `useStore($layoutTree)` here wires every zone — and
   // therefore every mounted pane and its whole transcript — to the entire
@@ -275,7 +284,6 @@ export function TreeGroup({
   // Middle-click / ⌘-click on a tab: one routing for every tab kind, the same
   // one the zone menu's Close and ⌘W use.
   const closeTab = (paneId: string) => closeTabPane(paneId)
-
 
   // A pane's own live label when it has one, else its registered string.
   const tabLabel = (paneId: string) => paneChrome(paneFor(paneId)).tabTitle?.() ?? paneFor(paneId)?.title ?? paneId
@@ -373,14 +381,7 @@ export function TreeGroup({
             onPointerDown={e =>
               // Drag empty header space like a pane. A plain click is inert:
               // split zones are equal work surfaces, not collapsible panels.
-              startPaneDrag(
-                activeId,
-                e,
-                undefined,
-                undefined,
-                undefined,
-                active?.title ?? activeId
-              )
+              startPaneDrag(activeId, e, undefined, undefined, undefined, active?.title ?? activeId)
             }
             ref={stripRef}
             style={{ cursor: 'grab' }}
@@ -554,7 +555,7 @@ export function TreeGroup({
                     // Reload remounts the contribution (effects re-run, state
                     // resets) while the layer — and every other tab — stays.
                     <PaneGroupContext.Provider value={node.id}>
-                      <PaneVisibleContext.Provider value={isActive}>
+                      <PaneVisibleContext.Provider value={isActive && screenVisible}>
                         <ContribBoundary id={pane.id} key={paneEpochs[paneId] ?? 0}>
                           <ContribRender render={pane.render} />
                         </ContribBoundary>

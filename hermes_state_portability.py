@@ -182,8 +182,6 @@ class SessionPortabilityMixin:
         _sel = self._compact_session_cols() if compact_rows else "s.*"
         delegate_select = (
             f", {_delegate_from_json('s.model_config')} AS delegate_parent_session_id"
-            if compact_rows
-            else ""
         )
         placeholders = ",".join("?" for _ in ids)
         prompt_select = (

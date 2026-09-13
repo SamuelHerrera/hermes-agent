@@ -579,7 +579,9 @@ async def get_session_detail(session_id: str, profile: Optional[str] = None):
     db = _open_session_db_for_profile(profile, read_only=True)
     try:
         sid = db.resolve_session_id(session_id)
-        session = db.get_session(sid) if sid else None
+        # Match list/search hydration: a bare row erases preview-based titles
+        # and delegate identity when Desktop opens a child outside recents.
+        session = db.get_session_rich_row(sid) if sid else None
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         # Always stamp the owning profile — the serving profile is known even

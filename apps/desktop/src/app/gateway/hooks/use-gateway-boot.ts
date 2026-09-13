@@ -55,6 +55,13 @@ import { stashGatewaySurvivor, survivorIsStale, takeGatewaySurvivor } from './ga
 // original ~45s calibration.
 const RECONNECT_ESCALATE_AFTER_MS = 45_000
 
+function logBoot(message: string, details?: Record<string, unknown>) {
+  // Renderer-console timeline for reports that opening briefly flickers/reloads.
+  // The relevant paths are boot progress, soft gateway switches, late progress
+  // events, and reconnects.
+  console.info(`[desktop-boot] ${message}`, details ?? '')
+}
+
 interface GatewayBootOptions {
   beforeConnectionSwitch: () => void
   handleGatewayEvent: (event: RpcEvent) => void
@@ -152,6 +159,7 @@ export function useGatewayBoot({
       }
 
       reconnecting = true
+      logBoot('reconnect attempt started', { attempt: reconnectAttempt, profile: $activeGatewayProfile.get() })
 
       try {
         // Drop a stale REMOTE backend cache before re-dialing. After sleep/wake a
@@ -178,6 +186,7 @@ export function useGatewayBoot({
         // long-lived token and the re-mint is a cheap no-op.
         const wsUrl = await resolveGatewayWsUrl(desktop, conn)
         await gateway.connect(wsUrl)
+        logBoot('reconnect opened gateway', { profile: $activeGatewayProfile.get() })
 
         if (cancelled) {
           return
@@ -192,6 +201,8 @@ export function useGatewayBoot({
         await callbacksRef.current.refreshHermesConfig().catch(() => undefined)
         await callbacksRef.current.refreshSessions().catch(() => undefined)
       } catch (err) {
+        logBoot('reconnect attempt failed', { error: err instanceof Error ? err.message : String(err) })
+
         // OAuth session expired mid-reconnect: surface the actionable "sign in
         // again" message once instead of silently looping the backoff against a
         // ticket that can never succeed. Transport failures fall through to the
@@ -228,6 +239,7 @@ export function useGatewayBoot({
       // an immediate-retry reconnect storm can exhaust the gateway's file
       // descriptors while it's still coming back up.
       const delay = reconnectBackoffDelayMs(reconnectAttempt)
+      logBoot('reconnect scheduled', { attempt: reconnectAttempt, delayMs: delay })
       reconnectAttempt += 1
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null
@@ -240,6 +252,7 @@ export function useGatewayBoot({
         return
       }
 
+      logBoot('immediate reconnect requested', { state: gateway.connectionState })
       clearReconnectTimer()
       reconnectAttempt = 0
       reconnectFailingSince = null
@@ -295,6 +308,7 @@ export function useGatewayBoot({
         return
       }
 
+      logBoot('soft gateway switch started')
       $gatewaySwitching.set(true)
       clearReconnectTimer()
       reconnectAttempt = 0
@@ -334,6 +348,7 @@ export function useGatewayBoot({
         ])
         completeDesktopBoot()
         bootCompleted = true
+        logBoot('soft gateway switch completed')
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : String(err)
@@ -350,6 +365,13 @@ export function useGatewayBoot({
       // Soft switch / post-boot startHermes re-emits progress — ignore so the
       // cold-boot CONNECTING overlay stays down. Errors still surface.
       if ($gatewaySwitching.get() || bootCompleted) {
+        logBoot('late boot progress received', {
+          phase: payload.phase,
+          progress: payload.progress,
+          running: payload.running,
+          ignored: !payload.error
+        })
+
         if (payload.error) {
           applyDesktopBootProgress(payload)
         }
@@ -358,6 +380,7 @@ export function useGatewayBoot({
       }
 
       applyDesktopBootProgress(payload)
+      logBoot('boot progress applied', { phase: payload.phase, progress: payload.progress, running: payload.running })
     })
 
     void desktop
@@ -397,6 +420,7 @@ export function useGatewayBoot({
     configureGatewayRegistry({ onEvent: event => callbacksRef.current.handleGatewayEvent(event) })
 
     const offState = gateway.onState(st => {
+      logBoot('gateway state changed', { state: st, bootCompleted })
       // Mirror to the composer only while the primary is the active profile —
       // a background secondary reconnect mustn't flip the foreground state.
       reportPrimaryGatewayState(st)
@@ -500,6 +524,7 @@ export function useGatewayBoot({
 
     async function boot() {
       try {
+        logBoot('initial boot started')
         // A profile-pinned helper window (the HUD) dials its target profile's
         // backend directly — ensureBackend spawns/reuses it from the pool.
         // Everything else keeps dialing the primary.
@@ -577,6 +602,7 @@ export function useGatewayBoot({
 
         completeDesktopBoot()
         bootCompleted = true
+        logBoot('initial boot completed')
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : String(err)
@@ -596,6 +622,7 @@ export function useGatewayBoot({
     async function adoptBoot() {
       bootCompleted = true
       completeDesktopBoot()
+      logBoot('adopted existing HMR gateway')
 
       if (survivor?.connection) {
         publish(survivor.connection)

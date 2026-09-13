@@ -60,7 +60,8 @@ test('Settings is a reusable tab with independent navigation and close behavior'
     )
     .toBe('config:appearance')
   await page.reload()
-  await waitForAppReady(fixture)
+  // Settings restores as the active screen; no chat composer is mounted here.
+  await expect(settings).toBeVisible({ timeout: 60_000 })
   await expect(settingsTab).toHaveCount(1)
   await settingsTab.click()
   await expect(settings).toBeVisible()

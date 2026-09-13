@@ -25,6 +25,7 @@ import {
   $layoutTree,
   bindPaneVisibility,
   bindTreeSideVisibility,
+  cycleTabbedScreen,
   declareDefaultTree,
   dismissTreePane,
   isPaneVisible,
@@ -37,6 +38,7 @@ import {
   removeTreePane,
   resetLayoutTree,
   revealTreePane,
+  setActiveTabbedScreen,
   togglePaneVisible,
   watchContributedPanes
 } from '@/components/pane-shell/tree/store'
@@ -304,9 +306,9 @@ registry.registerMany([
     area: KEYBINDS_AREA,
     data: {
       id: 'scrollWindows.workspace.next',
-      label: 'Scroll windows: next workspace',
+      label: 'Next screen',
       defaults: [],
-      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWorkspace(1)
+      run: () => ($layoutSurfaceMode.get() === 'scroll-windows' ? cycleScrollWorkspace(1) : cycleTabbedScreen(1))
     } satisfies KeybindContribution
   },
   {
@@ -314,9 +316,9 @@ registry.registerMany([
     area: KEYBINDS_AREA,
     data: {
       id: 'scrollWindows.workspace.previous',
-      label: 'Scroll windows: previous workspace',
+      label: 'Previous screen',
       defaults: [],
-      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && cycleScrollWorkspace(-1)
+      run: () => ($layoutSurfaceMode.get() === 'scroll-windows' ? cycleScrollWorkspace(-1) : cycleTabbedScreen(-1))
     } satisfies KeybindContribution
   },
   ...SCROLL_WINDOW_WORKSPACE_IDS.map(id => ({
@@ -324,9 +326,10 @@ registry.registerMany([
     area: KEYBINDS_AREA,
     data: {
       id: `scrollWindows.workspace.${id}`,
-      label: `Scroll windows: switch to workspace ${id}`,
+      label: `Switch to screen ${id}`,
       defaults: [],
-      run: () => $layoutSurfaceMode.get() === 'scroll-windows' && setActiveScrollWorkspace(id)
+      run: () =>
+        $layoutSurfaceMode.get() === 'scroll-windows' ? setActiveScrollWorkspace(id) : setActiveTabbedScreen(id)
     } satisfies KeybindContribution
   })),
   {
@@ -358,17 +361,18 @@ registry.registerMany([
     get: () => $layoutSurfaceMode.get() === 'scroll-windows',
     set: enabled => setLayoutSurfaceMode(enabled ? 'scroll-windows' : 'tabbed')
   }),
-  {
-    id: 'scrollWindows.minimap',
-    area: 'titleBar.center',
-    order: 10,
-    render: () => <ScrollWindowsMinimap />
-  },
+
   {
     id: 'scrollWindows.workspaces',
     area: 'titleBar.right',
     order: 20,
     render: () => <ScrollWindowsWorkspaceChips />
+  },
+  {
+    id: 'scrollWindows.minimap',
+    area: 'titleBar.center',
+    order: 10,
+    render: () => <ScrollWindowsMinimap />
   },
   // The agent's write -> see loop: rescan <hermes home>/desktop-plugins
   // without relaunching (same-id reloads dispose the previous incarnation).
