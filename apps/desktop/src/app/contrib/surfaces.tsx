@@ -75,13 +75,11 @@ export const SidebarSurface = memo(function SidebarSurface({
 export const StatusbarSurface = memo(function StatusbarSurface({
   actions,
   agentsOpen,
-  chatOpen,
-  commandCenterOpen
+  chatOpen
 }: {
   actions: WiringActions
   agentsOpen: boolean
   chatOpen: boolean
-  commandCenterOpen: boolean
 }) {
   const gatewayState = useStore($gatewayState)
   const freshDraftReady = useStore($freshDraftReady)
@@ -92,7 +90,6 @@ export const StatusbarSurface = memo(function StatusbarSurface({
   const { leftStatusbarItems, statusbarItems } = useStatusbarItems({
     agentsOpen,
     chatOpen,
-    commandCenterOpen,
     extraLeftItems,
     extraRightItems,
     freshDraftReady,
@@ -101,8 +98,7 @@ export const StatusbarSurface = memo(function StatusbarSurface({
     openAgents: actions.openAgents,
     openCommandCenterSection: actions.openCommandCenterSection,
     requestGateway: actions.requestGateway,
-    statusSnapshot,
-    toggleCommandCenter: actions.toggleCommandCenter
+    statusSnapshot
   })
 
   return <StatusbarControls items={statusbarItems} leftItems={leftStatusbarItems} />

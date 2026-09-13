@@ -55,12 +55,14 @@ const EMPTY_SESSIONS: readonly never[] = []
 const EMPTY_PINNED: readonly string[] = []
 
 interface CommandCenterViewProps {
+  fixedSection?: CommandCenterSection
   initialSection?: CommandCenterSection
   onClose?: () => void
   onDeleteSession?: (sessionId: string) => Promise<void> | void
   // Accepted for call-site parity; navigation lives in the global Cmd+K palette.
   onNavigateRoute?: (path: string) => void
   onOpenSession: (sessionId: string) => void
+  showNav?: boolean
 }
 
 function formatTimestamp(value?: number | null): string {
@@ -132,13 +134,31 @@ function EmptyPanel({ action, description, title }: { action?: ReactNode; descri
   )
 }
 
-export function CommandCenterView({ initialSection, onClose, onDeleteSession, onOpenSession }: CommandCenterViewProps) {
+export function CommandCenterView({
+  fixedSection,
+  initialSection,
+  onClose,
+  onDeleteSession,
+  onOpenSession,
+  showNav = true
+}: CommandCenterViewProps) {
   const { t } = useI18n()
   const cc = t.commandCenter
   // $sessions ticks on every streaming token (title updates, new sessions),
   // but we only need the data on the Sessions tab. Subscribe conditionally so
   // the System/Usage/Maintenance tabs don't re-render on every stream delta.
-  const [section, setSection] = useRouteEnumParam('section', SECTIONS, initialSection ?? 'sessions')
+  const [routeSection, setRouteSection] = useRouteEnumParam('section', SECTIONS, initialSection ?? 'sessions')
+  const section = fixedSection ?? routeSection
+
+  const setSection = useCallback(
+    (next: CommandCenterSection) => {
+      if (!fixedSection) {
+        setRouteSection(next)
+      }
+    },
+    [fixedSection, setRouteSection]
+  )
+
   const sessions = useStoreSelector($sessions, s => (section === 'sessions' ? s : EMPTY_SESSIONS))
   const pinnedSessionIds = useStoreSelector($pinnedSessionIds, s => (section === 'sessions' ? s : EMPTY_PINNED))
 
@@ -323,9 +343,9 @@ export function CommandCenterView({ initialSection, onClose, onDeleteSession, on
 
   const content = (
     <OverlaySplitLayout>
-        <OverlayNav groups={navGroups} />
+      {showNav && <OverlayNav groups={navGroups} />}
 
-        <OverlayMain>
+      <OverlayMain>
           <header className="mb-4 flex items-center justify-between gap-3 max-[47.5rem]:mb-2">
             {/* Redundant on narrow — the nav dropdown already names the section. */}
             <div className="min-w-0 max-[47.5rem]:hidden">
@@ -521,6 +541,10 @@ export function CommandCenterView({ initialSection, onClose, onDeleteSession, on
   }
 
   return <div className="flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)">{content}</div>
+}
+
+export function CommandCenterSettingsSection({ section }: { section: Exclude<CommandCenterSection, 'sessions'> }) {
+  return <CommandCenterView fixedSection={section} onOpenSession={() => undefined} showNav={false} />
 }
 
 interface UsagePanelProps {

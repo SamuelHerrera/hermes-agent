@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
+import { CommandCenterSettingsSection } from '@/app/command-center'
 import { codiconIcon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { getHermesConfigDefaults, getHermesConfigRecord, saveHermesConfig } from '@/hermes'
@@ -8,6 +9,7 @@ import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import {
   Archive,
+  Activity,
   BarChart3,
   Bell,
   Download,
@@ -49,6 +51,9 @@ const SETTINGS_VIEWS: readonly SettingsViewId[] = [
   'gateway',
   'keybinds',
   'keys',
+  'system-status',
+  'usage',
+  'maintenance',
   'notifications',
   'billing',
   'plugins',
@@ -166,6 +171,28 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
         id: 'billing',
         label: t.settings.nav.billing,
         onSelect: () => setActiveView('billing')
+      },
+      {
+        active: activeView === 'system-status',
+        gapBefore: true,
+        icon: Activity,
+        id: 'system-status',
+        label: t.commandCenter.sections.system,
+        onSelect: () => setActiveView('system-status')
+      },
+      {
+        active: activeView === 'usage',
+        icon: BarChart3,
+        id: 'usage',
+        label: t.commandCenter.sections.usage,
+        onSelect: () => setActiveView('usage')
+      },
+      {
+        active: activeView === 'maintenance',
+        icon: Wrench,
+        id: 'maintenance',
+        label: t.commandCenter.sections.maintenance,
+        onSelect: () => setActiveView('maintenance')
       },
       {
         active: activeView === 'providers',
@@ -306,6 +333,12 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
             <GatewaySettings />
           ) : activeView === 'keybinds' ? (
             <KeybindSettings />
+          ) : activeView === 'system-status' ? (
+            <CommandCenterSettingsSection section="system" />
+          ) : activeView === 'usage' ? (
+            <CommandCenterSettingsSection section="usage" />
+          ) : activeView === 'maintenance' ? (
+            <CommandCenterSettingsSection section="maintenance" />
           ) : activeView.startsWith('config:') ? (
             <ConfigSettings
               activeSectionId={activeView.slice('config:'.length)}

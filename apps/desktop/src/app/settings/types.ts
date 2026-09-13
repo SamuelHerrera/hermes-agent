@@ -10,10 +10,13 @@ export type SettingsView =
   | 'gateway'
   | 'keybinds'
   | 'keys'
+  | 'maintenance'
   | 'notifications'
   | 'plugins'
   | 'providers'
   | 'sessions'
+  | 'system-status'
+  | 'usage'
   | `config:${string}`
 export type EnvPatch = Partial<Pick<EnvVarInfo, 'is_set' | 'redacted_value'>>
 

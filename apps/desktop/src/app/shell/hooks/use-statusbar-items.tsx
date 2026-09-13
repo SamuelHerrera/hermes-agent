@@ -9,7 +9,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { useI18n } from '@/i18n'
 import { displayPath, pathLeaf } from '@/lib/display-path'
-import { Activity, AlertCircle, Command, FolderOpen, Globe, Hash, Loader2, Terminal } from '@/lib/icons'
+import { Activity, AlertCircle, FolderOpen, Globe, Hash, Loader2, Terminal } from '@/lib/icons'
 import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { LiveDuration } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
@@ -50,7 +50,6 @@ import type { StatusbarItem } from '../statusbar-controls'
 interface StatusbarItemsOptions {
   agentsOpen: boolean
   chatOpen: boolean
-  commandCenterOpen: boolean
   extraLeftItems: readonly StatusbarItem[]
   extraRightItems: readonly StatusbarItem[]
   gatewayState: string
@@ -60,13 +59,11 @@ interface StatusbarItemsOptions {
   freshDraftReady: boolean
   requestGateway: <T = unknown>(method: string, params?: Record<string, unknown>) => Promise<T>
   statusSnapshot: StatusResponse | null
-  toggleCommandCenter: () => void
 }
 
 export function useStatusbarItems({
   agentsOpen,
   chatOpen,
-  commandCenterOpen,
   extraLeftItems,
   extraRightItems,
   gatewayState,
@@ -74,8 +71,7 @@ export function useStatusbarItems({
   openAgents,
   openCommandCenterSection,
   requestGateway,
-  statusSnapshot,
-  toggleCommandCenter
+  statusSnapshot
 }: StatusbarItemsOptions) {
   const { t } = useI18n()
   const copy = t.shell.statusbar
@@ -346,18 +342,6 @@ export function useStatusbarItems({
     () => [
       ...(connectionItem ? [connectionItem] : []),
       {
-        className: `w-7 justify-center px-0${commandCenterOpen ? ' bg-accent/55 text-foreground' : ''}`,
-        icon: <Command className="size-3.5" />,
-        id: 'command-center',
-        // The system icon: the way into every other surface, including the
-        // settings that would bring a hidden item back. Never hideable.
-        lockedVisible: true,
-        onSelect: toggleCommandCenter,
-        title: copy.openCommandCenter,
-        toggleLabel: copy.toggleCommandCenter,
-        variant: 'action'
-      },
-      {
         className: gatewayRestarting ? undefined : gatewayClassName,
         detail: gatewayRestarting ? copy.gatewayRestarting : gatewayDetail,
         icon: gatewayRestarting ? (
@@ -447,7 +431,6 @@ export function useStatusbarItems({
     ],
     [
       agentsOpen,
-      commandCenterOpen,
       connectionItem,
       copy,
       currentCwd,
@@ -463,8 +446,7 @@ export function useStatusbarItems({
       openAgents,
       projectName,
       subagentsFailed,
-      subagentsRunning,
-      toggleCommandCenter
+      subagentsRunning
     ]
   )
 
