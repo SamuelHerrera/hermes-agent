@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { $layoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows'
 import type { Contribution } from '@/contrib/types'
 import { setCronJobs } from '@/store/cron'
 import { $keepAwake } from '@/store/keep-awake'
@@ -132,6 +133,20 @@ describe('TitlebarControls', () => {
     expect(disable.querySelector('.codicon-lock')).toBeTruthy()
   })
 
+  it('toggles scroll-window layout from the header', () => {
+    act(() => $layoutSurfaceMode.set('tabbed'))
+    render(
+      <MemoryRouter>
+        <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use scroll-window layout' }))
+
+    expect($layoutSurfaceMode.get()).toBe('scroll-windows')
+    expect(screen.getByRole('button', { name: 'Use tabbed layout' })).toBeTruthy()
+  })
+
   it('keeps requested app controls visible and moves the rest behind the dots menu', async () => {
     const commandCenter: StatusbarItem = {
       icon: <span data-testid="command-center-icon" />,
@@ -210,6 +225,7 @@ describe('TitlebarControls', () => {
     ])
     expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Profiles' }).querySelector('.codicon-chevron-down')).toBeNull()
 
     fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
