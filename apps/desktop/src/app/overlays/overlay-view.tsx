@@ -65,7 +65,12 @@ export function OverlayView({
   return (
     <div
       className={cn(
-        'fixed inset-0 z-50 bg-black/22 backdrop-blur-[0.125rem]',
+        // Keep the shell mounted underneath, but do not let pane/tab churn show
+        // through as visible flashes while an overlay is open. The old
+        // transparent dimmer made background route/adoption commits visible
+        // behind Scheduled/Agents/etc. even though the overlay itself was
+        // stable.
+        'fixed inset-0 z-50 bg-background/94 backdrop-blur-[0.125rem]',
         // Equidistant inset on every side. The top value is driven by the
         // titlebar height so the card clears the OS traffic-lights vertically;
         // since the card top already sits below them, the left needs no extra
