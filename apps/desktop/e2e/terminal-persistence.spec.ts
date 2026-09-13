@@ -2,17 +2,27 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { buildAppEnv, launchDesktop, setupMockBackend, waitForAppReady } from './fixtures'
+import { buildAppEnv, launchDesktop, PACKAGED_BINARY_PATH, setupMockBackend, waitForAppReady } from './fixtures'
+import { _electron } from '@playwright/test'
 import { expect, test } from './test'
 
 test('persistent terminal retains shell and btop across complete Desktop quit/reopen', async ({}, testInfo) => {
   test.setTimeout(180_000)
   const fixture = await setupMockBackend()
   let current = { app: fixture.app, page: fixture.page }
+  const launch = async () => {
+    if (process.env.HERMES_E2E_TERMINAL_PACKAGED !== '1') { return launchDesktop(buildAppEnv(fixture.sandbox)) }
+    const app = await _electron.launch({ executablePath: PACKAGED_BINARY_PATH, env: buildAppEnv(fixture.sandbox) })
+    return { app, page: await app.firstWindow() }
+  }
+  if (process.env.HERMES_E2E_TERMINAL_PACKAGED === '1') {
+    await current.app.close()
+    current = await launch()
+  }
   const receipt = path.join(fixture.sandbox.root, 'terminal-proof')
   const hostDir = path.join(fixture.sandbox.hermesHome, 'terminal-host', 'runtime')
   try {
-    await waitForAppReady(fixture, 120_000)
+    await waitForAppReady({ ...fixture, ...current }, 120_000)
     await current.page.keyboard.press('Control+`')
     const terminal = () => current.page.locator('[data-persistent-terminal] .xterm-helper-textarea').first()
     await expect(terminal()).toBeVisible({ timeout: 30_000 })
@@ -33,7 +43,7 @@ test('persistent terminal retains shell and btop across complete Desktop quit/re
     await current.page.screenshot({ path: testInfo.outputPath('before-quit.png') })
     await current.app.close()
     process.kill(Number(btop), 0)
-    current = await launchDesktop(buildAppEnv(fixture.sandbox))
+    current = await launch()
     await waitForAppReady({ ...fixture, ...current }, 120_000)
     await expect.poll(reference, { timeout: 30_000 }).toEqual(saved)
     await current.page.locator('[data-tree-tab^="terminal-instance:"]').first().click()
