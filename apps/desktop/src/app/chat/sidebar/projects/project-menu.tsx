@@ -11,7 +11,6 @@ import {
   renderActionItem
 } from '@/components/ui/actions-menu'
 import { Codicon } from '@/components/ui/codicon'
-import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -102,7 +101,6 @@ function useProjectActions({
   const p = t.sidebar.projects
   const f = t.fileMenu
   const target = { id: project.id, name: project.label }
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   const removeAuto = () => {
     dismissAutoProject(project.id)
@@ -112,8 +110,8 @@ function useProjectActions({
     }
   }
 
-  const confirmDelete = async () => {
-    await deleteProject(project.id)
+  const removeProject = () => {
+    void deleteProject(project.id)
 
     if (scoped) {
       onExitScope?.()
@@ -181,24 +179,12 @@ function useProjectActions({
       : {
           icon: 'trash',
           key: 'delete',
-          label: `${p.menuDelete}…`,
-          onSelect: () => setConfirmDeleteOpen(true),
+          label: p.menuDelete,
+          onSelect: removeProject,
           variant: 'destructive'
         }
 
-  const confirmDialog = (
-    <ConfirmDialog
-      confirmLabel={p.menuDelete}
-      description={p.deleteConfirm}
-      destructive
-      onClose={() => setConfirmDeleteOpen(false)}
-      onConfirm={confirmDelete}
-      open={confirmDeleteOpen}
-      title={`${p.menuDelete} "${project.label}"?`}
-    />
-  )
-
-  return { confirmDialog, dangerItem, identityItems, pathItems }
+  return { dangerItem, identityItems, pathItems }
 }
 
 // Per-project actions. The kebab keeps its row-anchored Appearance popover; the
@@ -232,7 +218,7 @@ export function ProjectMenu({
   const panesFlipped = useStore($panesFlipped)
   const homePath = useHomeProjectPath(project)
 
-  const { confirmDialog, dangerItem, identityItems, pathItems } = useProjectActions({
+  const { dangerItem, identityItems, pathItems } = useProjectActions({
     homePath,
     isActive,
     onExitScope,
@@ -337,7 +323,6 @@ export function ProjectMenu({
           projectPath={project.path}
         />
       </PopoverContent>
-      {confirmDialog}
     </Popover>
   )
 }
@@ -364,7 +349,7 @@ export function ProjectContextMenu({
   const p = t.sidebar.projects
   const homePath = useHomeProjectPath(project)
 
-  const { confirmDialog, dangerItem, identityItems, pathItems } = useProjectActions({
+  const { dangerItem, identityItems, pathItems } = useProjectActions({
     homePath,
     isActive,
     onExitScope,
@@ -417,7 +402,6 @@ export function ProjectContextMenu({
       <ActionsContextMenu ariaLabel={p.menu} contentClassName="w-48" items={items}>
         {children}
       </ActionsContextMenu>
-      {confirmDialog}
     </>
   )
 }

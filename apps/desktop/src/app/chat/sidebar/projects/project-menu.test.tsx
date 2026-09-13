@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { createTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { revealFileInTree } from '@/store/layout'
-import { copyPath, setHomeProjectAppearance } from '@/store/projects'
+import { copyPath, deleteProject, setHomeProjectAppearance } from '@/store/projects'
 import { getConfiguredDefaultProjectDir } from '@/store/session'
 
 import { ProjectMenu } from './project-menu'
@@ -155,6 +155,16 @@ describe('ProjectMenu', () => {
 
     expect(button.className).not.toContain('opacity-0')
     expect(button.className).not.toContain('group-hover/workspace:opacity-100')
+  })
+
+  it('removes an explicit project directly without a confirm dialog', async () => {
+    render(<ProjectMenu isActive={false} project={project} />)
+
+    openTriggerMenu(screen.getByRole('button', { name: 'Actions' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    expect(deleteProject).toHaveBeenCalledExactlyOnceWith('p1')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   // When anchorRef is absent, PopoverAnchor wraps the dropdown trigger so the
