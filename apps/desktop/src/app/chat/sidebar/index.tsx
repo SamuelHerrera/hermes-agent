@@ -420,8 +420,12 @@ export function ChatSidebar({
     (showAllProfiles && profileFilter.length > 0)
 
   const visibleSessions = useMemo(
-    () => (filtersNarrow ? scopedSessions.filter(sessionMatchesFilters) : scopedSessions),
-    [scopedSessions, filtersNarrow, sessionMatchesFilters]
+    () => {
+      const nonHiddenSessions = scopedSessions.filter(session => !sessionIsUnderAnyPath(session, hiddenProjectPaths))
+
+      return filtersNarrow ? nonHiddenSessions.filter(sessionMatchesFilters) : nonHiddenSessions
+    },
+    [scopedSessions, hiddenProjectPaths, filtersNarrow, sessionMatchesFilters]
   )
 
   // Recents by activity (last_active || started_at). User send stamps
@@ -1198,8 +1202,8 @@ export function ChatSidebar({
     )
   }, [profileGrouped, agentSessions, profileColors])
 
-  // The flat Sessions list always shows ALL recent sessions; Projects is a
-  // parallel grouped view, not a filter on this one — nothing is hidden here.
+  // The flat Sessions list shows non-project recent sessions. Removed project
+  // roots are hidden from Home until the project is restored/re-added.
   const displayAgentSessions = agentSessions
 
   // Pagination is scope-aware. In "All profiles" mode it tracks the global
