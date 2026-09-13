@@ -1,0 +1,13 @@
+{
+  "name": "@hermes/terminal-host",
+  "version": "0.1.0",
+  "description": "Independent per-user persistent PTY host for Hermes clients",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.22.0" },
+  "bin": { "hermes-terminal-host": "src/cli.mjs" },
+  "exports": { ".": "./src/client.mjs", "./screen": "./src/screen.mjs" },
+  "files": ["src", "README.md"],
+  "scripts": { "postinstall": "node src/prepare-native.mjs", "test": "node --test test/*.test.mjs", "check": "node --test test/*.test.mjs" },
+  "dependencies": { "node-pty": "1.1.0", "@xterm/headless": "6.0.0", "@xterm/addon-serialize": "0.14.0" }
+}
