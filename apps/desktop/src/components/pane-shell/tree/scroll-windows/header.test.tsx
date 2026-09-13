@@ -1,11 +1,15 @@
-import { act, cleanup, fireEvent, render } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $terminals } from '@/app/right-sidebar/terminal/terminals'
+import { registry } from '@/contrib/registry'
 import { $projectTree } from '@/store/projects'
 import { $currentCwd, $selectedStoredSessionId, $sessions } from '@/store/session'
 import { $sessionTiles } from '@/store/session-states'
+
+import { group } from '../model'
+import { $layoutTree, declareDefaultTree, registerPaneCloser } from '../store'
 
 import { generateScrollGrid } from './grid'
 import { ScrollWindowHeader } from './header'
@@ -16,6 +20,13 @@ import {
   $scrollWindowWorkspaces
 } from './store'
 import { ScrollWindowsMinimap } from './titlebar'
+import { ScrollWindowWorkspace } from './workspace'
+
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 
 const project = (id: string, path: string, color: string): SidebarProjectTree => ({
   id,
@@ -26,7 +37,15 @@ const project = (id: string, path: string, color: string): SidebarProjectTree =>
   sessionCount: 0
 })
 
+const disposers: (() => void)[] = []
+
+beforeAll(() => {
+  globalThis.ResizeObserver ??= TestResizeObserver as unknown as typeof ResizeObserver
+})
+
 beforeEach(() => {
+  window.localStorage.clear()
+  $layoutTree.set(null)
   $projectTree.set([project('a', '/a', '#e35d91'), project('b', '/b', '#3399cc')])
   $currentCwd.set('/a')
   $selectedStoredSessionId.set(null)
@@ -55,7 +74,15 @@ beforeEach(() => {
     }
   ])
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  disposers.splice(0).forEach(dispose => dispose())
+})
+
+function openContextMenu(target: HTMLElement) {
+  fireEvent.pointerDown(target, { button: 2, pointerType: 'mouse' })
+  fireEvent.contextMenu(target, { button: 2 })
+}
 
 describe('scroll card project headers', () => {
   it('matches minimap colors to each card, distinguishes pane types, and preserves navigation', () => {
@@ -114,5 +141,36 @@ describe('scroll card project headers', () => {
     $sessionTiles.set([{ storedSessionId: 'draft', workspaceCwd: '/b' }])
     const { getByTestId } = render(<ScrollWindowHeader data-testid="header" windowId="session-tile:draft" />)
     expect(getByTestId('header').getAttribute('data-scroll-window-project-color')).toBe('#3399cc')
+  })
+
+  it('uses type icons and the tab context menu on scroll-window cards', async () => {
+    disposers.push(
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main', uncloseable: true },
+        id: 'workspace',
+        render: () => <div>Chat body</div>,
+        title: 'Chat'
+      }),
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main' },
+        id: 'terminal-instance:one',
+        render: () => <div>Terminal body</div>,
+        title: 'Shell'
+      })
+    )
+    registerPaneCloser('workspace', () => undefined)
+    declareDefaultTree(group(['workspace', 'terminal-instance:one'], { active: 'workspace', id: 'grp-main' }))
+
+    const { container } = render(<ScrollWindowWorkspace />)
+
+    expect(container.querySelector('[data-scroll-window="workspace"] .codicon-comment')).toBeTruthy()
+    expect(container.querySelector('[data-scroll-window="terminal-instance:one"] .codicon-terminal')).toBeTruthy()
+
+    openContextMenu(container.querySelector<HTMLElement>('[data-scroll-window="terminal-instance:one"]')!)
+
+    expect(await screen.findByRole('menuitem', { name: /^close$/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /close others/i })).toBeTruthy()
   })
 })
