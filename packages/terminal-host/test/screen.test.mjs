@@ -9,7 +9,7 @@ function state(t) {
     lines: Array.from({length: b.length}, (_, i) => b.getLine(i).translateToString(true)) };
 }
 test('snapshot restores both buffers and differential output after alternate exit', async () => {
-  const { Screen } = await import('../src/screen.mjs');
+  const { Screen, restoreScreen } = await import('../src/screen.mjs');
   const screen = new Screen({ cols: 40, rows: 8 });
   const live = new Terminal({ cols: 40, rows: 8, allowProposedApi: true });
   const restored = new Terminal({ cols: 40, rows: 8, allowProposedApi: true });
@@ -17,14 +17,14 @@ test('snapshot restores both buffers and differential output after alternate exi
     const prefix = 'normal\r\nkeep\x1b[?1049h\x1b[2J\x1b[3;4H\x1b[31mAlternate';
     await Promise.all([screen.write(Buffer.from(prefix)), write(live, prefix)]);
     const snapshot = await screen.snapshot();
-    await write(restored, snapshot.data);
+    await restoreScreen(restored, snapshot);
     assert.deepEqual(state(restored), state(live));
     const delta = '\x1b[0m!\x1b[?1049l\r\ncontinued';
     await Promise.all([screen.write(Buffer.from(delta)), write(live, delta), write(restored, delta)]);
     assert.deepEqual(state(restored), state(live));
   } finally { screen.dispose(); live.dispose(); restored.dispose(); }
 });
-test('exact replay preserves partial ANSI, UTF8, modes and resize at callback boundary', async () => {
+test('state checkpoint preserves partial ANSI, UTF8, modes and resize at callback boundary', async () => {
   const { Screen, restoreScreen } = await import('../src/screen.mjs');
   const screen = new Screen({ cols: 40, rows: 8 });
   const restored = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
@@ -32,7 +32,7 @@ test('exact replay preserves partial ANSI, UTF8, modes and resize at callback bo
     await screen.write(Buffer.from('line\r\n\x1b[2;6r\x1b[?6h\x1b[3;2H'));
     await screen.write(Buffer.from([0xe2, 0x82]));
     const snap = await screen.snapshot();
-    assert.equal(snap.exact, true);
+    assert.equal(snap.format, 'hermes-xterm-state');
     await restoreScreen(restored, snap);
     const events = [];
     screen.onEvent = e => events.push(e);
@@ -51,17 +51,20 @@ test('exact replay preserves partial ANSI, UTF8, modes and resize at callback bo
     assert.deepEqual(state(restored), state(screen.term));
   } finally { screen.dispose(); restored.dispose(); }
 });
-test('replay cap explicitly refuses exact reconstruction rather than inventing modes', async () => {
+test('checkpoint format never exposes ANSI preview as a reconstruction stream', async () => {
   const { Screen, restoreScreen } = await import('../src/screen.mjs');
-  const screen = new Screen({ maxReplayBytes: 100 });
+  const screen = new Screen();
   const target = new Terminal({ allowProposedApi: true });
   try {
     await screen.write(Buffer.from('x'.repeat(101)));
     const snapshot = await screen.snapshot();
-    assert.equal(snapshot.exact, false);
-    assert.equal(snapshot.replay, null);
-    assert.match(snapshot.data, /x/);
-    await assert.rejects(restoreScreen(target, snapshot), /RECONSTRUCTION_LIMIT/);
+    assert.equal(snapshot.data, undefined);
+    assert.equal(snapshot.exact, undefined);
+    assert.equal(snapshot.replay, undefined);
+    assert.equal(snapshot.preview.approximate, true);
+    assert.match(snapshot.preview.data, /x/);
+    await restoreScreen(target, snapshot);
+    assert.deepEqual(state(target), state(screen.term));
   } finally { screen.dispose(); target.dispose(); }
 });
 export { state, write, Terminal };

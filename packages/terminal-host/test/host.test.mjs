@@ -88,7 +88,7 @@ test('PTY screen snapshot precedes ordered deltas and host answers device querie
   const p = { scope: 'screen', terminalId: s.terminalId };
   await until(() => client.request('read', { ...p, after: 0 }), x => x.events.some(e => e.data?.includes('REPLY=')));
   const a = await client.request('attach', p);
-  assert.equal(a.snapshot.exact, true);
+  assert.equal(a.snapshot.format, 'hermes-xterm-state');
   const { restoreScreen } = await import('../src/screen.mjs');
   const { default: xterm } = await import('@xterm/headless');
   const view = new xterm.Terminal({ allowProposedApi: true, scrollback: 2000 });
@@ -144,7 +144,7 @@ test('slow readers get explicit GAP while detached output keeps draining', async
   const s = await client.request('create', { scope: 'flood', requestId: 'flood', file: process.execPath,
     args: ['-e', `process.stdout.write('x'.repeat(800000)+'FLOOD_DONE');process.stdin.resume();`] });
   const p = { scope: 'flood', terminalId: s.terminalId };
-  await until(() => client.request('attach', p), a => a.snapshot.data.includes('FLOOD_DONE'));
+  await until(() => client.request('attach', p), a => a.snapshot.preview.data.includes('FLOOD_DONE'));
   await assert.rejects(client.request('read', { ...p, after: 0 }), /GAP/);
   const a = await client.request('attach', p);
   assert.deepEqual((await client.request('read', { ...p, after: a.snapshot.seq })).events, []);
@@ -194,10 +194,10 @@ test('create dimensions reach both PTY and headless snapshot', async t => {
   const s = await client.request('create', { scope: 'dimensions', requestId: 'dimensions', cols: 50, rows: 10,
     file: process.execPath, args: ['-e', `process.stdout.write('SIZE='+process.stdout.columns+'x'+process.stdout.rows);process.stdin.resume();`] });
   const p = { scope: 'dimensions', terminalId: s.terminalId };
-  const a = await until(() => client.request('attach', p), a => a.snapshot.data.includes('SIZE='));
+  const a = await until(() => client.request('attach', p), a => a.snapshot.preview.data.includes('SIZE='));
   assert.equal(a.snapshot.cols, 50);
   assert.equal(a.snapshot.rows, 10);
-  assert.match(a.snapshot.data, /SIZE=50x10/);
+  assert.match(a.snapshot.preview.data, /SIZE=50x10/);
 });
 test('HTTP chunk boundaries do not corrupt UTF8 scope', async t => {
   const { client, dir } = await fixture(t);
@@ -227,15 +227,28 @@ test('optional native btop acceptance: same PID and alternate buffer after detac
   const s = await client.request('create', { scope: 'btop', requestId: 'btop', file: binary,
     args: ['--config', join(dir, 'btop.conf'), '--force-utf', '--no-tty', '-u', '1000'], cols: 120, rows: 40 });
   const p = { scope: 'btop', terminalId: s.terminalId };
-  const a = await until(() => client.request('attach', p), a => a.snapshot.data.includes('\x1b[?1049h') && a.snapshot.data.length > 2000);
+  const a = await until(() => client.request('attach', p), a => a.snapshot.preview.data.includes('\x1b[?1049h') && a.snapshot.preview.data.length > 2000);
   await client.request('detach', a.identity);
   await until(() => client.request('read', { ...p, after: a.snapshot.seq }), r => r.events.some(e => e.type === 'data'));
   const code = `import {connect} from ${JSON.stringify(clientURL)};const c=await connect(${JSON.stringify(dir)});console.log(JSON.stringify(await c.request('attach',${JSON.stringify(p)})));`;
   const b = JSON.parse((await exec(process.execPath, ['--input-type=module', '-e', code])).stdout);
   assert.equal(b.pid, s.pid);
   assert.ok(b.snapshot.seq >= a.snapshot.seq);
-  assert.equal(b.snapshot.exact, true);
-  assert.match(b.snapshot.data, /\x1b\[\?1049h/);
+  assert.equal(b.snapshot.format, 'hermes-xterm-state');
+  assert.match(b.snapshot.preview.data, /\x1b\[\?1049h/);
+  const { default: xterm } = await import('@xterm/headless');
+  const { restoreScreen } = await import('../src/screen.mjs');
+  const { captureTerminalState } = await import('../src/xterm-state-v1.mjs');
+  const first = new xterm.Terminal({ allowProposedApi: true }), second = new xterm.Terminal({ allowProposedApi: true });
+  try {
+    await restoreScreen(first, a.snapshot); await restoreScreen(second, b.snapshot);
+    const updates = await client.request('read', { ...p, after: a.snapshot.seq });
+    for (const e of updates.events.filter(e => e.seq <= b.snapshot.seq)) {
+      if (e.type === 'resize') first.resize(e.cols, e.rows);
+      else await new Promise(r => first.write(e.data, r));
+    }
+    assert.deepEqual(captureTerminalState(first), captureTerminalState(second));
+  } finally { first.dispose(); second.dispose(); }
   t.diagnostic(`btop PID ${s.pid} retained across detach and separate reconnecting client; snapshot seq ${b.snapshot.seq}`);
   await client.request('terminate', p);
 });

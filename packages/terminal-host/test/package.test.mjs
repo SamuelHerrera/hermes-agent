@@ -27,6 +27,7 @@ test('packed package installs in isolation and starts an independent usable PTY 
   if (process.platform !== 'win32') {
     assert.match((await exec(join(prefix, 'node_modules', '.bin', 'hermes-terminal-host'), ['--version'])).stdout, /^0\.1\.0/);
   }
+  assert.equal((await exec(process.execPath, ['--input-type=module', '-e', "import { hydrateTerminalState } from '@hermes/terminal-host/xterm-state-v1'; console.log(typeof hydrateTerminalState)"], { cwd: prefix })).stdout.trim(), 'function');
   const started = JSON.parse((await run('start')).stdout);
   assert.equal(JSON.parse((await run('status')).stdout).pid, started.pid);
   const { connect } = await import(pathToFileURL(join(installed, 'src', 'client.mjs')).href);

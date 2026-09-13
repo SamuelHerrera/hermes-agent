@@ -4,7 +4,7 @@ import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import pty from 'node-pty';
 import { Screen } from './screen.mjs';
-import { validate, admitCreate, LIMITS, PROTOCOL_VERSION } from './protocol.mjs';
+import { validate, admitCreate, LIMITS, PROTOCOL_VERSION, DeliveryRing } from './protocol.mjs';
 import { privateDirectory } from './security.mjs';
 export async function serve(directory) {
   await privateDirectory(directory);
@@ -28,13 +28,9 @@ export async function serve(directory) {
       admitCreate(sessions.size, creates.size);
       const id = randomUUID();
       const child = pty.spawn(p.file, p.args || [], { name: 'xterm-256color', cols: p.cols ?? 80, rows: p.rows ?? 24, cwd: p.cwd || process.cwd(), env: process.env, encoding: null });
-      const s = { id, scope: p.scope, pty: child, generation: 0, events: [], eventBytes: 0, seq: 0, screen: new Screen({ cols: p.cols ?? 80, rows: p.rows ?? 24 }) };
+      const s = { id, scope: p.scope, pty: child, generation: 0, delivery: new DeliveryRing(), screen: new Screen({ cols: p.cols ?? 80, rows: p.rows ?? 24 }) };
       sessions.set(id, s);
-      s.screen.onEvent = event => {
-        s.seq = event.seq; s.events.push(event);
-        s.eventBytes += Buffer.byteLength(JSON.stringify(event));
-        while (s.eventBytes > LIMITS.eventBytes && s.events.length > 1) s.eventBytes -= Buffer.byteLength(JSON.stringify(s.events.shift()));
-      };
+      s.screen.onEvent = event => s.delivery.push(event);
       s.screen.term.onData(data => { try { child.write(data); } catch {} });
       let pendingBytes = 0;
       child.onData(data => {
@@ -71,8 +67,7 @@ export async function serve(directory) {
     if (method === 'input') { s.pty.write(p.data); return {}; }
     if (method === 'resize') { await s.screen.resize(p.cols, p.rows); s.pty.resize(p.cols, p.rows); return {}; }
     if (method === 'read') {
-      if (p.after < (s.events[0]?.seq ?? 1) - 1) throw Error('GAP');
-      return { events: s.events.filter(e => e.seq > p.after), exit: s.exit || null };
+      return { events: s.delivery.read(p.after), exit: s.exit || null };
     }
     if (method === 'terminate') { s.pty.kill(process.platform === 'win32' ? undefined : 'SIGKILL'); return {}; }
     throw Error('UNKNOWN_METHOD');
