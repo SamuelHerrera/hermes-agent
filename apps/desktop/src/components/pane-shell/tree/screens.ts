@@ -32,7 +32,7 @@ export function saveTabbedScreen(tree: LayoutNode): void {
 }
 
 export function tabbedScreenOwner(paneId: string): string | undefined {
-  if (paneId === 'sessions') {
+  if (paneId === 'sessions' || paneId === 'files') {
     return undefined
   }
 
@@ -44,7 +44,7 @@ export function emptyTabbedScreen(tree: LayoutNode, screenId?: string): LayoutNo
   const id = screenId ? `${tree.id}:screen-${screenId}` : tree.id
 
   if (tree.type === 'group') {
-    const panes = tree.panes.filter(id => id === 'sessions')
+    const panes = tree.panes.filter(id => id === 'sessions' || id === 'files')
 
     return { ...tree, id, panes, active: panes[0] ?? '' }
   }

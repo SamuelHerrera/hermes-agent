@@ -51,6 +51,13 @@ beforeEach(() => {
       id: 'sessions',
       render: () => <div>Sessions body</div>,
       title: 'sessions'
+    }),
+    registry.register({
+      area: 'panes',
+      data: { placement: 'right' },
+      id: 'files',
+      render: () => <div>Files body</div>,
+      title: 'files'
     })
   )
 })
@@ -72,6 +79,14 @@ describe('pane tab/header double tap', () => {
     const { container } = render(<TreeGroup node={node} />)
 
     expect(container.querySelector('[data-zone-tabstrip="grp-main"]')).toBeTruthy()
+  })
+
+  it('hides fixed sidebar tab chrome for a lone files pane', () => {
+    const node = group(['files'], { active: 'files', id: 'grp-files' })
+    declareDefaultTree(node)
+    const { container } = render(<TreeGroup node={node} />)
+
+    expect(container.querySelector('[data-zone-tabstrip="grp-files"]')).toBeNull()
   })
 
   it('renders the tab strip for a full-page workspace route', () => {

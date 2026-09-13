@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router'
 import { hudTargetSessionId } from '@/app/hud/handoff'
 import { toggleLayoutEditMode } from '@/components/pane-shell/edit-mode'
 import { $layoutSurfaceMode, toggleLayoutSurfaceMode } from '@/components/pane-shell/tree/scroll-windows'
-import { resetLayoutTree } from '@/components/pane-shell/tree/store'
+import { $paneVisible, resetLayoutTree } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import {
@@ -33,7 +33,7 @@ import { $cronJobs } from '@/store/cron'
 import { $hapticsMuted, toggleHapticsMuted } from '@/store/haptics'
 import { toggleHud } from '@/store/hud'
 import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
-import { $sidebarOpen, toggleSidebarOpen } from '@/store/layout'
+import { $sidebarOpen, toggleFileBrowserOpen, toggleSidebarOpen } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $activeGatewayProfile,
@@ -335,6 +335,7 @@ export function TitlebarControls({
   const keepAwakeBusy = useStore($keepAwakeBusy)
   const layoutSurfaceMode = useStore($layoutSurfaceMode)
   const sidebarOpen = useStore($sidebarOpen)
+  const filesVisible = useStore($paneVisible('files'))
   const hiddenStatusbarIds = useStore($statusbarHiddenIds)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const overlayOpen = isOverlayView(appViewForPath(location.pathname))
@@ -420,6 +421,17 @@ export function TitlebarControls({
       onSelect: () => {
         triggerHaptic('tap')
         toggleLayoutSurfaceMode()
+      }
+    },
+    {
+      actionId: 'view.showFiles',
+      active: filesVisible,
+      icon: <TitlebarIcon name="layout-sidebar-right" />,
+      id: 'files',
+      label: filesVisible ? 'Hide files' : 'Show files',
+      onSelect: () => {
+        triggerHaptic('tap')
+        toggleFileBrowserOpen()
       }
     },
     {

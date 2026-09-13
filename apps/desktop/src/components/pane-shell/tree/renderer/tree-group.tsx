@@ -248,8 +248,8 @@ export function TreeGroup({
   const collapsePaneZone = shown.some(isCollapsePane)
   const minimized = collapsePaneZone && Boolean(node.minimized)
   const verticalCollapse = minimized && parentAxis === 'row' && !isEmpty
-  const sessionsOnlyFixedPanel = shown.length === 1 && shown[0] === 'sessions'
-  const headerVisible = !sessionsOnlyFixedPanel && !isEmpty && !verticalCollapse && (minimized || !headerHidden)
+  const fixedSidebarOnly = shown.length === 1 && (shown[0] === 'sessions' || shown[0] === 'files')
+  const headerVisible = !fixedSidebarOnly && !isEmpty && !verticalCollapse && (minimized || !headerHidden)
 
   // Keep the activated tab inside the strip's scroll window. Opening a tab
   // past the right edge otherwise leaves the newly-created tab out of view.

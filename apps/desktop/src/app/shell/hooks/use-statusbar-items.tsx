@@ -4,7 +4,6 @@ import { useMemo } from 'react'
 import type { CommandCenterSection } from '@/app/command-center'
 import { useApprovalModeStatusbarItem } from '@/app/shell/approval-mode-menu'
 import { GatewayMenuPanel } from '@/app/shell/gateway-menu-panel'
-import { $paneVisible, togglePaneVisible } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { useI18n } from '@/i18n'
@@ -79,9 +78,6 @@ export function useStatusbarItems({
   const activeGatewayProfile = useStore($activeGatewayProfile)
   // What the button paints and flips is whether the terminal is ON SCREEN —
   // the takeover store alone stays true behind a stacked sibling tab or a
-  // minimized zone, which lit the button for a pane the user couldn't see.
-
-  const filesShowing = useStore($paneVisible('files'))
   const primaryBusy = useStore($busy)
   // Draft / primary composer atom — used only while the focused surface is the
   // primary (or a draft with no runtime slice yet). A focused TILE keeps its
@@ -466,17 +462,6 @@ export function useStatusbarItems({
         toggleLabel: copy.toggleApprovalMode
       },
       {
-        actionId: 'view.showFiles',
-        className: `w-7 justify-center px-0${filesShowing ? ' bg-accent/55 text-foreground' : ''}`,
-        hidden: !chatOpen,
-        icon: <FolderOpen className="size-3.5" />,
-        id: 'files',
-        onSelect: () => togglePaneVisible('files'),
-        title: filesShowing ? 'Hide files' : 'Show files',
-        toggleLabel: 'Files',
-        variant: 'action'
-      },
-      {
         actionId: 'view.showTerminal',
         className: 'w-7 justify-center px-0',
         icon: <Terminal className="size-3.5" />,
@@ -494,10 +479,8 @@ export function useStatusbarItems({
       approvalModeItem,
       backendVersionItem,
       busy,
-      chatOpen,
       clientVersionItem,
       copy,
-      filesShowing,
       gatewayState,
       t.keybinds.actions,
       turnStartedAt
