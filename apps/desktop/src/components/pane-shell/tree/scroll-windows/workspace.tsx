@@ -32,6 +32,7 @@ import { paneChrome } from '../renderer/track-model'
 import {
   $hiddenTreePanes,
   $layoutTree,
+  $panesWithCloser,
   closeAllTreeTabs,
   closeOtherTreeTabs,
   closeTabPane,
@@ -87,6 +88,7 @@ export function ScrollWindowWorkspace() {
   const activeWorkspaceId = useStore($activeScrollWorkspaceId)
   const workspaces = useStore($scrollWindowWorkspaces)
   const revealWindowId = useStore($scrollWindowRevealRequest)
+  const panesWithCloser = useStore($panesWithCloser)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
@@ -381,6 +383,7 @@ export function ScrollWindowWorkspace() {
               const rect = scrollGridWindowRect(layout, index, GAP)
               const focused = workspace.focusedWindowId === windowId || (!workspace.focusedWindowId && index === 0)
               const closeable = !chrome.uncloseable || panesWithCloser.has(windowId)
+
               const menuItems = (kit: MenuKit) => (
                 <>
                   {renderActionItem(kit, {

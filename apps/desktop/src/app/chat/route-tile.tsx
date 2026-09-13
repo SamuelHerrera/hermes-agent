@@ -39,12 +39,17 @@ const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 const CommandCenterView = lazy(async () => ({ default: (await import('../command-center')).CommandCenterView }))
+const CommandCenterTabRoute = lazy(async () => ({ default: (await import('../command-center/tab-route')).CommandCenterTabRoute }))
 
 // Built-in page views + their pane titles, keyed by route.
 const BUILTIN_PAGES: Record<string, { render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { render: () => <ArtifactsView />, title: 'Artifacts' },
   [COMMAND_CENTER_ROUTE]: {
-    render: () => <CommandCenterView onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')} />,
+    render: () => (
+      <CommandCenterTabRoute>
+        <CommandCenterView onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')} />
+      </CommandCenterTabRoute>
+    ),
     title: 'Command Center'
   },
   [MESSAGING_ROUTE]: { render: () => <MessagingView />, title: 'Messaging' },

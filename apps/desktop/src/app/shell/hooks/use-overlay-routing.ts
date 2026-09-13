@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { type CommandCenterSection } from '@/app/command-center'
+import { openCommandCenterTab } from '@/app/command-center/tab-route'
 import {
   AGENTS_ROUTE,
   appViewForPath,
@@ -65,8 +66,8 @@ export function useOverlayRouting() {
   )
 
   const openCommandCenterSection = useCallback(
-    (section: CommandCenterSection) => navigate(`${COMMAND_CENTER_ROUTE}?section=${section}`),
-    [navigate]
+    (section: CommandCenterSection) => openCommandCenterTab(`${COMMAND_CENTER_ROUTE}?section=${section}`),
+    []
   )
 
   const resetOverlayReturnRoute = useCallback(() => {

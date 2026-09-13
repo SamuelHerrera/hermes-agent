@@ -28,6 +28,7 @@ vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
 }))
 
 afterEach(() => {
+  act(() => $layoutSurfaceMode.set('tabbed'))
   act(() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH))
   act(() => $keepAwake.set(false))
   act(() => setSidebarOpen(true))
