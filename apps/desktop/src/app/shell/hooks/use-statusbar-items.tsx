@@ -9,7 +9,7 @@ import { Codicon } from '@/components/ui/codicon'
 import { GlyphSpinner } from '@/components/ui/glyph-spinner'
 import { useI18n } from '@/i18n'
 import { displayPath, pathLeaf } from '@/lib/display-path'
-import { Activity, AlertCircle, FolderOpen, Globe, Hash, Loader2, Terminal } from '@/lib/icons'
+import { Activity, AlertCircle, FolderOpen, Hash, Loader2, Terminal } from '@/lib/icons'
 import type { RuntimeReadinessResult } from '@/lib/runtime-readiness'
 import { LiveDuration } from '@/lib/statusbar'
 import { useStoreSelector } from '@/lib/use-session-slice'
@@ -421,7 +421,7 @@ export function useStatusbarItems({
         variant: 'action'
       },
       {
-        icon: <Globe className="size-3" />,
+        icon: <Codicon name="plug" size="0.75rem" />,
         id: 'webhooks',
         label: copy.webhooks,
         onSelect: () => openRouteTile(WEBHOOKS_ROUTE, 'center'),
