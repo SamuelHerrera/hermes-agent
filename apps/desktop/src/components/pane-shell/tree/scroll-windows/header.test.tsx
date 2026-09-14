@@ -9,12 +9,12 @@ import { registry } from '@/contrib/registry'
 import { setFileBrowserOpen } from '@/store/layout'
 import { $projectTree } from '@/store/projects'
 import { $routeTiles } from '@/store/route-tiles'
-import { $currentCwd, $selectedStoredSessionId, $sessions } from '@/store/session'
+import { $currentCwd, $selectedStoredSessionId, $sessions, $workspaceEmptyPlaceholder } from '@/store/session'
 import { $sessionTiles } from '@/store/session-states'
 
 import { group } from '../model'
 import { TreeGroup } from '../renderer/tree-group'
-import { $layoutTree, declareDefaultTree, registerPaneCloser } from '../store'
+import { $hiddenTreePanes, $layoutTree, declareDefaultTree, registerPaneCloser, setTreePaneHidden } from '../store'
 
 import { generateScrollGrid } from './grid'
 import { ScrollWindowHeader } from './header'
@@ -60,6 +60,8 @@ beforeEach(() => {
   $sessionTiles.set([])
   $routeTiles.set([])
   $terminals.set([])
+  $hiddenTreePanes.set(new Set())
+  $workspaceEmptyPlaceholder.set(false)
   $layoutSurfaceMode.set('scroll-windows')
   $activeScrollWorkspaceId.set('1')
   $scrollWindowRevealRequest.set(null)
@@ -96,6 +98,49 @@ function openContextMenu(target: HTMLElement) {
 describe('scroll card project headers', () => {
   it('matches minimap colors to each card, distinguishes pane types, and preserves navigation', () => {
     $terminals.set([{ id: 'one', title: 'Shell', auto: true, kind: 'user', cwd: '/b', projectId: 'b' }])
+    disposers.push(
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main', uncloseable: true },
+        id: 'workspace',
+        render: () => <div>Chat body</div>,
+        title: 'Chat'
+      }),
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main' },
+        id: 'terminal-instance:one',
+        render: () => <div>Terminal body</div>,
+        title: 'Shell'
+      }),
+      registry.register({
+        area: 'panes',
+        data: { placement: 'main' },
+        id: 'terminal-instance:closed',
+        render: () => <div>Closed shell</div>,
+        title: 'Closed shell'
+      })
+    )
+    declareDefaultTree(group(['workspace', 'terminal-instance:one', 'terminal-instance:closed'], { active: 'workspace', id: 'grp-main' }))
+    setTreePaneHidden('terminal-instance:closed', true)
+    $scrollWindowWorkspaces.set([
+      {
+        id: '1',
+        focusedWindowId: 'workspace',
+        windowIds: ['workspace', 'terminal-instance:closed', 'terminal-instance:one'],
+        columns: [['workspace'], ['terminal-instance:closed'], ['terminal-instance:one']],
+        scrollLeft: 0,
+        scrollTop: 0,
+        grid: generateScrollGrid({
+          windowCount: 2,
+          viewportWidth: 900,
+          viewportHeight: 700,
+          minWindowWidth: 360,
+          minWindowHeight: 280,
+          gap: 12
+        })
+      }
+    ])
 
     const { getByRole, getByTestId, queryByText } = render(
       <>
@@ -107,6 +152,9 @@ describe('scroll card project headers', () => {
 
     const chat = getByRole('button', { name: 'Scroll to window 1' })
     const terminal = getByRole('button', { name: 'Scroll to window 2' })
+    expect(screen.queryByRole('button', { name: 'Scroll to window 3' })).toBeNull()
+    expect(chat.getAttribute('data-scroll-minimap-window')).toBe('workspace')
+    expect(terminal.getAttribute('data-scroll-minimap-window')).toBe('terminal-instance:one')
 
     const assertColors = () => {
       expect(chat.style.backgroundColor).toBe(getByTestId('chat').style.backgroundColor)

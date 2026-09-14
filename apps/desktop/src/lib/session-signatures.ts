@@ -23,7 +23,11 @@ export function sameCronSignature(a: SessionInfo[], b: SessionInfo[]): boolean {
       session.preview === other.preview &&
       session.message_count === other.message_count &&
       session.last_active === other.last_active &&
-      session.ended_at === other.ended_at
+      session.ended_at === other.ended_at &&
+      session.cron_execution_id === other.cron_execution_id &&
+      session.cron_execution_status === other.cron_execution_status &&
+      session.cron_execution_error === other.cron_execution_error &&
+      session.cron_output_path === other.cron_output_path
     )
   })
 }

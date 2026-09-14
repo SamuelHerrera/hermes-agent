@@ -228,6 +228,45 @@ describe('useSessionTileDelegate resumeTile', () => {
     expect(runtimeId).toBe('runtime-recovered')
   })
 
+  it('replaces a stale cold tile transcript with the persisted idle transcript', async () => {
+    setSessions([row({ id: 'stored-stale', profile: 'default' })])
+    vi.mocked(getLatestSessionMessages).mockResolvedValueOnce({
+      messages: [
+        { content: 'work in progress', role: 'assistant', timestamp: 1 },
+        { content: 'final answer', role: 'assistant', timestamp: 2 }
+      ],
+      session_id: 'stored-stale'
+    } as never)
+
+    const staleState = createClientSessionState('stored-stale')
+
+    staleState.messages = [{ id: 'stale', parts: [{ text: 'work in progress', type: 'text' }], role: 'assistant' }]
+
+    const restored: ClientSessionState[] = []
+
+    const updateSessionState = vi.fn((_sessionId: string, updater: (state: ClientSessionState) => ClientSessionState) => {
+      restored.push(updater(staleState))
+    })
+
+    const requestGateway = vi.fn(async (method: string) =>
+      method === 'session.resume'
+        ? {
+            messages: [],
+            resumed: 'stored-stale',
+            running: false,
+            session_id: 'runtime-stale'
+          }
+        : ({} as never)
+    )
+
+    renderTile(requestGateway, updateSessionState)
+    await sessionTileDelegate()!.resumeTile('stored-stale')
+
+    expect(
+      restored[0]?.messages.map(message => message.parts.find(part => part.type === 'text')?.text)
+    ).toEqual(['work in progress', 'final answer'])
+  })
+
   it('rebuilds the composer task list for a cold restored tile from resume events', async () => {
     setSessions([row({ id: 'stored-todo', profile: 'default' })])
     vi.mocked(getLatestSessionMessages).mockResolvedValueOnce({ messages: [], session_id: 'stored-todo' })

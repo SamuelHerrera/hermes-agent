@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldHint } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { LogView } from '@/components/ui/log-view'
 import {
   Select,
   SelectContent,
@@ -36,6 +37,7 @@ import {
   getCronJobRuns,
   getCronJobs,
   pauseCronJob,
+  readManagedFileText,
   resumeCronJob,
   type SessionInfo,
   triggerCronJob,
@@ -44,6 +46,7 @@ import {
 import { type Translations, useI18n } from '@/i18n'
 import { AlertTriangle } from '@/lib/icons'
 import { requestModelOptions } from '@/lib/model-options'
+import { sameCronSignature } from '@/lib/session-signatures'
 import { asText } from '@/lib/text'
 import { $cronFocusJobId, $cronJobs, setCronFocusJobId, setCronJobs, updateCronJobs } from '@/store/cron'
 import { $changeEventsAvailable, $cronChangeTick } from '@/store/live-sync'
@@ -685,8 +688,41 @@ function CronJobRuns({
   onOpenSession?: (sessionId: string) => void
 }) {
   const [runs, setRuns] = useState<null | SessionInfo[]>(null)
+  const [output, setOutput] = useState<null | { loading: boolean; path: string; text: string; title: string }>(null)
   const changeEventsAvailable = useStore($changeEventsAvailable)
   const cronChangeTick = useStore($cronChangeTick)
+
+  async function openRun(run: SessionInfo) {
+    if (!run.cron_execution_id) {
+      onOpenSession?.(run.id)
+      return
+    }
+
+    if (!run.cron_output_path) {
+      setOutput({
+        loading: false,
+        path: '',
+        text: run.cron_execution_error || run.preview || 'No output was recorded for this execution.',
+        title: run.title?.trim() || 'Cron execution'
+      })
+
+      return
+    }
+
+    setOutput({ loading: true, path: run.cron_output_path, text: '', title: run.title?.trim() || 'Cron execution output' })
+
+    try {
+      const result = await readManagedFileText(run.cron_output_path, run.profile)
+      setOutput({ loading: false, path: result.path, text: result.text || '(empty output)', title: result.name })
+    } catch (err) {
+      setOutput({
+        loading: false,
+        path: run.cron_output_path,
+        text: err instanceof Error ? err.message : String(err),
+        title: 'Could not load execution output'
+      })
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -695,7 +731,7 @@ function CronJobRuns({
       getCronJobRuns(jobId)
         .then(result => {
           if (!cancelled) {
-            setRuns(result)
+            setRuns(prev => (prev && sameCronSignature(prev, result) ? prev : result))
           }
         })
         .catch(() => {
@@ -751,9 +787,9 @@ function CronJobRuns({
             return (
               <button
                 className="row-hover flex items-center justify-between gap-3 rounded-md px-2 py-1 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default disabled:hover:bg-transparent"
-                disabled={isExecutionOnly}
+                disabled={isExecutionOnly && !run.cron_output_path && !run.cron_execution_error && !run.preview}
                 key={run.id}
-                onClick={() => onOpenSession?.(run.id)}
+                onClick={() => void openRun(run)}
                 title={run.cron_output_path || undefined}
                 type="button"
               >
@@ -766,6 +802,17 @@ function CronJobRuns({
           })}
         </div>
       )}
+      <Dialog onOpenChange={open => !open && setOutput(null)} open={output !== null}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{output?.title || 'Cron execution output'}</DialogTitle>
+            {output?.path ? <DialogDescription className="truncate font-mono">{output.path}</DialogDescription> : null}
+          </DialogHeader>
+          <LogView className="max-h-[60vh]">
+            {output?.loading ? <div>Loading output...</div> : <pre className="whitespace-pre-wrap">{output?.text}</pre>}
+          </LogView>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

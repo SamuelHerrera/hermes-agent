@@ -1412,6 +1412,35 @@ export async function getCronJobRuns(jobId: string, limit = 20): Promise<Session
   return runs ?? []
 }
 
+export interface ManagedFileText {
+  mimeType: string
+  name: string
+  path: string
+  text: string
+}
+
+export async function readManagedFileText(path: string, profile?: null | string): Promise<ManagedFileText> {
+  const result = await window.hermesDesktop.api<{
+    data_url: string
+    mime_type: string
+    name: string
+    path: string
+  }>({
+    ...(profile ? { profile } : profileScoped()),
+    path: `/api/files/read?path=${encodeURIComponent(path)}`
+  })
+
+  const [, encoded = ''] = String(result.data_url || '').split(',', 2)
+  const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0))
+
+  return {
+    mimeType: result.mime_type,
+    name: result.name,
+    path: result.path,
+    text: new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  }
+}
+
 // The single source of truth for cron delivery targets (local + configured
 // gateways). Both the manual cron editor and the blueprint dialog use this so
 // they never offer a platform that isn't connected. Mirrors the dashboard.

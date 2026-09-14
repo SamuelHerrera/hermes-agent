@@ -3,12 +3,14 @@ import type { ComponentProps } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { useContributions } from '@/contrib/react/use-contributions'
 import { cn } from '@/lib/utils'
 import { $fileBrowserOpen, setFileBrowserOpen, toggleFileBrowserOpen } from '@/store/layout'
+import { $workspaceEmptyPlaceholder } from '@/store/session'
 
-import { allPaneIds } from '../model'
+import { allPaneIds, type LayoutNode } from '../model'
 import { $activeTabbedScreen, $tabbedScreenTrees } from '../screens'
-import { $paneVisible, setActiveTabbedScreen } from '../store'
+import { $hiddenTreePanes, $layoutTree, $paneVisible, isMainStripPane, setActiveTabbedScreen } from '../store'
 
 import { scrollGridWindowRect } from './grid'
 import {
@@ -24,6 +26,10 @@ import { scrollWindowColorBackground, useScrollWindowColor } from './window-colo
 const GAP = 12
 const MAP_WIDTH = 160
 const MAP_HEIGHT = 22
+
+function treeWindowIds(tree: LayoutNode | null): string[] {
+  return tree ? allPaneIds(tree).filter(isMainStripPane) : []
+}
 
 interface MinimapWindowProps extends ComponentProps<'button'> {
   windowId: string
@@ -52,8 +58,12 @@ function MinimapWindow({ windowId, iconSize, style, ...props }: MinimapWindowPro
 
 export function ScrollWindowsMinimap() {
   const mode = useStore($layoutSurfaceMode)
+  const tree = useStore($layoutTree)
+  const hiddenTreePanes = useStore($hiddenTreePanes)
   const activeWorkspaceId = useStore($activeScrollWorkspaceId)
   const workspaces = useStore($scrollWindowWorkspaces)
+  const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
+  const panes = useContributions('panes')
 
   if (mode !== 'scroll-windows') {
     return null
@@ -61,8 +71,15 @@ export function ScrollWindowsMinimap() {
 
   const workspace = workspaces.find(item => item.id === activeWorkspaceId) ?? workspaces[0]
   const layout = workspace.grid
+  const paneIds = new Set(panes.map(pane => pane.id))
 
-  if (!layout || workspace.windowIds.length === 0) {
+  const visibleWindowIds = treeWindowIds(tree).filter(
+    id => paneIds.has(id) && !hiddenTreePanes.has(id) && !(id === 'workspace' && workspaceEmpty)
+  )
+
+  const windowIds = workspace.windowIds.filter(id => visibleWindowIds.includes(id))
+
+  if (!layout || windowIds.length === 0) {
     return null
   }
 
@@ -82,7 +99,7 @@ export function ScrollWindowsMinimap() {
       data-scroll-minimap=""
       style={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
     >
-      {workspace.windowIds.map((windowId, index) => {
+      {windowIds.map((windowId, index) => {
         const rect = scrollGridWindowRect(layout, index, GAP)
 
         return (

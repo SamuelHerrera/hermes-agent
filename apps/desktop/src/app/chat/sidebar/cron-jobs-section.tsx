@@ -10,6 +10,7 @@ import { SidebarGroup, SidebarGroupContent } from '@/components/ui/sidebar'
 import { Tip } from '@/components/ui/tooltip'
 import { deleteCronJob, getCronJobRuns, pauseCronJob, resumeCronJob, type SessionInfo } from '@/hermes'
 import { useI18n } from '@/i18n'
+import { sameCronSignature } from '@/lib/session-signatures'
 import { fmtDayTime, relativeTime } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { updateCronJobs } from '@/store/cron'
@@ -340,7 +341,7 @@ function CronJobSidebarRuns({ jobId, onOpenRun }: { jobId: string; onOpenRun: (s
       getCronJobRuns(jobId, PEEK_RUN_LIMIT)
         .then(result => {
           if (!cancelled) {
-            setRuns(result)
+            setRuns(prev => (prev && sameCronSignature(prev, result) ? prev : result))
           }
         })
         .catch(() => {

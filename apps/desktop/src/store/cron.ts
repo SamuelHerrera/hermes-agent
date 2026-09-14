@@ -2,11 +2,41 @@ import { atom } from 'nanostores'
 
 import type { CronJob } from '@/types/hermes'
 
+function sameCronJobs(a: CronJob[], b: CronJob[]): boolean {
+  if (a.length !== b.length) {
+    return false
+  }
+
+  return a.every((job, i) => {
+    const other = b[i]
+
+    return (
+      other != null &&
+      job.id === other.id &&
+      job.name === other.name &&
+      job.enabled === other.enabled &&
+      job.state === other.state &&
+      job.last_error === other.last_error &&
+      job.last_run_at === other.last_run_at &&
+      job.next_run_at === other.next_run_at &&
+      job.deliver === other.deliver &&
+      job.model === other.model &&
+      job.provider === other.provider &&
+      job.prompt === other.prompt &&
+      job.script === other.script &&
+      job.schedule_display === other.schedule_display &&
+      job.schedule?.display === other.schedule?.display &&
+      job.schedule?.expr === other.schedule?.expr &&
+      job.schedule?.kind === other.schedule?.kind
+    )
+  })
+}
+
 // Cron *jobs* (not run sessions) power the sidebar "Cron jobs" section. Listing
 // the job — schedule, state, live next-run countdown — makes the job the
 // first-class entity; its runs (sessions) resolve under it in the cron detail.
 export const $cronJobs = atom<CronJob[]>([])
-export const setCronJobs = (jobs: CronJob[]) => $cronJobs.set(jobs)
+export const setCronJobs = (jobs: CronJob[]) => $cronJobs.set(sameCronJobs($cronJobs.get(), jobs) ? $cronJobs.get() : jobs)
 
 // In-place edit so the cron overlay's mutations (create/edit/delete/pause/…)
 // land in the same atom the sidebar renders — no stale list until the next poll.

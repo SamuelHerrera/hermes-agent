@@ -23,6 +23,13 @@ describe('sameCronSignature', () => {
     expect(sameCronSignature(a, b)).toBe(false)
   })
 
+  it('is false when cron execution output changes', () => {
+    const a = [{ ...session('cron_exec_1', 'run'), cron_output_path: '/tmp/old.md' }]
+    const b = [{ ...session('cron_exec_1', 'run'), cron_output_path: '/tmp/new.md' }]
+
+    expect(sameCronSignature(a, b)).toBe(false)
+  })
+
   it('is false when order differs', () => {
     const a = [session('a', 't'), session('b', 't')]
     const b = [session('b', 't'), session('a', 't')]

@@ -224,6 +224,8 @@ export function useSessionTileDelegate({
           hydrateSessionTodosFromMessages(runtimeId, recovery.messages, { allowActive: resumedRunning })
         }
 
+        const useAuthoritativeTranscript = Boolean(prefetch) && !resumedRunning && !hasLiveProjection
+
         updateSessionState(
           runtimeId,
           state => ({
@@ -232,7 +234,11 @@ export function useSessionTileDelegate({
             adoptedRunningTurn: state.adoptedRunningTurn || resumedRunning,
             awaitingResponse: resumedRunning && !recovery.applied,
             busy: resumedRunning,
-            messages: state.messages.length > 0 ? state.messages : recovery.messages,
+            messages: useAuthoritativeTranscript
+              ? recovery.messages
+              : state.messages.length > 0
+                ? state.messages
+                : recovery.messages,
             ...(recovery.applied
               ? {
                   sawAssistantPayload: true,
