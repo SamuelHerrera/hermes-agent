@@ -52,6 +52,14 @@ const SESSION_SLOT_ACTIONS: KeybindActionMeta[] = Array.from({ length: SESSION_S
   defaults: [`ctrl+${i + 1}`]
 }))
 
+export const SCREEN_SLOT_COUNT = 5
+
+const SCREEN_SLOT_ACTIONS: KeybindActionMeta[] = Array.from({ length: SCREEN_SLOT_COUNT }, (_, i) => ({
+  id: `view.screen.${i + 1}`,
+  category: 'view' as const,
+  defaults: [`ctrl+alt+${i + 1}`]
+}))
+
 export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   // ── Composer ─────────────────────────────────────────────────────────────
   // Soft `/` / Enter focus (gated); other printables type-to-focus unbound.
@@ -154,6 +162,7 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   // These entries let users assign a dedicated chord if desired.
   { id: 'view.findNext', category: 'view', defaults: [] },
   { id: 'view.findPrevious', category: 'view', defaults: [] },
+  ...SCREEN_SLOT_ACTIONS,
   { id: 'appearance.toggleMode', category: 'view', defaults: ['shift+x'] },
   { id: 'keybinds.openPanel', category: 'view', defaults: ['mod+/'] }
 ]

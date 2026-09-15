@@ -36,7 +36,16 @@ import { guardGuestPointers } from '@/lib/guest-pointer-guard'
 import { reorderCommitHaptic, reorderStepHaptic } from '@/lib/reorder'
 
 import type { DropPosition } from '../model'
-import { $dropHint, $treeDragging, type DropHint, mergeTreeZones, moveTreePanes, reorderTreePanes } from '../store'
+import {
+  $dropHint,
+  $treeDragging,
+  type DropHint,
+  mergeTreeZones,
+  moveTreePanes,
+  moveTreePanesToTabbedScreen,
+  reorderTreePanes,
+  setActiveTabbedScreen
+} from '../store'
 import { clearTabSelection } from '../tab-selection'
 import { type EngineZone, HighlightedZones, primaryZone, type ZoneRect } from '../zones-engine'
 
@@ -144,11 +153,29 @@ export function snapshotStrips(): StripSnapshot[] {
   })
 }
 
+interface ScreenTargetSnapshot {
+  rect: ZoneRect
+  screenId: string
+}
+
+function snapshotScreenTargets(): ScreenTargetSnapshot[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-tabbed-screen-target]')].map(el => {
+    const r = el.getBoundingClientRect()
+
+    return {
+      rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom },
+      screenId: el.dataset.tabbedScreenTarget ?? ''
+    }
+  })
+}
+
 export const rectContains = (rect: ZoneRect, x: number, y: number, pad = 0) =>
   x >= rect.left - pad && x <= rect.right + pad && y >= rect.top - pad && y <= rect.bottom + pad
 
 const sameHint = (a: DropHint | null, b: DropHint | null) =>
+  a?.kind === b?.kind &&
   a?.groupId === b?.groupId &&
+  a?.screenId === b?.screenId &&
   a?.pos === b?.pos &&
   a?.stack?.before === b?.stack?.before &&
   (a?.stack === undefined) === (b?.stack === undefined) &&
@@ -182,6 +209,8 @@ export interface DragSessionSpec {
   /** Release over the final published hint (already flushed to the exact
    *  release position). Only called for engaged drags. */
   onCommit(hint: DropHint | null): void
+  /** Optional capture-phase keyboard handling while the drag is alive. */
+  onKey?(event: KeyboardEvent, engaged: boolean): boolean | void
   /** Teardown for both commit and abort — undo whatever onEngage marked. */
   onEnd?(): void
   /** Sub-threshold release = a click on the handle. */
@@ -393,6 +422,13 @@ export function startDragSession(e: ReactPointerEvent<HTMLElement>, spec: DragSe
       ev.preventDefault()
       ev.stopPropagation()
       finish(false)
+
+      return
+    }
+
+    if (spec.onKey?.(ev, engaged)) {
+      ev.preventDefault()
+      ev.stopPropagation()
     }
   }
 
@@ -458,8 +494,16 @@ export function startPaneDrag(
   const highlighted = new HighlightedZones()
   let zones: EngineZone[] = []
   let strips: StripSnapshot[] = []
+  let screenTargets: ScreenTargetSnapshot[] = []
   let mode: 'reorder' | 'zone' | null = null
   let dimmed: HTMLElement[] = []
+  let keyboardScreenTarget: null | string = null
+
+  const resnapshotTargets = () => {
+    zones = snapshotZones()
+    strips = snapshotStrips()
+    screenTargets = snapshotScreenTargets()
+  }
 
   const markSource = () => {
     // Every dragged tab dims for the drag's life — the divider says where they
@@ -478,8 +522,7 @@ export function startPaneDrag(
   const enterZoneMode = () => {
     mode = 'zone'
     // The layout never restructures mid-drag, so zone/strip rects are stable.
-    zones = snapshotZones()
-    strips = snapshotStrips()
+    resnapshotTargets()
     $treeDragging.set(paneId)
     markSource()
   }
@@ -517,6 +560,21 @@ export function startPaneDrag(
       }
     },
 
+    onKey(ev, engaged) {
+      const targetScreen = ev.ctrlKey && ev.altKey && /^[1-5]$/.test(ev.key) ? ev.key : null
+
+      if (!targetScreen || !engaged) {
+        return false
+      }
+
+      setActiveTabbedScreen(targetScreen)
+      keyboardScreenTarget = targetScreen
+      resnapshotTargets()
+      $dropHint.set({ kind: 'screen', screenId: targetScreen })
+
+      return true
+    },
+
     resolveMove(x, y, shift) {
       if (mode === 'reorder') {
         if (withinStrip(x, y)) {
@@ -531,6 +589,12 @@ export function startPaneDrag(
 
         // Tear-off: the tab leaves the strip and becomes a zone move.
         enterZoneMode()
+      }
+
+      const screenTarget = screenTargets.find(target => rectContains(target.rect, x, y, 4))
+
+      if (screenTarget) {
+        return { kind: 'screen', screenId: screenTarget.screenId }
       }
 
       // The hint updates on highlight-set changes AND on sub-zone position
@@ -592,6 +656,22 @@ export function startPaneDrag(
       }
 
       if (mode === 'zone') {
+        if (keyboardScreenTarget) {
+          moveTreePanesToTabbedScreen(moving, keyboardScreenTarget, paneId)
+          reorderCommitHaptic()
+          spendSelection()
+
+          return
+        }
+
+        if (hint?.kind === 'screen' && hint.screenId) {
+          moveTreePanesToTabbedScreen(moving, hint.screenId, paneId)
+          reorderCommitHaptic()
+          spendSelection()
+
+          return
+        }
+
         // Drop what the hint SHOWS — the overlay and the commit share one
         // truth (the raw highlight set can hold both seam neighbors; the hint
         // already collapsed that to the primary unless Shift made the span

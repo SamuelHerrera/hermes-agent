@@ -10,7 +10,7 @@ import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { allPaneIds, type LayoutNode } from '../model'
 import { $activeTabbedScreen, $tabbedScreenTrees } from '../screens'
-import { $hiddenTreePanes, $layoutTree, $paneVisible, isMainStripPane, setActiveTabbedScreen } from '../store'
+import { $dropHint, $hiddenTreePanes, $layoutTree, $paneVisible, isMainStripPane, setActiveTabbedScreen } from '../store'
 
 import { scrollGridWindowRect } from './grid'
 import {
@@ -159,6 +159,7 @@ export function ScrollWindowsWorkspaceChips() {
   const tabbedScreenId = useStore($activeTabbedScreen)
   const tabbedTrees = useStore($tabbedScreenTrees)
   const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
+  const dropHint = useStore($dropHint)
   const workspaces = useStore($scrollWindowWorkspaces)
   const activeWorkspaceId = mode === 'tabbed' ? tabbedScreenId : scrollWorkspaceId
   const fileToggleActive = mode === 'scroll-windows' ? fileBrowserOpen : filesVisible
@@ -173,6 +174,7 @@ export function ScrollWindowsWorkspaceChips() {
     <div className="flex items-center">
       {SCROLL_WINDOW_WORKSPACE_IDS.map(id => {
         const active = id === activeWorkspaceId
+        const draggingOver = mode === 'tabbed' && dropHint?.kind === 'screen' && dropHint.screenId === id
         const count = counts.get(id) ?? 0
 
         return (
@@ -181,10 +183,11 @@ export function ScrollWindowsWorkspaceChips() {
             aria-pressed={active}
             className={cn(
               'relative text-[0.62rem] font-semibold',
-              active
+              active || draggingOver
                 ? 'bg-(--ui-control-active-background) text-(--ui-text-primary)'
                 : 'text-muted-foreground/85 hover:bg-(--ui-control-hover-background) hover:text-foreground'
             )}
+            data-tabbed-screen-target={mode === 'tabbed' ? id : undefined}
             key={id}
             onClick={() => (mode === 'tabbed' ? setActiveTabbedScreen(id) : setActiveScrollWorkspace(id))}
             size="icon-titlebar"

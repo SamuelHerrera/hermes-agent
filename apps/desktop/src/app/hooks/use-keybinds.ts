@@ -11,10 +11,20 @@ import {
   cycleTerminal,
   terminalPaneId
 } from '@/app/right-sidebar/terminal/terminals'
-import { activateTreeTabSlot, cycleTreeTabInFocusedZone, isPaneVisible } from '@/components/pane-shell/tree/store'
+import {
+  $layoutSurfaceMode,
+  SCROLL_WINDOW_WORKSPACE_IDS,
+  setActiveScrollWorkspace
+} from '@/components/pane-shell/tree/scroll-windows/store'
+import {
+  activateTreeTabSlot,
+  cycleTreeTabInFocusedZone,
+  isPaneVisible,
+  setActiveTabbedScreen
+} from '@/components/pane-shell/tree/store'
 import { onReleaseTypingFocus } from '@/components/ui/keyboard-first'
 import { findBarClaimsCombo } from '@/lib/find-in-page'
-import { contributedKeybindHandler, PROFILE_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
+import { contributedKeybindHandler, PROFILE_SLOT_COUNT, SCREEN_SLOT_COUNT, SESSION_SLOT_COUNT } from '@/lib/keybinds/actions'
 import { comboAllowedInInput, comboFromEvent, isEditableTarget } from '@/lib/keybinds/combo'
 import { composerFocusKeysAllowed, isComposerFocusSoftCombo, typeToFocusChar } from '@/lib/keybinds/composer-focus-keys'
 import { openWorktreeDialog } from '@/store/coding-status'
@@ -145,6 +155,24 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     }
   }
 
+  const screenSlotHandlers: HandlerMap = {}
+
+  for (let slot = 1; slot <= SCREEN_SLOT_COUNT; slot += 1) {
+    screenSlotHandlers[`view.screen.${slot}`] = () => {
+      const id = SCROLL_WINDOW_WORKSPACE_IDS[slot - 1]
+
+      if (!id) {
+        return
+      }
+
+      if ($layoutSurfaceMode.get() === 'tabbed') {
+        setActiveTabbedScreen(id)
+      } else {
+        setActiveScrollWorkspace(id)
+      }
+    }
+  }
+
   commitSwitcherRef.current = () => goToSession(commitOnCtrlUp())
 
   const stepSession = (direction: 1 | -1) => {
@@ -259,6 +287,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     // invisibly.
     'view.findNext': findNextMatch,
     'view.findPrevious': findPreviousMatch,
+    ...screenSlotHandlers,
 
     'appearance.toggleMode': () => setMode(resolvedMode === 'dark' ? 'light' : 'dark'),
 

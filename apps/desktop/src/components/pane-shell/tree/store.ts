@@ -119,6 +119,99 @@ export function setActiveTabbedScreen(id: string): void {
   persist(next)
 }
 
+function moveTargetGroupId(tree: LayoutNode): string | null {
+  const groups = groupLeafIds(tree).map(id => findGroup(tree, id)).filter((group): group is GroupNode => Boolean(group))
+
+  return (
+    groups.find(group => group.panes.length === 0)?.id ??
+    groups.find(group => group.panes.some(isMainStripPane))?.id ??
+    groups.find(group => !group.panes.every(pane => pane === 'sessions' || pane === 'files'))?.id ??
+    groups[0]?.id ??
+    null
+  )
+}
+
+function insertPaneBlock(tree: LayoutNode, paneIds: readonly string[], activeId: string): LayoutNode {
+  const targetGroupId = moveTargetGroupId(tree)
+
+  if (!targetGroupId) {
+    return tree
+  }
+
+  let next = tree
+  let landingGroupId = targetGroupId
+
+  for (const [index, paneId] of paneIds.entries()) {
+    next = insertAtGroup(next, landingGroupId, paneId, 'center', null, index === 0) ?? next
+    landingGroupId = findGroupOfPane(next, paneIds[0])?.id ?? landingGroupId
+  }
+
+  const landed = findGroupOfPane(next, paneIds[0])
+
+  return landed && landed.panes.includes(activeId) ? setActivePaneOp(next, landed.id, activeId) : next
+}
+
+/** Move one or more tabs to a numbered tabbed screen. Used by the screen chips,
+ *  the tab context menu, and drag-key switching; it resolves the real owner so a
+ *  drag can switch screens before the pointer is released. */
+export function moveTreePanesToTabbedScreen(
+  paneIds: readonly string[],
+  targetScreenId: string,
+  activeId: string = paneIds[0] ?? ''
+): void {
+  if (
+    paneIds.length === 0 ||
+    isSecondaryWindow() ||
+    $layoutSurfaceMode.get() !== 'tabbed' ||
+    !SCROLL_WINDOW_WORKSPACE_IDS.includes(targetScreenId)
+  ) {
+    return
+  }
+
+  const trees = $tabbedScreenTrees.get()
+  const activeScreenId = $activeTabbedScreen.get()
+  const sourceScreenId = tabbedScreenOwner(paneIds[0]) ?? activeScreenId
+
+  if (sourceScreenId === targetScreenId) {
+    setActiveTabbedScreen(targetScreenId)
+    revealTreePane(activeId)
+
+    return
+  }
+
+  const liveTree = $layoutTree.get()
+  const sourceTree = sourceScreenId === activeScreenId ? liveTree : trees[sourceScreenId]
+
+  if (!sourceTree) {
+    return
+  }
+
+  let sourceAfter: LayoutNode | null = sourceTree
+
+  for (const paneId of paneIds) {
+    sourceAfter = sourceAfter && removePane(sourceAfter, paneId)
+  }
+
+  sourceAfter ??= emptyTabbedScreen(defaultTree ?? sourceTree, sourceScreenId)
+
+  const baseTargetTree =
+    targetScreenId === activeScreenId && liveTree ? liveTree : (trees[targetScreenId] ?? emptyTabbedScreen(defaultTree ?? sourceTree, targetScreenId))
+  const targetAfter = insertPaneBlock(baseTargetTree, paneIds, activeId)
+  const nextTrees = { ...trees, [sourceScreenId]: sourceAfter, [targetScreenId]: targetAfter }
+
+  $tabbedScreenTrees.set(nextTrees)
+  $activeTabbedScreen.set(targetScreenId)
+  $activeTreeGroup.set(null)
+  $hoveredTreeGroup.set(null)
+  $layoutTree.set(targetAfter)
+  persist(targetAfter)
+  markActivePreset('custom')
+
+  for (const paneId of paneIds) {
+    markPaneUserPlaced(paneId)
+  }
+}
+
 export function cycleTabbedScreen(direction: 1 | -1): void {
   const ids = SCROLL_WINDOW_WORKSPACE_IDS
   setActiveTabbedScreen(ids[(ids.indexOf($activeTabbedScreen.get()) + direction + ids.length) % ids.length])
@@ -1282,7 +1375,9 @@ export function mirrorLayoutTree() {
 }
 
 export interface DropHint {
-  kind: 'group'
+  kind: 'group' | 'screen'
+  /** Numbered tabbed screen/workspace target while dragging over the titlebar chips. */
+  screenId?: string
   /** The zone a drop will land in (ClosestCenter among `groupIds`). */
   groupId?: string
   /** Full highlighted set (multi-zone when Shift extends the range). */

@@ -82,3 +82,28 @@ it('does not count the empty workspace placeholder as a tabbed-screen tab', asyn
   expect(tabbedScreenPaneCount(initial, true)).toBe(0)
   expect(tabbedScreenPaneCount(initial, false)).toBe(1)
 })
+
+it('moves a tab to another numbered screen', async () => {
+  const { store, screens, model, registry } = await setup()
+  registry.register({ id: 'session-tile:first', area: 'panes', data: { placement: 'main' }, render: () => null })
+  store.revealTreePane('session-tile:first')
+
+  store.moveTreePanesToTabbedScreen(['session-tile:first'], '2')
+
+  expect(screens.$activeTabbedScreen.get()).toBe('2')
+  expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['1'])).toEqual(['sessions', 'workspace', 'files'])
+  expect(model.allPaneIds(store.$layoutTree.get()!)).toEqual(['sessions', 'session-tile:first', 'files'])
+})
+
+it('moves a tab from its owning screen after the user switches during a drag', async () => {
+  const { store, screens, model, registry } = await setup()
+  registry.register({ id: 'session-tile:first', area: 'panes', data: { placement: 'main' }, render: () => null })
+  store.revealTreePane('session-tile:first')
+  store.setActiveTabbedScreen('2')
+
+  store.moveTreePanesToTabbedScreen(['session-tile:first'], '3')
+
+  expect(screens.$activeTabbedScreen.get()).toBe('3')
+  expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['1'])).toEqual(['sessions', 'workspace', 'files'])
+  expect(model.allPaneIds(store.$layoutTree.get()!)).toEqual(['sessions', 'session-tile:first', 'files'])
+})

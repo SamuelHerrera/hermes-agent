@@ -2369,6 +2369,8 @@ export interface Translations {
     closeRunningBody: string
     closeRunningConfirm: string
     reload: string
+    moveToScreen: string
+    screenNumber: (id: string) => string
     closeOthers: string
     closeToRight: string
     closeAll: string
