@@ -2680,6 +2680,7 @@ describe('openNewSessionTile empty workspace placeholder', () => {
     let handle: HarnessHandle | null = null
 
     $workspaceEmptyPlaceholder.set(true)
+    $layoutTree.set(group(['workspace'], { active: 'workspace', id: 'main' }))
     render(<Harness navigate={navigate} onReady={value => (handle = value)} requestGateway={requestGateway} />)
     await waitFor(() => expect(handle).not.toBeNull())
 
@@ -2723,6 +2724,34 @@ describe('openNewSessionTile empty workspace placeholder', () => {
       expect.objectContaining({ runtimeId: 'runtime-1', storedSessionId: 'stored-1', workspaceCwd: '/repo' }),
       expect.objectContaining({ runtimeId: 'runtime-2', storedSessionId: 'stored-2', workspaceCwd: '/repo' })
     ])
+  })
+
+  it('does not spend another screen\'s close-all placeholder when creating a tab on an empty active screen', async () => {
+    const requestGateway = vi.fn(async () => ({
+      info: { cwd: '/new-screen' },
+      session_id: 'runtime-screen-2',
+      stored_session_id: 'stored-screen-2'
+    }) as never)
+    let handle: HarnessHandle | null = null
+
+    $workspaceEmptyPlaceholder.set(true)
+    $layoutTree.set(group(['sessions'], { active: 'sessions', id: 'screen-2' }))
+    render(<Harness onReady={value => (handle = value)} requestGateway={requestGateway} />)
+    await waitFor(() => expect(handle).not.toBeNull())
+
+    await act(async () => {
+      await handle!.openNewSessionTile('center', { listed: false, source: 'screen-2.plus' })
+    })
+
+    expect(requestGateway).toHaveBeenCalledWith('session.create', expect.any(Object))
+    expect($sessionTiles.get()).toEqual([
+      expect.objectContaining({
+        runtimeId: 'runtime-screen-2',
+        storedSessionId: 'stored-screen-2',
+        workspaceCwd: '/new-screen'
+      })
+    ])
+    expect(revealTreePane).toHaveBeenCalledWith('session-tile:stored-screen-2')
   })
 })
 

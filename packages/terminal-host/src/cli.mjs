@@ -1,12 +1,22 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { connect } from './client.mjs';
 const args = process.argv.slice(2);
 const command = args[0];
 const index = args.indexOf('--dir');
+function staleEndpoint(error) {
+  if (error?.code === 'ENOENT') return true;
+  if (error?.code === 'HOST_LOST') return true;
+  if (error?.cause?.code === 'ECONNREFUSED') return true;
+  return error?.name === 'TypeError' && error?.message === 'fetch failed';
+}
+async function removeStaleRuntime(directory) {
+  await rm(join(directory, 'endpoint.json'), { force: true });
+  await rm(join(directory, 'host.lock'), { recursive: true, force: true });
+}
 try {
   if (command === '--version') {
     console.log(JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version);
@@ -22,6 +32,8 @@ try {
   } else if (command === 'serve') {
     const { serve } = await import('./host.mjs'); await serve(directory);
   } else if (command === 'start') {
+    try { console.log(JSON.stringify(await (await connect(directory)).request('status'))); process.exit(0); }
+    catch (error) { if (staleEndpoint(error)) await removeStaleRuntime(directory); }
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), 'serve', '--dir', directory], { detached: true, stdio: 'ignore', windowsHide: true });
     child.unref();
     const deadline = Date.now() + 10000;

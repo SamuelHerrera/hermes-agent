@@ -4,7 +4,8 @@ import type { NavigateFunction } from 'react-router'
 
 import { archivedTerminalIds } from '@/app/right-sidebar/terminal/archive'
 import { closeTerminal } from '@/app/right-sidebar/terminal/terminals'
-import { revealTreePane } from '@/components/pane-shell/tree/store'
+import { allPaneIds } from '@/components/pane-shell/tree/model'
+import { $layoutTree, revealTreePane } from '@/components/pane-shell/tree/store'
 import { deleteSession, getAllSessionMessages, getLatestSessionMessages, setSessionArchived } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
@@ -819,7 +820,10 @@ export function useSessionActions({
         workspaceEmptyPlaceholder: $workspaceEmptyPlaceholder.get()
       })
 
-      if (dir === 'center' && $workspaceEmptyPlaceholder.get() && !explicitCwd) {
+      const activeTree = $layoutTree.get()
+      const activeScreenHasWorkspace = Boolean(activeTree && allPaneIds(activeTree).includes('workspace'))
+
+      if (dir === 'center' && $workspaceEmptyPlaceholder.get() && activeScreenHasWorkspace && !explicitCwd) {
         logUatEvent('tabs', 'new-session-tile.reused-workspace-placeholder', { source })
         startFreshSessionDraft({ replaceRoute: true, source: `new-session-tile:${source}` })
 

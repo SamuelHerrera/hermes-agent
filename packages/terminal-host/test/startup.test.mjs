@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,4 +43,17 @@ test('an unowned existing lock is never removed on startup failure', async t => 
   await mkdir(join(dir, 'host.lock'));
   await exec(process.execPath, [cli, 'serve', '--dir', dir]).catch(() => {});
   assert.ok((await stat(join(dir, 'host.lock'))).isDirectory());
+});
+
+test('start recovers stale endpoint and lock from a crashed host', async t => {
+  const dir = await fixture(t);
+  await mkdir(join(dir, 'host.lock'));
+  await writeFile(join(dir, 'endpoint.json'), JSON.stringify({ port: 65534, epoch: 'stale', token: 'stale' }), { mode: 0o600 });
+  const result = await exec(process.execPath, [cli, 'start', '--dir', dir], { timeout: 15000 });
+  const status = JSON.parse(result.stdout);
+  assert.equal(typeof status.pid, 'number');
+  assert.notEqual(status.epoch, 'stale');
+  const endpoint = JSON.parse(await readFile(join(dir, 'endpoint.json'), 'utf8'));
+  assert.equal(endpoint.epoch, status.epoch);
+  await exec(process.execPath, [cli, 'stop', '--dir', dir, '--force']);
 });

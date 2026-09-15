@@ -134,6 +134,23 @@ export function ScrollWindowsMinimap() {
   )
 }
 
+export function tabbedScreenPaneCount(tree: LayoutNode, workspaceEmptyPlaceholder: boolean): number {
+  return allPaneIds(tree).filter(pane => {
+    if (pane === 'sessions' || pane === 'files') {
+      return false
+    }
+
+    // A parked workspace placeholder is the inert "No tabs open" host, not a
+    // real user tab. Without this the screen chip kept an attention dot after
+    // Close all even though the active surface was empty.
+    if (pane === 'workspace' && workspaceEmptyPlaceholder) {
+      return false
+    }
+
+    return true
+  }).length
+}
+
 export function ScrollWindowsWorkspaceChips() {
   const mode = useStore($layoutSurfaceMode)
   const fileBrowserOpen = useStore($fileBrowserOpen)
@@ -141,15 +158,14 @@ export function ScrollWindowsWorkspaceChips() {
   const scrollWorkspaceId = useStore($activeScrollWorkspaceId)
   const tabbedScreenId = useStore($activeTabbedScreen)
   const tabbedTrees = useStore($tabbedScreenTrees)
+  const workspaceEmptyPlaceholder = useStore($workspaceEmptyPlaceholder)
   const workspaces = useStore($scrollWindowWorkspaces)
   const activeWorkspaceId = mode === 'tabbed' ? tabbedScreenId : scrollWorkspaceId
   const fileToggleActive = mode === 'scroll-windows' ? fileBrowserOpen : filesVisible
 
   const counts = new Map(
     mode === 'tabbed'
-      ? Object.entries(tabbedTrees).map(
-          ([id, tree]) => [id, allPaneIds(tree).filter(pane => pane !== 'sessions' && pane !== 'files').length] as const
-        )
+      ? Object.entries(tabbedTrees).map(([id, tree]) => [id, tabbedScreenPaneCount(tree, workspaceEmptyPlaceholder)] as const)
       : workspaces.map(workspace => [workspace.id, workspace.windowIds.length] as const)
   )
 

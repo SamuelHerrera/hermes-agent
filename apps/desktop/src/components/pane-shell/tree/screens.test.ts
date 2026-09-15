@@ -74,3 +74,11 @@ it('cycles screens and keeps the tabbed tree through a layout mode roundtrip', a
   store.cycleTabbedScreen(1)
   expect(screens.$activeTabbedScreen.get()).toBe('1')
 })
+
+it('does not count the empty workspace placeholder as a tabbed-screen tab', async () => {
+  const { initial } = await setup()
+  const { tabbedScreenPaneCount } = await import('./scroll-windows/titlebar')
+
+  expect(tabbedScreenPaneCount(initial, true)).toBe(0)
+  expect(tabbedScreenPaneCount(initial, false)).toBe(1)
+})
