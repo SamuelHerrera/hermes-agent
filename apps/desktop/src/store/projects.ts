@@ -1,6 +1,7 @@
 import { atom } from 'nanostores'
 
 import {
+  excludeProjectSessions,
   liveSessionProjectId,
   NO_PROJECT_ID,
   type SidebarProjectTree
@@ -230,6 +231,7 @@ export function sessionAndDelegateDescendantIds(storedSessionId: string): string
 // mutation completing must NOT drop the tombstone, or the row flashes back until
 // the backend catches up. Keyed by id, so concurrent deletes stay independent.
 export const $sessionMutationsInFlight = atom<Set<string>>(new Set())
+const $relocatingSessionIds = atom<Set<string>>(new Set())
 
 function mutateInFlight(ids: Array<null | string | undefined>, add: boolean): void {
   const current = $sessionMutationsInFlight.get()
@@ -250,6 +252,38 @@ function mutateInFlight(ids: Array<null | string | undefined>, add: boolean): vo
 
 export const beginSessionMutation = (ids: Array<null | string | undefined>): void => mutateInFlight(ids, true)
 export const endSessionMutation = (ids: Array<null | string | undefined>): void => mutateInFlight(ids, false)
+
+function setRelocatingSessionIds(ids: Array<null | string | undefined>, add: boolean): void {
+  const current = $relocatingSessionIds.get()
+  const next = new Set(current)
+
+  for (const id of ids) {
+    const trimmed = id?.trim()
+
+    if (trimmed) {
+      add ? next.add(trimmed) : next.delete(trimmed)
+    }
+  }
+
+  if (next.size !== current.size) {
+    $relocatingSessionIds.set(next)
+  }
+}
+
+function withoutRelocatingSessions(projects: SidebarProjectTree[]): SidebarProjectTree[] {
+  const relocating = $relocatingSessionIds.get()
+
+  if (!relocating.size) {
+    return projects
+  }
+
+  return projects.map(project =>
+    excludeProjectSessions(
+      project,
+      session => relocating.has(session.id) || Boolean(session._lineage_root_id && relocating.has(session._lineage_root_id))
+    )
+  )
+}
 
 // True while the disk scan is in flight (drives the "finding repos" hint).
 export const $reposScanning = atom(false)
@@ -543,7 +577,7 @@ let projectTreeRefreshGeneration = 0
 
 function applyProjectTreePayload(res: ProjectTreePayload): void {
   const scoped = new Set(res.scoped_session_ids ?? [])
-  $projectTree.set(res.projects ?? [])
+  $projectTree.set(withoutRelocatingSessions(res.projects ?? []))
   $activeProjectId.set(res.active_id ?? null)
   $hiddenProjectPaths.set(res.hidden_project_paths ?? [])
   const tombstones = $removedSessionIds.get()
@@ -677,21 +711,53 @@ export async function moveSessionToProject(
     throw new Error(translateNow('sidebar.projects.moveNoFolder'))
   }
 
-  const res = await gatewayRequest<WorkspaceMovePayload>('session.workspace.move', {
-    cwd,
-    session_key: sessionId,
-    ...(profile ? { profile } : {})
-  })
-
-  const moved = res.cwd || cwd
+  const previous = $sessions.get().find(s => sessionMatchesStoredId(s, sessionId))
+  setRelocatingSessionIds([sessionId, previous?._lineage_root_id], true)
   setSessions(prev =>
     prev.map(s =>
       sessionMatchesStoredId(s, sessionId)
-        ? { ...s, cwd: moved, git_branch: res.branch ?? null, git_repo_root: res.git_repo_root ?? null }
+        ? { ...s, cwd, git_branch: null, git_repo_root: null }
         : s
     )
   )
-  void refreshProjectTree()
+  $projectTree.set(withoutRelocatingSessions($projectTree.get()))
+
+  try {
+    const res = await gatewayRequest<WorkspaceMovePayload>('session.workspace.move', {
+      cwd,
+      session_key: sessionId,
+      ...(profile ? { profile } : {})
+    })
+
+    const moved = res.cwd || cwd
+    setSessions(prev =>
+      prev.map(s =>
+        sessionMatchesStoredId(s, sessionId)
+          ? { ...s, cwd: moved, git_branch: res.branch ?? null, git_repo_root: res.git_repo_root ?? null }
+          : s
+      )
+    )
+    await refreshProjectTree()
+  } catch (err) {
+    if (previous) {
+      setSessions(prev =>
+        prev.map(s =>
+          sessionMatchesStoredId(s, sessionId)
+            ? {
+                ...s,
+                cwd: previous.cwd,
+                git_branch: previous.git_branch,
+                git_repo_root: previous.git_repo_root
+              }
+            : s
+        )
+      )
+    }
+
+    throw err
+  } finally {
+    setRelocatingSessionIds([sessionId, previous?._lineage_root_id], false)
+  }
 }
 
 export interface RepoDiscoveryPolicy {

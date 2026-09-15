@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { NO_PROJECT_ID, type SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $sidebarAgentsGrouped, setSidebarAgentsGrouped } from '@/store/layout'
-import { $activeGatewayProfile } from '@/store/profile'
+import { $activeGatewayProfile, $showAllProfiles } from '@/store/profile'
 import { $currentCwd, $selectedStoredSessionId, $sessions, applyConfiguredDefaultProjectDir } from '@/store/session'
 
 import {
@@ -20,6 +20,7 @@ import {
   endSessionMutation,
   enterProject,
   exitProjectScope,
+  moveSessionToProject,
   openProjectCreate,
   pickProjectFolder,
   projectColorForCwd,
@@ -692,5 +693,116 @@ describe('tombstone pruning', () => {
     await refreshProjectTree()
 
     expect($removedSessionIds.get().has('sess-1')).toBe(false)
+  })
+})
+
+describe('moveSessionToProject', () => {
+  const session = {
+    archived: false,
+    cwd: null,
+    ended_at: 123,
+    git_branch: null,
+    git_repo_root: null,
+    id: 'sess-home',
+    input_tokens: 0,
+    is_active: false,
+    last_active: 123,
+    message_count: 1,
+    model: null,
+    output_tokens: 0,
+    preview: null,
+    source: 'desktop',
+    started_at: 123,
+    title: 'Moved chat',
+    tool_call_count: 0
+  }
+
+  const homeProject = (row: typeof session): SidebarProjectTree => ({
+    chatSessionCount: 1,
+    childSessionCount: 0,
+    id: '__no_project__',
+    isNoProject: true,
+    label: 'Home',
+    path: null,
+    previewSessions: [row as never],
+    repos: [
+      {
+        groups: [{ id: '__no_project__', label: 'Home', path: null, sessions: [row as never] }],
+        id: '__no_project__',
+        label: 'Home',
+        path: null,
+        sessionCount: 1
+      }
+    ],
+    runningSessionCount: 0,
+    sessionCount: 1
+  })
+
+  const iconProject: SidebarProjectTree = {
+    chatSessionCount: 0,
+    childSessionCount: 0,
+    id: 'p_icon',
+    label: 'ICON',
+    path: '/work/icon',
+    previewSessions: [],
+    repos: [
+      {
+        groups: [{ id: '/work/icon::branch::main', isMain: true, label: 'main', path: '/work/icon', sessions: [] }],
+        id: '/work/icon',
+        label: 'icon',
+        path: '/work/icon',
+        sessionCount: 0
+      }
+    ],
+    runningSessionCount: 0,
+    sessionCount: 0
+  }
+
+  beforeEach(() => {
+    $activeGatewayProfile.set('default')
+    $showAllProfiles.set(false)
+    $projectTree.set([homeProject(session), iconProject])
+    $sessions.set([session as never])
+  })
+
+  afterEach(() => {
+    $projectTree.set([])
+    $sessions.set([])
+    $showAllProfiles.set(false)
+  })
+
+  it('optimistically removes the row from its old project while the backend move is pending', async () => {
+    let resolveMove: ((value: unknown) => void) | undefined
+    const request = vi.fn((method: string) => {
+      if (method === 'session.workspace.move') {
+        return new Promise(resolve => {
+          resolveMove = resolve
+        })
+      }
+
+      return Promise.resolve({ active_id: null, projects: [iconProject], scoped_session_ids: ['sess-home'] })
+    })
+    activeGateway.mockReturnValue({ connectionState: 'open', request } as never)
+
+    const pending = moveSessionToProject('sess-home', 'p_icon')
+
+    expect($sessions.get()[0]?.cwd).toBe('/work/icon')
+    expect($projectTree.get()[0]?.previewSessions?.map((row: { id: string }) => row.id)).toEqual([])
+    expect($projectTree.get()[0]?.repos[0]?.groups[0]?.sessions.map((row: { id: string }) => row.id)).toEqual([])
+
+    resolveMove?.({ branch: 'main', cwd: '/work/icon', git_repo_root: '/work/icon' })
+    await pending
+    expect($sessions.get()[0]?.git_repo_root).toBe('/work/icon')
+  })
+
+  it('rolls the optimistic row back if the backend rejects the move', async () => {
+    activeGateway.mockReturnValue({
+      connectionState: 'open',
+      request: vi.fn().mockRejectedValue(new Error('session busy'))
+    } as never)
+
+    await expect(moveSessionToProject('sess-home', 'p_icon')).rejects.toThrow('session busy')
+
+    expect($sessions.get()[0]?.cwd).toBeNull()
   })
 })
