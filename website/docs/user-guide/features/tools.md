@@ -228,6 +228,18 @@ PTY mode (`pty=true`) enables interactive CLI tools like Codex and Claude Code.
 
 If a command needs sudo, you'll be prompted for your password (cached for the session). Or set `SUDO_PASSWORD` in `~/.hermes/.env`.
 
+### Desktop credential settings
+
+Open **Settings → Tools & Keys → Sudo credentials** to manage the selected backend/profile's sudo password. The masked password field writes `SUDO_PASSWORD` to that profile's `.env`; the sudo editor never returns existing password values. You can replace or remove the saved value.
+
+The same page manages `terminal.sudo_password_file` and host-specific `terminal.sudo_password_files` references. File paths belong to the **backend machine**, not necessarily the computer running Desktop or the remote SSH target. Add separate rows for the host aliases or IP addresses used in commands. For example, `server-a` and `192.0.2.10` are different targets.
+
+You can also create or replace a dedicated host password file, with confirmation, under the selected profile's `sudo-passwords` directory. This creates an owner-only file and assigns its reference to that host. Arbitrary external reference files are never overwritten. On backends without secure file-write support, reference an existing file instead.
+
+Check the displayed backend hostname and profile directory before saving. Availability means the file exists and is readable; it does not prove that sudo accepts the password. Removing a reference does not delete its file. Settings changes apply to subsequent commands; they do not retry a failed command or answer an already-open password prompt.
+
+Pending password, secret, and approval prompts come from the live backend when Desktop reconnects. Reopening the app restores unanswered requests without saving password drafts. Resolved, expired, or cancelled requests must not reappear. If the backend itself stopped, its old request is no longer answerable; resume the interrupted work instead.
+
 :::warning
 On messaging platforms, if sudo fails, the output includes a tip to add `SUDO_PASSWORD` to `~/.hermes/.env`.
 :::

@@ -25,6 +25,19 @@ def _hermes_root_path() -> Path:
         return Path(os.path.expanduser("~/.hermes"))
 
 
+def _is_managed_sudo_credential(path: Path) -> bool:
+    """Recognize the private sudo store, including sibling profiles."""
+    for base in (_hermes_home_path(), _hermes_root_path()):
+        directory = (base / "sudo-passwords").resolve()
+        if path == directory or directory in path.parents:
+            return True
+    try:
+        parts = path.relative_to(_hermes_root_path().resolve() / "profiles").parts
+    except ValueError:
+        return False
+    return len(parts) >= 2 and parts[1] == "sudo-passwords"
+
+
 def build_write_denied_paths(home: str) -> set[str]:
     """Return exact sensitive paths that must never be written."""
     hermes_home = _hermes_home_path()
@@ -133,6 +146,9 @@ def _classify_write_denial(path: str) -> Optional[str]:
     """Return ``'credential'``, ``'safe_root'``, or ``None`` if writes are allowed."""
     home = os.path.realpath(os.path.expanduser("~"))
     resolved = os.path.realpath(os.path.expanduser(str(path)))
+
+    if _is_managed_sudo_credential(Path(resolved)):
+        return "credential"
 
     # Approval-gated paths (e.g. ~/.ssh/config) are NOT hard-denied here:
     # they are allowed at this layer so the interactive file tools can run
@@ -290,6 +306,13 @@ def get_read_block_error(path: str) -> Optional[str]:
     terminal cwd differs from the process cwd.
     """
     resolved = Path(path).expanduser().resolve()
+
+    if _is_managed_sudo_credential(resolved):
+        return (
+            f"Access denied: {path} is a managed sudo credential store. "
+            "Manage its values through Desktop's Sudo credentials settings; "
+            "terminal tools consume them internally. (Defense-in-depth, not a security boundary.)"
+        )
 
     # Resolve BOTH the active HERMES_HOME (profile-aware) AND the global
     # Hermes root so credential stores at <root>/auth.json etc. are also

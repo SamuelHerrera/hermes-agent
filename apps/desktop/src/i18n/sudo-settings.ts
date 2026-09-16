@@ -11,7 +11,7 @@ export const sudoEn = {
   scope:
     'Passwords and paths belong to this backend, not the Desktop computer. Switch backend/profile to manage another machine. Existing passwords are never shown.',
   precedence:
-    'Saving enables profile-only sudo resolution for subsequent commands. Host file → .env password → fallback file. SSH (direct commands or the SSH terminal backend) requires an exact host row: hp and 192.168.68.57 are different targets. Local/default credentials are never sent to an unmatched SSH host.',
+    'Saving enables profile-only sudo resolution for subsequent commands. Host file → .env password → fallback file. SSH (direct commands or the SSH terminal backend) requires an exact host row: server-a and 192.0.2.10 are different targets. Local/default credentials are never sent to an unmatched SSH host.',
   password: 'New sudo password',
   passwordSet: 'Password configured',
   passwordUnset: 'No .env password',
@@ -51,7 +51,7 @@ export const sudoJa: typeof sudoEn = {
   scope:
     'パスワードとパスは Desktop 端末ではなく、このバックエンドに属します。他の端末を管理するには接続先とプロファイルを切り替えてください。既存のパスワードは表示されません。',
   precedence:
-    '保存後はプロファイルの設定を次のコマンドから使用します。ホスト別ファイル → .env パスワード → フォールバックファイル。SSH（直接コマンドおよび SSH バックエンド）には一致するホスト行が必要です。hp と 192.168.68.57 は別の対象です。未登録の SSH ホストに local/default の認証情報は送信しません。',
+    '保存後はプロファイルの設定を次のコマンドから使用します。ホスト別ファイル → .env パスワード → フォールバックファイル。SSH（直接コマンドおよび SSH バックエンド）には一致するホスト行が必要です。server-a と 192.0.2.10 は別の対象です。未登録の SSH ホストに local/default の認証情報は送信しません。',
   password: '新しい sudo パスワード',
   passwordSet: 'パスワード設定済み',
   passwordUnset: '.env パスワードなし',
@@ -90,7 +90,7 @@ export const sudoZh: typeof sudoEn = {
   owner: '后端 / 所属配置',
   scope: '密码和路径属于此后端，而非 Desktop 电脑。切换后端和配置以管理其他机器。现有密码不会显示。',
   precedence:
-    '保存后，后续命令仅使用此配置的凭据。主机文件 → .env 密码 → 后备文件。SSH（直接命令或 SSH 后端）必须有完全匹配的主机行：hp 和 192.168.68.57 是不同的目标。不会向未匹配的 SSH 主机发送 local/default 凭据。',
+    '保存后，后续命令仅使用此配置的凭据。主机文件 → .env 密码 → 后备文件。SSH（直接命令或 SSH 后端）必须有完全匹配的主机行：server-a 和 192.0.2.10 是不同的目标。不会向未匹配的 SSH 主机发送 local/default 凭据。',
   password: '新的 sudo 密码',
   passwordSet: '已配置密码',
   passwordUnset: '未设置 .env 密码',
@@ -128,7 +128,7 @@ export const sudoZhHant: typeof sudoEn = {
   owner: '後端 / 所屬設定檔',
   scope: '密碼和路徑屬於此後端，而非 Desktop 電腦。切換後端和設定檔以管理其他機器。現有密碼不會顯示。',
   precedence:
-    '儲存後，後續命令僅使用此設定檔的憑證。主機檔案 → .env 密碼 → 備用檔案。SSH（直接命令或 SSH 後端）必須有完全符合的主機列：hp 和 192.168.68.57 是不同的目標。不會向未符合的 SSH 主機傳送 local/default 憑證。',
+    '儲存後，後續命令僅使用此設定檔的憑證。主機檔案 → .env 密碼 → 備用檔案。SSH（直接命令或 SSH 後端）必須有完全符合的主機列：server-a 和 192.0.2.10 是不同的目標。不會向未符合的 SSH 主機傳送 local/default 憑證。',
   password: '新的 sudo 密碼',
   passwordSet: '已設定密碼',
   passwordUnset: '未設定 .env 密碼',
