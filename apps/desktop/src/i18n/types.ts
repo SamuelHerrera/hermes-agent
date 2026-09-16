@@ -48,7 +48,10 @@ interface AuxTaskCopy {
   hint: string
 }
 
+import type { sudoEn } from './sudo-settings'
+
 export interface Translations {
+  sudoSettings: typeof sudoEn
   common: {
     apply: string
     back: string

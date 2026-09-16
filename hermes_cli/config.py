@@ -3991,7 +3991,7 @@ def _env_line_defines_key(line: str, key: str) -> bool:
     return stripped.startswith(f"{key}=")
 
 
-def save_env_value(key: str, value: str):
+def save_env_value(key: str, value: str, *, update_process_env: bool = True):
     """Save or update a value in ~/.hermes/.env."""
     if is_managed():
         managed_error(f"set {key}")
@@ -4014,7 +4014,9 @@ def save_env_value(key: str, value: str):
     _reject_denylisted_env_var(key)
     value = value.replace("\n", "").replace("\r", "")
     # API keys / tokens must be ASCII — strip non-ASCII with a warning.
-    value = _check_non_ascii_credential(key, value)
+    # OS passwords are not HTTP API keys; Unicode is significant.
+    if key != "SUDO_PASSWORD":
+        value = _check_non_ascii_credential(key, value)
     ensure_hermes_home()
     env_path = get_env_path()
 
@@ -4042,6 +4044,8 @@ def save_env_value(key: str, value: str):
     for i, line in enumerate(lines):
         if _env_line_defines_key(line, key):
             lines[i] = f"{key}={serialized_value}\n"
+            if key == "SUDO_PASSWORD":
+                lines[i + 1:] = [line for line in lines[i + 1:] if not _env_line_defines_key(line, key)]
             found = True
             break
 
@@ -4067,7 +4071,9 @@ def save_env_value(key: str, value: str):
         atomic_replace(tmp_path, env_path)
         # Preserve the original file mode (e.g. 0640 for Docker volume mounts)
         # instead of letting _secure_file unconditionally tighten to 0600.
-        if original_mode is not None:
+        if key == "SUDO_PASSWORD":
+            _secure_file(env_path)
+        elif original_mode is not None:
             try:
                 os.chmod(env_path, original_mode)
             except OSError:
@@ -4081,7 +4087,8 @@ def save_env_value(key: str, value: str):
             pass
         raise
 
-    os.environ[key] = value
+    if update_process_env:
+        os.environ[key] = value
     invalidate_env_cache()
 
 
@@ -4104,7 +4111,7 @@ def custom_endpoint_key_env(identity: str) -> str:
     return f"HERMES_CUSTOM_{slug}_API_KEY" if slug else "HERMES_CUSTOM_API_KEY"
 
 
-def remove_env_value(key: str) -> bool:
+def remove_env_value(key: str, *, update_process_env: bool = True) -> bool:
     """Remove a key from ~/.hermes/.env and os.environ.
 
     Returns True if the key was found and removed, False otherwise.
@@ -4128,7 +4135,8 @@ def remove_env_value(key: str) -> bool:
         raise ValueError(f"Invalid environment variable name: {key!r}")
     env_path = get_env_path()
     if not env_path.exists():
-        os.environ.pop(key, None)
+        if update_process_env:
+            os.environ.pop(key, None)
         return False
 
     read_kw = {"encoding": "utf-8-sig", "errors": "replace"}
@@ -4172,7 +4180,8 @@ def remove_env_value(key: str) -> bool:
                 pass
             raise
 
-    os.environ.pop(key, None)
+    if update_process_env:
+        os.environ.pop(key, None)
     invalidate_env_cache()
     return found
 

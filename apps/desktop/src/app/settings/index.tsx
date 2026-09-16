@@ -43,6 +43,7 @@ import { NotificationsSettings } from './notifications-settings'
 import { PluginsSettings } from './plugins-settings'
 import { PROVIDER_VIEWS, ProvidersSettings, type ProviderView } from './providers-settings'
 import { SessionsSettings } from './sessions-settings'
+import { SudoSettings } from './sudo-settings'
 import type { SettingsPageProps, SettingsView as SettingsViewId } from './types'
 
 const SETTINGS_VIEWS: readonly SettingsViewId[] = [
@@ -255,6 +256,13 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
             id: 'kview:settings',
             label: t.settings.nav.keysSettings,
             onSelect: () => openKeysView('settings')
+          },
+          {
+            active: activeView === 'keys' && keysView === 'sudo',
+            icon: KeyRound,
+            id: 'kview:sudo',
+            label: t.sudoSettings.title,
+            onSelect: () => openKeysView('sudo')
           }
         ],
         icon: KeyRound,
@@ -320,7 +328,10 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)" data-settings-surface="">
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden bg-(--ui-chat-surface-background)"
+      data-settings-surface=""
+    >
       <OverlaySplitLayout>
         <OverlayNav embedded footer={navFooter} groups={navGroups} />
 
@@ -355,7 +366,11 @@ export function SettingsView({ onClose, onConfigSaved, onMainModelChanged }: Set
               view={providerView}
             />
           ) : activeView === 'keys' ? (
-            <KeysSettings view={keysView} />
+            keysView === 'sudo' ? (
+              <SudoSettings />
+            ) : (
+              <KeysSettings view={keysView} />
+            )
           ) : activeView === 'notifications' ? (
             <NotificationsSettings />
           ) : activeView === 'billing' ? (

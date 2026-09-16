@@ -882,6 +882,54 @@ export function saveMemoryProviderConfig(provider: string, values: Record<string
   })
 }
 
+export interface SudoSettingsStatus {
+  owner: { host: string; home: string }
+  password_set: boolean
+  file: string
+  files: Record<string, string>
+  file_availability: string
+  availability: Record<string, string>
+}
+
+export function getSudoSettings(profile?: null | string): Promise<SudoSettingsStatus> {
+  return window.hermesDesktop.api({ ...profileScoped(profile), path: '/api/settings/sudo' })
+}
+
+export function saveSudoPassword(password: string | null, profile?: null | string): Promise<SudoSettingsStatus> {
+  return window.hermesDesktop.api({
+    ...profileScoped(profile),
+    path: '/api/settings/sudo/password',
+    method: password === null ? 'DELETE' : 'PUT',
+    ...(password === null ? {} : { body: { password } })
+  })
+}
+
+export function saveSudoFiles(
+  file: string,
+  files: Record<string, string>,
+  profile?: null | string
+): Promise<SudoSettingsStatus> {
+  return window.hermesDesktop.api({
+    ...profileScoped(profile),
+    path: '/api/settings/sudo/files',
+    method: 'PUT',
+    body: { file, files }
+  })
+}
+
+export function writeSudoHostPassword(
+  host: string,
+  password: string,
+  profile?: null | string
+): Promise<SudoSettingsStatus> {
+  return window.hermesDesktop.api({
+    ...profileScoped(profile),
+    path: '/api/settings/sudo/file-password',
+    method: 'PUT',
+    body: { host, password, overwrite: true }
+  })
+}
+
 export function getEnvVars(): Promise<Record<string, EnvVarInfo>> {
   return window.hermesDesktop.api<Record<string, EnvVarInfo>>({
     ...profileScoped(),
