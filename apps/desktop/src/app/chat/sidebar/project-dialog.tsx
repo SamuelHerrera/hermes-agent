@@ -130,7 +130,7 @@ export function ProjectDialog() {
         onInteractOutside={event => event.preventDefault()}
       >
         <div className="grid min-w-0 grid-cols-1 gap-4 min-[800px]:has-[[data-project-recents]]:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
-          <div className="grid min-w-0 grid-cols-1 content-start gap-3">
+          <div className="flex min-w-0 flex-col gap-3">
             <DialogHeader className="pr-5">
               <DialogTitle>{title}</DialogTitle>
               {mode === 'create' && <DialogDescription>{p.createDesc}</DialogDescription>}
@@ -213,26 +213,25 @@ export function ProjectDialog() {
                 {p.addFolder}
               </Button>
             )}
+            {mode !== 'add-folder' && (
+              <DialogFooter className="mt-auto">
+                <Button disabled={submitting} onClick={() => onOpenChange(false)} type="button" variant="ghost">
+                  {t.common.cancel}
+                </Button>
+                <Button
+                  disabled={submitting || !name.trim() || (mode === 'create' && folders.length === 0)}
+                  onClick={() => void submit()}
+                  type="button"
+                >
+                  {mode === 'rename' ? t.common.save : p.create}
+                </Button>
+              </DialogFooter>
+            )}
           </div>
           {mode === 'create' && open && (
             <RecentProjects disabled={submitting} onBusyChange={setSubmitting} onOpen={closeProjectDialog} />
           )}
         </div>
-
-        {mode !== 'add-folder' && (
-          <DialogFooter>
-            <Button disabled={submitting} onClick={() => onOpenChange(false)} type="button" variant="ghost">
-              {t.common.cancel}
-            </Button>
-            <Button
-              disabled={submitting || !name.trim() || (mode === 'create' && folders.length === 0)}
-              onClick={() => void submit()}
-              type="button"
-            >
-              {mode === 'rename' ? t.common.save : p.create}
-            </Button>
-          </DialogFooter>
-        )}
       </DialogContent>
     </Dialog>
   )

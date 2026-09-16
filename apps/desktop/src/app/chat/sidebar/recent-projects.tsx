@@ -118,7 +118,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
   return (
     <section
       aria-label={p.recentTitle}
-      className="min-w-0 border-t border-(--stroke-nous) pt-3 min-[800px]:order-first min-[800px]:border-r min-[800px]:border-t-0 min-[800px]:pr-4 min-[800px]:pt-0"
+      className="flex min-w-0 flex-col border-t border-(--stroke-nous) pt-3 min-[800px]:order-first min-[800px]:border-r min-[800px]:border-t-0 min-[800px]:pr-4 min-[800px]:pt-0"
       data-project-recents
     >
       <h3 className="text-[0.75rem] font-medium text-(--ui-text-secondary)">{p.recentTitle}</h3>
@@ -126,7 +126,7 @@ function RecentProjectList({ disabled, onOpen, onBusyChange }: RecentProjectsPro
       {failed ? (
         <p className="mt-2 text-[0.75rem] text-(--ui-text-tertiary)">{p.recentFailed}</p>
       ) : (
-        <ul className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto">
+        <ul className="mt-2 flex max-h-48 flex-col gap-1 overflow-y-auto min-[800px]:max-h-none min-[800px]:min-h-48 min-[800px]:flex-[1_1_0px]">
           {visibleProjects.map(project => (
             <li
               className="flex min-w-0 items-center gap-1 rounded-md hover:bg-(--ui-control-hover-background)"

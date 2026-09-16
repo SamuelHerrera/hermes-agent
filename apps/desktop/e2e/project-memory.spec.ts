@@ -51,6 +51,47 @@ interface Project {
   folders: { path: string }[]
 }
 
+test('recent projects scroll to the bottom alongside the create actions', async ({}, testInfo) => {
+  const fixture = await setupMockBackend()
+  try {
+    await waitForAppReady(fixture)
+    for (let index = 0; index < 10; index++) {
+      const folder = path.join(fixture.sandbox.root, `workspace-${index}`)
+      fs.mkdirSync(folder)
+      const { project } = await rpc<{ project: Project }>(fixture.page, 'projects.create', {
+        name: `Workspace ${index}`,
+        folders: [folder]
+      })
+      await rpc(fixture.page, 'projects.delete', { id: project.id })
+    }
+    await fixture.page.reload()
+    await waitForAppReady(fixture)
+    await selectCreateAction(fixture.page, 'New project')
+    const form = fixture.page.getByRole('dialog')
+    const list = form.getByRole('region', { name: 'Recently opened' }).getByRole('list')
+    await expect(list.getByRole('listitem')).toHaveCount(10)
+    const actions = form.locator('[data-slot="dialog-footer"]')
+    await expect
+      .poll(async () => {
+        const left = (await list.boundingBox())!
+        const right = (await actions.boundingBox())!
+        return left.x + left.width < right.x && Math.abs(left.y + left.height - right.y - right.height) < 2
+      })
+      .toBe(true)
+    expect(await list.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+    await list.evaluate(el => {
+      el.scrollTop = el.scrollHeight
+    })
+    await expect(list.getByRole('listitem').last()).toBeInViewport()
+    await expect(form.getByRole('button', { name: 'Cancel', exact: true })).toBeInViewport()
+    await fixture.page.screenshot({ path: testInfo.outputPath('recent-projects-full-height.png') })
+    await form.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(form).toHaveCount(0)
+  } finally {
+    await fixture.cleanup()
+  }
+})
+
 test('project removal remembers settings across clients and the simplified create form restores them', async ({}, testInfo) => {
   const fixture = await setupMockBackend()
   try {
@@ -106,6 +147,10 @@ test('project removal remembers settings across clients and the simplified creat
         const historyTitle = (await recents.getByRole('heading').boundingBox())!
         expect(title.x).toBeGreaterThan(historyTitle.x + historyTitle.width)
         expect(Math.abs(title.y - historyTitle.y)).toBeLessThan(8)
+        const list = (await recents.getByRole('list').boundingBox())!
+        const actions = (await form.locator('[data-slot="dialog-footer"]').boundingBox())!
+        expect(actions.x).toBeGreaterThan(list.x + list.width)
+        expect(Math.abs(list.y + list.height - actions.y - actions.height)).toBeLessThan(2)
       }
       await expect(
         recents.getByText('Remove entries from this list without losing project settings.', { exact: true })
