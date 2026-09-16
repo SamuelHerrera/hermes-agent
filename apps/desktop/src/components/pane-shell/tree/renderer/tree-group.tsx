@@ -44,8 +44,8 @@ import { $workspaceEmptyPlaceholder } from '@/store/session'
 import { $layoutEditMode } from '../../edit-mode'
 import { useWindowControlsOverlap } from '../../geometry'
 import { hiddenPaneProps, PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
+import { PaneDesktopMenu } from '../desktop-menu'
 import type { DropPosition, GroupNode } from '../model'
-import { SCROLL_WINDOW_WORKSPACE_IDS } from '../scroll-windows/store'
 import {
   $dropHint,
   $hiddenTreePanes,
@@ -62,7 +62,7 @@ import {
   isCollapsePane,
   isMainStripPane,
   isSessionStripPane,
-  moveTreePanesToTabbedScreen,
+
   reloadTreePane,
   restoreTreePane,
   SESSION_TILE_DRAG,
@@ -118,22 +118,7 @@ function ZoneMenu({
           label: t.zones.reload,
           onSelect: () => reloadTreePane(targetId)
         })}
-        <kit.Sub>
-          <kit.SubTrigger>
-            <Codicon name="window" size="0.875rem" />
-            <span>{t.zones.moveToScreen}</span>
-          </kit.SubTrigger>
-          <kit.SubContent>
-            {SCROLL_WINDOW_WORKSPACE_IDS.map(id =>
-              renderActionItem(kit, {
-                disabled: targetId === undefined,
-                key: id,
-                label: t.zones.screenNumber(id),
-                onSelect: () => moveTreePanesToTabbedScreen([targetId], id, targetId)
-              })
-            )}
-          </kit.SubContent>
-        </kit.Sub>
+        <PaneDesktopMenu kit={kit} paneId={targetId} />
         <kit.Separator />
         {paneTabCloseItems(kit, {
           counts: treeTabCloseTargets(targetId),

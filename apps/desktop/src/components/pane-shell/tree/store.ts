@@ -51,7 +51,7 @@ import {
   saveTabbedScreen,
   tabbedScreenOwner
 } from './screens'
-import { $layoutSurfaceMode, requestScrollWindowIntoView, SCROLL_WINDOW_WORKSPACE_IDS } from './scroll-windows/store'
+import { $layoutSurfaceMode, $scrollWindowWorkspaces, requestScrollWindowIntoView, SCROLL_WINDOW_WORKSPACE_IDS } from './scroll-windows/store'
 
 // v2: v1 trees were saved against placeholder panes with index-order zone
 // assignment (chat could land in a corner cell). Retire them wholesale.
@@ -198,6 +198,7 @@ export function moveTreePanesToTabbedScreen(
 
   const baseTargetTree =
     targetScreenId === activeScreenId && liveTree ? liveTree : (trees[targetScreenId] ?? emptyTabbedScreen(defaultTree ?? sourceTree, targetScreenId))
+
   const targetAfter = insertPaneBlock(ensureTabbedScreenContent(baseTargetTree), paneIds, activeId)
   const nextTrees = { ...trees, [sourceScreenId]: sourceAfter, [targetScreenId]: targetAfter }
 
@@ -744,10 +745,24 @@ export function closeFocusedToolTab(): boolean {
 
 /** Closeable siblings of `paneId` within its group, split by position — powers
  *  the tab menu's Close-others / Close-to-the-right verbs (and their enablement). */
-function closeableTreeSiblings(paneId: string): { others: string[]; right: string[] } {
+function tabMenuPanes(paneId: string): string[] {
+  if ($layoutSurfaceMode.get() === 'scroll-windows') {
+    const workspace = $scrollWindowWorkspaces.get().find(item => item.windowIds.includes(paneId))
+    const hidden = $hiddenTreePanes.get()
+
+    return (workspace?.windowIds ?? []).filter(id =>
+      !hidden.has(id) && !(id === 'workspace' && $workspaceEmptyPlaceholder.get())
+    )
+  }
+
   const tree = $layoutTree.get()
   const group = tree ? findGroupOfPane(tree, paneId) : null
-  const panes = group ? shownPanesInGroup(group) : []
+
+  return group ? shownPanesInGroup(group) : []
+}
+
+function closeableTreeSiblings(paneId: string): { others: string[]; right: string[] } {
+  const panes = tabMenuPanes(paneId)
   const idx = panes.indexOf(paneId)
 
   return {
@@ -817,9 +832,7 @@ export function isClosingAllTreeTabs(): boolean {
 }
 
 export function closeAllTreeTabs(paneId: string): void {
-  const tree = $layoutTree.get()
-  const group = tree ? findGroupOfPane(tree, paneId) : null
-  const panes = group ? shownPanesInGroup(group) : []
+  const panes = tabMenuPanes(paneId)
 
   closeAllTreeTabsDepth += 1
 
@@ -1675,6 +1688,7 @@ function commit(next: LayoutNode | null, reason = 'unspecified') {
 
   const previous = $layoutTree.get()
   const fixed = enforceFixedLeftPanel(next)
+
   const normalized = !isSecondaryWindow() && $layoutSurfaceMode.get() === 'tabbed'
     ? ensureTabbedScreenContent(fixed)
     : fixed

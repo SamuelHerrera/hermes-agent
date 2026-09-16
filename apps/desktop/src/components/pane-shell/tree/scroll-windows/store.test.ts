@@ -7,6 +7,32 @@ beforeEach(() => {
 })
 
 describe('scroll workspace persistence', () => {
+  it('moves from the actual owning desktop, preserves stacks, and restores ownership after reload', async () => {
+    const store = await import('./store')
+    store.setLayoutSurfaceMode('scroll-windows')
+    store.syncScrollWindowWindows(['a', 'b', 'c'])
+    store.reorderScrollWindowWindow('b', 'a', 'bottom')
+    store.setScrollWorkspaceScroll('1', 40, 0)
+    store.setActiveScrollWorkspace('2')
+    store.syncScrollWindowWindows(['a', 'b', 'c', 'd'])
+    store.moveScrollWindowToWorkspace('b', '2')
+    expect(store.$scrollWindowWorkspaces.get()[0]).toMatchObject({ columns: [['a'], ['c']], scrollLeft: 40, focusedWindowId: 'a' })
+    expect(store.$scrollWindowWorkspaces.get()[1]).toMatchObject({ columns: [['d'], ['b']], focusedWindowId: 'b' })
+    const snapshot = store.$scrollWindowWorkspaces.get()
+    store.moveScrollWindowToWorkspace('b', '2')
+    store.moveScrollWindowToWorkspace('missing', '1')
+    store.moveScrollWindowToWorkspace('b', '99')
+    expect(store.$scrollWindowWorkspaces.get()).toBe(snapshot)
+    store.moveScrollWindowToWorkspace('b', '1')
+    expect(store.$activeScrollWorkspaceId.get()).toBe('1')
+    store.syncScrollWindowWindows(['a', 'b', 'c', 'd'])
+    const expected = store.$scrollWindowWorkspaces.get().map(workspace => workspace.columns)
+    vi.resetModules()
+    const restored = await import('./store')
+    expect(restored.$scrollWindowWorkspaces.get().map(workspace => workspace.columns)).toEqual(expected)
+    expect(restored.$activeScrollWorkspaceId.get()).toBe('1')
+  })
+
   it('retains a reveal requested before a terminal card mounts, only in scroll mode', async () => {
     const store = await import('./store')
     store.requestScrollWindowIntoView('terminal-instance:one')

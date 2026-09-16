@@ -31,12 +31,14 @@ import { setPaneWidthOverride } from '@/store/panes'
 import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { PaneGroupContext, PaneVisibleContext } from '../../pane-visibility'
+import { PaneDesktopMenu } from '../desktop-menu'
 import { allPaneIds, type LayoutNode } from '../model'
 import { paneChrome } from '../renderer/track-model'
 import {
   $hiddenTreePanes,
   $layoutTree,
   $panesWithCloser,
+  $treePaneEpochs,
   closeAllTreeTabs,
   closeOtherTreeTabs,
   closeTabPane,
@@ -93,6 +95,7 @@ export function ScrollWindowWorkspace() {
   const workspaces = useStore($scrollWindowWorkspaces)
   const revealWindowId = useStore($scrollWindowRevealRequest)
   const panesWithCloser = useStore($panesWithCloser)
+  const paneEpochs = useStore($treePaneEpochs)
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
@@ -391,6 +394,47 @@ export function ScrollWindowWorkspace() {
               const focused = workspace.focusedWindowId === windowId || (!workspace.focusedWindowId && index === 0)
               const closeable = !chrome.uncloseable || panesWithCloser.has(windowId)
 
+              const header = (
+                <ScrollWindowHeader
+                  className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
+                  data-scroll-window-header=""
+                  draggable
+                  onDragEnd={() => {
+                    setDraggingWindowId(null)
+                    setScrollDropTarget(null)
+                  }}
+                  onDragStart={event => {
+                    event.dataTransfer.setData(SCROLL_WINDOW_DRAG_TYPE, windowId)
+                    event.dataTransfer.setData('text/plain', windowId)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setDragImage(event.currentTarget, event.nativeEvent.offsetX, event.nativeEvent.offsetY)
+                    setDraggingWindowId(windowId)
+                  }}
+                  windowId={windowId}
+                >
+                  <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-(--ui-text-secondary)">
+                    {tabLead ?? <Codicon name={iconName} size="0.75rem" />}
+                  </span>
+                  <span
+                    className="min-w-0 flex-1 truncate text-[0.72rem] font-medium text-(--ui-text-primary)"
+                    data-scroll-window-title=""
+                  >
+                    {title}
+                  </span>
+                  <button
+                    aria-label="Close window"
+                    className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
+                    onClick={event => {
+                      event.stopPropagation()
+                      closeTabPane(windowId)
+                    }}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </ScrollWindowHeader>
+              )
+
               const menuItems = (kit: MenuKit) => (
                 <>
                   {renderActionItem(kit, {
@@ -398,6 +442,7 @@ export function ScrollWindowWorkspace() {
                     label: 'Reload',
                     onSelect: () => reloadTreePane(windowId)
                   })}
+                  <PaneDesktopMenu kit={kit} paneId={windowId} />
                   <kit.Separator />
                   {paneTabCloseItems(kit, {
                     counts: treeTabCloseTargets(windowId),
@@ -465,53 +510,12 @@ export function ScrollWindowWorkspace() {
                     onPointerDown={() => focusScrollWindowWindow(windowId)}
                     style={style}
                   >
-                    <ScrollWindowHeader
-                      className="flex h-[30px] shrink-0 cursor-grab select-none items-center gap-2 border-b border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)/95 px-2 text-xs active:cursor-grabbing"
-                      data-scroll-window-header=""
-                      draggable
-                      onDragEnd={() => {
-                        setDraggingWindowId(null)
-                        setScrollDropTarget(null)
-                      }}
-                      onDragStart={event => {
-                        event.dataTransfer.setData(SCROLL_WINDOW_DRAG_TYPE, windowId)
-                        event.dataTransfer.setData('text/plain', windowId)
-                        event.dataTransfer.effectAllowed = 'move'
-                        event.dataTransfer.setDragImage(
-                          event.currentTarget,
-                          event.nativeEvent.offsetX,
-                          event.nativeEvent.offsetY
-                        )
-                        setDraggingWindowId(windowId)
-                      }}
-                      windowId={windowId}
-                    >
-                      <span className="grid size-5 shrink-0 place-items-center rounded-md bg-(--ui-control-active-background) text-(--ui-text-secondary)">
-                        {tabLead ?? <Codicon name={iconName} size="0.75rem" />}
-                      </span>
-                      <span
-                        className="min-w-0 flex-1 truncate text-[0.72rem] font-medium text-(--ui-text-primary)"
-                        data-scroll-window-title=""
-                      >
-                        {title}
-                      </span>
-                      <button
-                        aria-label="Close window"
-                        className="grid size-5 shrink-0 place-items-center rounded text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary)"
-                        onClick={event => {
-                          event.stopPropagation()
-                          closeTabPane(windowId)
-                        }}
-                        type="button"
-                      >
-                        ×
-                      </button>
-                    </ScrollWindowHeader>
+                    {chrome.tabWrap ? chrome.tabWrap(header) : header}
                     <div className="relative min-h-0 flex-1 overflow-hidden" data-scroll-window-pane="">
                       {pane?.render ? (
                         <PaneGroupContext.Provider value={`scroll-${workspace.id}-${windowId}`}>
                           <PaneVisibleContext.Provider value>
-                            <ContribBoundary id={pane.id}>
+                            <ContribBoundary id={pane.id} key={paneEpochs[pane.id] ?? 0}>
                               <ContribRender render={pane.render} />
                             </ContribBoundary>
                           </PaneVisibleContext.Provider>

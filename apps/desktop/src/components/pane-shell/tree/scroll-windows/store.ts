@@ -218,6 +218,45 @@ export function focusScrollWindowWindow(windowId: string): void {
   )
 }
 
+/** Transfer ownership atomically; retain both desktops' stacks and scroll offsets. */
+export function moveScrollWindowToWorkspace(windowId: string, targetId: string): void {
+  const workspaces = $scrollWindowWorkspaces.get()
+  const source = workspaces.find(workspace => workspace.windowIds.includes(windowId))
+  const target = workspaces.find(workspace => workspace.id === targetId)
+
+  if ($layoutSurfaceMode.get() !== 'scroll-windows' || !source || !target || source === target) {
+    return
+  }
+
+  $scrollWindowWorkspaces.set(workspaces.map(workspace => {
+    if (workspace === source) {
+      const windowIds = workspace.windowIds.filter(id => id !== windowId)
+
+      return {
+        ...workspace,
+        windowIds,
+        columns: reconcileColumns(workspace.columns, windowIds),
+        focusedWindowId: workspace.focusedWindowId === windowId ? windowIds[0] ?? null : workspace.focusedWindowId,
+        grid: null
+      }
+    }
+
+    if (workspace === target) {
+      return {
+        ...workspace,
+        windowIds: [...workspace.windowIds, windowId],
+        columns: [...workspace.columns, [windowId]],
+        focusedWindowId: windowId,
+        grid: null
+      }
+    }
+
+    return workspace
+  }))
+  setActiveScrollWorkspace(targetId)
+  requestScrollWindowIntoView(windowId)
+}
+
 export function reorderScrollWindowWindow(
   sourceWindowId: string,
   targetWindowId: string,

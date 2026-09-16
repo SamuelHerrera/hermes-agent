@@ -3,6 +3,7 @@ import type * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
 
 import { openSession } from '@/app/open-session'
+import { PaneDesktopMenu } from '@/components/pane-shell/tree/desktop-menu'
 import {
   closeAllTreeTabs,
   closeOtherTreeTabs,
@@ -444,6 +445,7 @@ function useSessionActions({
         <>
           <kit.Separator />
           {tabItems.map(item => renderActionItem(kit, item))}
+          {tabPaneId && <PaneDesktopMenu kit={kit} paneId={tabPaneId} />}
         </>
       )}
       <kit.Separator />

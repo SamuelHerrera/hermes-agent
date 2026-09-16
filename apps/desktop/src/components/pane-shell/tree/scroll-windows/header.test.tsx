@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { watchRouteTiles } from '@/app/chat/route-tile'
+import { SessionTabMenu, WorkspaceTabMenu } from '@/app/chat/session-tile'
 import type { SidebarProjectTree } from '@/app/chat/sidebar/projects/workspace-groups'
 import { $terminals } from '@/app/right-sidebar/terminal/terminals'
 import { CRON_ROUTE, SKILLS_ROUTE, WEBHOOKS_ROUTE } from '@/app/routes'
@@ -45,6 +46,7 @@ const project = (id: string, path: string, color: string): SidebarProjectTree =>
 const disposers: (() => void)[] = []
 
 beforeAll(() => {
+  HTMLElement.prototype.scrollTo ??= () => undefined
   globalThis.ResizeObserver ??= TestResizeObserver as unknown as typeof ResizeObserver
   globalThis.CSS ??= {} as never
   globalThis.CSS.escape ??= (value: string) => value
@@ -81,6 +83,9 @@ beforeEach(() => {
         minWindowHeight: 280,
         gap: 12
       })
+    },
+    {
+      id: '2', focusedWindowId: null, windowIds: [], columns: [], scrollLeft: 0, scrollTop: 0, grid: null
     }
   ])
 })
@@ -96,6 +101,58 @@ function openContextMenu(target: HTMLElement) {
 }
 
 describe('scroll card project headers', () => {
+  it('reloads only the chosen scroll pane', async () => {
+    for (const id of ['workspace', 'terminal-instance:one']) {
+      disposers.push(registry.register({
+        area: 'panes', id, title: id, data: { placement: 'main' },
+        render: () => <input aria-label={id} defaultValue="initial" />
+      }))
+    }
+
+    declareDefaultTree(group(['workspace', 'terminal-instance:one']))
+    const { container } = render(<ScrollWindowWorkspace />)
+    fireEvent.change(screen.getByRole('textbox', { name: 'workspace' }), { target: { value: 'keep' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'terminal-instance:one' }), { target: { value: 'changed' } })
+    openContextMenu(container.querySelector<HTMLElement>('[data-scroll-window="terminal-instance:one"] [data-scroll-window-header]')!)
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reload' }))
+    expect((screen.getByRole('textbox', { name: 'terminal-instance:one' }) as HTMLInputElement).value).toBe('initial')
+    expect((screen.getByRole('textbox', { name: 'workspace' }) as HTMLInputElement).value).toBe('keep')
+  })
+
+  it.each(['workspace', 'session-tile:saved'])('uses the full session menu on the %s header', async paneId => {
+    $selectedStoredSessionId.set('saved')
+    $sessions.set([{
+      id: 'saved', title: 'Saved chat', source: 'desktop', started_at: 1, ended_at: null,
+      last_active: 1, input_tokens: 0, output_tokens: 0, message_count: 2, tool_call_count: 0,
+      is_active: false, model: null, preview: null
+    }])
+    disposers.push(registry.register({
+      area: 'panes',
+      id: paneId,
+      title: 'Saved chat',
+      data: {
+        placement: 'main',
+        tabWrap: (tab: React.ReactElement) => paneId === 'workspace'
+          ? <WorkspaceTabMenu>{tab}</WorkspaceTabMenu>
+          : <SessionTabMenu storedSessionId="saved" tabPaneId={paneId}>{tab}</SessionTabMenu>
+      },
+      render: () => <div>Chat body</div>
+    }))
+    declareDefaultTree(group([paneId]))
+    const { container } = render(<ScrollWindowWorkspace />)
+    openContextMenu(container.querySelector<HTMLElement>('[data-scroll-window-header]')!)
+    expect(await screen.findByRole('menuitem', { name: /rename/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /move to project/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Move to desktop' })).toBeTruthy()
+    expect(screen.getAllByRole('menu')).toHaveLength(1)
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Move to desktop' }), { key: 'ArrowRight' })
+    expect((await screen.findByRole('menuitem', { name: 'Desktop 1' })).getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Desktop 2' }))
+    expect($activeScrollWorkspaceId.get()).toBe('2')
+    expect($scrollWindowWorkspaces.get()[0].windowIds).not.toContain(paneId)
+    expect($scrollWindowWorkspaces.get()[1].windowIds).toEqual([paneId])
+  })
+
   it('matches minimap colors to each card, distinguishes pane types, and preserves navigation', () => {
     $terminals.set([{ id: 'one', title: 'Shell', auto: true, kind: 'user', cwd: '/b', projectId: 'b' }])
     disposers.push(
@@ -229,6 +286,12 @@ describe('scroll card project headers', () => {
 
     expect(await screen.findByRole('menuitem', { name: /^close$/i })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /close others/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Move to desktop' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Move to desktop' }), { key: 'ArrowRight' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Desktop 2' }))
+    expect($activeScrollWorkspaceId.get()).toBe('2')
+    expect($scrollWindowWorkspaces.get()[0].windowIds).toEqual(['workspace'])
+    expect($scrollWindowWorkspaces.get()[1].windowIds).toEqual(['terminal-instance:one'])
   })
 
   it('keeps the global files rail visible in scroll-window mode', () => {
