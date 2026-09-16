@@ -424,9 +424,11 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
           if (userText.includes('E2E_SUDO_REOPEN')) {
             const calls = messages.flatMap(message => message.tool_calls ?? [])
               .filter(call => call.function?.name === 'e2e_sudo_prompt')
-            const completed = messages.some(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
-            const turn: ScriptedTurn = completed
-              ? { text: 'Sudo reopen fixture finished.' }
+            const result = messages.find(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
+            let accepted = false
+            try { accepted = JSON.parse(String(result?.content)).accepted === true } catch { /* error is not success */ }
+            const turn: ScriptedTurn = result
+              ? { text: accepted ? 'Sudo reopen fixture finished.' : 'Sudo reopen fixture failed: password was not accepted.' }
               : { text: 'Waiting for the test password.', toolCalls: [{ name: 'e2e_sudo_prompt', args: {} }] }
             if (stream) streamScriptedTurn(res, model, turn)
             else nonStreamingScriptedTurn(res, model, turn)
