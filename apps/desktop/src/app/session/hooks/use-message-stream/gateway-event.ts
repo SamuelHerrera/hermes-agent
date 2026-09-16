@@ -82,6 +82,7 @@ import type { RpcEvent } from '@/types/hermes'
 
 import type { ClientSessionState } from '../../../types'
 import { finalizeInterruptedMessages } from '../use-prompt-actions/rewind'
+import { hasPendingPrompt, retirePendingPrompt } from '../use-session-actions/pending-prompts'
 
 import { hasSessionInfoStatePatch, sessionInfoStatePatch, SUBAGENT_EVENT_TYPES, toTodoPayload } from './utils'
 
@@ -1070,6 +1071,17 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           sessionId,
           title: translateNow('notifications.native.approvalTitle')
         })
+      } else if (event.type === 'prompt.resolved' || ['sudo.expire', 'secret.expire', 'clarify.expire', 'mcp.setup.expire'].includes(event.type)) {
+        const requestId = typeof payload?.request_id === 'string' ? payload.request_id : ''
+
+        const requestEvent = event.type === 'prompt.resolved'
+          ? (typeof payload?.event === 'string' ? payload.event : '')
+          : event.type.replace(/\.expire$/, '.request')
+
+        if (sessionId && requestId) {
+          retirePendingPrompt(requestEvent, requestId, sessionId)
+          updateSessionState(sessionId, state => ({ ...state, needsInput: hasPendingPrompt(sessionId) }))
+        }
       } else if (event.type === 'sudo.request') {
         // Sudo password capture (tools/terminal_tool.py). Blocked on
         // sudo.respond {request_id, password}.

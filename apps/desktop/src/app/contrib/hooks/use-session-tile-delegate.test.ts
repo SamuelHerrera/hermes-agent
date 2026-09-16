@@ -5,10 +5,13 @@ import type { ClientSessionState } from '@/app/types'
 import type * as HermesModule from '@/hermes'
 import type { ChatMessage } from '@/lib/chat-messages'
 import { createClientSessionState } from '@/lib/chat-runtime'
+import { clearAllPrompts, sessionApprovalRequest, sessionSecretRequest, sessionSudoRequest } from '@/store/prompts'
 import { setSessions } from '@/store/session'
 import { sessionTileDelegate } from '@/store/session-states'
 import { $todosBySession, clearSessionTodos } from '@/store/todos'
 import type { SessionInfo } from '@/types/hermes'
+
+import { retirePendingPrompt } from '../../session/hooks/use-session-actions/pending-prompts'
 
 import { useSessionTileDelegate } from './use-session-tile-delegate'
 
@@ -80,6 +83,7 @@ function renderTile(
 
 describe('useSessionTileDelegate resumeTile', () => {
   beforeEach(() => {
+    clearAllPrompts()
     setSessions([])
     clearSessionTodos('runtime-1')
     clearSessionTodos('runtime-2')
@@ -91,6 +95,53 @@ describe('useSessionTileDelegate resumeTile', () => {
     clearSessionTodos('runtime-1')
     clearSessionTodos('runtime-2')
     window.localStorage.clear()
+  })
+
+  it.each([
+    [false, 'sudo.request'], [true, 'sudo.request'],
+    [false, 'secret.request'], [true, 'secret.request'],
+    [false, 'approval.request'], [true, 'approval.request']
+  ] as const)('restores a reachable prompt on tile reopen (cached=%s, event=%s)', async (cached, event) => {
+    setSessions([row({ id: 'stored-live', profile: 'default' })])
+    const state = createClientSessionState('stored-live')
+    const restored: ClientSessionState[] = []
+
+    const requestGateway = vi.fn(async () => ({
+      session_id: 'runtime-live', session_key: 'stored-live', running: true,
+      pending_prompt: { event, payload: { request_id: 'sudo-live' } }
+    }))
+
+    renderTile(requestGateway, (_id, updater) => { restored.push(updater(state)) }, cached ? {
+      runtimeIdByStoredSessionId: new Map([['stored-live', 'runtime-live']]),
+      sessionStateByRuntimeId: new Map([['runtime-live', state]])
+    } : {})
+    await sessionTileDelegate()!.resumeTile('stored-live')
+    const request = event === 'sudo.request' ? sessionSudoRequest : event === 'secret.request' ? sessionSecretRequest : sessionApprovalRequest
+    expect(request('runtime-live').get()).toMatchObject({ requestId: 'sudo-live', sessionId: 'runtime-live' })
+    expect(restored[0].needsInput).toBe(true)
+  })
+
+  it('does not project an approval resolved while the tile resume was in flight', async () => {
+    setSessions([row({ id: 'stored-live', profile: 'default' })])
+    const restored: ClientSessionState[] = []
+
+    const requestGateway = vi.fn(async () => {
+      retirePendingPrompt('approval.request', 'resolved', 'runtime-live')
+
+      return {
+        session_id: 'runtime-live', session_key: 'stored-live', running: true,
+        inflight: { assistant: '', streaming: true, user: 'run test command', events: [
+          { type: 'tool.start', payload: { name: 'terminal', tool_id: 'call-1', args: { command: 'test command' } } }
+        ] },
+        pending_prompt: { event: 'approval.request', payload: { request_id: 'resolved', command: 'test command' } }
+      }
+    })
+
+    renderTile(requestGateway, (_id, updater) => { restored.push(updater(createClientSessionState('stored-live'))) })
+    await sessionTileDelegate()!.resumeTile('stored-live')
+    expect(sessionApprovalRequest('runtime-live').get()).toBeNull()
+    expect(restored[0].needsInput).toBe(false)
+    expect(JSON.stringify(restored[0].messages)).not.toContain('__hermes_pending_approval')
   })
 
   it('carries the owning profile into a cold tile resume so it cannot fork profiles', async () => {

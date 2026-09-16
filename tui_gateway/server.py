@@ -3531,6 +3531,9 @@ def _block(event: str, sid: str, payload: dict, timeout: float | None = 300) -> 
             _pending_prompt_payloads.pop(rid, None)
             answer_present = rid in _answers
             answer = _answers.pop(rid, "")
+        # Retire the request on every viewer, including cancellation/timeout.
+        # Only metadata crosses the transport; never publish the answer.
+        _emit("prompt.resolved", sid, {"event": event, "request_id": rid})
 
     # Emit an `.expire` notification on timeout for every blocking request type
     # whose `*.respond` handler tolerates a late reply (allow_expired=True).
@@ -8559,11 +8562,12 @@ def _session_pending_approval(session: dict) -> dict | None:
 
 
 def _session_pending_kind(sid: str) -> str:
-    for rid, (owner_sid, _ev) in list(_pending.items()):
-        if owner_sid != sid:
-            continue
-        event, _payload = _pending_prompt_payloads.get(rid, ("input.request", {}))
-        return str(event).removesuffix(".request")
+    with _prompt_lock:
+        for rid, (owner_sid, ev) in list(_pending.items()):
+            if owner_sid != sid or ev.is_set() or rid in _answers:
+                continue
+            event, _payload = _pending_prompt_payloads.get(rid, ("input.request", {}))
+            return str(event).removesuffix(".request")
     return ""
 
 
@@ -8578,8 +8582,8 @@ def _session_pending_prompt_snapshot(sid: str, session: dict | None = None) -> d
     timeout or interrupting the turn.
     """
     with _prompt_lock:
-        for rid, (owner_sid, _ev) in list(_pending.items()):
-            if owner_sid != sid:
+        for rid, (owner_sid, ev) in list(_pending.items()):
+            if owner_sid != sid or ev.is_set() or rid in _answers:
                 continue
             event, payload = _pending_prompt_payloads.get(rid, ("input.request", {}))
             return {"event": str(event), "payload": dict(payload)}

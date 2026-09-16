@@ -1360,17 +1360,22 @@ def _(rid, params: dict) -> dict:
         with _sessions_lock:
             if authority_error := _session_control_authority_error(rid, session):
                 return authority_error
-            return _ok(
-                rid,
-                {
-                    "resolved": resolve_gateway_approval(
-                        session["session_key"],
-                        params.get("choice", "deny"),
-                        resolve_all=params.get("all", False),
-                        request_id=params.get("request_id"),
-                    )
-                },
+            pending = _session_pending_approval(session)
+            resolved = resolve_gateway_approval(
+                session["session_key"],
+                params.get("choice", "deny"),
+                resolve_all=params.get("all", False),
+                request_id=params.get("request_id"),
             )
+            if resolved:
+                request_id = params.get("request_id") or (pending or {}).get("request_id")
+                _emit("prompt.resolved", params["session_id"], {
+                    "event": "approval.request", "request_id": request_id,
+                })
+                # Queued approvals remain actionable after the shown one retires.
+                if next_pending := _session_pending_approval(session):
+                    _emit("approval.request", params["session_id"], _approval_request_payload(next_pending))
+            return _ok(rid, {"resolved": resolved})
     except Exception as e:
         return _err(rid, 5004, str(e))
 
