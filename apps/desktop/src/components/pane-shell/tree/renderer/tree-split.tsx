@@ -137,7 +137,7 @@ export function TreeSplit({ node, root, rootRow }: { node: SplitNode; root?: boo
   // overlay owns the single live instance of the pane's content.
   // EMPTY zones only exist in editor-authored trees (normalize prunes them on
   // every structural op) — they take space in edit mode as drop targets.
-  const isEmptyZone = (child: LayoutNode) => child.type === 'group' && child.panes.length === 0
+  const isEmptyZone = (child: LayoutNode) => child.type === 'group' && child.panes.length === 0 && !child.emptyWorkspace
   const isCollapsed = (child: LayoutNode) => subtreeGone(child, trackCtx) || (isEmptyZone(child) && !editMode)
 
   // Min/max clamps come from a direct GROUP child's panes (the same clamps

@@ -31,6 +31,8 @@ export interface GroupNode {
   panes: string[]
   /** The visible pane. */
   active: string
+  /** Inert numbered-desktop center, not a tab or a primary chat host. */
+  emptyWorkspace?: boolean
   /** Collapsed to header strip (chevron restores). */
   minimized?: boolean
   /**
@@ -56,6 +58,7 @@ export const group = (panes: string[], options?: Partial<Omit<GroupNode, 'type' 
   id: options?.id ?? nodeId('g'),
   panes,
   active: options?.active ?? panes[0] ?? '',
+  emptyWorkspace: options?.emptyWorkspace,
   minimized: options?.minimized,
   headerHidden: options?.headerHidden
 })
@@ -534,7 +537,7 @@ export function setGroupHeaderHidden(root: LayoutNode, groupId: string, headerHi
   return mapGroups(root, g => (g.id === groupId ? { ...g, headerHidden } : g))
 }
 
-function replaceNode(node: LayoutNode, id: string, make: (g: GroupNode) => LayoutNode): LayoutNode {
+export function replaceNode(node: LayoutNode, id: string, make: (g: GroupNode) => LayoutNode): LayoutNode {
   if (node.type === 'group') {
     return node.id === id ? make(node) : node
   }

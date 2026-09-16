@@ -47,6 +47,7 @@ import {
   $activeTabbedScreen,
   $tabbedScreenTrees,
   emptyTabbedScreen,
+  ensureTabbedScreenContent,
   saveTabbedScreen,
   tabbedScreenOwner
 } from './screens'
@@ -111,7 +112,7 @@ export function setActiveTabbedScreen(id: string): void {
   }
 
   saveTabbedScreen(tree)
-  const next = $tabbedScreenTrees.get()[id] ?? emptyTabbedScreen(defaultTree ?? tree, id)
+  const next = ensureTabbedScreenContent($tabbedScreenTrees.get()[id] ?? emptyTabbedScreen(defaultTree ?? tree, id))
   $activeTabbedScreen.set(id)
   $activeTreeGroup.set(null)
   $hoveredTreeGroup.set(null)
@@ -193,10 +194,11 @@ export function moveTreePanesToTabbedScreen(
   }
 
   sourceAfter ??= emptyTabbedScreen(defaultTree ?? sourceTree, sourceScreenId)
+  sourceAfter = ensureTabbedScreenContent(sourceAfter)
 
   const baseTargetTree =
     targetScreenId === activeScreenId && liveTree ? liveTree : (trees[targetScreenId] ?? emptyTabbedScreen(defaultTree ?? sourceTree, targetScreenId))
-  const targetAfter = insertPaneBlock(baseTargetTree, paneIds, activeId)
+  const targetAfter = insertPaneBlock(ensureTabbedScreenContent(baseTargetTree), paneIds, activeId)
   const nextTrees = { ...trees, [sourceScreenId]: sourceAfter, [targetScreenId]: targetAfter }
 
   $tabbedScreenTrees.set(nextTrees)
@@ -1672,7 +1674,10 @@ function commit(next: LayoutNode | null, reason = 'unspecified') {
   }
 
   const previous = $layoutTree.get()
-  const normalized = enforceFixedLeftPanel(next)
+  const fixed = enforceFixedLeftPanel(next)
+  const normalized = !isSecondaryWindow() && $layoutSurfaceMode.get() === 'tabbed'
+    ? ensureTabbedScreenContent(fixed)
+    : fixed
 
   $layoutTree.set(normalized)
   persist(normalized)

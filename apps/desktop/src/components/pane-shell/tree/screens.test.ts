@@ -26,6 +26,63 @@ async function setup() {
   return { store, screens, model, registry, initial }
 }
 
+it('retains an empty center after closing the last secondary-screen tab', async () => {
+  const { store, model, registry } = await setup()
+  store.setActiveTabbedScreen('2')
+  const dispose = registry.register({
+    id: 'session-tile:last',
+    area: 'panes',
+    data: { placement: 'main' },
+    render: () => null
+  })
+  store.revealTreePane('session-tile:last')
+  store.removeTreePane('session-tile:last')
+  dispose()
+
+  const tree = store.$layoutTree.get()!
+  const emptyGroups = model
+    .groupLeafIds(tree)
+    .map(id => model.findGroup(tree, id)!)
+    .filter(g => g.panes.length === 0)
+  expect(emptyGroups).toHaveLength(1)
+  expect(model.allPaneIds(tree)).toEqual(['sessions', 'files'])
+})
+
+it('moves a tab back into the center of an emptied desktop, not its sidebar', async () => {
+  const { store, screens, model, registry } = await setup()
+  // Legacy/default topology after the main group has been normalized away.
+  screens.$tabbedScreenTrees.set({ ...screens.$tabbedScreenTrees.get(), '2': model.group(['sessions', 'files']) })
+  registry.register({ id: 'session-tile:roundtrip', area: 'panes', data: { placement: 'main' }, render: () => null })
+  store.revealTreePane('session-tile:roundtrip')
+  store.moveTreePanesToTabbedScreen(['session-tile:roundtrip'], '2')
+  store.moveTreePanesToTabbedScreen(['session-tile:roundtrip'], '3')
+  store.moveTreePanesToTabbedScreen(['session-tile:roundtrip'], '2')
+
+  const tree = store.$layoutTree.get()!
+  expect(model.findGroupOfPane(tree, 'session-tile:roundtrip')!.panes).toEqual(['session-tile:roundtrip'])
+  expect(model.findGroupOfPane(tree, 'sessions')!.id).not.toBe(
+    model.findGroupOfPane(tree, 'session-tile:roundtrip')!.id
+  )
+  const source = screens.$tabbedScreenTrees.get()['3']
+  expect(model.groupLeafIds(source).some(id => model.findGroup(source, id)!.panes.length === 0)).toBe(true)
+})
+
+it('repairs a persisted sidebar-only desktop on reload without adding a chat tab', async () => {
+  const { model } = await setup()
+  localStorage.setItem('hermes.desktop.tabbedScreens.active.v1', '3')
+  localStorage.setItem(
+    'hermes.desktop.tabbedScreens.trees.v1',
+    JSON.stringify({ '3': model.group(['sessions', 'files']) })
+  )
+  vi.resetModules()
+  const { $layoutTree } = await import('./store')
+  const tree = $layoutTree.get()!
+  expect(tree.type).toBe('split')
+  expect(model.allPaneIds(tree)).toEqual(['sessions', 'files'])
+  expect(model.groupLeafIds(tree).some(id => model.findGroup(tree, id)!.emptyWorkspace)).toBe(true)
+  expect(model.isLayoutNode(tree)).toBe(true)
+})
+
 it('switches independent tab/panel sets and restores their split geometry', async () => {
   const { store, model, registry } = await setup()
   const first = store.$layoutTree.get()

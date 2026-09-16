@@ -11,6 +11,7 @@ import { Thread } from '@/components/assistant-ui/thread'
 import { TranscriptWindowProvider } from '@/components/assistant-ui/thread/transcript-window'
 import { Backdrop } from '@/components/Backdrop'
 import { COMPOSER_HEART_CONFIG, HeartField } from '@/components/chat/vibe-hearts'
+import { EmptyWorkspace } from '@/components/pane-shell/empty-workspace'
 import { usePaneVisible } from '@/components/pane-shell/pane-visibility'
 import { $sessionTileDragging, $sessionTileEdgeHover } from '@/components/pane-shell/tree/store'
 import { PromptOverlays } from '@/components/prompt-overlays'
@@ -578,14 +579,7 @@ export const ChatView = memo(function ChatView({
       <PromptOverlays sessionId={activeSessionId} />
 
       {showWorkspaceEmptyPlaceholder ? (
-        <div className="relative grid min-h-0 flex-1 place-items-center overflow-hidden bg-(--ui-chat-surface-background) px-8 py-10">
-          <div className="select-none text-center text-sm text-(--ui-muted-fg)">
-            <div className="mb-2 text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-(--ui-subtle-fg)">
-              No tabs open
-            </div>
-            <div className="text-xs text-(--ui-faint-fg)">Open a session from the sidebar to start.</div>
-          </div>
-        </div>
+        <EmptyWorkspace />
       ) : (
         <ChatRuntimeBoundary
         busy={busy}

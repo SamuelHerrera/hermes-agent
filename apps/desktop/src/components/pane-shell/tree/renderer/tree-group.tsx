@@ -21,6 +21,7 @@ import {
   useState
 } from 'react'
 
+import { EmptyWorkspace } from '@/components/pane-shell/empty-workspace'
 import { ActionsContextMenu, type MenuKit, renderActionItem } from '@/components/ui/actions-menu'
 import { Codicon } from '@/components/ui/codicon'
 import { DecodeText } from '@/components/ui/decode-text'
@@ -547,7 +548,9 @@ export function TreeGroup({
           marker document-wide lookups filter on (see pane-visibility.ts). */}
       {!minimized && (
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
-          {isEmpty ? (
+          {isEmpty && node.emptyWorkspace ? (
+            <EmptyWorkspace />
+          ) : isEmpty ? (
             <div className="grid h-full place-items-center">
               {/* Same decode primitive as the CONNECTING boot overlay. */}
               <DecodeText className="text-(--ui-text-quaternary)" cursor prefix={1} text="HERMES" />

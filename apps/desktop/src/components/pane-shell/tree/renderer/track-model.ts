@@ -294,6 +294,12 @@ export function rootChildSide(
   child: LayoutNode,
   paneFor: (id: string) => Contribution | undefined
 ): 'left' | 'right' | null {
+  if (child.type === 'group'
+    ? child.emptyWorkspace && child.panes.length === 0
+    : child.children.some(node => rootChildSide(node, paneFor) === null)) {
+    return null
+  }
+
   const placements = allPaneIds(child).map(id => paneChrome(paneFor(id)).placement)
 
   if (placements.includes('main')) {
