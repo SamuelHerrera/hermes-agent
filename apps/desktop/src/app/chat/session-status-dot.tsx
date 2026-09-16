@@ -103,7 +103,7 @@ const DOT_VARIANTS: Record<SessionDotState, DotVariant> = {
 // without replacing the user's chosen project/session color. Live turns are the
 // exception: the outline circle wraps the project dot itself so the moving cue and
 // the color identity read as one marker.
-const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconVariant> = {
+const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'background' | 'idle'>, StatusIconVariant> = {
   'needs-input': {
     className: 'text-amber-500',
     icon: 'question',
@@ -120,11 +120,6 @@ const STATUS_ICON_VARIANTS: Record<Exclude<SessionDotState, 'idle'>, StatusIconV
     icon: 'loading',
     label: r => r.sessionRunning,
     spinning: true
-  },
-  background: {
-    className: 'text-(--ui-text-tertiary)',
-    icon: 'terminal',
-    label: r => r.backgroundRunning
   },
   unread: {
     className: 'text-emerald-500',
@@ -306,8 +301,8 @@ export interface SessionAttentionDotProps {
   storedSessionId: null | string
 }
 
-/** Compact transient status for pane tabs. Idle/draft stay out of the trailing
- *  slot so the left identity dot remains the stable project/session color. */
+/** Compact transient status for pane tabs. Background activity stays in the
+ *  composer/sidebar; only unread completion and input requests use this slot. */
 export function SessionAttentionDot({ className, storedSessionId }: SessionAttentionDotProps) {
   const { t } = useI18n()
   const r = t.sidebar.row
@@ -316,7 +311,7 @@ export function SessionAttentionDot({ className, storedSessionId }: SessionAtten
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'draft'
   )
 
-  if (dotState === 'idle' || dotState === 'draft' || isLoadingDotState(dotState)) {
+  if (dotState === 'idle' || dotState === 'draft' || dotState === 'background' || isLoadingDotState(dotState)) {
     return null
   }
 

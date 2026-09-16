@@ -2,7 +2,9 @@ import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createClientSessionState } from '@/lib/chat-runtime'
-import { $unreadFinishedSessionIds } from '@/store/session'
+import { $backgroundStatusBySession } from '@/store/composer-status'
+import { $activeSessionId, $unreadFinishedSessionIds } from '@/store/session'
+import { $sessionDotStateById } from '@/store/session-dot-state'
 import { clearAllSessionStates, publishSessionState } from '@/store/session-states'
 
 import { SessionStatusDot } from './session-status-dot'
@@ -27,7 +29,9 @@ vi.mock('@/i18n', () => ({
 
 afterEach(() => {
   cleanup()
+  $activeSessionId.set(null)
   clearAllSessionStates()
+  $backgroundStatusBySession.set({})
   $unreadFinishedSessionIds.set([])
 })
 
@@ -82,6 +86,41 @@ describe('SessionStatusDot running icon', () => {
 })
 
 describe('session tab attention treatment', () => {
+  it('keeps background activity out of the tab when a live turn settles', () => {
+    $activeSessionId.set('rt1')
+    publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
+
+    const { container } = render(
+      <>
+        <SessionTabLead session={{ id: 's1' } as never} storedSessionId="s1" />
+        <SessionTabAttentionDot storedSessionId="s1" />
+      </>
+    )
+
+    expect(livePulse(container)).toBeTruthy()
+    expect(container.querySelector('[data-session-attention-dot]')).toBeNull()
+
+    act(() => {
+      publishSessionState('rt1', createClientSessionState('s1'))
+      $backgroundStatusBySession.set({
+        rt1: [{ id: 'proc-1', state: 'running', title: 'watch uploader', type: 'background' }]
+      })
+    })
+
+    expect($sessionDotStateById.get().s1).toBe('background')
+    expect(livePulse(container)).toBeNull()
+    expect(normalDot(container)).toBeTruthy()
+    expect(container.querySelector('[data-session-attention-dot]')).toBeNull()
+    expect(container.querySelector('.codicon-terminal')).toBeNull()
+
+    act(() => {
+      $backgroundStatusBySession.set({})
+      $unreadFinishedSessionIds.set(['s1'])
+    })
+
+    expect(container.querySelector('[data-session-status="unread"] .codicon-check')).toBeTruthy()
+  })
+
   it('wraps the leading project dot with a finite pulse while a session is running', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true })
 
