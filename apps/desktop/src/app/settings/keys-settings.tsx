@@ -10,7 +10,7 @@ import { SettingsContent, SettingsSkeleton } from './primitives'
 import { useDeepLinkHighlight } from './use-deep-link-highlight'
 
 // Sub-views surfaced as sidebar subnav under Tools & Keys (see settings/index.tsx).
-export const KEYS_VIEWS = ['tools', 'settings'] as const
+export const KEYS_VIEWS = ['tools', 'settings', 'sudo'] as const
 
 export type KeysView = (typeof KEYS_VIEWS)[number]
 
@@ -25,7 +25,8 @@ export type KeysView = (typeof KEYS_VIEWS)[number]
 // appear here alongside ``setting``.
 const VIEW_CATEGORIES: Record<KeysView, readonly string[]> = {
   settings: ['setting', 'messaging'],
-  tools: ['tool']
+  tools: ['tool'],
+  sudo: []
 }
 
 export function KeysSettings({ view }: KeysSettingsProps) {

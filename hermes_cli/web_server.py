@@ -7134,6 +7134,69 @@ def _catalog_provider_env_metadata() -> dict:
     return meta
 
 
+@app.get("/api/settings/sudo")
+async def get_sudo_settings(profile: Optional[str] = None):
+    from hermes_cli.sudo_settings import status
+    def run():
+        with _config_profile_scope(profile):
+            return status()
+    return await asyncio.to_thread(run)
+
+
+@app.put("/api/settings/sudo/password")
+async def put_sudo_password(request: Request, profile: Optional[str] = None):
+    from hermes_cli.sudo_settings import set_password
+    # Manual validation keeps FastAPI/Pydantic input echoes off secret paths.
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid password request") from None
+    if not isinstance(body, dict) or not isinstance(body.get("password"), str):
+        raise HTTPException(400, "Password must be a string")
+    def run():
+        with _config_profile_scope(profile):
+            return set_password(body["password"])
+    return await asyncio.to_thread(run)
+
+
+@app.delete("/api/settings/sudo/password")
+async def delete_sudo_password(profile: Optional[str] = None):
+    from hermes_cli.sudo_settings import set_password
+    def run():
+        with _config_profile_scope(profile):
+            return set_password(None)
+    return await asyncio.to_thread(run)
+
+
+class SudoFilesUpdate(BaseModel):
+    file: str = ""
+    files: Dict[str, str]
+
+
+@app.put("/api/settings/sudo/files")
+async def put_sudo_files(body: SudoFilesUpdate, profile: Optional[str] = None):
+    from hermes_cli.sudo_settings import set_files
+    def run():
+        with _config_profile_scope(profile):
+            return set_files(body.file, body.files)
+    return await asyncio.to_thread(run)
+
+
+@app.put("/api/settings/sudo/file-password")
+async def put_sudo_file_password(request: Request, profile: Optional[str] = None):
+    from hermes_cli.sudo_settings import write_host_password
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid password request") from None
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Invalid password request")
+    def run():
+        with _config_profile_scope(profile):
+            return write_host_password(body.get("host"), body.get("password"), body.get("overwrite", False))
+    return await asyncio.to_thread(run)
+
+
 @app.get("/api/env")
 async def get_env_vars(profile: Optional[str] = None):
     # _profile_scope takes _SKILLS_PROFILE_LOCK and load_env()/catalog
@@ -7154,7 +7217,7 @@ def _get_env_vars_sync(profile: Optional[str] = None):
         # gaps (description/url) and always supplies provider grouping hints.
         return {
             "is_set": bool(value),
-            "redacted_value": redact_key(value) if value else None,
+            "redacted_value": (None if var_name == "SUDO_PASSWORD" else redact_key(value)) if value else None,
             "description": info.get("description") or cat_meta.get("description", ""),
             "url": info.get("url") if info.get("url") is not None else cat_meta.get("url"),
             "category": info.get("category") or cat_meta.get("category", ""),
@@ -7214,6 +7277,10 @@ async def set_env_var(body: EnvVarUpdate, profile: Optional[str] = None):
             # keeps authenticating with the old key (#62269).
             from hermes_cli.credential_lifecycle import save_provider_env_credential
 
+            if body.key == "SUDO_PASSWORD":
+                from hermes_cli.sudo_settings import set_password
+                set_password(body.value)
+                return {"ok": True}
             return save_provider_env_credential(body.key, body.value)
 
     try:
@@ -7696,6 +7763,11 @@ async def remove_env_var(body: EnvVarDelete, profile: Optional[str] = None):
             # manual pool entries for the same provider are preserved.
             from hermes_cli.credential_lifecycle import remove_provider_env_credential
 
+            if body.key == "SUDO_PASSWORD":
+                from hermes_cli.sudo_settings import set_password
+                found = "SUDO_PASSWORD" in load_env()
+                set_password(None)
+                return {"ok": True, "found": found}
             return remove_provider_env_credential(body.key)
 
     try:
@@ -7726,6 +7798,9 @@ async def reveal_env_var(
     - Rate limiting (max 5 reveals per 30s window)
     - Audit logging
     """
+    if body.key == "SUDO_PASSWORD":
+        raise HTTPException(403, "Sudo passwords are write-only")
+
     # --- Token check ---
     _require_token(request)
 

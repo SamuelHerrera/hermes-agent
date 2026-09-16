@@ -1,8 +1,10 @@
 import { FIELD_DESCRIPTIONS, FIELD_LABELS } from '@/app/settings/constants'
 
+import { sudoEn } from './sudo-settings'
 import type { Translations } from './types'
 
 export const en: Translations = {
+  sudoSettings: sudoEn,
   common: {
     apply: 'Apply',
     back: 'Back',

@@ -979,15 +979,12 @@ def _rewrite_compound_background(command: str) -> str:
 
 def _scoped_secret_or_env(name: str) -> str | None:
     """Read a process/profile-scoped secret env var without raising on scope gaps."""
+    from agent.secret_scope import UnscopedSecretError, get_secret
     try:
-        from agent.secret_scope import UnscopedSecretError, get_secret
-
-        try:
-            return get_secret(name)
-        except UnscopedSecretError:
-            return os.environ.get(name)
-    except Exception:
-        return os.environ.get(name)
+        return get_secret(name)
+    except UnscopedSecretError:
+        # A missing multiplex scope is not permission to use another profile.
+        return None
 
 
 def _read_sudo_password_file(path_value: str | None) -> str | None:
@@ -1120,6 +1117,45 @@ def _configured_sudo_password_for_command(command: str) -> tuple[bool, str | Non
     true for explicit empty values too, matching the legacy SUDO_PASSWORD
     behavior that intentionally sends a blank sudo password instead of prompting.
     """
+    from agent.secret_scope import current_secret_scope, is_multiplex_active
+    if is_multiplex_active() and current_secret_scope() is None:
+        return False, None
+
+    from hermes_cli.config import load_config, load_env
+    terminal = load_config().get("terminal", {})
+    if terminal.get("sudo_credentials_source") == "profile":
+        # UI-managed settings are read at command time, not copied into a
+        # process-global env or an old per-turn secret snapshot. Deletion is
+        # authoritative too. Preserve the legacy env ladder for non-UI users.
+        mapping = terminal.get("sudo_password_files", {})
+        if isinstance(mapping, str):
+            try:
+                mapping = json.loads(mapping)
+            except ValueError:
+                return False, None
+        if not isinstance(mapping, dict):
+            return False, None
+        direct_host = _extract_ssh_target_host(command)
+        backend = str(terminal.get("backend", "local")).lower()
+        remote = bool(direct_host) or backend == "ssh"
+        target = direct_host or (
+            _normalize_ssh_target_host(terminal.get("ssh_host")) if backend == "ssh" else None
+        )
+        hosts = [target, target.lower()] if target else ([] if remote else ["local", "default"])
+        for host in hosts:
+            if host in mapping:
+                password = _read_sudo_password_file(mapping[host])
+                # An unavailable matched file must not fall through to another
+                # machine's password. Empty files still mean an empty password.
+                return password is not None, password
+        if remote:
+            return False, None
+        password = load_env().get("SUDO_PASSWORD")
+        if password is not None:
+            return True, password
+        password = _read_sudo_password_file(terminal.get("sudo_password_file"))
+        return password is not None, password
+
     env_password = _scoped_secret_or_env("SUDO_PASSWORD")
     if env_password is not None:
         return True, env_password
@@ -1195,10 +1231,18 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     # those read secrets from disk inside the tool runtime, never from the LLM's
     # command text.
     has_configured_password, _configured_password = _configured_sudo_password_for_command(command)
+    from hermes_cli.config import load_config
+    _sudo_terminal = load_config().get("terminal", {})
+    _sudo_remote = bool(_extract_ssh_target_host(command)) or str(
+        _sudo_terminal.get("backend", os.environ.get("TERMINAL_ENV", "local"))
+    ).lower() == "ssh"
+    # Interactive callbacks do not identify a destination. Never reuse or seed
+    # their session-wide cache across SSH hosts; each unmatched remote prompts
+    # independently, while configured host files remain non-interactive.
     sudo_password = (
         _configured_password
         if has_configured_password
-        else _get_cached_sudo_password()
+        else (None if _sudo_remote else _get_cached_sudo_password())
     )
 
     # Local hosts with sudoers NOPASSWD should not be forced through the
@@ -1207,7 +1251,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     # inherit host sudo state. Re-probes every call (no process-lifetime
     # cache) so an expired sudo timestamp doesn't make a later command block
     # silently without Hermes prompting.
-    if not has_configured_password and not sudo_password and _sudo_nopasswd_works():
+    if not _sudo_remote and not has_configured_password and not sudo_password and _sudo_nopasswd_works():
         return command, None
 
     has_sudo_prompt_callback = _get_sudo_password_callback() is not None
@@ -1216,7 +1260,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     )
     if not has_configured_password and not sudo_password and should_prompt_for_sudo:
         sudo_password = _prompt_for_sudo_password(timeout_seconds=45)
-        if sudo_password:
+        if sudo_password and not _sudo_remote:
             _set_cached_sudo_password(sudo_password)
 
     if has_configured_password or sudo_password:

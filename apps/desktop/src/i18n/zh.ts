@@ -1,8 +1,10 @@
 import { defineFieldCopy } from '@/app/settings/field-copy'
 
+import { sudoZh } from './sudo-settings'
 import type { Translations } from './types'
 
 export const zh: Translations = {
+  sudoSettings: sudoZh,
   common: {
     apply: '应用',
     back: '返回',

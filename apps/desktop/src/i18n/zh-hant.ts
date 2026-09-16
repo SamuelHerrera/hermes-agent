@@ -1,8 +1,10 @@
 import { defineFieldCopy } from '@/app/settings/field-copy'
 
 import { defineLocale } from './define-locale'
+import { sudoZhHant } from './sudo-settings'
 
 export const zhHant = defineLocale({
+  sudoSettings: sudoZhHant,
   common: {
     apply: '套用',
     back: '返回',
