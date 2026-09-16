@@ -144,6 +144,33 @@ describe('useSessionTileDelegate resumeTile', () => {
     expect(JSON.stringify(restored[0].messages)).not.toContain('__hermes_pending_approval')
   })
 
+  it('does not restore a cached prompt resolved during transcript prefetch', async () => {
+    setSessions([row({ id: 'stored-live', profile: 'default' })])
+    const cachedState = createClientSessionState('stored-live')
+    const restored: ClientSessionState[] = []
+    let finishPrefetch!: (value: { messages: []; session_id: string }) => void
+    const prefetch = new Promise<{ messages: []; session_id: string }>(resolve => { finishPrefetch = resolve })
+    vi.mocked(getLatestSessionMessages).mockReturnValueOnce(prefetch)
+
+    const requestGateway = vi.fn(async () => ({
+      session_id: 'runtime-live', session_key: 'stored-live', running: true,
+      pending_prompt: { event: 'sudo.request', payload: { request_id: 'resolved' } }
+    }))
+
+    renderTile(requestGateway, (_id, updater) => { restored.push(updater(cachedState)) }, {
+      runtimeIdByStoredSessionId: new Map([['stored-live', 'runtime-live']]),
+      sessionStateByRuntimeId: new Map([['runtime-live', cachedState]])
+    })
+    const resume = sessionTileDelegate()!.resumeTile('stored-live')
+    await vi.waitFor(() => expect(requestGateway).toHaveBeenCalled())
+    await Promise.resolve()
+    retirePendingPrompt('sudo.request', 'resolved', 'runtime-live')
+    finishPrefetch({ messages: [], session_id: 'stored-live' })
+    await resume
+    expect(sessionSudoRequest('runtime-live').get()).toBeNull()
+    expect(restored[0].needsInput).toBe(false)
+  })
+
   it('carries the owning profile into a cold tile resume so it cannot fork profiles', async () => {
     // A tile opens a session owned by another profile. Resuming without the
     // profile lets the gateway fall back to the launch-profile DB and clone the

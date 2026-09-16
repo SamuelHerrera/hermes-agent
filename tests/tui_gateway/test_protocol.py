@@ -244,9 +244,12 @@ def test_sensitive_prompt_timeout_emits_expiry(capture, event):
     assert server._block(event, "s1", {}, timeout=0) == ""
 
     messages = [json.loads(line) for line in buf.getvalue().splitlines()]
-    request, expiry = [message["params"] for message in messages]
-    assert request["type"] == event
-    assert expiry["type"] == event.removesuffix(".request") + ".expire"
+    frames = [message["params"] for message in messages]
+    request, = [frame for frame in frames if frame["type"] == event]
+    expiry, = [frame for frame in frames if frame["type"] == event.removesuffix(".request") + ".expire"]
+    resolved, = [frame for frame in frames if frame["type"] == "prompt.resolved"]
+    assert resolved["session_id"] == "s1"
+    assert resolved["payload"] == {"event": event, "request_id": request["payload"]["request_id"]}
     assert expiry["session_id"] == "s1"
     assert expiry["payload"]["request_id"] == request["payload"]["request_id"]
 

@@ -133,10 +133,10 @@ export function useSessionTileDelegate({
               sessionStateByRuntimeIdRef.current.delete(existing)
               dropSessionState(existing)
             } else {
+              const persisted = await prefetchPromise
               const promptHydration = hydratePendingPromptFromResume(activated, promptBaseline)
               const projection = promptHydration.snapshotAccepted ? activated : withoutPendingPromptProjection(activated)
               const running = Boolean(activated.running ?? activated.info?.running)
-              const persisted = await prefetchPromise
 
               const baseMessages =
                 !running && persisted ? toChatMessages(persisted.messages) : cached.messages
