@@ -96,3 +96,33 @@ export async function openRemoteTerminal(url: string, WebSocketImpl = WebSocket)
     }
   }
 }
+
+/**
+ * Open a remote shell from a Desktop-selected working directory if possible,
+ * but never let a client-local cwd strand cross-machine terminal startup.
+ *
+ * The cwd belongs to the machine that last owned the workspace. When Desktop is
+ * pointed at a different backend (Mac -> Linux/Windows, Windows -> Mac, etc.)
+ * that absolute path may be meaningless there. In that case the backend closes
+ * before the ready frame; retry once without cwd so the owner host can choose
+ * its native home directory instead of failing the terminal entirely.
+ */
+export async function openRemoteTerminalWithCwdFallback(url: string, WebSocketImpl = WebSocket) {
+  try {
+    return await openRemoteTerminal(url, WebSocketImpl)
+  } catch (error) {
+    const fallback = new URL(url)
+
+    if (!fallback.searchParams.has('cwd')) {
+      throw error
+    }
+
+    fallback.searchParams.delete('cwd')
+
+    try {
+      return await openRemoteTerminal(fallback.toString(), WebSocketImpl)
+    } catch {
+      throw error
+    }
+  }
+}

@@ -8,8 +8,8 @@ import { group, split } from '../model'
 import { emptyTabbedScreen } from '../screens'
 import { $collapsedTreeSides } from '../store'
 
-import { TreeNode } from './tree-node'
 import { rootChildSide } from './track-model'
+import { TreeNode } from './tree-node'
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {

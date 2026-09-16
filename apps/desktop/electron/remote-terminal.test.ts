@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { openRemoteTerminal } from './remote-terminal'
+import { openRemoteTerminal, openRemoteTerminalWithCwdFallback } from './remote-terminal'
 import { createTerminalDelivery } from './terminal-delivery'
 
 class Socket extends EventTarget {
@@ -75,6 +75,30 @@ describe('remote shell transport', () => {
     const rejected = expect(pending).rejects.toThrow('owner backend')
     await vi.advanceTimersByTimeAsync(15_000)
     await rejected
+  })
+
+  it('retries without cwd when a cross-machine remote rejects the launch directory', async () => {
+    const pending = openRemoteTerminalWithCwdFallback('ws://owner-A/api/terminal?cols=80&cwd=%2FUsers%2Fsam%2Fapp', impl)
+    const first = Socket.last
+
+    first.close()
+    await vi.waitUntil(() => Socket.last !== first)
+    const second = Socket.last
+    second.frame(JSON.stringify({ type: 'ready', protocol: 1 }))
+
+    const terminal = await pending
+
+    expect(first.url).toBe('ws://owner-A/api/terminal?cols=80&cwd=%2FUsers%2Fsam%2Fapp')
+    expect(second.url).toBe('ws://owner-a/api/terminal?cols=80')
+    terminal.kill()
+  })
+
+  it('does not retry remote startup without an explicit cwd', async () => {
+    const pending = openRemoteTerminalWithCwdFallback('ws://owner-A/api/terminal?cols=80', impl)
+
+    Socket.last.close()
+
+    await expect(pending).rejects.toThrow('owner backend')
   })
 })
 

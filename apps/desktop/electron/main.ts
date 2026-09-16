@@ -219,7 +219,7 @@ import {
   revalidatePooledRemoteBackends,
   revalidateRemoteConnection
 } from './remote-liveness'
-import { openRemoteTerminal } from './remote-terminal'
+import { openRemoteTerminalWithCwdFallback } from './remote-terminal'
 import { missingRendererAssets } from './renderer-bundle'
 import {
   attachRendererConsoleCapture,
@@ -12724,7 +12724,7 @@ ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
     if (connection.source !== 'profile') {
       url.searchParams.set('profile', route.profile)
     }
-    remotePty = await openRemoteTerminal(url.toString())
+    remotePty = await openRemoteTerminalWithCwdFallback(url.toString())
     if (event.sender.isDestroyed()) {
       remotePty.kill()
       throw new Error('Terminal window closed.')

@@ -53,10 +53,21 @@ export async function openRemotePersistentTerminal(url: string, options: { refer
     }
   }
   try {
-    const session = await openSession(client, {
+    const open = (cwd?: string) => openSession(client, {
       scope: ready.scope, reference: options.reference, requestId: options.requestId,
-      spawn: { cols: options.cols, rows: options.rows, cwd: options.cwd }
+      spawn: { cols: options.cols, rows: options.rows, cwd }
     })
+    let session
+
+    try {
+      session = await open(options.cwd)
+    } catch (error) {
+      if (options.reference || !options.cwd) { throw error }
+      // The launch cwd may come from a different OS/backend. If the owner host
+      // rejects it, retry once detached so cross-machine terminals still open.
+      session = await open(undefined)
+    }
+
     const detach = session.detach
     session.detach = async () => { try { return await detach() } finally { socket.close() } }
     return session
