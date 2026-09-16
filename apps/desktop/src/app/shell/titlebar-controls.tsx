@@ -779,7 +779,13 @@ function TitlebarOverflowMenu({
 
   const toolsBeforeUtility = mainTools.filter(tool => !renderedToolIds.has(tool.id) && tool.id !== 'haptics' && tool.id !== 'settings')
   const toolsAfterUtility = mainTools.filter(tool => tool.id === 'haptics' || tool.id === 'settings')
-  const showToolbarSeparator = mainStatusbarItems.length > 0 && (tools.length > 0 || Boolean(webhooksItem))
+
+  const hasMenuRows =
+    mainStatusbarItems.length > 0 ||
+    Boolean(cronTool) ||
+    Boolean(webhooksItem) ||
+    toolsBeforeUtility.length > 0 ||
+    toolsAfterUtility.length > 0
 
   if (statusbarItems.length === 0 && tools.length === 0) {
     return null
@@ -805,10 +811,26 @@ function TitlebarOverflowMenu({
         </DropdownMenuTrigger>
       </Tip>
       <DropdownMenuContent align="end" className="w-56">
+        {utilityTools.length > 0 ? (
+          <>
+            <div
+              aria-label="More controls"
+              className="mx-0.5 mb-1 flex items-center gap-1 rounded-md bg-(--ui-bg-muted)/45 p-1"
+              role="toolbar"
+            >
+              {utilityTools.map(tool => (
+                <TitlebarOverflowToolbarToolButton key={tool.id} navigate={navigate} onClose={close} tool={tool} />
+              ))}
+            </div>
+            {hasMenuRows ? <DropdownMenuSeparator /> : null}
+          </>
+        ) : null}
         {mainStatusbarItems.map(item => (
           <TitlebarOverflowStatusbarItem item={item} key={`status:${item.id}`} navigate={navigate} onClose={close} />
         ))}
-        {showToolbarSeparator ? <DropdownMenuSeparator /> : null}
+        {mainStatusbarItems.length > 0 && (Boolean(cronTool) || Boolean(webhooksItem) || toolsBeforeUtility.length > 0) ? (
+          <DropdownMenuSeparator />
+        ) : null}
         {cronTool ? <TitlebarOverflowToolItem key={cronTool.id} navigate={navigate} onClose={close} tool={cronTool} /> : null}
         {webhooksItem ? (
           <TitlebarOverflowStatusbarItem item={webhooksItem} key={`status:${webhooksItem.id}`} navigate={navigate} onClose={close} />
@@ -816,18 +838,6 @@ function TitlebarOverflowMenu({
         {toolsBeforeUtility.map(tool => (
           <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
         ))}
-        {utilityTools.length > 0 ? (
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <MenuRow icon={<TitlebarIcon name="tools" />} label="More controls" />
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              {utilityTools.map(tool => (
-                <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        ) : null}
         {toolsAfterUtility.map(tool => (
           <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
         ))}
@@ -891,6 +901,42 @@ function TitlebarOverflowStatusbarItem({
     <DropdownMenuItem disabled={item.disabled} onSelect={event => run(Boolean((event as Event & { shiftKey?: boolean }).shiftKey))}>
       <MenuRow icon={item.icon} label={label} />
     </DropdownMenuItem>
+  )
+}
+
+function TitlebarOverflowToolbarToolButton({
+  navigate,
+  onClose,
+  tool
+}: {
+  navigate: ReturnType<typeof useNavigate>
+  onClose: () => void
+  tool: TitlebarTool
+}) {
+  return (
+    <Button
+      aria-label={tool.label}
+      aria-pressed={tool.active ?? undefined}
+      className={cn(
+        'size-7 bg-transparent p-0 text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-foreground',
+        tool.className
+      )}
+      disabled={tool.disabled}
+      onClick={event => {
+        if (tool.to) {
+          navigate(tool.to)
+        }
+
+        tool.onSelect?.(event)
+        onClose()
+      }}
+      onPointerDown={event => event.stopPropagation()}
+      title={String(tool.title ?? tool.label)}
+      type="button"
+      variant="ghost"
+    >
+      {tool.icon}
+    </Button>
   )
 }
 
