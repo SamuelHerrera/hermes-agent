@@ -35,6 +35,8 @@ import { $threadScrollByKey, threadScrollStateFor } from '@/store/thread-scroll'
 import { $autoSpeakReplies } from '@/store/voice-prefs'
 import { useTheme } from '@/themes'
 
+import { SessionReferenceDropOverlay } from '../chat-drop-overlay'
+
 import { AttachmentList } from './attachments'
 import {
   acceptsTriggerCompletion,
@@ -1085,6 +1087,7 @@ export function ChatBar({
         suppressContentEditableWarning
       />
       <ComposerDirectiveActions editorRef={editorRef} />
+      {!inputDisabled && <SessionReferenceDropOverlay />}
       {/* assistant-ui requires ComposerPrimitive.Input somewhere in the tree
         so the composer-state binding (text + IME + paste + form-submit hookup)
         wires up. We render the real input UI ourselves above via the

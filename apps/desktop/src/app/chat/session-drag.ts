@@ -8,9 +8,9 @@
  *     divider's slot (the strip caret shows it);
  *   - a chat zone's EDGE band  → split: open the session as a tile docked on
  *     that edge (the zone sheet morphs to the half);
- *   - a chat zone's CENTER / the composer → link: insert an `@session` chip
- *     into that surface's composer (ChatDropOverlay owns the visual);
- *   - anything else (sidebar, terminal, gutters) → deny.
+ *   - a chat's text input → link: insert an `@session` chip into that
+ *     surface's composer (ChatDropOverlay owns the input-only visual);
+ *   - anything else (chat center, sidebar, terminal, gutters) → deny.
  *
  * Zones that don't host a chat surface are NOT targets — the overlay never
  * lights them, so a release there must not commit either (one truth).
@@ -83,7 +83,7 @@ function snapshotSurfaces(): SurfaceSnapshot[] {
 /** A session may land in any zone hosting a MAIN tile — another chat stack, a
  *  Browser tile, a page — never the sidebar/terminal zones. Returns the pane a
  *  stack anchors to, plus whether the zone hosts a CHAT surface (only those
- *  offer the link-to-composer center; a preview zone's center stacks). */
+ *  reserve their center; a preview zone's center stacks). */
 function tileZoneHost(groupId: string): { chat: boolean; pane: string } | null {
   const tree = $layoutTree.get()
   const panes = tree ? (findGroup(tree, groupId)?.panes ?? []) : []
@@ -113,6 +113,7 @@ export function startSessionDrag(
   let strips: StripSnapshot[] = []
   let surfaces: SurfaceSnapshot[] = []
   let composers: ZoneRect[] = []
+  let inputs: ZoneRect[] = []
   let zoneHost = new Map<string, ReturnType<typeof tileZoneHost>>()
 
   // Commit intent, updated per resolved move (the machinery flushes the final
@@ -138,6 +139,7 @@ export function startSessionDrag(
       strips = snapshotStrips()
       surfaces = snapshotSurfaces()
       composers = queryAllVisible('[data-slot="composer-root"]').map(snapRect)
+      inputs = queryAllVisible('[data-slot="composer-rich-input"][contenteditable="true"]').map(snapRect)
       zoneHost = new Map(zones.map(zone => [zone.id, tileZoneHost(zone.id)]))
       source?.style.setProperty('opacity', '0.45')
       // The same sentinel the zone overlay + chat surfaces key off — the
@@ -175,14 +177,18 @@ export function startSessionDrag(
         return { kind: 'group', groupId: zone.id, groupIds: [zone.id], pos: 'center', stack }
       }
 
-      // The composer (and everything in it) is always the link/attach drop;
-      // elsewhere the shared radial targeting decides center vs edge.
+      // Only the editable text area accepts references. Keep the surrounding
+      // composer out of radial edge splits too: controls aren't dock targets.
       const pos = composers.some(rect => rectContains(rect, x, y)) ? 'center' : subZonePosition(zones, zone.id, x, y)
       const surface = surfaces.find(s => rectContains(s.rect, x, y))
 
       if (pos === 'center' && host.chat) {
         split = null
-        link = surface?.composerTarget ?? 'main'
+        link = surface && inputs.some(rect => rectContains(rect, x, y)) ? surface.composerTarget : null
+
+        if (!link) {
+          return null
+        }
       } else if (pos === 'center') {
         // A preview/page zone has no composer to link to — its center stacks
         // the session as a tab, same as dropping on the strip's tail.

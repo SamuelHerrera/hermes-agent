@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { insertInlineRefsIntoEditor } from './inline-refs'
 import {
+  caretOffsetInEditor,
   composerPlainText,
   deleteSelectionInEditor,
   insertComposerContentsAtCaret,
@@ -88,6 +89,56 @@ describe('renderComposerContents', () => {
     probe.setEnd(after!.startContainer, after!.startOffset)
     expect(probe.toString()).toBe('**bold')
     editor.remove()
+  })
+
+  it('keeps reference labels through successive typing repaints without changing their wire values', () => {
+    const editor = document.createElement('div')
+    editor.dataset.slot = RICH_INPUT_SLOT
+    document.body.append(editor)
+
+    try {
+      insertInlineRefsIntoEditor(editor, [
+        { kind: 'session', value: 'default/chat-id', label: 'Release planning' },
+        { kind: 'session', value: 'work/chat-id', label: 'Work planning' }
+      ])
+      const original = composerPlainText(editor)
+
+      for (const suffix of [' ', 'x', '**bold**']) {
+        editor.append(document.createTextNode(suffix))
+        caretIn(editor)
+        const text = composerPlainText(editor)
+        renderComposerContentsPreservingCaret(editor, text)
+
+        expect(Array.from(editor.querySelectorAll('[data-ref-kind="session"]'), chip => chip.textContent)).toEqual([
+          'Release planning',
+          'Work planning'
+        ])
+        expect(composerPlainText(editor)).toBe(text)
+        expect(caretOffsetInEditor(editor)).toBe(text.length)
+      }
+
+      expect(composerPlainText(editor)).toBe(`${original} x**bold**`)
+    } finally {
+      editor.remove()
+    }
+  })
+
+  it('preserves labels only for matching full reference tokens during programmatic repaints', () => {
+    const editor = document.createElement('div')
+    editor.dataset.slot = RICH_INPUT_SLOT
+    editor.append(refChipElement('session', 'default/chat-id', 'Release planning'))
+
+    renderComposerContents(editor, 'see @session:`default/chat-id` twice @session:`default/chat-id`')
+
+    expect(Array.from(editor.querySelectorAll('[data-ref-kind]'), chip => chip.textContent)).toEqual([
+      'Release planning',
+      'Release planning'
+    ])
+
+    renderComposerContents(editor, '@session:`other/chat-id` @file:`default/chat-id`')
+
+    expect(editor.textContent).not.toContain('Release planning')
+    expect(composerPlainText(editor)).toBe('@session:`other/chat-id` @file:`default/chat-id`')
   })
 
   it('hydrates a committed leading slash command back to its pill', () => {

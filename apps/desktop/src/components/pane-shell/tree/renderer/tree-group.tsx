@@ -707,8 +707,8 @@ function ZoneDropOverlay({ node }: { node: GroupNode }) {
 
   // A session drag (sidebar row) reuses this exact overlay — over ANY zone
   // that hosts a MAIN tile (stack into its tabs / split its edges); only a
-  // CHAT zone's center is a link-to-chat (the composer overlay owns that
-  // visual). Standing side chrome — the sidebar, files, terminal — hosts no
+  // CHAT zone only links from its text input (the composer owns that visual).
+  // Standing side chrome — the sidebar, files, terminal — hosts no
   // main tile, so a session can't land there: those zones stay DARK rather
   // than painting an idle outline the drop would only refuse. Same test
   // `tileZoneHost` (session-drag.ts) resolves the drop with, so what lights
@@ -739,11 +739,12 @@ function ZoneDropOverlay({ node }: { node: GroupNode }) {
   const multi = (hint?.groupIds?.length ?? 0) > 1
   // Sub-positions only exist for a single-zone target (a Shift-span merges).
   const pos = primary && !multi ? (hint?.pos ?? 'center') : 'center'
-  // Session drag over a CHAT zone's CENTER: the "link to chat" overlay inside
-  // the surface (ChatDropOverlay — the same sheet) owns that region; this sheet
-  // fades out so the two never stack. A non-chat zone's center has no chat to
-  // link, so it shows the normal stack sheet. Edges act like a tab.
-  const centerLink = sessionDrag && primary && pos === 'center' && chatZone
+
+  // A chat's center is not a target; only its text input advertises linking.
+  // Don't paint an idle full-chat sheet suggesting a transcript drop works.
+  if (sessionDrag && chatZone && (!active || pos === 'center')) {
+    return null
+  }
 
   return (
     <div
@@ -759,8 +760,7 @@ function ZoneDropOverlay({ node }: { node: GroupNode }) {
           // paint in the whole drag.
           'absolute transition-[top,right,bottom,left,background-color,border-color,opacity] duration-150 ease-out',
           // Blur only the live target — idle outlines must not fog the app.
-          active && !centerLink && DROP_SHEET_BLUR_CLASS,
-          centerLink && 'opacity-0'
+          active && DROP_SHEET_BLUR_CLASS
         )}
         style={{
           ...REGION[pos],

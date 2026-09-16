@@ -13,7 +13,6 @@ import { Backdrop } from '@/components/Backdrop'
 import { COMPOSER_HEART_CONFIG, HeartField } from '@/components/chat/vibe-hearts'
 import { EmptyWorkspace } from '@/components/pane-shell/empty-workspace'
 import { usePaneVisible } from '@/components/pane-shell/pane-visibility'
-import { $sessionTileDragging, $sessionTileEdgeHover } from '@/components/pane-shell/tree/store'
 import { PromptOverlays } from '@/components/prompt-overlays'
 import { Button } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
@@ -61,7 +60,7 @@ import { droppedFileInlineRefs } from './composer/inline-refs'
 import { useComposerScope } from './composer/scope'
 import type { ChatBarState } from './composer/types'
 import { type DroppedFile, partitionDroppedFiles } from './hooks/use-composer-actions'
-import { type DragKind, useFileDropZone } from './hooks/use-file-drop-zone'
+import { useFileDropZone } from './hooks/use-file-drop-zone'
 import { ProfileTag } from './profile-tag'
 import { useRuntimeMessageRepository } from './runtime-repository'
 import { ScrollToBottomButton } from './scroll-to-bottom-button'
@@ -534,21 +533,9 @@ export const ChatView = memo(function ChatView({
 
   // Session drags are POINTER drags (session-drag.ts) — never native DnD.
   // The drop zone below only handles files; session drops commit through the
-  // drag session itself, which routes a center/link drop to this surface's
+  // drag session itself, which routes a text-input drop to this surface's
   // composer via `data-composer-target`.
   const { dragKind, dropHandlers } = useFileDropZone({ enabled: showChatBar, onDropFiles })
-
-  // While a session drag targets one of this surface's EDGES or a tab strip,
-  // the zone overlay/caret owns the visual — the link overlay stands down.
-  // It shows for the whole drag on every chat surface otherwise (the drag
-  // session's global sentinel, not a per-surface hover chain).
-  // COMPUTED booleans, never the raw `$dropHint`: the hint churns on every
-  // pointer-crossing of every drag (pane drags included), and a re-render
-  // here is the WHOLE surface — thread, composer, header — per mounted tile.
-  const sessionDragging = useStore($sessionTileDragging)
-  const sessionEdgeHover = useStore($sessionTileEdgeHover)
-
-  const overlayKind: DragKind = dragKind === 'files' ? 'files' : sessionDragging && !sessionEdgeHover ? 'session' : null
 
   return (
     <div
@@ -636,9 +623,8 @@ export const ChatView = memo(function ChatView({
               }}
             />
           )}
-          {/* A session drag hovering an EDGE hands the visual to the zone
-              target; the link overlay shows only for the center region. */}
-          <ChatDropOverlay kind={overlayKind} />
+          {/* Files can drop anywhere; session links are input-only. */}
+          <ChatDropOverlay kind={dragKind} />
           <ChatSwapOverlay profile={gatewaySwapTarget} />
         </div>
         {/* Composer renders OUTSIDE the contain:[layout paint] wrapper above:

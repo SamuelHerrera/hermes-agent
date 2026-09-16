@@ -20,6 +20,7 @@ vi.mock('./composer/focus', () => ({ requestComposerInsertRefs: vi.fn() }))
 
 const ZONE = { left: 0, top: 0, right: 1000, bottom: 800 }
 const COMPOSER = { left: 100, top: 700, right: 900, bottom: 780 }
+const INPUT = { left: 150, top: 710, right: 850, bottom: 750 }
 
 const stubRect = (el: Element, box: { left: number; top: number; right: number; bottom: number }) => {
   el.getBoundingClientRect = () =>
@@ -32,12 +33,12 @@ function mountStackedTabs() {
     <div data-tree-group="g1">
       <div data-pane-hidden>
         <div data-session-anchor="workspace" data-composer-target="main">
-          <div data-slot="composer-root"></div>
+          <div data-slot="composer-root"><div data-slot="composer-rich-input" contenteditable="true"></div></div>
         </div>
       </div>
       <div>
         <div data-session-anchor="session-tile:visible" data-composer-target="tile:visible">
-          <div data-slot="composer-root"></div>
+          <div data-slot="composer-root"><div data-slot="composer-rich-input" contenteditable="true"></div></div>
         </div>
       </div>
     </div>
@@ -55,6 +56,10 @@ function mountStackedTabs() {
   }
 
   $layoutTree.set(group(['workspace', 'session-tile:visible'], { id: 'g1' }))
+
+  for (const input of document.querySelectorAll('[data-slot="composer-rich-input"]')) {
+    stubRect(input, INPUT)
+  }
 
   return document.getElementById('row')!
 }
@@ -103,6 +108,29 @@ describe('session drop targeting across stacked tabs', () => {
     dragTo(row, 980, 400)
 
     expect(openSessionTile).toHaveBeenCalledWith('dragged', 'right', 'session-tile:visible', undefined)
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['transcript center', 500, 400],
+    ['composer toolbar', 500, 765]
+  ] as const)('does not insert a reference over the %s', (_name, x, y) => {
+    const row = mountStackedTabs()
+
+    dragTo(row, x, y)
+
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+    expect(openSessionTile).not.toHaveBeenCalled()
+  })
+
+  it('does not link into a disabled editor', () => {
+    const row = mountStackedTabs()
+    document
+      .querySelectorAll('[data-slot="composer-rich-input"]')
+      .forEach(input => input.setAttribute('contenteditable', 'false'))
+
+    dragTo(row, 500, 740)
+
     expect(requestComposerInsertRefs).not.toHaveBeenCalled()
   })
 

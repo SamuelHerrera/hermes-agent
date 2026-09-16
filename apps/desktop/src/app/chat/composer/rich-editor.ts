@@ -255,12 +255,29 @@ export function appendComposerContents(
 }
 
 export function renderComposerContents(target: HTMLElement, text: string, options?: SlashCommandScanOptions) {
-  target.replaceChildren()
+  // The wire text identifies a reference, but cannot carry its display label.
+  // Keep existing chips by their full token (including kind/profile) so typing
+  // and programmatic repaints don't replace picked titles with ID fallbacks.
+  const refs = new Map(
+    Array.from(target.querySelectorAll<HTMLElement>('[data-ref-kind][data-ref-text]'), chip => [chip.dataset.refText, chip])
+  )
+
+  const fragment = document.createDocumentFragment()
 
   // Defaults to live editing, where a token ending the text is still being
   // typed (`/wor`) and must stay editable. Callers repainting inert text (a
   // restored draft, a sent message opened for edit) pass `trailingCommitted`.
-  appendComposerContents(target, text, options)
+  appendComposerContents(fragment, text, options)
+
+  for (const chip of fragment.querySelectorAll<HTMLElement>('[data-ref-kind][data-ref-text]')) {
+    const previous = refs.get(chip.dataset.refText)
+
+    if (previous) {
+      chip.replaceWith(previous.cloneNode(true))
+    }
+  }
+
+  target.replaceChildren(fragment)
 
   // The other writer that reshapes the editor root: painting a restored draft
   // in clears the marker, clearing back to '' sets it.
