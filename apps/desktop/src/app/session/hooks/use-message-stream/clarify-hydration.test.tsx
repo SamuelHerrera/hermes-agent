@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ClientSessionState } from '@/app/types'
 import { createClientSessionState } from '@/lib/chat-runtime'
 import { clearClarifyRequest } from '@/store/clarify'
+import { clearAllPrompts, sessionSudoRequest } from '@/store/prompts'
 import type { RpcEvent } from '@/types/hermes'
 
 import { useMessageStream } from './index'
@@ -70,6 +71,7 @@ describe('clarify.request stream hydration', () => {
   beforeEach(() => {
     handleEvent = null
     stateRef = null
+    clearAllPrompts()
     clearClarifyRequest()
   })
 
@@ -77,6 +79,16 @@ describe('clarify.request stream hydration', () => {
     cleanup()
     clearClarifyRequest()
     vi.restoreAllMocks()
+  })
+
+  it.each(['prompt.resolved', 'sudo.expire'])('clears a sudo prompt on %s without waiting for turn completion', async type => {
+    await mountStream()
+    act(() => handleEvent!({ type: 'sudo.request', session_id: SID, payload: { request_id: 'live' } }))
+    act(() => handleEvent!({ type, session_id: SID, payload: { event: 'sudo.request', request_id: 'old' } }))
+    expect(sessionSudoRequest(SID).get()?.requestId).toBe('live')
+    act(() => handleEvent!({ type, session_id: SID, payload: { event: 'sudo.request', request_id: 'live' } }))
+    expect(sessionSudoRequest(SID).get()).toBeNull()
+    expect(stateRef?.current.get(SID)?.needsInput).toBe(false)
   })
 
   it('mounts an answerable clarify row when the tool.start row was missed', async () => {

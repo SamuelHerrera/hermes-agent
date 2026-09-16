@@ -70,6 +70,8 @@ export type GatewayEventPayload = {
   // agent.terminal.output — live chunk for a read-only agent terminal tab
   process_id?: string
   chunk?: string
+  // prompt.resolved carries request metadata only, never the response.
+  event?: string
   // clarify.request
   request_id?: string
   question?: string

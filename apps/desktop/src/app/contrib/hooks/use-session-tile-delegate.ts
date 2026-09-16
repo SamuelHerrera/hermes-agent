@@ -9,13 +9,15 @@ import type { SessionResumeResponse } from '@/types/hermes'
 
 import type { usePromptActions } from '../../session/hooks/use-prompt-actions'
 import { withSessionNotFoundResume } from '../../session/hooks/use-prompt-actions/utils'
+import { hydratePendingPromptFromResume, pendingPromptResumeBaseline } from '../../session/hooks/use-session-actions/pending-prompts'
 import {
   appendLiveSessionProjection,
   applyRuntimeInfo,
   hydrateSessionTodosFromMessages,
   hydrateSessionTodosFromResume,
   isSessionGoneError,
-  resolveSessionProfile
+  resolveSessionProfile,
+  withoutPendingPromptProjection
 } from '../../session/hooks/use-session-actions/utils'
 import type { useSessionStateCache } from '../../session/hooks/use-session-state-cache'
 import type { GatewayRequester } from '../types'
@@ -104,6 +106,7 @@ export function useSessionTileDelegate({
       resumeTile: async storedSessionId => {
         const existing = runtimeIdByStoredSessionIdRef.current.get(storedSessionId)
         const cached = existing ? sessionStateByRuntimeIdRef.current.get(existing) : undefined
+        const promptBaseline = pendingPromptResumeBaseline(existing || storedSessionId)
 
         // Resolve the owning profile before binding or re-activating a runtime.
         // A tile can open a session from any profile, not just the active one.
@@ -130,6 +133,8 @@ export function useSessionTileDelegate({
               sessionStateByRuntimeIdRef.current.delete(existing)
               dropSessionState(existing)
             } else {
+              const promptHydration = hydratePendingPromptFromResume(activated, promptBaseline)
+              const projection = promptHydration.snapshotAccepted ? activated : withoutPendingPromptProjection(activated)
               const running = Boolean(activated.running ?? activated.info?.running)
               const persisted = await prefetchPromise
 
@@ -139,7 +144,7 @@ export function useSessionTileDelegate({
               const hasLiveProjection = Boolean(activated.recovery || activated.inflight || activated.queued || activated.pending_prompt)
 
               const projectedMessages = hasLiveProjection
-                ? appendLiveSessionProjection(baseMessages, activated)
+                ? appendLiveSessionProjection(baseMessages, projection)
                 : baseMessages
 
               const recovery = recoverInFlightTurnJournal(storedSessionId, projectedMessages, {
@@ -162,6 +167,7 @@ export function useSessionTileDelegate({
                   adoptedRunningTurn: state.adoptedRunningTurn || running,
                   awaitingResponse: running && !recovery.applied,
                   busy: running,
+                  needsInput: promptHydration.needsInput,
                   messages: recovery.messages,
                   ...(recovery.applied
                     ? {
@@ -211,11 +217,13 @@ export function useSessionTileDelegate({
           throw new Error('resume returned no session id')
         }
 
+        const promptHydration = hydratePendingPromptFromResume(resumed, promptBaseline)
+        const projection = promptHydration.snapshotAccepted ? resumed : withoutPendingPromptProjection(resumed)
         const resumedRunning = Boolean(resumed.running ?? resumed.info?.running)
         const runtimeInfo = applyRuntimeInfo(resumed.info, { foreground: false })
         const baseMessages = toChatMessages(prefetch?.messages ?? resumed.messages ?? [])
         const hasLiveProjection = Boolean(resumed.recovery || resumed.inflight || resumed.queued || resumed.pending_prompt)
-        const projectedMessages = hasLiveProjection ? appendLiveSessionProjection(baseMessages, resumed) : baseMessages
+        const projectedMessages = hasLiveProjection ? appendLiveSessionProjection(baseMessages, projection) : baseMessages
         const recovery = recoverInFlightTurnJournal(storedSessionId, projectedMessages, { keepPending: resumedRunning })
 
         hydrateSessionTodosFromResume({ ...resumed, running: resumedRunning })
@@ -234,6 +242,7 @@ export function useSessionTileDelegate({
             adoptedRunningTurn: state.adoptedRunningTurn || resumedRunning,
             awaitingResponse: resumedRunning && !recovery.applied,
             busy: resumedRunning,
+            needsInput: promptHydration.needsInput,
             messages: useAuthoritativeTranscript
               ? recovery.messages
               : state.messages.length > 0

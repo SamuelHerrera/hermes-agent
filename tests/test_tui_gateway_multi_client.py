@@ -675,6 +675,10 @@ def test_approval_response_is_first_wins_across_attached_peers():
         assert accepted["result"]["resolved"] == 1
         assert duplicate["result"]["resolved"] == 0
         assert entry.result == "once"
+        for peer in (first, second):
+            resolved = [frame["params"] for frame in peer.frames if frame.get("params", {}).get("type") == "prompt.resolved"]
+            assert len(resolved) == 1
+            assert resolved[0]["payload"] == {"event": "approval.request", "request_id": "approval-request"}
     finally:
         with approval._lock:
             approval._gateway_queues.pop("approval-session", None)

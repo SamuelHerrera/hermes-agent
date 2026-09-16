@@ -421,6 +421,18 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
             message => typeof message?.content === 'string' && message.content.includes(CORRECTION_SWITCH_TRIGGER),
           )
 
+          if (userText.includes('E2E_SUDO_REOPEN')) {
+            const calls = messages.flatMap(message => message.tool_calls ?? [])
+              .filter(call => call.function?.name === 'e2e_sudo_prompt')
+            const completed = messages.some(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
+            const turn: ScriptedTurn = completed
+              ? { text: 'Sudo reopen fixture finished.' }
+              : { text: 'Waiting for the test password.', toolCalls: [{ name: 'e2e_sudo_prompt', args: {} }] }
+            if (stream) streamScriptedTurn(res, model, turn)
+            else nonStreamingScriptedTurn(res, model, turn)
+            return
+          }
+
           if (includesBlockingClarifyTrigger(parsed.messages)) {
             if (stream) {
               streamScriptedTurn(res, model, BLOCKING_CLARIFY_TURN)
