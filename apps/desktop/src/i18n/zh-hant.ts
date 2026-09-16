@@ -2660,7 +2660,7 @@ export const zhHant = defineLocale({
     sudoSendFailed: '無法傳送 sudo 密碼',
     secretSendFailed: '無法傳送密鑰',
     sudoTitle: '管理員密碼',
-    sudoDesc: 'Hermes 需要您的 sudo 密碼來執行特權指令。它只會傳送給您的本機代理。',
+    sudoDesc: 'Hermes 需要您的 sudo 密碼來執行特權指令。密碼會傳送給處理此工作階段的後端，該後端可能位於另一台機器上。',
     sudoPlaceholder: 'sudo 密碼',
     secretTitle: '需要密鑰',
     secretDesc: 'Hermes 需要一個憑證才能繼續。',

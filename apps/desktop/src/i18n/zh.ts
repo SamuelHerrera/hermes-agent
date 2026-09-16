@@ -3172,7 +3172,7 @@ export const zh: Translations = {
     sudoSendFailed: '无法发送 sudo 密码',
     secretSendFailed: '无法发送密钥',
     sudoTitle: '管理员密码',
-    sudoDesc: 'Hermes 需要你的 sudo 密码来运行特权命令。它只会发送给你的本地 agent。',
+    sudoDesc: 'Hermes 需要你的 sudo 密码来运行特权命令。密码会发送给处理此会话的后端，该后端可能位于另一台机器上。',
     sudoPlaceholder: 'sudo 密码',
     secretTitle: '需要密钥',
     secretDesc: 'Hermes 需要一个凭据才能继续。',
