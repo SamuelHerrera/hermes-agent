@@ -818,6 +818,31 @@ export const zhHant = defineLocale({
       sshErrUpdateRequired: '使用 Desktop SSH 連線前，請更新遠端主機上的 Hermes。',
       sshErrUnknown: 'SSH 連線失敗。'
     },
+    toolCredentials: {
+      search: '搜尋工具、服務或金鑰…',
+      savedFields: (count, total) => `已儲存欄位：${count} / ${total}`,
+      notVerified: '儲存值不代表已通過連線測試。',
+      noResults: '沒有符合的工具。',
+      gatewayName: 'Nous 工具閘道',
+      localBrowserName: '本機瀏覽器',
+      descriptions: {
+        searchOnly: '網頁搜尋。',
+        search: '網頁搜尋與內容擷取。',
+        firecrawl: '網頁搜尋、擷取與雲端瀏覽。',
+        gateway: 'Nous 訂閱工具的共用路由設定。',
+        selfHostedSearch: '自架網頁搜尋。',
+        cloudBrowser: '雲端瀏覽器工作階段。',
+        localBrowser: '選擇 Chrome 或 Lightpanda 進行本機瀏覽。',
+        camofox: '反偵測瀏覽器伺服器。',
+        media: '圖像與影片生成。',
+        images: 'Krea 2 圖像生成。',
+        voice: '語音轉錄與文字轉語音。',
+        wakeWord: '「Hey Hermes」喚醒詞偵測。',
+        skillsHub: 'Skills Hub 存取與發布。',
+        memory: '代理程式持久記憶。',
+        telemetry: '代理程式追蹤與可觀測性。'
+      }
+    },
     keys: {
       loading: '正在載入 API 金鑰和憑證...',
       failedLoad: 'API 金鑰載入失敗',

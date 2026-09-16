@@ -845,6 +845,31 @@ export const ja = defineLocale({
       sshErrUpdateRequired: 'Desktop SSH で接続する前に、リモートホストの Hermes を更新してください。',
       sshErrUnknown: 'SSH 接続に失敗しました。'
     },
+    toolCredentials: {
+      search: 'ツール、サービス、キーを検索…',
+      savedFields: (count, total) => `保存済みの項目: ${count} / ${total}`,
+      notVerified: '値の保存は接続テストではありません。',
+      noResults: '一致するツールはありません。',
+      gatewayName: 'Nous ツールゲートウェイ',
+      localBrowserName: 'ローカルブラウザー',
+      descriptions: {
+        searchOnly: 'ウェブ検索。',
+        search: 'ウェブ検索とページ抽出。',
+        firecrawl: 'ウェブ検索、スクレイピング、クラウドブラウジング。',
+        gateway: 'Nous サブスクライバー向けツールの共通接続設定。',
+        selfHostedSearch: 'セルフホストのウェブ検索。',
+        cloudBrowser: 'クラウドブラウザーセッション。',
+        localBrowser: 'ローカルブラウジングに Chrome または Lightpanda を選択。',
+        camofox: '検出回避ブラウザーサーバー。',
+        media: '画像と動画の生成。',
+        images: 'Krea 2 による画像生成。',
+        voice: '音声認識と音声合成。',
+        wakeWord: '「Hey Hermes」ウェイクワード検出。',
+        skillsHub: 'Skills Hub へのアクセスと公開。',
+        memory: 'エージェントの永続メモリ。',
+        telemetry: 'エージェントのトレースと可観測性。'
+      }
+    },
     keys: {
       loading: 'API キーと認証情報を読み込み中...',
       failedLoad: 'API キーの読み込みに失敗しました',

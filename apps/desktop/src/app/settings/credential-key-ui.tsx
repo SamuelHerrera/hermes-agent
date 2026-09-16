@@ -45,12 +45,14 @@ export const credentialPlaceholder = (key: string, info: EnvVarInfo, label: stri
 // key also offers Remove, and Esc cancels without closing the overlay.
 export function KeyField({
   expanded = false,
+  id,
   info,
   placeholder,
   rowProps,
   varKey
 }: {
   expanded?: boolean
+  id?: string
   info: EnvVarInfo
   placeholder?: string
   rowProps: KeyRowProps
@@ -85,7 +87,9 @@ export function KeyField({
   if (info.is_set && !editing) {
     return (
       <Input
+        aria-label={varKey}
         className={cn(CREDENTIAL_CONTROL_CLASS, bare && CRED_BARE, 'cursor-pointer text-muted-foreground')}
+        id={id}
         onFocus={startEdit}
         readOnly
         value={masked}
@@ -96,8 +100,10 @@ export function KeyField({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
       <Input
+        aria-label={varKey}
         autoFocus={editing}
         className={cn(CREDENTIAL_CONTROL_CLASS, bare && CRED_BARE)}
+        id={id}
         onChange={update}
         onFocus={() => {
           if (!editing) {
@@ -121,7 +127,6 @@ export function KeyField({
               disabled={busy}
               onClick={() => void onClear(varKey)}
               size="icon-xs"
-              title={t.settings.credentials.remove}
               type="button"
               variant="ghost"
             >

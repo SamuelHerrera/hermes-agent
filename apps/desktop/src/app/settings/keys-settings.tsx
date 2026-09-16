@@ -7,6 +7,7 @@ import { CredentialKeyCard, credentialPlaceholder, credentialRowLabel } from './
 import { useEnvCredentials } from './env-credentials'
 import { asText } from './helpers'
 import { SettingsContent, SettingsSkeleton } from './primitives'
+import { ToolCredentialCards } from './tool-credential-cards'
 import { useDeepLinkHighlight } from './use-deep-link-highlight'
 
 // Sub-views surfaced as sidebar subnav under Tools & Keys (see settings/index.tsx).
@@ -45,7 +46,13 @@ export function KeysSettings({ view }: KeysSettingsProps) {
     elementId: key => `credential-key-${key}`,
     onResolve: key => setOpenKey(key),
     param: 'key',
-    ready: key => Boolean(vars && key in vars)
+    ready: key =>
+      Boolean(
+        view !== 'tools' &&
+        vars?.[key] &&
+        !vars[key].channel_managed &&
+        VIEW_CATEGORIES[view].includes(vars[key].category)
+      )
   })
 
   const groups = useMemo(() => {
@@ -66,6 +73,14 @@ export function KeysSettings({ view }: KeysSettingsProps) {
 
   if (!vars) {
     return <SettingsSkeleton sections={[{ rows: 5 }]} />
+  }
+
+  if (view === 'tools') {
+    return (
+      <SettingsContent>
+        <ToolCredentialCards rowProps={rowProps} vars={vars} />
+      </SettingsContent>
+    )
   }
 
   const visible = groups.filter(g => g.category === view)

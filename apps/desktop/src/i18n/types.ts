@@ -669,6 +669,31 @@ export interface Translations {
       sshErrUpdateRequired: string
       sshErrUnknown: string
     }
+    toolCredentials: {
+      search: string
+      savedFields: (count: number, total: number) => string
+      notVerified: string
+      noResults: string
+      gatewayName: string
+      localBrowserName: string
+      descriptions: {
+        searchOnly: string
+        search: string
+        firecrawl: string
+        gateway: string
+        selfHostedSearch: string
+        cloudBrowser: string
+        localBrowser: string
+        camofox: string
+        media: string
+        images: string
+        voice: string
+        wakeWord: string
+        skillsHub: string
+        memory: string
+        telemetry: string
+      }
+    }
     keys: {
       loading: string
       failedLoad: string

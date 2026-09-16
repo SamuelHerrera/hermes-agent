@@ -795,6 +795,31 @@ export const en: Translations = {
       sshErrUpdateRequired: 'Update Hermes on the remote host before connecting with Desktop SSH.',
       sshErrUnknown: 'SSH connection failed.'
     },
+    toolCredentials: {
+      search: 'Search tools, services or keys…',
+      savedFields: (count, total) => `Saved fields: ${count} / ${total}`,
+      notVerified: 'Saved values are not a connection test.',
+      noResults: 'No matching tools.',
+      gatewayName: 'Nous Tool Gateway',
+      localBrowserName: 'Local Browser',
+      descriptions: {
+        searchOnly: 'Web search.',
+        search: 'Web search and page extraction.',
+        firecrawl: 'Web search, scraping and cloud browsing.',
+        gateway: 'Shared routing for Nous subscriber tools.',
+        selfHostedSearch: 'Self-hosted web search.',
+        cloudBrowser: 'Cloud browser sessions.',
+        localBrowser: 'Choose Chrome or Lightpanda for local browsing.',
+        camofox: 'Anti-detection browser server.',
+        media: 'Image and video generation.',
+        images: 'Krea 2 image generation.',
+        voice: 'Speech transcription and text-to-speech.',
+        wakeWord: '“Hey Hermes” wake word detection.',
+        skillsHub: 'Skills Hub access and publishing.',
+        memory: 'Persistent agent memory.',
+        telemetry: 'Agent traces and observability.'
+      }
+    },
     keys: {
       loading: 'Loading API keys and credentials...',
       failedLoad: 'API keys failed to load',

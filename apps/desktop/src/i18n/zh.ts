@@ -998,6 +998,31 @@ export const zh: Translations = {
       sshErrUpdateRequired: '使用 Desktop SSH 连接前，请更新远程主机上的 Hermes。',
       sshErrUnknown: 'SSH 连接失败。'
     },
+    toolCredentials: {
+      search: '搜索工具、服务或密钥…',
+      savedFields: (count, total) => `已保存字段：${count} / ${total}`,
+      notVerified: '保存值不代表已通过连接测试。',
+      noResults: '没有匹配的工具。',
+      gatewayName: 'Nous 工具网关',
+      localBrowserName: '本地浏览器',
+      descriptions: {
+        searchOnly: '网页搜索。',
+        search: '网页搜索与内容提取。',
+        firecrawl: '网页搜索、抓取与云端浏览。',
+        gateway: 'Nous 订阅工具的共享路由设置。',
+        selfHostedSearch: '自托管网页搜索。',
+        cloudBrowser: '云端浏览器会话。',
+        localBrowser: '选择 Chrome 或 Lightpanda 进行本地浏览。',
+        camofox: '反检测浏览器服务器。',
+        media: '图像与视频生成。',
+        images: 'Krea 2 图像生成。',
+        voice: '语音转录与文本转语音。',
+        wakeWord: '“Hey Hermes”唤醒词检测。',
+        skillsHub: 'Skills Hub 访问与发布。',
+        memory: '智能体持久记忆。',
+        telemetry: '智能体追踪与可观测性。'
+      }
+    },
     keys: {
       loading: '正在加载 API 密钥和凭据...',
       failedLoad: 'API 密钥加载失败',
