@@ -61,9 +61,12 @@ function mountTrigger(editor: HTMLDivElement, items: Unstable_TriggerItem[]) {
 }
 
 describe('useComposerTrigger — slash anywhere in the prompt', () => {
-  it('offers a standing goal inside prose without offering unrelated app commands', () => {
-    const editor = mountEditor('Context first /go')
-    const goal = item('/goal', 'Commands')
+  it.each([
+    ['/go', '/goal'],
+    ['/goal', '/goal ']
+  ])('offers a standing goal inside prose for %s without offering unrelated app commands', (query, completion) => {
+    const editor = mountEditor(`Context first ${query}`)
+    const goal = item(completion, 'Commands')
     const { hook } = mountTrigger(editor, [goal, item('/model', 'Commands')])
 
     act(() => hook.result.current.refreshTrigger())

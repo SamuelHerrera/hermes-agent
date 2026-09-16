@@ -194,9 +194,10 @@ export function useComposerTrigger({
 
     // Skills and the standing-goal marker work inside prose. Other app
     // commands still require a leading invocation.
+    // Exact backend completions append a space to keep the CLI menu open.
     setTriggerItems(
       trigger.inline
-        ? items.filter(item => isSkillItem(item) || (item.metadata as { command?: string })?.command === '/goal')
+        ? items.filter(item => isSkillItem(item) || (item.metadata as { command?: string })?.command?.trim() === '/goal')
         : items
     )
   }, [trigger, triggerAdapter])
@@ -305,7 +306,10 @@ export function useComposerTrigger({
       return
     }
 
-    const serialized = hermesDirectiveFormatter.serialize(item)
+    const replacement = hermesDirectiveFormatter.serialize(item)
+    // The editor owns the separator after a slash chip; the backend's CLI
+    // completion suffix must not become part of the chip or hide its arg step.
+    const serialized = trigger.kind === '/' ? replacement.trimEnd() : replacement
     const starter = serialized.endsWith(':')
 
     // Tab on a folder walks INTO it instead of committing it: re-type the
