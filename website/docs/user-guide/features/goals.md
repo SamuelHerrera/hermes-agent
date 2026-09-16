@@ -53,6 +53,28 @@ What you'll see:
 4. **Loop fires if needed** — if `continue`, you'll see `↻ Continuing toward goal (1/20): <judge's reason>` and Hermes takes the next step automatically.
 5. **Terminates** — eventually you see either `✓ Goal achieved: <reason>` or `⏸ Goal paused — N/20 turns used`.
 
+## Setting goals in Desktop
+
+You can put `/goal` inside a message, not just at the start:
+
+```text
+Use the Browser Router project. /goal Build and test the macOS app.
+```
+
+The text after the marker becomes the standing goal. The preceding text stays
+in the message as context. A marker at the end uses the preceding message as
+the goal. Only one inline marker is accepted per message. Code examples and
+blockquotes are not executed. Goal controls such as `/goal pause` still belong
+at the beginning of a message.
+
+You can also ask the agent to set a goal in ordinary language. Desktop exposes
+the `session_goal` tool with `set`, `status`, `pause`, `resume`, and `clear`
+actions. It writes to the same session goal store as `/goal` and updates the
+goal indicator. The agent can set a goal during its current turn, and the
+normal continuation loop takes over when that turn finishes. This does not
+create a Kanban card or require computer use. Approval requirements for the
+work itself are unchanged.
+
 ## Commands
 
 | Command | What it does |

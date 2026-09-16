@@ -192,11 +192,13 @@ export function useComposerTrigger({
 
     const items = triggerAdapter.search(trigger.query)
 
-    // Mid-message only offers SKILLS. A built-in like `/model` or `/new` acts
-    // on the app, so it's meaningless as a reference inside prose — only a
-    // skill reads as "handle this part with X". Filtering here rather than in
-    // the fetcher keeps one completion source for both shapes.
-    setTriggerItems(trigger.inline ? items.filter(isSkillItem) : items)
+    // Skills and the standing-goal marker work inside prose. Other app
+    // commands still require a leading invocation.
+    setTriggerItems(
+      trigger.inline
+        ? items.filter(item => isSkillItem(item) || (item.metadata as { command?: string })?.command === '/goal')
+        : items
+    )
   }, [trigger, triggerAdapter])
 
   const triggerLoading =

@@ -61,6 +61,17 @@ function mountTrigger(editor: HTMLDivElement, items: Unstable_TriggerItem[]) {
 }
 
 describe('useComposerTrigger — slash anywhere in the prompt', () => {
+  it('offers a standing goal inside prose without offering unrelated app commands', () => {
+    const editor = mountEditor('Context first /go')
+    const goal = item('/goal', 'Commands')
+    const { hook } = mountTrigger(editor, [goal, item('/model', 'Commands')])
+
+    act(() => hook.result.current.refreshTrigger())
+    expect(hook.result.current.triggerItems).toEqual([goal])
+    act(() => hook.result.current.replaceTriggerWithChip(goal))
+    expect(composerPlainText(editor)).toBe('Context first /goal ')
+  })
+
   it('opens the completion list for a slash typed mid-message', () => {
     const editor = mountEditor('please run /cle')
     const { hook } = mountTrigger(editor, [item('/clean')])

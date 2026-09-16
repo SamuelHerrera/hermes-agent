@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { $goalsBySession, applyGoalStatusText, clearSessionGoal } from './goals'
+import { $gateway } from './gateway'
+import { $goalsBySession, applyGoalStatusText, clearSessionGoal, refreshSessionGoal } from './goals'
 
 describe('goal store', () => {
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
     $goalsBySession.set({})
   })
 
@@ -15,6 +17,19 @@ describe('goal store', () => {
       status: 'active',
       title: 'ship the feature'
     })
+  })
+
+  it('rehydrates the durable goal through the session-owned dispatcher', async () => {
+    const request = vi.fn().mockResolvedValue({
+      type: 'exec', output: '⏸ Goal (paused, 1/1 turns — turn budget exhausted (1/1)): saved objective'
+    })
+
+    vi.spyOn($gateway, 'get').mockReturnValue({ request } as unknown as ReturnType<typeof $gateway.get>)
+
+    await refreshSessionGoal('s1')
+
+    expect(request).toHaveBeenCalledWith('command.dispatch', { name: 'goal', arg: 'status', session_id: 's1' })
+    expect($goalsBySession.get().s1).toMatchObject({ status: 'paused', title: 'saved objective' })
   })
 
   it('keeps the current title for continuation and pause messages', () => {

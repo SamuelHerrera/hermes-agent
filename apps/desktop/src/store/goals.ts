@@ -90,13 +90,14 @@ function nextGoalFromText(text: string, previous?: SessionGoal): SessionGoal | n
     return { status: 'active', title: fromSet || fromActive || fromResume, updatedAt: now }
   }
 
-  const fromWaiting = goalTitleFromLine(line, /^⏳ Goal\s*\([^)]*(?:parked|active)[^)]*\):\s*(.+)$/)
+  const fromWaiting = goalTitleFromLine(line, /^⏳ Goal\s*\(.*?(?:parked|active).*?\):\s*(.+)$/)
 
   if (fromWaiting) {
     return { status: 'waiting', title: fromWaiting, updatedAt: now }
   }
 
-  const fromPaused = goalTitleFromLine(line, /^⏸ Goal(?:\s*\([^)]*\)| paused)?:\s*(.+)$/)
+  // Reasons can contain parentheses, e.g. "turn budget exhausted (1/1)".
+  const fromPaused = goalTitleFromLine(line, /^⏸ Goal(?:\s*\(.*?\)| paused)?:\s*(.+)$/)
 
   if (fromPaused) {
     return { status: 'paused', title: fromPaused, updatedAt: now }
@@ -169,7 +170,12 @@ export async function refreshSessionGoal(sid: string): Promise<void> {
   }
 
   try {
-    const result = await gateway.request<{ output?: string }>('slash.exec', { command: 'goal status', session_id: sid })
+    // The slash worker owns a different CLI session. Read the same durable
+    // goal as command execution and the agent tool, through the gateway.
+    const result = await gateway.request<{ output?: string }>('command.dispatch', {
+      name: 'goal', arg: 'status', session_id: sid
+    })
+
     applyGoalStatusText(sid, result?.output ?? '')
   } catch {
     // Best-effort: older gateways or detached sessions simply won't hydrate it.

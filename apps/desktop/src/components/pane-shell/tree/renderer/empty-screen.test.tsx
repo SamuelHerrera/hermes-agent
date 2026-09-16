@@ -1,8 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, expect, it } from 'vitest'
 
-import { registry } from '@/contrib/registry'
 import { EmptyWorkspace } from '@/components/pane-shell/empty-workspace'
+import { registry } from '@/contrib/registry'
 import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { group, split } from '../model'

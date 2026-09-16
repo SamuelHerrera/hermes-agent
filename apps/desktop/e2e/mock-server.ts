@@ -421,6 +421,22 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
             message => typeof message?.content === 'string' && message.content.includes(CORRECTION_SWITCH_TRIGGER),
           )
 
+          if (userText.includes('E2E_SESSION_GOAL_TOOL')) {
+            const calls = messages.flatMap(message => message.tool_calls ?? [])
+              .filter(call => call.function?.name === 'session_goal')
+            const result = messages.find(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
+            let saved = false
+            try { saved = JSON.parse(String(result?.content)).success === true } catch { /* error is not success */ }
+            const turn: ScriptedTurn = result
+              ? { text: saved ? 'Session goal tool persisted the goal.' : 'Session goal tool failed.' }
+              : { text: 'Setting the standing goal directly.', toolCalls: [{ name: 'session_goal', args: {
+                action: 'set', text: 'Verify the agent-created standing goal', max_turns: 1,
+              } }] }
+            if (stream) streamScriptedTurn(res, model, turn)
+            else nonStreamingScriptedTurn(res, model, turn)
+            return
+          }
+
           if (userText.includes('E2E_SUDO_REOPEN')) {
             const calls = messages.flatMap(message => message.tool_calls ?? [])
               .filter(call => call.function?.name === 'e2e_sudo_prompt')

@@ -8300,6 +8300,7 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
                     queued["text"],
                     image_paths=queued["image_paths"],
                     queued_prompt_generation=queue_generation,
+                    parse_inline_goal=True,
                 )
             else:
                 _run_prompt_submit(
@@ -8308,6 +8309,7 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
                     session,
                     queued["text"],
                     queued_prompt_generation=queue_generation,
+                    parse_inline_goal=True,
                 )
     except Exception as exc:
         print(
@@ -10575,6 +10577,7 @@ def _run_prompt_submit(
     display_metadata: dict | None = None,
     image_paths: list[str] | None = None,
     queued_prompt_generation: int | None = None,
+    parse_inline_goal: bool = False,
 ) -> None:
     with session["history_lock"]:
         if (
@@ -10679,6 +10682,22 @@ def _run_prompt_submit(
             cols = session.get("cols", 80)
             streamer = make_stream_renderer(cols)
             prompt = text
+
+            # Parse only the user's own text, before expanding files/URLs/skills.
+            # This runs when a queued turn actually starts, not on receipt while
+            # another turn still owns the goal. Profile/session context is bound.
+            from hermes_cli.inline_goal import extract_inline_goal
+
+            inline_goal = extract_inline_goal(prompt) if parse_inline_goal else None
+            if inline_goal is not None:
+                from tools.session_goal_tool import session_goal
+
+                goal_text, goal_prompt = inline_goal
+                goal_result = json.loads(session_goal(action="set", text=goal_text, notify=False))
+                if not goal_result.get("success"):
+                    raise RuntimeError(goal_result.get("error") or "Could not set the goal")
+                prompt = goal_prompt
+                _emit("status.update", sid, {"kind": "goal", "text": goal_result["status_text"]})
 
             if isinstance(prompt, str) and "@" in prompt:
                 from agent.context_references import preprocess_context_references
