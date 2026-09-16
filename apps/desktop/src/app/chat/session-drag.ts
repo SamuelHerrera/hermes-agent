@@ -10,7 +10,8 @@
  *     that edge (the zone sheet morphs to the half);
  *   - a chat's text input → link: insert an `@session` chip into that
  *     surface's composer (ChatDropOverlay owns the input-only visual);
- *   - anything else (chat center, sidebar, terminal, gutters) → deny.
+ *   - a chat zone's CENTER → stack into that pane, unless already there;
+ *   - anything else (sidebar, terminal, gutters) → deny.
  *
  * Zones that don't host a chat surface are NOT targets — the overlay never
  * lights them, so a release there must not commit either (one truth).
@@ -28,7 +29,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 
 import { queryAllVisible } from '@/components/pane-shell/pane-visibility'
-import { findGroup } from '@/components/pane-shell/tree/model'
+import { findGroup, findGroupOfPane } from '@/components/pane-shell/tree/model'
 import {
   type DoubleTapContext,
   rectContains,
@@ -82,8 +83,7 @@ function snapshotSurfaces(): SurfaceSnapshot[] {
 
 /** A session may land in any zone hosting a MAIN tile — another chat stack, a
  *  Browser tile, a page — never the sidebar/terminal zones. Returns the pane a
- *  stack anchors to, plus whether the zone hosts a CHAT surface (only those
- *  reserve their center; a preview zone's center stacks). */
+ *  stack anchors to, plus whether the zone hosts a CHAT surface. */
 function tileZoneHost(groupId: string): { chat: boolean; pane: string } | null {
   const tree = $layoutTree.get()
   const panes = tree ? (findGroup(tree, groupId)?.panes ?? []) : []
@@ -115,6 +115,7 @@ export function startSessionDrag(
   let composers: ZoneRect[] = []
   let inputs: ZoneRect[] = []
   let zoneHost = new Map<string, ReturnType<typeof tileZoneHost>>()
+  let sourceGroup: string | undefined
 
   // Commit intent, updated per resolved move (the machinery flushes the final
   // move before commit, so these always match the released-at position).
@@ -141,6 +142,9 @@ export function startSessionDrag(
       composers = queryAllVisible('[data-slot="composer-root"]').map(snapRect)
       inputs = queryAllVisible('[data-slot="composer-rich-input"][contenteditable="true"]').map(snapRect)
       zoneHost = new Map(zones.map(zone => [zone.id, tileZoneHost(zone.id)]))
+      const tree = $layoutTree.get()
+      const sourcePane = source?.closest<HTMLElement>('[data-tree-tab]')?.dataset.treeTab ?? `session-tile:${payload.id}`
+      sourceGroup = tree ? findGroupOfPane(tree, sourcePane)?.id : undefined
       source?.style.setProperty('opacity', '0.45')
       // The same sentinel the zone overlay + chat surfaces key off — the
       // whole drop language (sheets, pills, caret, link overlay) lights up.
@@ -154,6 +158,8 @@ export function startSessionDrag(
     },
 
     resolveMove(x, y): DropHint | null {
+      split = null
+      link = null
       const zone = zones.find(z => rectContains(z.rect, x, y))
       const host = zone ? zoneHost.get(zone.id) : null
 
@@ -177,27 +183,28 @@ export function startSessionDrag(
         return { kind: 'group', groupId: zone.id, groupIds: [zone.id], pos: 'center', stack }
       }
 
-      // Only the editable text area accepts references. Keep the surrounding
-      // composer out of radial edge splits too: controls aren't dock targets.
-      const pos = composers.some(rect => rectContains(rect, x, y)) ? 'center' : subZonePosition(zones, zone.id, x, y)
       const surface = surfaces.find(s => rectContains(s.rect, x, y))
 
-      if (pos === 'center' && host.chat) {
-        split = null
-        link = surface && inputs.some(rect => rectContains(rect, x, y)) ? surface.composerTarget : null
+      if (surface && inputs.some(rect => rectContains(rect, x, y))) {
+        link = surface.composerTarget
 
-        if (!link) {
-          return null
-        }
-      } else if (pos === 'center') {
-        // A preview/page zone has no composer to link to — its center stacks
-        // the session as a tab, same as dropping on the strip's tail.
-        split = { anchor: host.pane, pos: 'center' }
-        link = null
-      } else {
-        split = { anchor: surface?.anchor ?? host.pane, pos }
-        link = null
+        return { kind: 'group', groupId: zone.id, groupIds: [zone.id], pos: 'center', composerTarget: link }
       }
+
+      // Composer controls and disabled inputs aren't docking targets.
+      if (composers.some(rect => rectContains(rect, x, y))) {
+        return null
+      }
+
+      const pos = subZonePosition(zones, zone.id, x, y)
+
+      // Dropping into the same pane's body must not reorder/activate a tab or
+      // detach the permanent workspace. Explicit strip reordering still works.
+      if (pos === 'center' && sourceGroup === zone.id) {
+        return null
+      }
+
+      split = { anchor: surface?.anchor ?? host.pane, pos }
 
       return { kind: 'group', groupId: zone.id, groupIds: [zone.id], pos }
     },

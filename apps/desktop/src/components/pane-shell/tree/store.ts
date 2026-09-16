@@ -1390,6 +1390,8 @@ export function mirrorLayoutTree() {
 }
 
 export interface DropHint {
+  /** Exact text input accepting a session reference; absent for docking. */
+  composerTarget?: string
   kind: 'group' | 'screen'
   /** Numbered tabbed screen/workspace target while dragging over the titlebar chips. */
   screenId?: string
@@ -1416,13 +1418,10 @@ export const $dropHint = atom<DropHint | null>(null)
  */
 export const $sessionTileDragging = computed($treeDragging, dragging => dragging === SESSION_TILE_DRAG)
 
-/** True while a session drag aims at a zone EDGE (a tile split) or a tab
- *  strip (a stack) — the moments the chat surfaces' "link to chat" overlay
- *  must stand down. */
-export const $sessionTileEdgeHover = computed(
+/** Only the input under the pointer may advertise a reference drop. */
+export const $sessionTileLinkTarget = computed(
   [$treeDragging, $dropHint],
-  (dragging, hint) =>
-    dragging === SESSION_TILE_DRAG && ((hint?.pos !== undefined && hint.pos !== 'center') || hint?.stack !== undefined)
+  (dragging, hint) => dragging === SESSION_TILE_DRAG ? hint?.composerTarget ?? null : null
 )
 
 /**

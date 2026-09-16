@@ -2,10 +2,12 @@ import { useStore } from '@nanostores/react'
 import { useRef } from 'react'
 
 import type { DragKind } from '@/app/chat/hooks/use-file-drop-zone'
-import { $sessionTileDragging, $sessionTileEdgeHover } from '@/components/pane-shell/tree/store'
+import { $sessionTileLinkTarget } from '@/components/pane-shell/tree/store'
 import { DROP_SHEET_BLUR_CLASS, DROP_SHEET_CLASS } from '@/components/ui/drop-affordance'
 import { useI18n } from '@/i18n'
 import { cn } from '@/lib/utils'
+
+import { useComposerScope } from './composer/scope'
 
 /**
  * Full-bleed affordance for files over the chat, or sessions over the text input.
@@ -52,8 +54,8 @@ export function ChatDropOverlay({ kind }: { kind: DragKind }) {
 
 /** Keep drag subscriptions on the affordance, not the whole chat/composer. */
 export function SessionReferenceDropOverlay() {
-  const dragging = useStore($sessionTileDragging)
-  const edgeHover = useStore($sessionTileEdgeHover)
+  const target = useStore($sessionTileLinkTarget)
+  const scope = useComposerScope()
 
-  return <ChatDropOverlay kind={dragging && !edgeHover ? 'session' : null} />
+  return <ChatDropOverlay kind={target === scope.target ? 'session' : null} />
 }

@@ -175,6 +175,7 @@ export const rectContains = (rect: ZoneRect, x: number, y: number, pad = 0) =>
 const sameHint = (a: DropHint | null, b: DropHint | null) =>
   a?.kind === b?.kind &&
   a?.groupId === b?.groupId &&
+  a?.composerTarget === b?.composerTarget &&
   a?.screenId === b?.screenId &&
   a?.pos === b?.pos &&
   a?.stack?.before === b?.stack?.before &&

@@ -2,7 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { group } from '@/components/pane-shell/tree/model'
-import { $layoutTree } from '@/components/pane-shell/tree/store'
+import { $dropHint, $layoutTree } from '@/components/pane-shell/tree/store'
 import { openSessionTile } from '@/store/session-states'
 
 import { requestComposerInsertRefs } from './composer/focus'
@@ -70,7 +70,8 @@ function dragTo(
   source: HTMLElement,
   x: number,
   y: number,
-  opts?: Parameters<typeof startSessionDrag>[2]
+  opts?: Parameters<typeof startSessionDrag>[2],
+  release = true
 ) {
   startSessionDrag({ id: 'dragged', profile: 'default', title: 'Dragged chat' }, {
     button: 0,
@@ -81,7 +82,10 @@ function dragTo(
   } as unknown as ReactPointerEvent<HTMLElement>, opts)
 
   window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: x, clientY: y }))
-  window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: x, clientY: y }))
+
+  if (release) {
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: x, clientY: y }))
+  }
 }
 
 beforeEach(() => {
@@ -89,6 +93,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true }))
   document.body.innerHTML = ''
   $layoutTree.set(null)
 })
@@ -111,13 +116,46 @@ describe('session drop targeting across stacked tabs', () => {
     expect(requestComposerInsertRefs).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['transcript center', 500, 400],
-    ['composer toolbar', 500, 765]
-  ] as const)('does not insert a reference over the %s', (_name, x, y) => {
+  it('stacks a chat into the target pane when dropped in the transcript center', () => {
     const row = mountStackedTabs()
 
-    dragTo(row, x, y)
+    dragTo(row, 500, 400)
+
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+    expect(openSessionTile).toHaveBeenCalledWith('dragged', 'center', 'session-tile:visible', undefined)
+  })
+
+  it('does nothing when a tab drops in its own pane center', () => {
+    const row = mountStackedTabs()
+    row.dataset.treeTab = 'workspace'
+    const onSplit = vi.fn()
+
+    dragTo(row, 500, 400, { onSplit })
+
+    expect(onSplit).not.toHaveBeenCalled()
+    expect(openSessionTile).not.toHaveBeenCalled()
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+  })
+
+  it('advertises a reference only while hovering the actual target input', async () => {
+    const row = mountStackedTabs()
+    dragTo(row, 500, 740, undefined, false)
+    await vi.waitFor(() => expect($dropHint.get()).toMatchObject({ composerTarget: 'tile:visible' }))
+
+    window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 500, clientY: 400 }))
+    await vi.waitFor(() => expect($dropHint.get()).toMatchObject({ pos: 'center' }))
+    await vi.waitFor(() => expect($dropHint.get()).not.toHaveProperty('composerTarget'))
+
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 400 }))
+    expect(requestComposerInsertRefs).not.toHaveBeenCalled()
+    expect(openSessionTile).toHaveBeenCalledWith('dragged', 'center', 'session-tile:visible', undefined)
+    expect($dropHint.get()).toBeNull()
+  })
+
+  it('does not insert a reference or dock over the composer toolbar', () => {
+    const row = mountStackedTabs()
+
+    dragTo(row, 500, 765)
 
     expect(requestComposerInsertRefs).not.toHaveBeenCalled()
     expect(openSessionTile).not.toHaveBeenCalled()

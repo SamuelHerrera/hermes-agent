@@ -706,8 +706,8 @@ function ZoneDropOverlay({ node }: { node: GroupNode }) {
   }
 
   // A session drag (sidebar row) reuses this exact overlay — over ANY zone
-  // that hosts a MAIN tile (stack into its tabs / split its edges); only a
-  // CHAT zone only links from its text input (the composer owns that visual).
+  // that hosts a MAIN tile (stack in its center / split its edges). A chat
+  // only links from its text input (the composer owns that visual).
   // Standing side chrome — the sidebar, files, terminal — hosts no
   // main tile, so a session can't land there: those zones stay DARK rather
   // than painting an idle outline the drop would only refuse. Same test
@@ -740,9 +740,9 @@ function ZoneDropOverlay({ node }: { node: GroupNode }) {
   // Sub-positions only exist for a single-zone target (a Shift-span merges).
   const pos = primary && !multi ? (hint?.pos ?? 'center') : 'center'
 
-  // A chat's center is not a target; only its text input advertises linking.
-  // Don't paint an idle full-chat sheet suggesting a transcript drop works.
-  if (sessionDrag && chatZone && (!active || pos === 'center')) {
+  // Show the actual docking target, not idle chat sheets. A reference hover
+  // belongs exclusively to the targeted input, never to the whole zone.
+  if (sessionDrag && (!active || hint?.composerTarget !== undefined)) {
     return null
   }
 
