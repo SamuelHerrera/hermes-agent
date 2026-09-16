@@ -6299,6 +6299,85 @@ def _existing_tool_names() -> List[str]:
     return names
 
 
+def probe_live_mcp_server(name: str, *, details: Optional[dict] = None) -> Optional[List[Tuple[str, str]]]:
+    """List tools for an MCP server already owned by this Hermes backend.
+
+    Dashboard/Desktop status probes run inside the same backend process that
+    owns long-lived MCP connections.  For singleton stdio servers (notably the
+    Chrome Bridge broker) spawning a second temporary probe conflicts with the
+    live server's socket and surfaces a false "already active" error.  Prefer
+    this helper before falling back to an out-of-process-style temporary probe.
+
+    Returns ``None`` when the named server is not currently connected in this
+    process, so callers can preserve the existing spawn-and-test behaviour.
+    """
+    with _lock:
+        server = _servers.get(name)
+    if server is None or getattr(server, "session", None) is None:
+        return None
+
+    async def _probe_live():
+        tools_found: List[Tuple[str, str]] = []
+        async with server._rpc_lock:
+            for tool in getattr(server, "_tools", []) or []:
+                desc = getattr(tool, "description", "") or ""
+                if len(desc) > 80:
+                    desc = desc[:77] + "..."
+                tools_found.append((tool.name, desc))
+
+            if details is not None and any(tool_name == "chrome_bridge_status" for tool_name, _ in tools_found):
+                try:
+                    status_result = await server.session.call_tool(
+                        "chrome_bridge_status", arguments={}
+                    )
+                    for item in getattr(status_result, "content", []) or []:
+                        text = getattr(item, "text", None)
+                        if not isinstance(text, str):
+                            continue
+                        parsed = json.loads(text)
+                        if isinstance(parsed, dict):
+                            details["chrome_bridge_status"] = parsed
+                            break
+                except Exception:
+                    # Status is an optional health probe; a live MCP connection
+                    # still counts as usable if this specific tool is absent or
+                    # temporarily fails.
+                    pass
+
+            advertised_caps = getattr(
+                getattr(server, "initialize_result", None),
+                "capabilities",
+                None,
+            )
+            tools_filter = getattr(server, "_config", {}) or {}
+            tools_filter = tools_filter.get("tools") or {}
+            prompts_enabled = _parse_boolish(tools_filter.get("prompts"), default=True)
+            resources_enabled = _parse_boolish(tools_filter.get("resources"), default=True)
+
+            def _advertises(cap_attr: str) -> bool:
+                if advertised_caps is None:
+                    return True
+                return getattr(advertised_caps, cap_attr, None) is not None
+
+            if details is not None and prompts_enabled and _advertises("prompts"):
+                try:
+                    result = await server.session.list_prompts()
+                    details["prompts"] = len(result.prompts)
+                except Exception:
+                    pass
+            if details is not None and resources_enabled and _advertises("resources"):
+                try:
+                    result = await server.session.list_resources()
+                    details["resources"] = len(result.resources)
+                except Exception:
+                    pass
+
+        return tools_found
+
+    _mark_server_call_started(server)
+    return _run_on_mcp_loop(_probe_live, timeout=getattr(server, "tool_timeout", _DEFAULT_TOOL_TIMEOUT))
+
+
 def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> List[str]:
     """Register tools from an already-connected server into the registry.
 

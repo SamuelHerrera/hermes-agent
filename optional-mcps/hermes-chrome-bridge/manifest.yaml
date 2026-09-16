@@ -22,13 +22,10 @@ auth:
   type: none
 
 post_install: |
-  The MCP server is configured, but Chrome control remains disabled until you
-  install and explicitly authorize the local extension/native host once.
+  Chrome Bridge assets and the native host were installed for this Hermes
+  profile. Chrome control remains disabled until you authorize the extension.
 
-  Run:
-    npx -y --package @hermes/chrome-bridge@0.1.0 hermes-chrome-bridge-setup install --hermes-home "${HERMES_HOME}"
-
-  Then open chrome://extensions, enable Developer mode, choose Load unpacked,
+  Open chrome://extensions, enable Developer mode, choose Load unpacked,
   and select:
     ${HERMES_HOME}/chrome-bridge/extension
 

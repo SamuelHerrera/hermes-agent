@@ -205,6 +205,80 @@ class TestInstall:
         assert servers["demo"]["args"] == ["-y", "demo-mcp"]
         assert servers["demo"]["enabled"] is True
 
+    def test_chrome_bridge_prefers_desktop_shipped_package(
+        self, catalog_dir, monkeypatch, tmp_path
+    ):
+        _write_manifest(catalog_dir, "hermes-chrome-bridge", _basic_manifest("hermes-chrome-bridge"))
+        shipped = (
+            tmp_path
+            / "resources"
+            / "chrome-bridge"
+            / "node_modules"
+            / "@hermes"
+            / "chrome-bridge"
+        )
+        (shipped / "dist" / "native").mkdir(parents=True)
+        (shipped / "dist" / "server.js").write_text("", encoding="utf-8")
+        (shipped / "dist" / "native" / "setup.js").write_text("", encoding="utf-8")
+        monkeypatch.setenv("HERMES_DESKTOP_RESOURCES", str(tmp_path / "resources"))
+
+        from hermes_cli.mcp_catalog import _build_server_config
+
+        cfg = _build_server_config(_entry("hermes-chrome-bridge"), None)
+        assert cfg["command"] == "node"
+        assert cfg["args"][:2] == [str(shipped / "dist" / "server.js"), "--hermes-home"]
+
+    def test_chrome_bridge_install_runs_setup_for_active_profile(
+        self, catalog_dir, monkeypatch, tmp_path
+    ):
+        _write_manifest(catalog_dir, "hermes-chrome-bridge", _basic_manifest("hermes-chrome-bridge"))
+        shipped = (
+            tmp_path
+            / "resources"
+            / "chrome-bridge"
+            / "node_modules"
+            / "@hermes"
+            / "chrome-bridge"
+        )
+        (shipped / "dist" / "native").mkdir(parents=True)
+        (shipped / "dist" / "server.js").write_text("", encoding="utf-8")
+        (shipped / "dist" / "native" / "setup.js").write_text("", encoding="utf-8")
+        monkeypatch.setenv("HERMES_DESKTOP_RESOURCES", str(tmp_path / "resources"))
+
+        from hermes_cli import mcp_catalog
+        from hermes_cli.config import load_config
+        hermes_home = tmp_path / "hermes-home"
+        monkeypatch.setattr(mcp_catalog, "get_hermes_home", lambda: hermes_home)
+
+        calls = []
+
+        class _Proc:
+            returncode = 0
+            stdout = '{"extensionDirectory":"/tmp/ext"}'
+            stderr = ""
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return _Proc()
+
+        monkeypatch.setattr(mcp_catalog.subprocess, "run", fake_run)
+        mcp_catalog.install_entry(_entry("hermes-chrome-bridge"), enable=True)
+
+        server = load_config()["mcp_servers"]["hermes-chrome-bridge"]
+        assert server["command"] == "node"
+        assert calls == [
+            (
+                [
+                    "node",
+                    str(shipped / "dist" / "native" / "setup.js"),
+                    "install",
+                    "--hermes-home",
+                    str(hermes_home),
+                ],
+                {"text": True, "capture_output": True, "env": mcp_catalog.os.environ.copy()},
+            )
+        ]
+
     def test_post_install_expands_active_hermes_home(
         self, catalog_dir, capsys, monkeypatch, tmp_path
     ):

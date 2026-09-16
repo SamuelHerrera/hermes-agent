@@ -197,6 +197,41 @@ class TestProfileScopedMcp:
             "nativeConnected": False,
         }
 
+    def test_mcp_test_uses_live_backend_server_before_spawning_probe(
+        self, client, isolated_profiles, monkeypatch
+    ):
+        import hermes_cli.mcp_config as mcp_config
+
+        (isolated_profiles["default"] / "config.yaml").write_text(
+            "mcp_servers:\n  hermes-chrome-bridge:\n    command: node\n",
+            encoding="utf-8",
+        )
+
+        def fake_live_probe(name, details=None):
+            assert name == "hermes-chrome-bridge"
+            assert details is not None
+            details["chrome_bridge_status"] = {
+                "bridgeConnected": True,
+                "nativeConnected": True,
+            }
+            return [("chrome_bridge_status", "status")]
+
+        def forbidden_spawn_probe(*_args, **_kwargs):
+            raise AssertionError("dashboard test endpoint spawned a duplicate MCP server")
+
+        monkeypatch.setattr(mcp_config, "_probe_live_server", fake_live_probe)
+        monkeypatch.setattr(mcp_config, "_probe_single_server", forbidden_spawn_probe)
+
+        response = client.post("/api/mcp/servers/hermes-chrome-bridge/test")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is True
+        assert body["health"]["chromeBridge"] == {
+            "bridgeConnected": True,
+            "nativeConnected": True,
+        }
+
 
 class TestProfileScopedModel:
     def test_model_set_main_scoped(self, client, isolated_profiles):

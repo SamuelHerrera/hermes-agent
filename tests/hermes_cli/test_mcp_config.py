@@ -324,6 +324,34 @@ class TestMcpTest:
         assert "Connected" in out
         assert "Chrome bridge: disconnected" in out
 
+    def test_test_reuses_live_server_when_available(self, tmp_path, capsys, monkeypatch):
+        _seed_config(tmp_path, {
+            "hermes-chrome-bridge": {"command": "npx", "args": ["bridge@1.0.0"]},
+        })
+
+        def mock_live_probe(name, **kwargs):
+            kwargs["details"]["chrome_bridge_status"] = {
+                "bridgeConnected": True,
+                "nativeConnected": True,
+            }
+            return [("chrome_bridge_status", "Status")]
+
+        def forbidden_spawn_probe(*_args, **_kwargs):
+            raise AssertionError("mcp test spawned a duplicate server")
+
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_live_server", mock_live_probe
+        )
+        monkeypatch.setattr(
+            "hermes_cli.mcp_config._probe_single_server", forbidden_spawn_probe
+        )
+        from hermes_cli.mcp_config import cmd_mcp_test
+
+        cmd_mcp_test(_make_args(name="hermes-chrome-bridge"))
+        out = capsys.readouterr().out
+        assert "Connected" in out
+        assert "Chrome bridge: connected" in out
+
     def test_probe_uses_configured_connect_timeout(self, monkeypatch):
         """OAuth-capable probes must not hard-code a short 30s timeout."""
         import asyncio

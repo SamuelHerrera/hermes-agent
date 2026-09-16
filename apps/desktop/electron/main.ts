@@ -8995,6 +8995,9 @@ async function startHermes() {
           // Marks this dashboard backend as desktop-spawned so it runs the cron
           // scheduler tick loop (the gateway isn't running under the app).
           HERMES_DESKTOP: '1',
+          // Lets the backend prefer MCP packages shipped inside the Desktop app
+          // (for example Chrome Bridge) over network `npx` fallbacks.
+          HERMES_DESKTOP_RESOURCES: process.resourcesPath,
           // Our PID so the backend's parent-death watchdog self-exits if we die
           // uncleanly (crash / SIGKILL / update handoff) instead of leaking a
           // serving backend + its MCP child subtree. See web_server.py

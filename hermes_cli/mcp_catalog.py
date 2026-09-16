@@ -27,6 +27,7 @@ See references/mcp-catalog.md (this repo's skill) for the manifest schema.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -51,6 +52,7 @@ _MANIFEST_VERSION = 1
 
 # Substituted at install time inside `transport.command` / `transport.args`.
 _INSTALL_DIR_VAR = "${INSTALL_DIR}"
+_CHROME_BRIDGE_NAME = "hermes-chrome-bridge"
 
 
 # ─── Data classes ────────────────────────────────────────────────────────────
@@ -480,6 +482,90 @@ def _expand_install_dir(value: str, install_dir: Optional[Path]) -> str:
     return value.replace(_INSTALL_DIR_VAR, str(install_dir))
 
 
+def _chrome_bridge_package_roots() -> List[Path]:
+    """Candidate package roots for the shipped Chrome Bridge package.
+
+    Desktop builds stage a self-contained npm install under
+    ``resources/chrome-bridge/node_modules/@hermes/chrome-bridge`` and pass the
+    resources directory to their backend process. Source/dev runs can use the
+    workspace package once it has been built. Falling back to the catalog's npx
+    transport keeps plain CLI installs working when no shipped package exists.
+    """
+    roots: List[Path] = []
+    resources = os.environ.get("HERMES_DESKTOP_RESOURCES")
+    if resources:
+        roots.append(
+            Path(resources)
+            / "app.asar.unpacked"
+            / "dist"
+            / "chrome-bridge"
+            / "node_modules"
+            / "@hermes"
+            / "chrome-bridge"
+        )
+        roots.append(
+            Path(resources)
+            / "chrome-bridge"
+            / "node_modules"
+            / "@hermes"
+            / "chrome-bridge"
+        )
+    roots.append(Path(__file__).resolve().parents[1] / "packages" / "hermes-chrome-bridge")
+    return roots
+
+
+def _resolve_chrome_bridge_package_root() -> Optional[Path]:
+    for root in _chrome_bridge_package_roots():
+        if (root / "dist" / "server.js").is_file() and (root / "dist" / "native" / "setup.js").is_file():
+            return root
+    return None
+
+
+def _chrome_bridge_server_config_from_shipped_package(package_root: Path) -> dict:
+    return {
+        "command": "node",
+        "args": [
+            str(package_root / "dist" / "server.js"),
+            "--hermes-home",
+            str(get_hermes_home()),
+        ],
+    }
+
+
+def _run_chrome_bridge_setup(package_root: Optional[Path]) -> None:
+    """Install extension assets + native host for the active Hermes profile."""
+    hermes_home = str(get_hermes_home())
+    if package_root is not None:
+        command = "node"
+        args = [str(package_root / "dist" / "native" / "setup.js"), "install", "--hermes-home", hermes_home]
+    else:
+        # Fallback for CLI-only installs that do not have the Desktop-shipped
+        # package staged locally yet.
+        command = "npx"
+        args = [
+            "-y",
+            "--package",
+            "@hermes/chrome-bridge@0.1.0",
+            "hermes-chrome-bridge-setup",
+            "install",
+            "--hermes-home",
+            hermes_home,
+        ]
+
+    print(color("  Installing Chrome Bridge extension assets and native host...", Colors.CYAN))
+    env = os.environ.copy()
+    proc = subprocess.run([command, *args], text=True, capture_output=True, env=env)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise CatalogError(
+            "Chrome Bridge setup failed" + (f": {detail}" if detail else "")
+        )
+    output = (proc.stdout or "").strip()
+    if output:
+        for line in output.splitlines():
+            print(color(f"  {line}", Colors.DIM))
+
+
 def _prompt_env_vars(specs: List[EnvVarSpec]) -> Dict[str, str]:
     """Walk the env spec list, prompting the user for each. Writes secrets and
     non-secrets alike to ~/.hermes/.env via save_env_value()."""
@@ -509,6 +595,11 @@ def _build_server_config(
 ) -> dict:
     """Translate a manifest into the ``mcp_servers.<name>`` block format used
     by hermes_cli/mcp_config.py."""
+    if entry.name == _CHROME_BRIDGE_NAME:
+        package_root = _resolve_chrome_bridge_package_root()
+        if package_root is not None:
+            return _chrome_bridge_server_config_from_shipped_package(package_root)
+
     cfg: dict = {}
     t = entry.transport
     if t.type == "stdio":
@@ -789,6 +880,9 @@ def install_entry(entry: CatalogEntry, *, enable: bool = True) -> None:
         raise CatalogError(
             f"catalog entry '{entry.name}' rejected: suspicious command/args configuration"
         )
+
+    if entry.name == _CHROME_BRIDGE_NAME:
+        _run_chrome_bridge_setup(_resolve_chrome_bridge_package_root())
 
     # ── Probe + tool selection ──────────────────────────────────────────
     _apply_tool_selection(entry, prior_selection=prior_selection)

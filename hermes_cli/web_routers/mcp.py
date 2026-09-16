@@ -161,6 +161,7 @@ async def test_mcp_server(name: str, profile: Optional[str] = None):
     from hermes_cli.mcp_config import (
         _get_mcp_servers,
         _oauth_tokens_present,
+        _probe_live_server,
         _probe_single_server,
     )
 
@@ -171,6 +172,9 @@ async def test_mcp_server(name: str, profile: Optional[str] = None):
     servers = await asyncio.to_thread(_read)
     if name not in servers:
         raise HTTPException(status_code=404, detail=f"Server '{name}' not found")
+
+    from hermes_constants import get_hermes_home
+    process_home = str(get_hermes_home().expanduser().resolve(strict=False))
 
     details: Dict[str, Any] = {}
     # An `auth: oauth` server that serves tools/list anonymously would probe OK
@@ -190,7 +194,10 @@ async def test_mcp_server(name: str, profile: Optional[str] = None):
         # contextvar provides (copied into this to_thread worker; and
         # _run_on_mcp_loop re-wraps it onto the MCP event-loop thread).
         with _config_profile_scope(profile):
-            tools = _probe_single_server(name, servers[name], details=details)
+            scoped_home = str(get_hermes_home().expanduser().resolve(strict=False))
+            tools = _probe_live_server(name, details=details) if scoped_home == process_home else None
+            if tools is None:
+                tools = _probe_single_server(name, servers[name], details=details)
             token_present = _oauth_tokens_present(name) if needs_oauth_token else True
             return tools, token_present
 

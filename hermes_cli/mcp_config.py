@@ -397,6 +397,15 @@ def _probe_single_server(
     return tools_found
 
 
+def _probe_live_server(name: str, *, details: Optional[dict] = None) -> Optional[List[Tuple[str, str]]]:
+    """Probe a server already connected by this Hermes backend, if present."""
+    try:
+        from tools.mcp_tool import probe_live_mcp_server
+    except Exception:
+        return None
+    return probe_live_mcp_server(name, details=details)
+
+
 def _oauth_tokens_present(name: str) -> bool:
     """Return True if an OAuth token file exists on disk for ``name``.
 
@@ -784,7 +793,9 @@ def cmd_mcp_test(args):
     start = time.monotonic()
     details: Dict[str, Any] = {}
     try:
-        tools = _probe_single_server(name, cfg, details=details)
+        tools = _probe_live_server(name, details=details)
+        if tools is None:
+            tools = _probe_single_server(name, cfg, details=details)
         elapsed_ms = (time.monotonic() - start) * 1000
     except Exception as exc:
         elapsed_ms = (time.monotonic() - start) * 1000

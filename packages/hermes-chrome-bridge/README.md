@@ -82,7 +82,12 @@ hermes mcp install hermes-chrome-bridge
 hermes mcp test hermes-chrome-bridge
 ```
 
-The install output prints the profile-aware setup command and unpacked-extension path. `hermes mcp test` distinguishes MCP transport connectivity from the extension/native-host connection and reports the latter as connected or disconnected.
+The install command configures the MCP server, installs the extension assets into
+the active profile's `<HERMES_HOME>/chrome-bridge/extension`, and registers the
+Chrome native-messaging host. The user still must load/enable the extension in
+Chrome and click **Connect**. `hermes mcp test` distinguishes MCP transport
+connectivity from the extension/native-host connection and reports the latter as
+connected or disconnected.
 
 Other MCP hosts can configure the built server directly with the same explicit profile home:
 

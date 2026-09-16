@@ -288,6 +288,8 @@ function launchFresh() {
 //   - node-pty IS shipped inside app.asar.unpacked/dist/node_modules/node-pty
 //     with package.json + lib/ + at least one .node binary (the renderer's
 //     integrated terminal needs this; see Phase 1F.6).
+//   - Chrome Bridge IS shipped as an app resource so MCP install can configure
+//     it without fetching from npm.
 //   - The renderer's dist/index.html is reachable (either unpacked or
 //     inside app.asar).
 function validateBundle() {
@@ -355,6 +357,26 @@ function validateBundle() {
       .find(exists)
     if (!spawnHelper) {
       die(`Missing node-pty spawn-helper (required on darwin) in: ${nativeBinaryDirs.join(', ')}`)
+    }
+  }
+
+  const chromeBridgeRoot = path.join(
+    APP.resourcesPath,
+    'app.asar.unpacked',
+    'dist',
+    'chrome-bridge',
+    'node_modules',
+    '@hermes',
+    'chrome-bridge'
+  )
+  const chromeBridgeRequired = [
+    path.join(chromeBridgeRoot, 'dist', 'server.js'),
+    path.join(chromeBridgeRoot, 'dist', 'native', 'setup.js'),
+    path.join(chromeBridgeRoot, 'dist', 'extension', 'manifest.json')
+  ]
+  for (const required of chromeBridgeRequired) {
+    if (!exists(required)) {
+      die(`Missing packaged Chrome Bridge artifact: ${required}`)
     }
   }
 

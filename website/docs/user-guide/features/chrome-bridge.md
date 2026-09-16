@@ -8,7 +8,8 @@ Hermes Chrome Bridge controls an existing, explicitly authorized Chrome profile 
 hermes mcp install hermes-chrome-bridge
 ```
 
-The command configures the pinned MCP package and prints a profile-aware setup command. Run that command, then:
+The command configures the MCP server, installs the local extension assets under
+the active Hermes profile, and registers the Chrome native-messaging host. Then:
 
 1. Open `chrome://extensions` in the Chrome profile Hermes should control.
 2. Enable **Developer mode**.
@@ -72,6 +73,6 @@ To remove the bridge entirely:
 | `ELEMENT_NOT_FOUND` | Take a new snapshot after navigation or DOM replacement. |
 | `SENSITIVE_FIELD` or `SENSITIVE_PAGE` | Stop; do not bypass the safety guard. |
 | Screenshot failure | Ensure the tab is still open and controllable; then retry once. |
-| Setup check says native host missing | Rerun the printed setup command for the active Hermes profile. |
+| Setup check says native host missing | Rerun `hermes mcp install hermes-chrome-bridge` for the active Hermes profile. |
 
 Windows setup currently fails closed because a signed native-host launcher is not yet included. macOS and Linux use Chrome's standard per-user native-messaging manifest locations.
