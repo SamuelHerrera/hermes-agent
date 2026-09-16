@@ -214,10 +214,11 @@ export function TreeGroup({
   // the model as the place the next chat opens, but when it represents the
   // close-all/final-tab placeholder it is not a visible tab chip. If sibling
   // page/session tabs exist, they are the real editor tabs and one of them owns
-  // the body; if workspace is alone, the body shows the empty placeholder with
-  // only the trailing "+" affordance.
+  // the body; if workspace is alone, the body shows the empty placeholder and
+  // the strip must disappear instead of leaving an empty h-7 chrome band.
   const workspacePlaceholder = workspaceEmptyPlaceholder && node.panes.includes('workspace')
   const tabbedShown = workspacePlaceholder ? shown.filter(id => id !== 'workspace') : shown
+  const emptyWorkspaceOnly = workspacePlaceholder && tabbedShown.length === 0
 
   const activeId = tabbedShown.includes(node.active)
     ? node.active
@@ -268,7 +269,7 @@ export function TreeGroup({
   const minimized = collapsePaneZone && Boolean(node.minimized)
   const verticalCollapse = minimized && parentAxis === 'row' && !isEmpty
   const fixedSidebarOnly = shown.length === 1 && (shown[0] === 'sessions' || shown[0] === 'files')
-  const headerVisible = !fixedSidebarOnly && !isEmpty && !verticalCollapse && (minimized || !headerHidden)
+  const headerVisible = !fixedSidebarOnly && !isEmpty && !emptyWorkspaceOnly && !verticalCollapse && (minimized || !headerHidden)
 
   // Keep the activated tab inside the strip's scroll window. Opening a tab
   // past the right edge otherwise leaves the newly-created tab out of view.

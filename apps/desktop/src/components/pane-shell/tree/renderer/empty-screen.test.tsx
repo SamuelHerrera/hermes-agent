@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, expect, it } from 'vitest'
 
 import { registry } from '@/contrib/registry'
+import { EmptyWorkspace } from '@/components/pane-shell/empty-workspace'
 import { $workspaceEmptyPlaceholder } from '@/store/session'
 
 import { group, split } from '../model'
@@ -65,5 +66,46 @@ it('keeps the empty center visible when the right sidebar is collapsed', () => {
   const message = screen.getByText('No tabs open')
   for (let el: HTMLElement | null = message; el && el !== container; el = el.parentElement) {
     expect(el.style.display).not.toBe('none')
+  }
+})
+
+it('does not reserve a header strip for a workspace-only empty placeholder', () => {
+  $workspaceEmptyPlaceholder.set(true)
+  const disposes = [
+    registry.register({
+      id: 'sessions',
+      area: 'panes',
+      title: 'Sessions',
+      data: { placement: 'left' },
+      render: () => <div>Sidebar</div>
+    }),
+    registry.register({
+      id: 'workspace',
+      area: 'panes',
+      title: 'Workspace',
+      data: { placement: 'main' },
+      render: () => <EmptyWorkspace />
+    }),
+    registry.register({
+      id: 'files',
+      area: 'panes',
+      title: 'Files',
+      data: { placement: 'right' },
+      render: () => <div>Files</div>
+    })
+  ]
+  const tree = split('row', [group(['sessions']), group(['workspace']), group(['files'])])
+
+  try {
+    const { container } = render(<TreeNode node={tree} root rootRow />)
+
+    expect(screen.getByText('No tabs open')).toBeTruthy()
+    expect(container.querySelector('[data-zone-header]')).toBeNull()
+    expect(container.querySelector('[data-tree-tab]')).toBeNull()
+  } finally {
+    for (const dispose of disposes) {
+      dispose()
+    }
+    $workspaceEmptyPlaceholder.set(false)
   }
 })
