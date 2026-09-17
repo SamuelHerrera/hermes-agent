@@ -71,11 +71,12 @@ describe('safe page inspector', () => {
 
     for (const format of ['dom', 'accessibility', 'both'] as const) {
       const snapshot = inspector.snapshot({ format })
-      expect(snapshot.elements).toHaveLength(2)
-      expect(snapshot.elements[1]).toMatchObject(format === 'dom' ? { text: 'Inbox' } : { name: 'Inbox' })
+      expect(snapshot.elements).toHaveLength(1)
+      expect(snapshot.elements[0]).toMatchObject(format === 'dom' ? { text: 'Inbox' } : { name: 'Inbox' })
     }
 
-    expect(inspector.query({ selector: 'input' }).count).toBe(1)
+    expect(inspector.query({ selector: 'input' }).count).toBe(0)
+    expect(inspector.query({ selector: 'input', visibleOnly: false }).count).toBe(1)
   })
 
   it('returns useful accessibility and DOM metadata with stable refs and bounds', () => {

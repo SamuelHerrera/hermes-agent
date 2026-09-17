@@ -46,7 +46,7 @@ export function createContentBridgeHandler(
   indicator?: ControlIndicator
 ) {
   return (message: unknown): ContentBridgeResult | undefined => {
-    if (!isRecord(message) || message.version !== 1) { return undefined }
+    if (!isRecord(message) || (message.version !== 1 && message.version !== 2)) { return undefined }
 
     try {
       if (message.type === 'hermes.bridge.indicator') {
@@ -75,38 +75,35 @@ export function createContentBridgeHandler(
         }
       }
 
-      if (message.type === 'hermes.bridge.snapshot') {
-        if (!exactKeys(message, ['format', 'type', 'version']) || !isFormat(message.format)) {
+      if (message.type === 'hermes.bridge.snapshot' || message.type === 'hermes.bridge.query') {
+        const snapshot = message.type === 'hermes.bridge.snapshot'
+        const keys = ['type', 'version', 'selector', 'limit', 'cursor', 'maxChars', 'fields', 'visibleOnly', ...(snapshot ? ['format'] : [])]
+
+        if (Object.keys(message).some(key => !keys.includes(key)) ||
+          (snapshot && !isFormat(message.format)) ||
+          (message.selector !== undefined && !validTarget(message.selector)) ||
+          (message.cursor !== undefined && !validTarget(message.cursor)) ||
+          (message.limit !== undefined && (!Number.isInteger(message.limit) || (message.limit as number) < 1 || (message.limit as number) > 500)) ||
+          (message.maxChars !== undefined && (!Number.isInteger(message.maxChars) || (message.maxChars as number) < 1 || (message.maxChars as number) > 240)) ||
+          (message.visibleOnly !== undefined && typeof message.visibleOnly !== 'boolean') ||
+          (message.fields !== undefined && (!Array.isArray(message.fields) || message.fields.length > 8 ||
+            !message.fields.every(field => ['ref', 'role', 'name', 'text', 'value', 'box', 'state', 'tag'].includes(field as string))))) {
           return undefined
         }
 
+        const options = Object.fromEntries(Object.entries(message).filter(([key]) => key !== 'type' && key !== 'version'))
+
         return {
-          result: inspector.snapshot({ format: message.format }),
+          result: snapshot ? inspector.snapshot(options as unknown as Parameters<PageInspector['snapshot']>[0]) : inspector.query(options),
           type: 'hermes.bridge.result',
           version: 1
         }
       }
 
-      if (message.type === 'hermes.bridge.query') {
-        const validKeys = exactKeys(message, ['selector', 'type', 'version']) ||
-          exactKeys(message, ['limit', 'selector', 'type', 'version'])
+      if (message.type === 'hermes.bridge.resolve') {
+        if (!exactKeys(message, ['target', 'type', 'version']) || !validTarget(message.target) || !inspector.locate) { return undefined }
 
-        const validLimit = message.limit === undefined ||
-          (Number.isInteger(message.limit) && (message.limit as number) > 0 && (message.limit as number) <= 100)
-
-        if (!validKeys || typeof message.selector !== 'string' || message.selector.length === 0 ||
-          message.selector.length > 2_048 || !validLimit) {
-          return undefined
-        }
-
-        return {
-          result: inspector.query({
-            ...(message.limit === undefined ? {} : { limit: message.limit as number }),
-            selector: message.selector
-          }),
-          type: 'hermes.bridge.result',
-          version: 1
-        }
+        return { result: inspector.locate(message.target), type: 'hermes.bridge.result', version: 1 }
       }
 
       if (message.type === 'hermes.bridge.click') {
