@@ -16,7 +16,7 @@ the active Hermes profile, and registers the Chrome native-messaging host. Then:
 3. Choose **Load unpacked** and select the printed `<HERMES_HOME>/chrome-bridge/extension` directory.
 4. Confirm that the extension ID is `mdeahbanbmncnmkjkklglmdflkcclckg`.
 5. Open the extension popup and click **Connect**.
-6. Restart Hermes so the MCP tools are discovered.
+6. Use `/reload-mcp now` (or the assistant's `reload_mcp` tool) to refresh MCP tools. This reloads all MCP integrations. Restarting Hermes also works.
 
 Verify both layers:
 
@@ -59,7 +59,7 @@ profiles. Installing for another Hermes home changes that ownership.
 
 ## What Hermes can do
 
-- List and select public HTTP(S) tabs with redacted metadata.
+- List and select HTTP(S) tabs with redacted metadata, including localhost and development networks by default.
 - Capture bounded DOM/accessibility snapshots and query reusable element refs.
 - Open, navigate, focus, and close controllable tabs.
 - Click, type, press keys, scroll, and hover with a visible on-page control indicator.
@@ -71,12 +71,21 @@ The extension displays **Hermes is controlling Chrome** and a gold cursor marker
 
 ## Trust and safety boundaries
 
+### Development network access
+
+The default **Development** mode allows public websites, localhost, loopback,
+LAN/VPN addresses, `.local`, and internal hostnames. Choose **Public websites
+only** in the extension popup to restrict that Chrome profile. The setting
+applies to discovery, opening, navigation, and subsequent control operations.
+It does not grant permission to submit forms or administer network devices.
+This hostname policy is not a DNS firewall.
+
 The bridge is local-only. The native host authenticates to a private Unix-socket broker with a random profile-owned token. The MCP server never exposes that token, and native messaging stdout contains protocol frames only.
 
 The bridge fails closed for:
 
 - `chrome://`, extension pages, and Chrome Web Store pages;
-- localhost, private, link-local, and reserved network targets;
+- cloud metadata endpoints, link-local IPv4 metadata networks, and multicast targets;
 - password, payment, and one-time-code fields;
 - JavaScript evaluation on any page containing a sensitive field;
 - requests received before explicit extension opt-in;
@@ -100,7 +109,7 @@ To remove the bridge entirely:
 | Symptom | Resolution |
 |---|---|
 | MCP connects, Chrome bridge is disconnected | Open the extension popup and click **Connect**. |
-| `TAB_NOT_CONTROLLABLE` | Use a public HTTP(S) page; private/internal/Web Store tabs are intentionally excluded. |
+| `TAB_NOT_CONTROLLABLE` | Check the popup's network mode. Development mode allows localhost/LAN; browser-internal, metadata, and Web Store pages remain excluded. |
 | `ELEMENT_NOT_FOUND` | Take a new snapshot after navigation or DOM replacement. |
 | `AMBIGUOUS_CONNECTION` | List connections with `chrome_bridge_status`, then pass the intended `connectionId` or a current opaque tab ID. |
 | `STALE_TAB_ID` | Re-list tabs for the same connection after reconnecting. |

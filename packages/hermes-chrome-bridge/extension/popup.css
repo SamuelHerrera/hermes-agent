@@ -52,6 +52,7 @@ h1[data-state='error']::before { background: #d74b4b; }
 }
 
 #profile-label { box-sizing: border-box; width: 100%; margin-top: 5px; padding: 6px; font: inherit; }
+#network-mode { box-sizing: border-box; width: 100%; margin: 5px 0 14px; padding: 6px; font: inherit; }
 #connection-id { font: 10px/1.5 monospace; overflow-wrap: anywhere; opacity: 0.7; }
 label { font-size: 11px; }
 

@@ -9,7 +9,7 @@ interface IndicatorOptions {
 }
 
 export interface ControlIndicator {
-  activity(target?: Element): void
+  activity(target?: Element | { x: number, y: number }): void
   destroy(): void
   hide(): void
   refresh(): void
@@ -31,7 +31,7 @@ export function createControlIndicator(
   let host: HTMLElement | undefined
   let root: HTMLElement | undefined
   let cursor: HTMLElement | undefined
-  let lastTarget: Element | undefined
+  let lastTarget: Element | { x: number, y: number } | undefined
 
   function mount(): void {
     if (host !== undefined) { return }
@@ -97,7 +97,10 @@ export function createControlIndicator(
 
     const width = document.defaultView?.innerWidth ?? Number.POSITIVE_INFINITY
     const height = document.defaultView?.innerHeight ?? Number.POSITIVE_INFINITY
-    const bounds = lastTarget?.getBoundingClientRect()
+
+    const bounds = lastTarget !== undefined && 'getBoundingClientRect' in lastTarget
+      ? lastTarget.getBoundingClientRect()
+      : lastTarget === undefined ? undefined : { ...lastTarget, width: 0, height: 0 }
 
     const position = {
       x: bounds === undefined

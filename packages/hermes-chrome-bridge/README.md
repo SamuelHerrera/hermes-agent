@@ -12,7 +12,9 @@ The extension connects only after the user clicks **Connect** in its popup. That
 - User-like actions: `chrome_bridge_click`, `chrome_bridge_type`, `chrome_bridge_key`, `chrome_bridge_scroll`, `chrome_bridge_hover`
 - Guarded diagnostics: `chrome_bridge_eval`, `chrome_bridge_console`, `chrome_bridge_screenshot`
 
-All page tools require an authenticated, explicitly opted-in host and a controllable public HTTP(S) tab. Private-network, local, browser-internal, Chrome Web Store, and sensitive-field paths fail closed. JavaScript evaluation is blocked whenever a password, payment, or one-time-code field is present and is advertised as destructive/open-world so Hermes approval policy applies. Tool output is bounded and credential-shaped strings are redacted.
+All page tools require an authenticated, explicitly opted-in host and a controllable HTTP(S) tab. **Development access is the default:** public websites, localhost, loopback, LAN/VPN addresses, and internal hostnames are available. The extension popup's **Network access** selector can restrict the profile to public websites. Changes apply to tab discovery and subsequent operations, not just navigation. Cloud metadata endpoints, browser-internal pages, Chrome Web Store, and sensitive-field paths remain restricted. This hostname policy is not a DNS firewall; application authentication and operation approvals remain separate from reachability.
+
+JavaScript evaluation is blocked whenever a password, payment, or one-time-code field is present and is advertised as destructive/open-world so Hermes approval policy applies. Tool output is bounded and credential-shaped strings are redacted.
 
 ## Simultaneous Chrome profiles
 
