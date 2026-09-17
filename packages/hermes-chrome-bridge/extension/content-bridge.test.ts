@@ -28,6 +28,22 @@ function setup() {
 }
 
 describe('content bridge protocol', () => {
+  it('accepts v2 requests to bypass historical v1-only listeners', () => {
+    const {handler, inspector} = setup()
+    expect(handler({type:'hermes.bridge.snapshot',version:2,format:'both'})).toMatchObject({type:'hermes.bridge.result',version:1})
+    expect(inspector.snapshot).toHaveBeenCalledWith({format:'both'})
+  })
+  it('routes bounded inspection options and rejects unsupported fields', () => {
+    const {handler, inspector} = setup()
+    const options = {selector:'button',limit:500,maxChars:80,fields:['ref','name'],visibleOnly:false,cursor:'c-example'}
+    expect(handler({...options,format:'both',type:'hermes.bridge.snapshot',version:1})).toBeDefined()
+    expect(inspector.snapshot).toHaveBeenCalledWith({...options,format:'both'})
+    expect(handler({type:'hermes.bridge.query',version:1})).toBeDefined()
+
+    for (const extra of [{limit:501},{maxChars:241},{fields:['html']},{cursor:''},{visibleOnly:1}]) {
+      expect(handler({...extra,type:'hermes.bridge.query',version:1})).toBeUndefined()
+    }
+  })
   it('routes strict snapshot and query messages', () => {
     const { handler, inspector } = setup()
 
