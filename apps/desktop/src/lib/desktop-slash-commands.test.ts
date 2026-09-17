@@ -15,6 +15,28 @@ import {
 } from './desktop-slash-commands'
 
 describe('desktop slash command curation', () => {
+  it('routes MCP reload and confirmation variants to the current session RPC', () => {
+    expect(isDesktopSlashSuggestion('/reload-mcp')).toBe(true)
+    expect(isDesktopSlashCommand('/reload_mcp')).toBe(true)
+    const surface = resolveDesktopCommand('/reload_mcp')?.surface
+
+    expect(surface?.kind).toBe('rpc')
+
+    if (surface?.kind !== 'rpc') {
+      throw new Error('Missing reload RPC')
+    }
+
+    expect(surface.rpc).toBe('reload.mcp')
+
+    for (const [arg, confirm, always] of [['', false, false], ['now', true, false], ['always', true, true]] as const) {
+      expect(surface.buildParams({ arg, command: '/reload-mcp', name: 'reload-mcp', sessionId: 'target' }))
+        .toEqual({ session_id: 'target', confirm, always })
+    }
+
+    expect(() => surface.buildParams({ arg: 'wrong', command: '/reload-mcp', name: 'reload-mcp', sessionId: 'target' }))
+      .toThrow('Usage:')
+  })
+
   it('keeps core desktop chat commands in suggestions', () => {
     expect(isDesktopSlashSuggestion('/new')).toBe(true)
     expect(isDesktopSlashSuggestion('/branch')).toBe(true)

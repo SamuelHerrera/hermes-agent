@@ -27,6 +27,7 @@ GUI_TOOLS = {
     "react_to_message",
     "setup_mcp",
     "session_goal",
+    "reload_mcp",
 }
 
 

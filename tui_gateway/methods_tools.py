@@ -145,6 +145,10 @@ def _(rid, params: dict) -> dict:
             if not session:
                 return
             agent = session["agent"]
+            if agent is None:
+                # New Desktop chats build their first agent lazily; discovery
+                # still applies to that future agent.
+                return
             try:
                 from tools.mcp_tool import refresh_agent_mcp_tools
 
@@ -160,6 +164,7 @@ def _(rid, params: dict) -> dict:
                     "Failed to refresh cached agent tools after /reload-mcp: %s",
                     _exc,
                 )
+                raise
             _emit("session.info", params.get("session_id", ""), _session_info(agent, session))
 
         global _mcp_reload_gen, _mcp_reload_loaded_rev

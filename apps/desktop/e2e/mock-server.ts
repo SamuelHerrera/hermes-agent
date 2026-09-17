@@ -423,6 +423,21 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
             message => typeof message?.content === 'string' && message.content.includes(CORRECTION_SWITCH_TRIGGER),
           )
 
+          if (userText.includes('E2E_MCP_RELOAD_TOOL')) {
+            const calls = messages.flatMap(message => message.tool_calls ?? [])
+              .filter(call => call.function?.name === 'tool_call')
+            const result = messages.find(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
+            const described = messages.some(message => (message.tool_calls ?? []).some((call: { function?: { name?: string } }) => call.function?.name === 'tool_describe'))
+            const turn: ScriptedTurn = result
+              ? { text: `Reload tool result: ${String(result.content)}` }
+              : described
+                ? { text: 'Requesting the approved reload.', toolCalls: [{ name: 'tool_call', args: { name: 'reload_mcp', arguments: { confirm: true } } }] }
+                : { text: 'Finding the reload tool.', toolCalls: [{ name: 'tool_describe', args: { name: 'reload_mcp' } }] }
+            if (stream) streamScriptedTurn(res, model, turn)
+            else nonStreamingScriptedTurn(res, model, turn)
+            return
+          }
+
           if (userText.includes('E2E_PROJECT_SPAWN_CALLER') && options.sessionSpawnArgs) {
             const calls = messages.flatMap(message => message.tool_calls ?? [])
               .filter(call => call.function?.name === 'tool_call')

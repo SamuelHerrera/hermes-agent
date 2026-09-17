@@ -327,8 +327,22 @@ const DESKTOP_COMMAND_SPECS: readonly DesktopCommandSpec[] = [
   { name: '/usage', description: 'Show token usage for this session', surface: exec() },
   { name: '/version', description: 'Show Hermes Agent version', surface: exec() },
 
+  {
+    name: '/reload-mcp',
+    description: 'Reload MCP servers and tools (resets this chat’s prompt cache)',
+    aliases: ['/reload_mcp'],
+    argumentMode: 'options',
+    surface: rpc('reload.mcp', ctx => {
+      const arg = ctx.arg.trim().toLowerCase()
+
+      if (!['', 'now', 'always'].includes(arg)) {
+        throw new Error('Usage: /reload-mcp [now|always]')
+      }
+
+      return { session_id: ctx.sessionId, confirm: arg === 'now' || arg === 'always', always: arg === 'always' }
+    }, 180_000)
+  },
   // No desktop surface, but carry an alias (underscore spelling variants).
-  { name: '/reload-mcp', aliases: ['/reload_mcp'], surface: unavailable('advanced') },
   { name: '/reload-skills', aliases: ['/reload_skills'], surface: unavailable('advanced') }
 ]
 

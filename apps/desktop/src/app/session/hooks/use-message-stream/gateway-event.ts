@@ -1265,6 +1265,20 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           void refreshBackgroundProcesses(sessionId)
         } else if (sessionId && payload?.kind === 'goal') {
           applyGoalStatusText(sessionId, coerceGatewayText(payload?.text))
+        } else if (sessionId && payload?.kind === 'mcp_reload') {
+          const text = coerceGatewayText(payload?.text).trim()
+
+          if (text) {
+            updateSessionState(sessionId, state => ({
+              ...state,
+              messages: [...state.messages, {
+                id: `mcp-reload-${Date.now()}`,
+                role: 'system',
+                parts: [textPart(`slash:/reload-mcp\n${text}`)],
+                timestamp: Math.floor(Date.now() / 1000)
+              }]
+            }))
+          }
         }
       } else if (event.type === 'review.summary') {
         // Self-improvement background review saved something to memory/skills

@@ -7424,7 +7424,10 @@ def refresh_agent_mcp_tools(
             t["function"]["name"]
             for t in (getattr(agent, "tools", None) or [])
         }
-        if new_names == current:
+        current_defs = {
+            t["function"]["name"]: t for t in (getattr(agent, "tools", None) or [])
+        }
+        if {t["function"]["name"]: t for t in new_defs} == current_defs:
             # No change → leave the live snapshot untouched (no churn), but
             # record the generation so an in-flight older caller can't clobber.
             agent._tool_snapshot_generation = max(published_gen, snapshot_generation)

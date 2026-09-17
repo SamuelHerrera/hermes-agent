@@ -281,6 +281,7 @@ TOOLSETS = {
             "focus_pane", "react_to_message",
             "setup_mcp",
             "session_goal",
+            "reload_mcp",
         ],
         "includes": []
     },

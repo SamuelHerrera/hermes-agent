@@ -6328,6 +6328,43 @@ def _request_session_spawn(task_id: str, args: dict) -> dict:
     return json.loads(answer)
 
 
+def _request_mcp_reload() -> dict:
+    """Queue on the exact executing session, never a supplied/foreground id."""
+    session = _current_runtime_session_record.get()
+    if session is None or _session_source(session) != "desktop":
+        return {"status": "unavailable", "error": "A live Desktop turn is required."}
+    with _sessions_lock:
+        if not any(value is session for value in _sessions.values()):
+            return {"status": "unavailable", "error": "The requesting session is no longer live."}
+    with session["history_lock"]:
+        if not session.get("running"):
+            return {"status": "unavailable", "error": "No executing turn is bound."}
+        session["_requested_mcp_reload"] = True
+    return {"status": "queued", "message": "MCP reload will run after this turn finishes; it has not run yet."}
+
+
+def _apply_requested_mcp_reload(sid: str, session: dict) -> None:
+    """Called after model execution, before releasing the turn's profile context."""
+    with session["history_lock"]:
+        requested = session.pop("_requested_mcp_reload", False)
+    if not requested:
+        return
+    with _sessions_lock:
+        if _sessions.get(sid) is not session:
+            return
+    try:
+        response = _methods["reload.mcp"](None, {"session_id": sid, "confirm": True})
+        error = response.get("error")
+        result = response.get("result") or {}
+        text = (f"MCP reload failed: {error.get('message', 'unknown error')}" if error else
+                "MCP tools reloaded. This chat will use the refreshed tools on its next turn."
+                if result.get("status") == "reloaded" else "MCP reload did not complete.")
+        _emit("status.update", sid, {"kind": "mcp_reload", "text": text})
+    except Exception:
+        logger.exception("Requested MCP reload failed")
+        _emit("status.update", sid, {"kind": "mcp_reload", "text": "MCP reload failed; retry /reload-mcp now."})
+
+
 def _wire_callbacks(sid: str):
     from tools.terminal_tool import set_sudo_password_callback
     from tools.skills_tool import set_secret_capture_callback
@@ -6336,6 +6373,8 @@ def _wire_callbacks(sid: str):
     set_sudo_password_callback(lambda: _block("sudo.request", sid, {}, timeout=120))
     set_project_workspace_callback(_apply_project_workspace)
     set_session_spawn_callback(_request_session_spawn)
+    from tools.mcp_reload_tool import set_mcp_reload_callback
+    set_mcp_reload_callback(_request_mcp_reload)
 
     def secret_cb(env_var, prompt, metadata=None):
         pl = {"prompt": prompt, "env_var": env_var}
@@ -11365,6 +11404,7 @@ def _run_prompt_submit(
                     reset_current_session_key(approval_token)
             except Exception:
                 pass
+            _apply_requested_mcp_reload(sid, session)
             if home_token is not None:
                 reset_hermes_home_override(home_token)
             if secret_token is not None:
