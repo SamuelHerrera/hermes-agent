@@ -1,6 +1,6 @@
 # Chrome Bridge
 
-Hermes Chrome Bridge controls an existing, explicitly authorized Chrome profile through an approved local MCP server, a Manifest V3 extension, and Chrome native messaging. It reuses the profile's current tabs and login state without a remote-debugging port or cloud browser.
+Hermes Chrome Bridge controls existing, explicitly authorized Chrome profiles through an approved local MCP server, a Manifest V3 extension, and Chrome native messaging. Multiple profiles can stay connected and independently controllable at the same time. It reuses each profile's current tabs and login state without a remote-debugging port or cloud browser.
 
 ## Install
 
@@ -25,6 +25,37 @@ hermes mcp test hermes-chrome-bridge
 ```
 
 `Connected` describes the MCP process. The separate `Chrome bridge: connected` line confirms that the opted-in extension and authenticated native host are live. If it says `disconnected`, open the extension popup and click **Connect**.
+
+## Connect multiple Chrome profiles
+
+Repeat the extension-loading steps and click **Connect** in each Chrome profile.
+No need to disconnect one to use another. The popup lets you assign a public
+label such as “Work” or “Personal”; labels must not contain account details or
+secrets. Each installation has a random, non-secret connection ID stored locally
+in that profile. Labels are for display; commands target the connection ID.
+
+- `chrome_bridge_status` with no arguments lists connected profiles, their labels,
+  and connection IDs. Desktop's bridge status card displays the same list.
+- Pass `connectionId` to tools such as `chrome_bridge_tabs` or `chrome_bridge_open`.
+- Returned tab IDs are opaque strings scoped to both profile and connection
+  incarnation. Passing one selects its connection automatically.
+- After reconnecting, list that profile's tabs again. Stale IDs are rejected
+  rather than being resolved against a new connection.
+
+Untargeted commands still work with one unchanged connection. After multiple
+profiles have connected, or the initial connection has reconnected or been replaced, commands
+require an explicit target for the remainder of the MCP broker session. The
+broker will not guess a profile—even if only one remains connected. A conflicting
+`connectionId` and tab ID is also rejected.
+
+Selected tabs, requests and Disconnect are per connection. Disconnecting one
+profile leaves the others usable. Clearing extension storage generates a new
+identity; copying an entire Chrome profile may duplicate it, in which case the
+second connection is rejected until the copy gets a new extension identity.
+
+Upgrade the extension, native host and MCP server together. One **Hermes** home
+owns the native-host registration and broker; it can serve many **Chrome**
+profiles. Installing for another Hermes home changes that ownership.
 
 ## What Hermes can do
 
@@ -71,6 +102,10 @@ To remove the bridge entirely:
 | MCP connects, Chrome bridge is disconnected | Open the extension popup and click **Connect**. |
 | `TAB_NOT_CONTROLLABLE` | Use a public HTTP(S) page; private/internal/Web Store tabs are intentionally excluded. |
 | `ELEMENT_NOT_FOUND` | Take a new snapshot after navigation or DOM replacement. |
+| `AMBIGUOUS_CONNECTION` | List connections with `chrome_bridge_status`, then pass the intended `connectionId` or a current opaque tab ID. |
+| `STALE_TAB_ID` | Re-list tabs for the same connection after reconnecting. |
+| `CONNECTION_MISMATCH` | Use a tab ID belonging to the explicitly targeted connection. |
+| `CONNECTION_ALREADY_CONNECTED` | An identical profile identity is already live. Do not replace it; give a copied profile its own extension identity. |
 | `SENSITIVE_FIELD` or `SENSITIVE_PAGE` | Stop; do not bypass the safety guard. |
 | Screenshot failure | Ensure the tab is still open and controllable; then retry once. |
 | Setup check says native host missing | Rerun `hermes mcp install hermes-chrome-bridge` for the active Hermes profile. |

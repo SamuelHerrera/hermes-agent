@@ -178,24 +178,137 @@ describe('authenticated local Chrome bridge broker', () => {
       `${JSON.stringify({ id: secondRequest.id, result, type: 'response' })}\n`
     )
 
-    const serverSocket = (broker as unknown as { activeHost: Socket }).activeHost
-    serverSocket.emit('data', combined)
+    // Exercise one concatenated parser delivery, not OS-dependent fragmentation
+    // of a 64 MiB socket write (which needlessly makes this a performance test).
+    const connections = (broker as unknown as { hosts: Map<string, { socket: Socket }> }).hosts
+    connections.values().next().value!.socket.emit('data', combined)
 
-    await expect(firstRouted).resolves.toBe(result)
-    await expect(secondRouted).resolves.toBe(result)
+    await expect(Promise.all([firstRouted, secondRouted])).resolves.toEqual([result, result])
     host.socket.destroy()
   }, 10_000)
 
-  it('allows only one active authenticated host and rejects malformed envelopes', async () => {
+  it('namespaces overlapping tabs, concurrent requests and selected-tab state per connection', async () => {
+    const { broker, config } = await setupBroker({ requestTimeoutMs: 2_000 })
+    const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222']
+    const hosts = await Promise.all(ids.map(connectionId => connectHost(config, { connectionId, label: 'Same label' })))
+    await Promise.all(hosts.map(host => host.nextMessage()))
+    const listing = ids.map(connectionId => broker.route({ arguments: { connectionId }, method: 'tabs' }))
+    const requests = await Promise.all(hosts.map(host => host.nextMessage()))
+    expect(requests[0].id).not.toBe(requests[1].id)
+
+    // Complete out of order; both Chrome profiles use native tab ID 7.
+    for (const index of [1, 0]) {
+      hosts[index].send({ id: requests[index].id, type: 'response', result: { selectedTabId: 7, tabs: [{ tabId: 7 }] } })
+    }
+
+    const results = await Promise.all(listing) as Array<{ selectedTabId: string, tabs: Array<{ tabId: string }> }>
+    expect(results[0].selectedTabId).not.toBe(results[1].selectedTabId)
+
+    for (const [index, result] of results.entries()) {
+      expect(result.tabs[0].tabId).toBe(result.selectedTabId)
+      const selected = broker.route({ arguments: { tabId: result.selectedTabId }, method: 'selectTab' })
+      const request = await hosts[index].nextMessage()
+      expect(request.arguments).toEqual({ tabId: 7 })
+      hosts[index].send({ id: request.id, type: 'response', result: { selectedTabId: 7 } })
+      await expect(selected).resolves.toMatchObject({ selectedTabId: result.selectedTabId, connectionId: ids[index] })
+    }
+
+    await expect(broker.route({ method: 'close', arguments: { connectionId: ids[1], tabId: results[0].selectedTabId } }))
+      .rejects.toMatchObject({ code: 'CONNECTION_MISMATCH' })
+    await expect(broker.route({ method: 'close', arguments: { tabId: 7 } }))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_CONNECTION' })
+  })
+
+  it('isolates disconnect, reconnect, pending limits and stale tab capabilities', async () => {
+    const { broker, config } = await setupBroker({ maxPending: 1, requestTimeoutMs: 2_000 })
+    const a = '11111111-1111-4111-8111-111111111111'
+    const b = '22222222-2222-4222-8222-222222222222'
+    const first = await connectHost(config, { connectionId: a })
+    const second = await connectHost(config, { connectionId: b })
+    await Promise.all([first.nextMessage(), second.nextMessage()])
+    const oldSession = broker.status().connections.find(connection => connection.connectionId === a)!.sessionId
+    const pendingA = broker.route({ method: 'query', arguments: { connectionId: a, tabId: 7 } })
+    const rejectedA = expect(pendingA).rejects.toMatchObject({ code: 'BRIDGE_DISCONNECTED' })
+    const requestA = await first.nextMessage()
+    await expect(broker.route({ method: 'tabs', arguments: { connectionId: a } })).rejects.toMatchObject({ code: 'BRIDGE_BUSY' })
+    const pendingB = broker.route({ method: 'tabs', arguments: { connectionId: b } })
+    const requestB = await second.nextMessage()
+    first.socket.destroy()
+    await rejectedA
+    second.send({ id: requestB.id, type: 'response', result: { tabs: [{ tabId: 7 }] } })
+    await expect(pendingB).resolves.toMatchObject({ connectionId: b })
+    const replacement = await connectHost(config, { connectionId: a })
+    await replacement.nextMessage()
+    expect(broker.status().connections.find(connection => connection.connectionId === a)!.sessionId).not.toBe(oldSession)
+    await expect(broker.route({ method: 'close', arguments: { tabId: `${a}:${oldSession}:7` } }))
+      .rejects.toMatchObject({ code: 'STALE_TAB_ID' })
+    // A stale response cannot fulfill another profile's current request.
+    const currentB = broker.route({ method: 'tabs', arguments: { connectionId: b } })
+    const currentRequestB = await second.nextMessage()
+    replacement.send({ id: currentRequestB.id, type: 'response', result: { wrong: true } })
+    await expect.poll(() => broker.status().connectionCount).toBe(1)
+    expect(currentRequestB.id).not.toBe(requestA.id)
+    second.send({ id: currentRequestB.id, type: 'response', result: { correct: true } })
+    await expect(currentB).resolves.toMatchObject({ correct: true, connectionId: b })
+    await expect(broker.route({ method: 'open', arguments: {} })).rejects.toMatchObject({ code: 'AMBIGUOUS_CONNECTION' })
+  })
+
+  it('does not silently switch the single-profile default after discovery alone', async () => {
     const { broker, config } = await setupBroker()
     const first = await connectHost(config)
     await first.nextMessage()
-    const second = await connectHost(config)
-    expect(await second.nextMessage()).toMatchObject({ code: 'HOST_ALREADY_CONNECTED' })
+    const discovered = await broker.route({ method: 'status', arguments: {} })
+    expect(discovered).toMatchObject({ connectionCount: 1 })
+    first.socket.destroy()
+    await expect.poll(() => broker.status().connectionCount).toBe(0)
+    const replacement = await connectHost(config)
+    await replacement.nextMessage()
+    await expect(broker.route({ method: 'open', arguments: {} }))
+      .rejects.toMatchObject({ code: 'AMBIGUOUS_CONNECTION' })
+  })
+
+  it('never reuses request IDs across broker restarts', async () => {
+    const requestIds = []
+
+    for (let index = 0; index < 2; index++) {
+      const { broker, config } = await setupBroker({ requestTimeoutMs: 2_000 })
+      const host = await connectHost(config)
+      await host.nextMessage()
+      const routed = broker.route({ method: 'tabs', arguments: {} })
+      const request = await host.nextMessage()
+      requestIds.push(request.id)
+      host.send({ id: request.id, type: 'response', result: {} })
+      await routed
+      host.socket.destroy()
+    }
+
+    expect(requestIds[0]).not.toBe(requestIds[1])
+  })
+
+  it('rejects duplicate identities without replacing their active host', async () => {
+    const { broker, config } = await setupBroker()
+    const connectionId = '11111111-1111-4111-8111-111111111111'
+    const first = await connectHost(config, { connectionId, label: 'Work' })
+    await first.nextMessage()
+    const duplicate = await connectHost(config, { connectionId, label: 'Other' })
+    expect(await duplicate.nextMessage()).toMatchObject({ code: 'CONNECTION_ALREADY_CONNECTED' })
+    expect(broker.status()).toMatchObject({ connectionCount: 1, connections: [{ label: 'Work' }] })
+    duplicate.socket.destroy()
+  })
+
+  it('isolates authenticated profiles and fails closed on ambiguous commands', async () => {
+    const { broker, config } = await setupBroker()
+    const first = await connectHost(config, { connectionId: '11111111-1111-4111-8111-111111111111', label: 'Work' })
+    await first.nextMessage()
+    const second = await connectHost(config, { connectionId: '22222222-2222-4222-8222-222222222222', label: 'Personal' })
+    expect(await second.nextMessage()).toMatchObject({ type: 'hello.ok' })
+    await expect(broker.route({ arguments: {}, method: 'open' })).rejects.toMatchObject({ code: 'AMBIGUOUS_CONNECTION' })
 
     first.send({ type: 'response' })
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(broker.status().connected).toBe(false)
+    await expect.poll(() => broker.status()).toMatchObject({
+      connected: true,
+      connections: [{ connectionId: '22222222-2222-4222-8222-222222222222', label: 'Personal' }]
+    })
     first.socket.destroy()
     second.socket.destroy()
   })

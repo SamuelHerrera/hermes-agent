@@ -1,4 +1,5 @@
 export interface PopupCommand {
+  label?: string
   type: 'bridge.connect' | 'bridge.disconnect' | 'bridge.status'
 }
 
@@ -18,7 +19,9 @@ export function isTrustedPopupCommand(
   popupUrl: string
 ): message is PopupCommand {
   return sender.id === extensionId && sender.url === popupUrl &&
-    isRecord(message) && Object.keys(message).length === 1 && (
+    isRecord(message) &&
+    Object.keys(message).every(key => key === 'type' || (key === 'label' && message.type === 'bridge.connect')) &&
+    (message.label === undefined || (typeof message.label === 'string' && message.label.length <= 64)) && (
       message.type === 'bridge.connect' ||
       message.type === 'bridge.disconnect' ||
       message.type === 'bridge.status'

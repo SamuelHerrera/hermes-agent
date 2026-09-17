@@ -14,6 +14,58 @@ The extension connects only after the user clicks **Connect** in its popup. That
 
 All page tools require an authenticated, explicitly opted-in host and a controllable public HTTP(S) tab. Private-network, local, browser-internal, Chrome Web Store, and sensitive-field paths fail closed. JavaScript evaluation is blocked whenever a password, payment, or one-time-code field is present and is advertised as destructive/open-world so Hermes approval policy applies. Tool output is bounded and credential-shaped strings are redacted.
 
+## Simultaneous Chrome profiles
+
+Load the extension in each Chrome profile and click **Connect** independently.
+The popup accepts a public nickname such as “Work” or “Personal”; do not put
+account details or secrets in it. Each extension installation stores a random,
+non-secret `connectionId` in **local** (not synced) Chrome storage. It survives
+Disconnect, reconnect and browser restarts. Clearing extension storage creates a
+new identity. Labels can repeat; routing never uses a label as an identifier.
+
+1. Call `chrome_bridge_status` with `{}` to discover all connected profiles.
+2. Pass `connectionId` to `chrome_bridge_tabs`, `chrome_bridge_open`, or any
+   other tool to target that profile explicitly.
+3. Use returned opaque `tabId` strings for subsequent commands. They namespace
+   the native tab ID by both profile identity and connection incarnation. They
+   also select the connection without a separate `connectionId` argument.
+4. After reconnect, re-list that profile's tabs. Old tab IDs fail with
+   `STALE_TAB_ID`; conflicting connection/tab targets fail with
+   `CONNECTION_MISMATCH`. No request is retried on another profile.
+
+Untargeted commands and legacy integer tab IDs still work during an unchanged
+single-connection MCP session. Once multiple connections have been present, or
+the initially connected profile has disconnected and reconnected or been replaced, explicit targeting is required for
+the rest of that broker session—even if only one profile remains. An integer
+tab ID with an explicit connection stays supported, but opaque IDs are preferred
+because they also detect reconnects. Selected tabs and pending requests belong
+to their own connection. Disconnecting one profile never disconnects its peers.
+
+Duplicate live identities fail closed rather than replacing an existing host.
+If you copied an entire Chrome profile directory, clear the bridge's extension
+storage in the copy and opt in again to generate its own identity.
+
+Upgrade the extension, native host and MCP server together. Older authenticated
+native hosts without identity metadata get an ephemeral public ID; reconnect
+cannot preserve that ID. MCP status is the authoritative live connection list.
+
+### Live verification (not mocks)
+
+After building, from the repository root with Playwright's Chromium installed:
+
+```sh
+node packages/hermes-chrome-bridge/scripts/multi-profile-smoke.mjs /absolute/evidence/directory
+```
+
+This opt-in smoke launches two disposable Chrome-for-Testing profiles, clicks
+their actual extension popup controls, and exercises the stdio MCP → broker →
+native host → extension → public page path concurrently. It tests target
+ambiguity, selected-tab isolation, redaction, guarded eval and independent
+Disconnect/reconnect. Browser data, manifests and broker config stay temporary;
+only the public extension manifest key is changed in the test copy to prevent
+accidental authorization by your regular native host. Extension code is unchanged.
+It leaves screenshots and a JSON report, then closes the test browsers.
+
 ## Development
 
 From the repository root:
@@ -71,7 +123,7 @@ Linux uses the corresponding Chrome user manifest directory under `~/.config/goo
 
 The installer creates a private runtime directory under the selected Hermes home. The runtime directory is mode `0700`; its random authentication token, config, and connectivity-only status are mode `0600`. The executable wrapper contains absolute paths to the current Node executable, built host, and runtime config, and does not depend on `PATH` or an environment-selected Node.
 
-Chrome has one global native host name, `com.nous.hermes_chrome_bridge`. The selected active profile owns that registration. Re-run the installer with another profile's explicit `--hermes-home` to select that profile instead.
+Chrome has one native host name, `com.nous.hermes_chrome_bridge`. One **Hermes** home owns that registration and its MCP broker; many **Chrome** profiles can connect to it simultaneously. Re-running the installer with another `--hermes-home` changes the owning Hermes home, not which Chrome profile is controllable.
 
 ## MCP host configuration
 
@@ -110,5 +162,6 @@ The implementation can internally fall back to the existing Hermes home resoluti
 - Browser-to-host messages are capped at 64 MiB; host-to-browser messages are capped at 1 MiB.
 - Broker IPC is capped NDJSON over a private POSIX Unix socket.
 - The native host must authenticate protocol version 1, the random token, and the exact configured `chrome-extension://<id>/` origin.
-- Only one authenticated host may connect. Requests have IDs, bounded pending concurrency, and timeouts; stale sockets are checked and cleaned safely.
-- Status files contain connectivity, protocol version, and timestamps only.
+- Before authentication, the updated extension sends the native host a strict `bridge.identity` message containing protocol version 1, its public `connectionId` and bounded label. This metadata is not authentication: the host still validates the Chrome origin and authenticates with the private broker token.
+- Each authenticated connection owns its socket, pending requests and timeout budget. Request IDs are unique across broker incarnations; responses from another socket cannot settle them. Duplicate active identities are rejected, never silently replaced.
+- The broker alone writes aggregate status, including public identities/labels and connectivity timestamps, never tokens, account names or Chrome profile paths. One native host exiting cannot overwrite another profile's connected status. Read live MCP status rather than relying on a file after an unclean process exit.

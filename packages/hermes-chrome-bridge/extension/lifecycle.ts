@@ -1,3 +1,5 @@
+import type { ConnectionIdentity } from '../src/connection.js'
+
 import type { NativeRequest, NativeRequestHandler } from './protocol.js'
 
 export const NATIVE_HOST_NAME = 'com.nous.hermes_chrome_bridge'
@@ -16,6 +18,7 @@ export interface RetryState {
 }
 
 export interface ConnectionState {
+  identity?: ConnectionIdentity
   connection: ConnectionStatus
   lastError?: SafeError
   optedIn: boolean
@@ -42,13 +45,14 @@ export interface ConnectionControllerDependencies {
   connectNative(hostName: string): NativePortLike
   consumeNativeDisconnectError?(): void
   readOptIn(): Promise<boolean>
+  readIdentity?(label?: string): Promise<ConnectionIdentity>
   requestHandler?: NativeRequestHandler
   timer?: TimerApi
   writeOptIn(optedIn: boolean): Promise<void>
 }
 
 export interface ConnectionController {
-  connect(): Promise<void>
+  connect(label?: string): Promise<void>
   disconnect(): Promise<void>
   getState(): ConnectionState
   start(): Promise<void>
@@ -94,6 +98,7 @@ function isRequest(value: Record<string, unknown>): value is Record<string, unkn
 
 function copyState(state: ConnectionState): ConnectionState {
   return {
+    ...(state.identity === undefined ? {} : { identity: { ...state.identity } }),
     connection: state.connection,
     ...(state.lastError === undefined ? {} : { lastError: { ...state.lastError } }),
     optedIn: state.optedIn,
@@ -113,6 +118,7 @@ export function createConnectionController(
   const ignoredDisconnects = new WeakSet<NativePortLike>()
   const readyPorts = new WeakSet<NativePortLike>()
   let intentGeneration = 0
+  let identity: ConnectionIdentity | undefined
   let persistenceQueue: Promise<void> = Promise.resolve()
   let port: NativePortLike | undefined
   let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -130,7 +136,7 @@ export function createConnectionController(
   }
 
   const replaceState = (next: ConnectionState): void => {
-    state = next
+    state = { ...next, ...(identity === undefined ? {} : { identity }) }
     publish()
   }
 
@@ -201,6 +207,15 @@ export function createConnectionController(
         message: 'The Hermes native host disconnected.'
       })
     })
+
+    if (identity !== undefined) {
+      try {
+        nextPort.postMessage({ ...identity, type: 'bridge.identity', version: 1 })
+      } catch {
+        closePort()
+        scheduleError({ code: 'NATIVE_HOST_DISCONNECTED', message: 'The Hermes native host disconnected.' })
+      }
+    }
   }
 
   const scheduleError = (error: SafeError): void => {
@@ -300,11 +315,15 @@ export function createConnectionController(
   }
 
   return {
-    async connect(): Promise<void> {
+    async connect(label?: string): Promise<void> {
       const generation = ++intentGeneration
       await persistOptIn(true)
 
       if (generation !== intentGeneration) { return }
+      const loadedIdentity = await dependencies.readIdentity?.(label)
+
+      if (generation !== intentGeneration) { return }
+      identity = loadedIdentity
       cancelRetry()
       replaceState({
         connection: 'disconnected',
@@ -335,6 +354,10 @@ export function createConnectionController(
       const optedIn = await dependencies.readOptIn()
 
       if (generation !== intentGeneration) { return }
+      const loadedIdentity = await dependencies.readIdentity?.()
+
+      if (generation !== intentGeneration) { return }
+      identity = loadedIdentity
       replaceState({
         connection: 'disconnected',
         optedIn,

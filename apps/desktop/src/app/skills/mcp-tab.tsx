@@ -1210,9 +1210,20 @@ export function ServerConfig({
               <p className="text-xs font-medium text-(--ui-text-primary)">
                 {bridgeHealth === 'connected' ? m.chromeBridgeConnected : m.chromeBridgeDisconnected}
               </p>
-              <p className="mt-0.5 text-[0.68rem] leading-relaxed text-(--ui-text-tertiary)">
-                {bridgeHealth === 'connected' ? m.chromeBridgeConnectedHint : m.chromeBridgeDisconnectedHint}
-              </p>
+              {probe && probe !== 'probing' && probe.health?.chromeBridge?.connections?.length ? (
+                <ul className="mt-1 space-y-1">
+                  {probe.health.chromeBridge.connections.map(connection => (
+                    <li className="min-w-0 text-[0.68rem] text-(--ui-text-secondary)" key={connection.connectionId}>
+                      <span>{connection.label}</span>
+                      <code className="block break-all text-(--ui-text-tertiary)">{connection.connectionId}</code>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-0.5 text-[0.68rem] leading-relaxed text-(--ui-text-tertiary)">
+                  {bridgeHealth === 'connected' ? m.chromeBridgeConnectedHint : m.chromeBridgeDisconnectedHint}
+                </p>
+              )}
             </div>
             <Button onClick={onProbe} size="xs" variant="ghost">
               {m.chromeBridgeRefresh}

@@ -6,11 +6,10 @@ import { resolve } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 
+import { type ConnectionIdentity, safeConnectionLabel, validConnectionId } from '../src/connection.js'
 import {
   readRuntimeConfig,
-  type RuntimeConfig,
-  type RuntimeStatus,
-  writeRuntimeStatus
+  type RuntimeConfig
 } from '../src/runtime.js'
 
 import {
@@ -31,7 +30,6 @@ export interface NativeMessagingHostOptions {
   input?: Readable
   output?: Writable
   reconnectDelayMs?: number
-  statusWriter?: (statusPath: string, status: RuntimeStatus) => Promise<void>
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -62,12 +60,13 @@ export class NativeMessagingHost {
   private readonly input: Readable
   private readonly output: Writable
   private readonly reconnectDelayMs: number
-  private readonly statusWriter: (statusPath: string, status: RuntimeStatus) => Promise<void>
+  private identity?: ConnectionIdentity
+  private identityReady?: () => void
   private broker?: Socket
   private brokerBuffer: Buffer<ArrayBufferLike> = Buffer.alloc(0)
   private connected = false
   private reconnectTimer?: NodeJS.Timeout
-  private statusWrites: Promise<void> = Promise.resolve()
+
   private stopped = false
   private stopPromise?: Promise<void>
 
@@ -76,27 +75,37 @@ export class NativeMessagingHost {
     this.output = options.output ?? process.stdout
     this.diagnostics = options.diagnostics ?? (message => process.stderr.write(`${message}\n`))
     this.reconnectDelayMs = options.reconnectDelayMs ?? 250
-    this.statusWriter = options.statusWriter ?? writeRuntimeStatus
   }
 
   public async start(): Promise<void> {
     this.config = await readRuntimeConfig(this.options.configPath)
     authorizeChromeOrigin(this.options.chromeOrigin, this.config.origin)
+
+    if (this.stopped) { return }
+    const identityReady = new Promise<void>(resolve => { this.identityReady = resolve })
+    const timer = setTimeout(() => void this.stop(), 2_000)
     this.input.on('data', chunk => this.handleBrowserData(Buffer.from(chunk)))
     this.input.once('end', () => void this.stop())
     this.input.once('error', () => void this.stop())
-    await this.connectOnce()
+    this.output.once('error', () => void this.stop())
+    await identityReady
+    clearTimeout(timer)
+
+    if (!this.stopped) { await this.connectOnce() }
   }
 
   public stop(): Promise<void> {
     if (this.stopPromise !== undefined) {return this.stopPromise}
     this.stopped = true
+    this.identityReady?.()
 
     if (this.reconnectTimer !== undefined) {clearTimeout(this.reconnectTimer)}
     this.connected = false
     this.broker?.destroy()
     this.broker = undefined
-    this.stopPromise = this.updateStatus(false)
+
+    if (!this.output.writableEnded) { this.output.end() }
+    this.stopPromise = Promise.resolve()
 
     return this.stopPromise
   }
@@ -118,6 +127,7 @@ export class NativeMessagingHost {
 
       socket.once('connect', () => {
         this.sendBroker({
+          ...this.identity,
           origin: this.config.origin,
           token: this.config.token,
           type: 'hello',
@@ -144,7 +154,6 @@ export class NativeMessagingHost {
 
         if (wasConnected) {
           this.writeBrowserStatus(false)
-          void this.updateStatus(false)
         }
 
         this.scheduleReconnect()
@@ -200,7 +209,6 @@ export class NativeMessagingHost {
         if (!this.connected) {
           this.connected = true
           this.writeBrowserStatus(true)
-          void this.updateStatus(true)
         }
       } else if (
         envelope.type === 'request' &&
@@ -218,10 +226,25 @@ export class NativeMessagingHost {
   }
 
   private handleBrowserData(chunk: Buffer): void {
+    if (this.stopped) { return }
+
     try {
       for (const value of this.decoder.push(chunk)) {
         if (!isObject(value) || typeof value.type !== 'string') {
           throw new Error('invalid browser envelope')
+        }
+
+        if (this.identity === undefined) {
+          if (value.type !== 'bridge.identity' || value.version !== 1 ||
+            !validConnectionId(value.connectionId) || typeof value.label !== 'string' ||
+            !Object.keys(value).every(key => ['type', 'version', 'connectionId', 'label'].includes(key))) {
+            throw new Error('invalid public browser identity')
+          }
+
+          this.identity = { connectionId: value.connectionId, label: safeConnectionLabel(value.label, value.connectionId) }
+          this.identityReady?.()
+
+          continue
         }
 
         if (
@@ -260,25 +283,6 @@ export class NativeMessagingHost {
 
   private writeBrowser(envelope: Record<string, unknown>): void {
     this.output.write(encodeNativeMessage(envelope, HOST_TO_BROWSER_MAX_BYTES))
-  }
-
-  private updateStatus(connected: boolean): Promise<void> {
-    const now = new Date().toISOString()
-
-    const status: RuntimeStatus = {
-      connected,
-      ...(connected ? { connectedAt: now } : { disconnectedAt: now }),
-      updatedAt: now,
-      version: PROTOCOL_VERSION
-    }
-
-    this.statusWrites = this.statusWrites
-      .then(async () => this.statusWriter(this.config.statusPath, status))
-      .catch(() => {
-        this.diagnostics('Hermes Chrome bridge could not update connectivity status')
-      })
-
-    return this.statusWrites
   }
 }
 

@@ -1416,10 +1416,12 @@ export interface McpServerTestResponse {
   tools: { name: string; description: string }[]
   health?: {
     chromeBridge?: {
+      connectionCount?: number
+      connections?: { connectionId: string; label: string; sessionId?: string; connectedAt?: string }[]
       bridgeConnected?: boolean
       connected?: boolean
       nativeConnected?: boolean
-      selectedTabId?: number
+      selectedTabId?: number | string
     }
   }
 }

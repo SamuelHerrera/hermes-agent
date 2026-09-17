@@ -116,6 +116,37 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(route).toHaveBeenCalledTimes(1)
   })
 
+  it('routes explicit connections and namespaced tab IDs without relaxing validation', async () => {
+    const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ ok: true })
+    const server = createChromeBridgeServer({ route })
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+    const client = new Client({ name: 'routing-test', version: '1' })
+    clients.push(client)
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const connectionId = '11111111-1111-4111-8111-111111111111'
+    const tabId = `${connectionId}:22222222-2222-4222-8222-222222222222:7`
+
+    for (const call of [
+      { name: 'chrome_bridge_status', arguments: { connectionId } },
+      { name: 'chrome_bridge_tabs', arguments: { connectionId } },
+      { name: 'chrome_bridge_open', arguments: { connectionId, active: false } },
+      { name: 'chrome_bridge_select_tab', arguments: { connectionId, tabId } },
+      { name: 'chrome_bridge_query', arguments: { tabId, selector: 'h1' } }
+    ]) {
+      expect((await client.callTool(call)).isError).not.toBe(true)
+      expect(route).toHaveBeenLastCalledWith(expect.objectContaining({ arguments: call.arguments }))
+    }
+
+    for (const arguments_ of [{ connectionId: 'wrong' }, { connectionId, extra: true }]) {
+      expect((await client.callTool({ name: 'chrome_bridge_tabs', arguments: arguments_ })).isError).toBe(true)
+    }
+
+    const { tools } = await client.listTools()
+
+    for (const tool of tools) { expect(tool.inputSchema.properties).toHaveProperty('connectionId') }
+  })
+
   it('validates and routes bounded snapshot and query arguments', async () => {
     const route = vi.fn<ChromeBridgeRequestRouter['route']>().mockResolvedValue({ count: 0 })
     const server = createChromeBridgeServer({ route })
@@ -343,7 +374,11 @@ describe('Hermes Chrome bridge MCP server', () => {
     clients.push(client)
     await server.connect(serverTransport)
     await client.connect(clientTransport)
-    const statusCall = client.callTool({ name: 'chrome_bridge_status' })
+    const discovery = await client.callTool({ name: 'chrome_bridge_status' })
+    const discovered = JSON.parse((discovery.content as Array<{ text: string }>)[0].text)
+    expect(discovered.connectionCount).toBe(1)
+    const connectionId = discovered.connections[0].connectionId as string
+    const statusCall = client.callTool({ name: 'chrome_bridge_status', arguments: { connectionId } })
 
     while (messages.length === 0) { await new Promise(resolveWait => setTimeout(resolveWait, 5)) }
     const statusRequest = messages.shift() as Record<string, unknown>
@@ -355,10 +390,11 @@ describe('Hermes Chrome bridge MCP server', () => {
     })}\n`)
     const status = await statusCall
     const statusContent = status.content as Array<{ text: string }>
-    expect(JSON.parse(statusContent[0]?.text ?? 'null')).toEqual({
+    expect(JSON.parse(statusContent[0]?.text ?? 'null')).toMatchObject({
       bridgeConnected: true,
       nativeConnected: true,
-      selectedTabId: 11
+      connectionId,
+      selectedTabId: `${connectionId}:${discovered.connections[0].sessionId}:11`
     })
 
     const tabsCall = client.callTool({ name: 'chrome_bridge_tabs' })

@@ -12,6 +12,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 
 import { BridgeBrokerError, ChromeBridgeBroker } from './broker.js'
+import { parseTabId, validConnectionId } from './connection.js'
 import {
   readRuntimeConfig,
   resolveHermesHome,
@@ -82,7 +83,21 @@ function validDistance(value: unknown): boolean {
   return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
 }
 
-function validToolArguments(method: ChromeBridgeRequest['method'], arguments_: Record<string, unknown>): boolean {
+function validToolArguments(method: ChromeBridgeRequest['method'], input: Record<string, unknown>): boolean {
+  const arguments_ = { ...input }
+
+  if ('connectionId' in arguments_) {
+    if (!validConnectionId(arguments_.connectionId)) { return false }
+    delete arguments_.connectionId
+  }
+
+  if (typeof arguments_.tabId === 'string') {
+    const tab = parseTabId(arguments_.tabId)
+
+    if (tab === undefined) { return false }
+    arguments_.tabId = tab.tabId
+  }
+
   const keys = Object.keys(arguments_)
 
   if (method === 'selectTab') {
@@ -218,6 +233,10 @@ const disconnectedRouter: ChromeBridgeRequestRouter = {
     if (request.method === 'status') {
       return {
         connected: false,
+        bridgeConnected: false,
+        nativeConnected: false,
+        connections: [],
+        connectionCount: 0,
         updatedAt: new Date().toISOString(),
         version: 1
       }

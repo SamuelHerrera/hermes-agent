@@ -1,5 +1,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
+import { CONNECTION_ID_PATTERN } from './connection.js'
+
 const EMPTY_INPUT_SCHEMA = {
   additionalProperties: false,
   properties: {},
@@ -43,10 +45,10 @@ const EVAL_ANNOTATIONS = {
   title: 'Arbitrary JavaScript execution; requires explicit user approval'
 } as const
 
-export const CHROME_BRIDGE_TOOLS = [
+const BASE_TOOLS = [
   {
     annotations: READ_ONLY_ANNOTATIONS,
-    description: 'Report whether the local Hermes Chrome bridge is connected.',
+    description: 'Discover connected Chrome profiles with public connectionId, label and sessionId. Without a target, returns all connections; with connectionId, checks that profile.',
     inputSchema: EMPTY_INPUT_SCHEMA,
     name: 'chrome_bridge_status'
   },
@@ -284,3 +286,27 @@ export const CHROME_BRIDGE_TOOLS = [
     name: 'chrome_bridge_screenshot'
   }
 ] as const satisfies readonly Tool[]
+
+export const CHROME_BRIDGE_TOOLS: readonly Tool[] = BASE_TOOLS.map(tool => ({
+  ...tool,
+  description: `${tool.description} Target connectionId explicitly when multiple profiles are connected. Namespaced tabId also binds the connection; labels are not selectors. Untargeted commands fail on ambiguity or after the implicit connection changes.`,
+  inputSchema: {
+    ...tool.inputSchema,
+    properties: {
+      ...tool.inputSchema.properties,
+      connectionId: {
+        description: 'Public profile identity from chrome_bridge_status; never a credential.',
+        type: 'string', pattern: `^${CONNECTION_ID_PATTERN}$`
+      },
+      ...('tabId' in tool.inputSchema.properties ? {
+        tabId: {
+          description: 'Use the namespaced tabId returned by the bridge. Integer IDs require an explicit connection or an unchanged single-connection session. Re-list tabs after reconnect.',
+          anyOf: [
+            { type: 'string', pattern: `^${CONNECTION_ID_PATTERN}:${CONNECTION_ID_PATTERN}:[1-9][0-9]*$` },
+            { type: 'integer', minimum: 1 }
+          ]
+        }
+      } : {})
+    }
+  }
+}))

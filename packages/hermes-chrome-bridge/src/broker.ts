@@ -1,16 +1,10 @@
-import { timingSafeEqual } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { chmod, lstat, unlink } from 'node:fs/promises'
-import {
-  createConnection,
-  createServer,
-  type Server,
-  type Socket
-} from 'node:net'
+import { createConnection, createServer, type Server, type Socket } from 'node:net'
 
-import type {
-  ChromeBridgeRequest,
-  ChromeBridgeRequestRouter
-} from './server.js'
+import { parseTabId, safeConnectionLabel, validConnectionId } from './connection.js'
+import { writeRuntimeStatus } from './runtime.js'
+import type { ChromeBridgeRequest, ChromeBridgeRequestRouter } from './server.js'
 
 const IPC_REQUEST_MAX_BYTES = 1024 * 1024
 const IPC_RESPONSE_MAX_BYTES = 64 * 1024 * 1024
@@ -23,11 +17,14 @@ export interface BrokerConfig {
   origin: string
   requestTimeoutMs?: number
   socketPath: string
+  statusPath?: string
   token: string
   version: 1
 }
 
 export interface BrokerStatus {
+  connections: ConnectionStatus[]
+  connectionCount: number
   bridgeConnected: boolean
   connected: boolean
   connectedAt?: string
@@ -35,6 +32,18 @@ export interface BrokerStatus {
   nativeConnected: boolean
   updatedAt: string
   version: 1
+}
+
+interface ConnectionStatus {
+  connectionId: string
+  label: string
+  sessionId: string
+  connectedAt: string
+}
+
+interface HostConnection extends ConnectionStatus {
+  socket: Socket
+  pending: Map<string, PendingRequest>
 }
 
 interface PendingRequest {
@@ -124,12 +133,15 @@ async function removeStaleSocket(socketPath: string): Promise<void> {
 }
 
 export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
-  private activeHost?: Socket
+  private hosts = new Map<string, HostConnection>()
+  private sockets = new Set<Socket>()
+  private implicitSession?: string
+  private requiresExplicitConnection = false
   private connectedAt?: string
   private disconnectedAt?: string
-  private nextRequestId = 1
-  private pending = new Map<string, PendingRequest>()
+
   private server?: Server
+  private statusWrites: Promise<void> = Promise.resolve()
 
   public constructor(private readonly config: BrokerConfig) {
     if (config.version !== 1) {throw new Error('unsupported Chrome bridge protocol version')}
@@ -147,52 +159,101 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       this.server?.listen(this.config.socketPath, resolve)
     })
     await chmod(this.config.socketPath, 0o600)
+    this.persistStatus()
   }
 
   public status(): BrokerStatus {
+    const connections = [...this.hosts.values()].map(({ connectionId, label, sessionId, connectedAt }) =>
+      ({ connectionId, label, sessionId, connectedAt }))
+      .sort((left, right) => left.connectionId.localeCompare(right.connectionId))
+
     return {
-      bridgeConnected: this.activeHost !== undefined,
-      connected: this.activeHost !== undefined,
+      connections,
+      connectionCount: connections.length,
+      bridgeConnected: connections.length > 0,
+      connected: connections.length > 0,
       ...(this.connectedAt === undefined ? {} : { connectedAt: this.connectedAt }),
       ...(this.disconnectedAt === undefined ? {} : { disconnectedAt: this.disconnectedAt }),
-      nativeConnected: this.activeHost !== undefined,
+      nativeConnected: connections.length > 0,
       updatedAt: new Date().toISOString(),
       version: 1
     }
   }
 
   public async route(request: ChromeBridgeRequest): Promise<unknown> {
-    if (this.activeHost === undefined || this.activeHost.destroyed) {
-      if (request.method === 'status') { return this.status() }
+    if (request.method === 'status' && request.arguments.connectionId === undefined) { return this.status() }
+    const arguments_ = { ...request.arguments }
+    const tab = parseTabId(arguments_.tabId)
+    const explicitId = arguments_.connectionId
+
+    if (explicitId !== undefined && !validConnectionId(explicitId)) {
+      throw new BridgeBrokerError('INVALID_ARGUMENTS', 'invalid connectionId')
+    }
+
+    if (typeof arguments_.tabId === 'string' && tab === undefined) {
+      throw new BridgeBrokerError('INVALID_ARGUMENTS', 'invalid namespaced tabId')
+    }
+
+    if (tab !== undefined && explicitId !== undefined && explicitId !== tab.connectionId) {
+      throw new BridgeBrokerError('CONNECTION_MISMATCH', 'tabId belongs to another connection')
+    }
+
+    const connectionId = explicitId ?? tab?.connectionId
+    let selected: HostConnection | undefined
+
+    if (connectionId !== undefined) {
+      selected = this.hosts.get(connectionId)
+    } else {
+      if (this.hosts.size > 1 || this.requiresExplicitConnection) {
+        throw new BridgeBrokerError('AMBIGUOUS_CONNECTION', 'Use connectionId from chrome_bridge_status or a namespaced tabId')
+      }
+
+      selected = this.hosts.values().next().value
+    }
+
+    if (selected === undefined || selected.socket.destroyed) {
       throw new BridgeBrokerError('BRIDGE_DISCONNECTED', 'native Chrome bridge is disconnected')
     }
 
-    const maxPending = this.config.maxPending ?? DEFAULT_MAX_PENDING
+    const host = selected
 
-    if (this.pending.size >= maxPending) {
+    if (tab !== undefined && tab.sessionId !== host.sessionId) {
+      throw new BridgeBrokerError('STALE_TAB_ID', 'Connection reconnected; rediscover its tabs')
+    }
+
+    delete arguments_.connectionId
+
+    if (tab !== undefined) { arguments_.tabId = tab.tabId }
+
+    if (host.pending.size >= (this.config.maxPending ?? DEFAULT_MAX_PENDING)) {
       throw new BridgeBrokerError('BRIDGE_BUSY', 'native Chrome bridge has too many pending requests')
     }
 
-    const id = String(this.nextRequestId++)
+    const id = randomUUID()
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.pending.delete(id)
+        host.pending.delete(id)
         reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'native Chrome bridge request timed out'))
       }, this.config.requestTimeoutMs ?? 10_000)
 
-      this.pending.set(id, { reject, resolve, timer })
-      this.send(this.activeHost as Socket, {
-        arguments: request.arguments,
-        id,
-        method: request.method,
-        type: 'request'
-      })
+      host.pending.set(id, { reject, resolve: value => resolve(this.scopeResult(host, value)), timer })
+
+      try {
+        this.send(host.socket, { arguments: arguments_, id, method: request.method, type: 'request' })
+      } catch (error) {
+        clearTimeout(timer)
+        host.pending.delete(id)
+        reject(error)
+      }
     })
   }
 
   public async close(): Promise<void> {
-    this.disconnectHost('broker closed')
+    for (const host of this.hosts.values()) { this.disconnectHost(host, 'broker closed') }
+
+    for (const socket of this.sockets) { socket.destroy() }
+    await this.statusWrites
 
     if (this.server !== undefined) {
       await new Promise<void>(resolve => this.server?.close(() => resolve()))
@@ -205,6 +266,8 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
   }
 
   private accept(socket: Socket): void {
+    this.sockets.add(socket)
+    let host: HostConnection | undefined
     let authenticated = false
     let buffer = Buffer.alloc(0)
 
@@ -213,6 +276,8 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
     }, this.config.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS)
 
     socket.on('data', chunk => {
+      if (socket.writableEnded || socket.destroyed) { return }
+
       try {
         buffer = buffer.length === 0 ? chunk : Buffer.concat([buffer, chunk])
 
@@ -247,106 +312,147 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
               return
             }
 
-            if (this.activeHost !== undefined) {
+            // Old hosts remain usable but their identity cannot survive reconnect.
+            const connectionId = envelope.connectionId === undefined ? randomUUID() : envelope.connectionId
+
+            if (!validConnectionId(connectionId)) {
+              throw new BridgeBrokerError('INVALID_ENVELOPE', 'invalid public connection identity')
+            }
+
+            if (this.hosts.has(connectionId)) {
               clearTimeout(handshakeTimer)
-              this.rejectSocket(socket, 'HOST_ALREADY_CONNECTED', 'an authenticated host is already connected')
+              this.rejectSocket(socket, 'CONNECTION_ALREADY_CONNECTED', 'this identity is already connected; disconnect it before retrying')
 
               return
             }
 
             authenticated = true
             clearTimeout(handshakeTimer)
-            this.activeHost = socket
             this.connectedAt = new Date().toISOString()
+            host = {
+              connectionId,
+              label: safeConnectionLabel(envelope.label, connectionId),
+              sessionId: randomUUID(),
+              connectedAt: this.connectedAt,
+              pending: new Map(),
+              socket
+            }
+            this.hosts.set(connectionId, host)
+
+            // Bind the default at discovery, before any command can race a
+            // disconnect/replacement. Never silently promote another profile.
+            if (this.implicitSession === undefined) { this.implicitSession = host.sessionId }
+            else { this.requiresExplicitConnection = true }
+
+            this.persistStatus()
             this.send(socket, { type: 'hello.ok', version: 1 })
-          } else {
-            this.handleHostEnvelope(envelope)
+          } else if (host !== undefined) {
+            this.handleHostEnvelope(host, envelope)
           }
         }
       } catch (error) {
         clearTimeout(handshakeTimer)
 
         const brokerError = error instanceof BridgeBrokerError
-          ? error
-          : new BridgeBrokerError('INVALID_ENVELOPE', 'invalid IPC envelope')
+          ? error : new BridgeBrokerError('INVALID_ENVELOPE', 'invalid IPC envelope')
 
         this.rejectSocket(socket, brokerError.code, brokerError.message)
 
-        if (authenticated) {this.disconnectHost(brokerError.message)}
+        if (host !== undefined) {this.disconnectHost(host, brokerError.message)}
       }
     })
     socket.on('close', () => {
       clearTimeout(handshakeTimer)
+      this.sockets.delete(socket)
 
-      if (this.activeHost === socket) {this.disconnectHost('native host disconnected')}
+      if (host !== undefined) {this.disconnectHost(host, 'native host disconnected')}
     })
     socket.on('error', () => {
-      if (this.activeHost === socket) {this.disconnectHost('native host disconnected')}
+      if (host !== undefined) {this.disconnectHost(host, 'native host disconnected')}
     })
   }
 
   private validHello(envelope: Envelope): boolean {
     return envelope.version === this.config.version &&
-      envelope.origin === this.config.origin &&
-      tokensEqual(envelope.token, this.config.token)
+      envelope.origin === this.config.origin && tokensEqual(envelope.token, this.config.token)
   }
 
-  private handleHostEnvelope(envelope: Envelope): void {
+  private handleHostEnvelope(host: HostConnection, envelope: Envelope): void {
     if (envelope.type === 'event' && isObject(envelope.event)) {return}
 
     if (envelope.type !== 'response' || typeof envelope.id !== 'string') {
       throw new BridgeBrokerError('INVALID_ENVELOPE', 'host sent an invalid response envelope')
     }
 
-    const pending = this.pending.get(envelope.id)
+    const pending = host.pending.get(envelope.id)
 
     if (pending === undefined) {
       throw new BridgeBrokerError('INVALID_ENVELOPE', 'host response has an unknown request ID')
     }
 
     const invalidResponse = !(
-      (isObject(envelope.error) && typeof envelope.error.message === 'string') ||
-      'result' in envelope
+      (isObject(envelope.error) && typeof envelope.error.message === 'string') || 'result' in envelope
     )
 
     if (invalidResponse) {
-      const error = new BridgeBrokerError(
-        'INVALID_ENVELOPE',
-        'host response has no result or error'
-      )
-
-      this.pending.delete(envelope.id)
+      const error = new BridgeBrokerError('INVALID_ENVELOPE', 'host response has no result or error')
+      host.pending.delete(envelope.id)
       clearTimeout(pending.timer)
       pending.reject(error)
       throw error
     }
 
-    this.pending.delete(envelope.id)
+    host.pending.delete(envelope.id)
     clearTimeout(pending.timer)
 
     if (isObject(envelope.error) && typeof envelope.error.message === 'string') {
       pending.reject(new BridgeBrokerError(
-        typeof envelope.error.code === 'string' ? envelope.error.code : 'BRIDGE_ERROR',
-        envelope.error.message
+        typeof envelope.error.code === 'string' ? envelope.error.code : 'BRIDGE_ERROR', envelope.error.message
       ))
     } else {
       pending.resolve(envelope.result)
     }
   }
 
-  private disconnectHost(reason: string): void {
-    const host = this.activeHost
-    this.activeHost = undefined
+  private disconnectHost(host: HostConnection, reason: string): void {
+    if (this.hosts.get(host.connectionId) !== host) { return }
+    this.hosts.delete(host.connectionId)
 
-    if (host !== undefined && !host.destroyed) {host.destroy()}
+    if (!host.socket.destroyed) {host.socket.destroy()}
+    this.disconnectedAt = new Date().toISOString()
 
-    if (this.connectedAt !== undefined) {this.disconnectedAt = new Date().toISOString()}
-
-    for (const [id, pending] of this.pending) {
+    for (const [id, pending] of host.pending) {
       clearTimeout(pending.timer)
       pending.reject(new BridgeBrokerError('BRIDGE_DISCONNECTED', reason))
-      this.pending.delete(id)
+      host.pending.delete(id)
     }
+
+    this.persistStatus()
+  }
+
+  private persistStatus(): void {
+    const path = this.config.statusPath
+
+    if (path === undefined) { return }
+    const status = this.status()
+    this.statusWrites = this.statusWrites.then(async () => writeRuntimeStatus(path, status))
+      .catch(() => { process.stderr.write('Chrome bridge could not persist broker status\n') })
+  }
+
+  private scopeResult(host: HostConnection, value: unknown): unknown {
+    // Only protocol tab fields, never similarly named fields inside page/eval data.
+    if (!isObject(value)) { return value }
+    const result: Record<string, unknown> = { ...value, connectionId: host.connectionId }
+
+    for (const key of ['tabId', 'selectedTabId']) {
+      if (Number.isSafeInteger(value[key]) && (value[key] as number) > 0) {
+        result[key] = `${host.connectionId}:${host.sessionId}:${String(value[key])}`
+      }
+    }
+
+    if (Array.isArray(value.tabs)) { result.tabs = value.tabs.map(tab => this.scopeResult(host, tab)) }
+
+    return result
   }
 
   private rejectSocket(socket: Socket, code: string, message: string): void {

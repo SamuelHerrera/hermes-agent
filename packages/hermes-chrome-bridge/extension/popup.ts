@@ -32,8 +32,16 @@ const status = requireElement<HTMLElement>('#status')
 const detail = requireElement<HTMLElement>('#detail')
 const connectButton = requireElement<HTMLButtonElement>('#connect')
 const disconnectButton = requireElement<HTMLButtonElement>('#disconnect')
+const profileLabel = requireElement<HTMLInputElement>('#profile-label')
+const connectionId = requireElement<HTMLElement>('#connection-id')
 
 function render(state: ConnectionState): void {
+  if (document.activeElement !== profileLabel && state.identity !== undefined) {
+    profileLabel.value = state.identity.label
+  }
+
+  profileLabel.disabled = state.optedIn
+  connectionId.textContent = state.identity?.connectionId ?? ''
   status.textContent = state.connection
   status.dataset.state = state.connection
   detail.textContent = state.lastError?.message ?? (
@@ -58,7 +66,9 @@ function renderUnavailable(): void {
 
 async function sendCommand(type: 'bridge.connect' | 'bridge.disconnect' | 'bridge.status'): Promise<void> {
   try {
-    const response: unknown = await chrome.runtime.sendMessage({ type })
+    const response: unknown = await chrome.runtime.sendMessage({
+      type, ...(type === 'bridge.connect' ? { label: profileLabel.value } : {})
+    })
 
     if (!isRecord(response) || !isConnectionState(response.state)) {
       renderUnavailable()

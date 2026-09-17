@@ -1,4 +1,5 @@
 import { isTrustedPopupCommand } from './background-policy.js'
+import { createIdentityStore } from './identity-store.js'
 import { hideControlIndicators } from './indicator-notifier.js'
 import {
   type ConnectionState,
@@ -70,6 +71,10 @@ const dispatchRequest = createBridgeRequestDispatcher({
 controller = createConnectionController({
   connectNative: hostName => chrome.runtime.connectNative(hostName),
   consumeNativeDisconnectError: () => { void chrome.runtime.lastError },
+  readIdentity: createIdentityStore({
+    get: async key => chrome.storage.local.get(key),
+    set: async values => chrome.storage.local.set(values)
+  }),
   readOptIn: async () => {
     const stored = await chrome.storage.local.get(OPT_IN_KEY)
 
@@ -117,7 +122,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
 
   const action = message.type === 'bridge.connect'
-    ? controller.connect()
+    ? controller.connect(message.label)
     : controller.disconnect()
 
   void action

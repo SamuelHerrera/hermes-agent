@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { ChromeBridgeBroker } from '../src/broker.js'
-import { type RuntimeConfig, type RuntimeStatus, writePrivateJson } from '../src/runtime.js'
+import { type RuntimeConfig, writePrivateJson } from '../src/runtime.js'
 
 import { FakeChromeProcess } from './fake-chrome.js'
 import {
@@ -38,7 +38,7 @@ async function waitFor<T>(read: () => Promise<T | undefined> | T | undefined, ti
   }
 }
 
-async function setup(): Promise<{
+async function setup(identify = true): Promise<{
   broker: ChromeBridgeBroker
   config: RuntimeConfig
   configPath: string
@@ -72,6 +72,12 @@ async function setup(): Promise<{
   const input = new PassThrough()
   const output = new PassThrough()
   const decoder = new NativeMessageDecoder(HOST_TO_BROWSER_MAX_BYTES)
+
+  if (identify) {
+    input.write(encodeNativeMessage({ type: 'bridge.identity', version: 1,
+      connectionId: '11111111-1111-4111-8111-111111111111', label: 'Test profile' }, BROWSER_TO_HOST_MAX_BYTES))
+  }
+
   const messages: Array<Record<string, unknown>> = []
   output.on('data', chunk => {
     messages.push(...decoder.push(Buffer.from(chunk)) as Array<Record<string, unknown>>)
@@ -90,6 +96,17 @@ afterEach(async () => {
 })
 
 describe('native messaging host', () => {
+  it('closes the native channel on invalid identity rather than leaving Chrome connecting', async () => {
+    const { broker, configPath, input, output } = await setup(false)
+    input.write(encodeNativeMessage({ type: 'bridge.identity', version: 1,
+      connectionId: 'not-an-identity', label: 'Test' }, BROWSER_TO_HOST_MAX_BYTES))
+    const host = new NativeMessagingHost({ chromeOrigin: origin, configPath, input, output, diagnostics: () => undefined })
+    hosts.push(host)
+    await host.start()
+    expect(output.writableEnded).toBe(true)
+    expect(broker.status().connectionCount).toBe(0)
+  })
+
   it('accepts only the configured Chrome argv origin', () => {
     expect(authorizeChromeOrigin(origin, origin)).toBe(origin)
     expect(authorizeChromeOrigin(origin.slice(0, -1), origin)).toBe(origin)
@@ -170,7 +187,7 @@ describe('native messaging host', () => {
       type: 'response'
     }, BROWSER_TO_HOST_MAX_BYTES))
 
-    await expect(routed).resolves.toEqual({ screenshot })
+    await expect(routed).resolves.toMatchObject({ screenshot })
     expect(diagnostics).toEqual([])
     output.end()
   })
@@ -204,6 +221,8 @@ describe('native messaging host', () => {
     for (let iteration = 0; iteration < 20; iteration += 1) {
       const input = new PassThrough()
       const output = new PassThrough()
+      input.write(encodeNativeMessage({ type: 'bridge.identity', version: 1,
+        connectionId: '11111111-1111-4111-8111-111111111111', label: 'Test profile' }, BROWSER_TO_HOST_MAX_BYTES))
 
       const host = new NativeMessagingHost({
         chromeOrigin: origin,
@@ -221,53 +240,38 @@ describe('native messaging host', () => {
       output.end()
     }
 
+    await waitFor(async () => JSON.parse(await readFile(config.statusPath, 'utf8')).connected === false ? true : undefined)
     const text = await readFile(config.statusPath, 'utf8')
     expect(() => JSON.parse(text)).not.toThrow()
     expect(JSON.parse(text)).toMatchObject({ connected: false, version: 1 })
     expect(diagnostics).toEqual([])
   })
 
-  it('orders status writes by invocation and waits for final persistence on stop', async () => {
-    const { configPath, input, output } = await setup()
-    const writes: boolean[] = []
-    let releaseConnected: (() => void) | undefined
+  it('preserves public browser identities across simultaneous native hosts', async () => {
+    const { broker, config, configPath, input, output } = await setup(false)
+    const secondInput = new PassThrough()
 
-    const connectedBlocked = new Promise<void>(resolve => {
-      releaseConnected = resolve
-    })
-
-    const options = {
-      chromeOrigin: origin,
-      configPath,
-      diagnostics: () => undefined,
-      input,
-      output,
-      statusWriter: async (_path: string, status: RuntimeStatus) => {
-        writes.push(status.connected)
-
-        if (status.connected) {await connectedBlocked}
-      }
+    const identify = (stream: PassThrough, connectionId: string, label: string): void => {
+      stream.write(encodeNativeMessage({ type: 'bridge.identity', version: 1, connectionId, label }, BROWSER_TO_HOST_MAX_BYTES))
     }
 
-    const host = new NativeMessagingHost(options)
-    hosts.push(host)
-    await host.start()
-    await waitFor(() => writes.length === 1 ? true : undefined)
-
-    const stopping = host.stop()
-
-    const early = await Promise.race([
-      stopping.then(() => 'stopped'),
-      new Promise(resolve => setTimeout(() => resolve('pending'), 20))
-    ])
-
-    expect(early).toBe('pending')
-    expect(writes).toEqual([true])
-
-    releaseConnected?.()
-    await stopping
-    expect(writes).toEqual([true, false])
-    output.end()
+    identify(input, '11111111-1111-4111-8111-111111111111', 'First profile')
+    identify(secondInput, '22222222-2222-4222-8222-222222222222', 'Second profile')
+    const first = new NativeMessagingHost({ chromeOrigin: origin, configPath, input, output })
+    const second = new NativeMessagingHost({ chromeOrigin: origin, configPath, input: secondInput, output: new PassThrough() })
+    hosts.push(first, second)
+    await Promise.all([first.start(), second.start()])
+    expect(broker.status()).toMatchObject({ connectionCount: 2, connections: [
+      { connectionId: '11111111-1111-4111-8111-111111111111', label: 'First profile' },
+      { connectionId: '22222222-2222-4222-8222-222222222222', label: 'Second profile' }
+    ] })
+    await first.stop()
+    await expect.poll(() => broker.status().connectionCount).toBe(1)
+    await expect.poll(async () => JSON.parse(await readFile(config.statusPath, 'utf8')))
+      .toMatchObject({ connected: true, connectionCount: 1 })
+    await second.stop()
+    await expect.poll(async () => JSON.parse(await readFile(config.statusPath, 'utf8')))
+      .toMatchObject({ connected: false, connectionCount: 0 })
   })
 
   it('emits bounded disconnected state and reconnects while the Chrome port is alive', async () => {

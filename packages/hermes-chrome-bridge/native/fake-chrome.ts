@@ -1,4 +1,5 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 
 import {
   BROWSER_TO_HOST_MAX_BYTES,
@@ -34,6 +35,7 @@ export class FakeChromeProcess {
         else {waiter(message)}
       }
     })
+    this.send({ type: 'bridge.identity', version: 1, connectionId: randomUUID(), label: 'Test Chrome' })
   }
 
   public send(message: Record<string, unknown>): void {
