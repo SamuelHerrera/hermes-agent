@@ -10,6 +10,7 @@ import { resetProjectTreeState, useProjectTree } from './use-project-tree'
 const readDir = vi.fn<(path: string) => Promise<HermesReadDirResult>>()
 
 beforeEach(() => {
+  localStorage.clear()
   $connection.set(null)
   resetProjectTreeState()
   readDir.mockReset()
@@ -216,6 +217,112 @@ describe('useProjectTree', () => {
 
     expect(result.current.rootError).toBeNull()
     expect(result.current.data.map(n => n.name)).toEqual(['README.md'])
+  })
+
+  it('restores expanded and collapsed folders after switching roots and remounting', async () => {
+    readDir.mockImplementation(async path =>
+      ok(
+        path === '/a'
+          ? [{ name: 'src', path: '/a/src', isDirectory: true }]
+          : path === '/a/src'
+            ? [{ name: 'nested', path: '/a/src/nested', isDirectory: true }]
+            : path === '/a/src/nested'
+              ? [{ name: 'file.ts', path: '/a/src/nested/file.ts', isDirectory: false }]
+              : []
+      )
+    )
+    const { result, rerender, unmount } = renderHook(({ cwd }) => useProjectTree(cwd), { initialProps: { cwd: '/a' } })
+    await waitFor(() => expect(result.current.data).toHaveLength(1))
+    await act(async () => {
+      result.current.setNodeOpen('/a/src', true)
+      await result.current.loadChildren('/a/src')
+      result.current.setNodeOpen('/a/src/nested', true)
+      await result.current.loadChildren('/a/src/nested')
+    })
+    rerender({ cwd: '/b' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    rerender({ cwd: '/a' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    expect(result.current.openState).toEqual({ '/a/src': true, '/a/src/nested': true })
+    expect(result.current.data[0]?.children?.[0]?.children?.[0]?.name).toBe('file.ts')
+    act(() => result.current.setNodeOpen('/a/src', false))
+    unmount()
+    resetProjectTreeState()
+    const restored = renderHook(() => useProjectTree('/a'))
+    await waitFor(() => expect(restored.result.current.rootLoading).toBe(false))
+    expect(restored.result.current.openState).toEqual({ '/a/src': false, '/a/src/nested': true })
+    await act(async () => {
+      restored.result.current.setNodeOpen('/a/src', true)
+      await restored.result.current.loadChildren('/a/src')
+    })
+    expect(restored.result.current.data[0]?.children?.[0]?.children?.[0]?.name).toBe('file.ts')
+  })
+
+  it('isolates the same path across filesystem connections and restores each view', async () => {
+    readDir.mockImplementation(async path =>
+      ok(path === '/p' ? [{ name: 'src', path: '/p/src', isDirectory: true }] : [])
+    )
+    $connection.set({ mode: 'local', baseUrl: 'backend-a', profile: 'a' } as never)
+    const { result } = renderHook(() => useProjectTree('/p'))
+    await waitFor(() => expect(result.current.data).toHaveLength(1))
+    await act(async () => {
+      result.current.setNodeOpen('/p/src', true)
+      await result.current.loadChildren('/p/src')
+    })
+    act(() => $connection.set({ mode: 'local', baseUrl: 'backend-b', profile: 'b' } as never))
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    expect(result.current.openState).toEqual({})
+    act(() => $connection.set({ mode: 'local', baseUrl: 'backend-a', profile: 'a' } as never))
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    expect(result.current.openState).toEqual({ '/p/src': true })
+  })
+
+  it('ignores a stale child response after switching away and back to the same folder', async () => {
+    let finishOld: (value: HermesReadDirResult) => void = () => {}
+    readDir.mockImplementation(async path =>
+      ok(path === '/a' ? [{ name: 'src', path: '/a/src', isDirectory: true }] : [])
+    )
+    const { result, rerender } = renderHook(({ cwd }) => useProjectTree(cwd), { initialProps: { cwd: '/a' } })
+    await waitFor(() => expect(result.current.data).toHaveLength(1))
+    readDir.mockImplementationOnce(
+      () =>
+        new Promise(resolve => {
+          finishOld = resolve
+        })
+    )
+    act(() => {
+      void result.current.loadChildren('/a/src')
+    })
+    rerender({ cwd: '/b' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    rerender({ cwd: '/a' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    await act(async () => {
+      finishOld(ok([{ name: 'stale', path: '/a/src/stale', isDirectory: false }]))
+    })
+    expect(result.current.data[0]?.children).toBeUndefined()
+  })
+
+  it('keeps expansion on refresh and remembers collapse-all across root switches', async () => {
+    readDir.mockImplementation(async path =>
+      ok(path === '/a' ? [{ name: 'src', path: '/a/src', isDirectory: true }] : [])
+    )
+    const { result, rerender } = renderHook(({ cwd }) => useProjectTree(cwd), { initialProps: { cwd: '/a' } })
+    await waitFor(() => expect(result.current.data).toHaveLength(1))
+    await act(async () => {
+      result.current.setNodeOpen('/a/src', true)
+      await result.current.loadChildren('/a/src')
+      await result.current.refreshRoot()
+    })
+    expect(result.current.openState).toEqual({ '/a/src': true })
+    expect(result.current.data[0]?.children).toEqual([])
+    act(() => result.current.collapseAll())
+    rerender({ cwd: '/b' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    rerender({ cwd: '/a' })
+    await waitFor(() => expect(result.current.rootLoading).toBe(false))
+    expect(result.current.openState).toEqual({})
+    expect(result.current.data[0]?.children).toBeUndefined()
   })
 
   it('reloads when cwd changes', async () => {

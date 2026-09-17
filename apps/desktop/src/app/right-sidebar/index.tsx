@@ -11,10 +11,10 @@ import { useDelayedTrue } from '@/hooks/use-delayed-true'
 import { useI18n } from '@/i18n'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import { cn } from '@/lib/utils'
+import { $focusedCwd } from '@/store/focused-cwd'
 import { $panesFlipped } from '@/store/layout'
 import { notifyError } from '@/store/notifications'
 import { openPreview } from '@/store/preview'
-import { $currentCwd } from '@/store/session'
 
 import { SidebarPanelLabel } from '../shell/sidebar-label'
 
@@ -30,7 +30,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
   const { t } = useI18n()
   const r = t.rightSidebar
   const panesFlipped = useStore($panesFlipped)
-  const currentCwd = useStore($currentCwd).trim()
+  const currentCwd = useStore($focusedCwd)
 
   // The file tree is simply "browse the session's working directory". If the
   // session has a cwd — a repo, a sibling worktree, or any folder — show it. A
@@ -48,7 +48,8 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
     refreshRoot,
     rootError,
     rootLoading,
-    setNodeOpen
+    setNodeOpen,
+    viewKey
   } = useProjectTree(hasWorkspace ? currentCwd : '')
 
   const cwdName =
@@ -102,6 +103,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
         onPreviewFile={previewFile}
         onRefresh={() => void refreshRoot()}
         openState={openState}
+        viewKey={viewKey}
       />
     </aside>
   )
@@ -138,7 +140,8 @@ function FilesystemTab({
   onNodeOpenChange,
   onPreviewFile,
   onRefresh,
-  openState
+  openState,
+  viewKey
 }: FilesystemTabProps) {
   const { t } = useI18n()
   const r = t.rightSidebar
@@ -193,6 +196,7 @@ function FilesystemTab({
         onPreviewFile={onPreviewFile}
         onRetry={onRefresh}
         openState={openState}
+        viewKey={viewKey}
       />
     </div>
   )
@@ -207,6 +211,7 @@ export function RightSidebarSectionHeader({ children, className, ...props }: Com
 }
 
 interface FileTreeBodyProps {
+  viewKey: string
   collapseNonce: number
   cwd: string
   data: ReturnType<typeof useProjectTree>['data']
@@ -235,7 +240,8 @@ function FileTreeBody({
   onNodeOpenChange,
   onPreviewFile,
   onRetry,
-  openState
+  openState,
+  viewKey
 }: FileTreeBodyProps) {
   const { t } = useI18n()
   const r = t.rightSidebar
@@ -286,7 +292,7 @@ function FileTreeBody({
           </button>
         </div>
       )}
-      key={cwd}
+      key={viewKey}
       label="file-tree"
     >
       <ProjectTree
@@ -299,6 +305,7 @@ function FileTreeBody({
         onNodeOpenChange={onNodeOpenChange}
         onPreviewFile={onPreviewFile}
         openState={openState}
+        viewKey={viewKey}
       />
     </ErrorBoundary>
   )

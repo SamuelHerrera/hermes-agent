@@ -2,10 +2,12 @@ import { useStore } from '@nanostores/react'
 import { atom } from 'nanostores'
 import { useCallback, useEffect, useMemo } from 'react'
 
+import { desktopFsCacheKey } from '@/lib/desktop-fs'
 import { $connection } from '@/store/session'
 import { $workspaceChangeTick, consumeWorkspaceChange } from '@/store/workspace-events'
 
 import { type ProjectTreeEntry, readProjectDir } from './ipc'
+import { projectTreeViewKey, readProjectTreeView, saveProjectTreeView } from './view-state'
 
 export interface TreeNode {
   /** Absolute filesystem path. Doubles as react-arborist node id. */
@@ -96,6 +98,7 @@ export interface UseProjectTreeResult {
    *  session's recorded cwd no longer exists and we fell back to the default
    *  workspace dir. */
   effectiveCwd: string
+  viewKey: string
   openState: Record<string, boolean>
   rootError: string | null
   rootLoading: boolean
@@ -106,6 +109,7 @@ export interface UseProjectTreeResult {
 }
 
 interface ProjectTreeState {
+  connectionKey: string
   collapseNonce: number
   cwd: string
   data: TreeNode[]
@@ -119,6 +123,7 @@ interface ProjectTreeState {
 }
 
 const initialState: ProjectTreeState = {
+  connectionKey: '',
   collapseNonce: 0,
   cwd: '',
   data: [],
@@ -183,8 +188,14 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
   }
 
   const current = $projectTree.get()
+  const connectionKey = desktopFsCacheKey()
 
-  if (!force && current.cwd === cwd && (current.loaded || current.rootLoading)) {
+  if (
+    !force &&
+    current.connectionKey === connectionKey &&
+    current.cwd === cwd &&
+    (current.loaded || current.rootLoading)
+  ) {
     return
   }
 
@@ -193,11 +204,12 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
   inflight.clear()
 
   $projectTree.set({
+    connectionKey,
     collapseNonce: current.collapseNonce,
     cwd,
     data: [],
     loaded: false,
-    openState: current.cwd === cwd ? current.openState : {},
+    openState: readProjectTreeView(projectTreeViewKey(cwd, connectionKey)).openState,
     requestId,
     resolvedCwd: '',
     rootError: null,
@@ -206,6 +218,10 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
 
   let resolvedCwd = cwd
   let { entries, error } = await readProjectDir(cwd)
+
+  if ($projectTree.get().requestId !== requestId) {
+    return
+  }
 
   if (error) {
     const fallback = await fallbackRootFor(cwd)
@@ -221,6 +237,13 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
     }
   }
 
+  if ($projectTree.get().requestId !== requestId) {
+    return
+  }
+
+  const openState = readProjectTreeView(projectTreeViewKey(resolvedCwd, connectionKey)).openState
+  const data = error ? [] : await restoreOpenChildren(entries, openState, requestId)
+
   setProjectTree(latest => {
     if (latest.cwd !== cwd || latest.requestId !== requestId) {
       return latest
@@ -228,13 +251,40 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
 
     return {
       ...latest,
-      data: error ? [] : entries.map(e => makeNode(e.path, e.name, e.isDirectory)),
+      data,
+      openState,
       loaded: true,
       resolvedCwd,
       rootError: error || null,
       rootLoading: false
     }
   })
+}
+
+// Reload only remembered expanded branches. Closed folders stay lazy, including
+// their remembered descendant state for the next time they are opened.
+async function restoreOpenChildren(
+  entries: ProjectTreeEntry[],
+  openState: Record<string, boolean>,
+  requestId: number
+): Promise<TreeNode[]> {
+  return Promise.all(
+    entries.map(async entry => {
+      const node = makeNode(entry.path, entry.name, entry.isDirectory)
+
+      if (!node.isDirectory || !openState[node.id] || $projectTree.get().requestId !== requestId) {
+        return node
+      }
+
+      const { entries: children, error } = await readProjectDir(node.id)
+
+      return {
+        ...node,
+        error,
+        children: error ? [errorChild(node.id, error)] : await restoreOpenChildren(children, openState, requestId)
+      }
+    })
+  )
 }
 
 export function resetProjectTreeState() {
@@ -269,7 +319,7 @@ async function revalidateTree(cwd: string, change: { dirs: string[]; full: boole
     const reads = await Promise.all(targets.map(async dir => ({ dir, ...(await readProjectDir(dir)) })))
 
     setProjectTree(latest => {
-      if (latest.cwd !== cwd || !latest.loaded) {
+      if (latest.cwd !== cwd || latest.requestId !== state.requestId || !latest.loaded) {
         return latest
       }
 
@@ -320,7 +370,9 @@ async function revalidateTree(cwd: string, change: { dirs: string[]; full: boole
 
   const nextData = await reconcile(rootPath, state.data)
 
-  setProjectTree(latest => (latest.cwd === cwd && latest.loaded ? { ...latest, data: nextData } : latest))
+  setProjectTree(latest =>
+    latest.cwd === cwd && latest.requestId === state.requestId && latest.loaded ? { ...latest, data: nextData } : latest
+  )
 }
 
 /**
@@ -334,7 +386,7 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
   const state = useStore($projectTree)
   const connection = useStore($connection)
   const workspaceTick = useStore($workspaceChangeTick)
-  const connectionKey = `${connection?.mode || 'local'}:${connection?.profile || ''}:${connection?.baseUrl || ''}`
+  const connectionKey = desktopFsCacheKey(connection)
 
   const refreshRoot = useCallback(() => loadRoot(cwd, { force: true }), [cwd])
 
@@ -345,13 +397,10 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
           return current
         }
 
-        return {
-          ...current,
-          openState: {
-            ...current.openState,
-            [id]: open
-          }
-        }
+        const openState = { ...current.openState, [id]: open }
+        saveProjectTreeView(projectTreeViewKey(current.resolvedCwd || cwd, current.connectionKey), { openState })
+
+        return { ...current, openState }
       })
     },
     [cwd]
@@ -366,6 +415,8 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
         return current
       }
 
+      saveProjectTreeView(projectTreeViewKey(current.resolvedCwd || cwd, current.connectionKey), { openState: {} })
+
       return { ...current, collapseNonce: current.collapseNonce + 1, openState: {} }
     })
   }, [cwd])
@@ -376,6 +427,7 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
         return
       }
 
+      const requestId = $projectTree.get().requestId
       inflight.add(id)
 
       setProjectTree(current => {
@@ -391,6 +443,18 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
 
       const { entries, error } = await readProjectDir(id)
 
+      if ($projectTree.get().requestId !== requestId) {
+        return
+      }
+
+      const children = error
+        ? [errorChild(id, error)]
+        : await restoreOpenChildren(entries, $projectTree.get().openState, requestId)
+
+      if ($projectTree.get().requestId !== requestId) {
+        return
+      }
+
       inflight.delete(id)
 
       setProjectTree(current => {
@@ -404,7 +468,7 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
             ...n,
             loading: false,
             error: error || undefined,
-            children: error ? [errorChild(n.id, error)] : entries.map(e => makeNode(e.path, e.name, e.isDirectory))
+            children
           }))
         }
       })
@@ -475,23 +539,30 @@ export function useProjectTree(cwd: string): UseProjectTreeResult {
   return useMemo(
     () => ({
       collapseAll,
-      collapseNonce: state.cwd === cwd ? state.collapseNonce : 0,
-      data: state.cwd === cwd ? state.data : [],
-      effectiveCwd: state.cwd === cwd && state.resolvedCwd ? state.resolvedCwd : cwd,
+      collapseNonce: state.cwd === cwd && state.connectionKey === connectionKey ? state.collapseNonce : 0,
+      data: state.cwd === cwd && state.connectionKey === connectionKey ? state.data : [],
+      effectiveCwd:
+        state.cwd === cwd && state.connectionKey === connectionKey && state.resolvedCwd ? state.resolvedCwd : cwd,
+      viewKey: projectTreeViewKey(
+        state.cwd === cwd && state.connectionKey === connectionKey ? state.resolvedCwd || cwd : cwd,
+        connectionKey
+      ),
       loadChildren,
-      openState: state.cwd === cwd ? state.openState : {},
+      openState: state.cwd === cwd && state.connectionKey === connectionKey ? state.openState : {},
       refreshRoot,
-      rootError: state.cwd === cwd ? state.rootError : null,
-      rootLoading: state.cwd === cwd ? state.rootLoading : Boolean(cwd),
+      rootError: state.cwd === cwd && state.connectionKey === connectionKey ? state.rootError : null,
+      rootLoading: state.cwd === cwd && state.connectionKey === connectionKey ? state.rootLoading : Boolean(cwd),
       setNodeOpen
     }),
     [
       collapseAll,
+      connectionKey,
       cwd,
       loadChildren,
       refreshRoot,
       setNodeOpen,
       state.collapseNonce,
+      state.connectionKey,
       state.cwd,
       state.data,
       state.openState,

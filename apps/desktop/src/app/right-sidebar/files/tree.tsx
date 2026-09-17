@@ -1,5 +1,12 @@
 import { useStore } from '@nanostores/react'
-import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  type KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
 import { useMemo } from 'react'
 import { type NodeApi, type NodeRendererProps, type RowRendererProps, Tree, type TreeApi } from 'react-arborist'
 
@@ -16,6 +23,7 @@ import { FileEntryContextMenu, InlineRenameInput, isRenameShortcut } from '../fi
 
 import { getFileTreeDndManager } from './dnd-manager'
 import type { TreeNode } from './use-project-tree'
+import { readProjectTreeView, saveProjectTreeView } from './view-state'
 
 const ROW_HEIGHT = 22
 const INDENT = 10
@@ -35,6 +43,7 @@ function withTreeInset(paddingLeft: number | string | undefined): string {
 }
 
 interface ProjectTreeProps {
+  viewKey: string
   collapseNonce: number
   cwd: string
   data: TreeNode[]
@@ -55,7 +64,8 @@ export function ProjectTree({
   onLoadChildren,
   onNodeOpenChange,
   onPreviewFile,
-  openState
+  openState,
+  viewKey
 }: ProjectTreeProps) {
   markRightPanePerf('project-tree-render')
 
@@ -82,6 +92,57 @@ export function ProjectTree({
   }, [])
 
   useResizeObserver(syncTreeSize, containerRef)
+
+  // Wait for the virtual list to mount, then restore before paint. Ignore its
+  // initial onScroll(0), which otherwise erases the remembered offset.
+  const ready = size.height > 0 && size.width > 0
+  const scrollState = useRef<{ key: string; offset: number; timer?: ReturnType<typeof setTimeout> } | null>(null)
+  useLayoutEffect(() => {
+    const tree = treeRef.current
+
+    if (!ready || !tree) {
+      return
+    }
+
+    const offset = Math.min(
+      readProjectTreeView(viewKey).scrollTop,
+      Math.max(0, tree.visibleNodes.length * ROW_HEIGHT - tree.height)
+    )
+
+    scrollState.current = { key: viewKey, offset }
+    tree.scrollToOffset(offset)
+
+    const flush = () => {
+      const state = scrollState.current
+
+      if (!state) {
+        return
+      }
+
+      clearTimeout(state.timer)
+      saveProjectTreeView(state.key, { scrollTop: state.offset })
+    }
+
+    window.addEventListener('pagehide', flush)
+
+    return () => {
+      flush()
+      scrollState.current = null
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [viewKey, ready, collapseNonce])
+
+  const handleScroll = useCallback(({ scrollOffset }: { scrollOffset: number }) => {
+    const state = scrollState.current
+
+    if (!state) {
+      return
+    }
+
+    state.offset = scrollOffset
+    clearTimeout(state.timer)
+    state.timer = setTimeout(() => saveProjectTreeView(state.key, { scrollTop: state.offset }), 150)
+  }, [])
 
   const handleToggle = useCallback(
     (id: string) => {
@@ -197,6 +258,7 @@ export function ProjectTree({
           initialOpenState={openState}
           key={`${cwd}:${collapseNonce}`}
           onActivate={handleActivate}
+          onScroll={handleScroll}
           onToggle={handleToggle}
           openByDefault={false}
           padding={0}

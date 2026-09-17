@@ -53,6 +53,7 @@ import { Download, FileText, FolderOpen, LayoutDashboard, PanelBottom, Terminal,
 import { type KeybindContribution, KEYBINDS_AREA } from '@/lib/keybinds/actions'
 import { setYoloEnabled } from '@/lib/yolo-session'
 import { pruneComposerPopoutZones } from '@/store/composer-popout'
+import { $focusedCwd } from '@/store/focused-cwd'
 import {
   $fileBrowserOpen,
   $panesFlipped,
@@ -69,7 +70,6 @@ import { $activeGatewayProfile } from '@/store/profile'
 import { runExportProfileFlow, runImportProfileFlow } from '@/store/profile-share'
 import { $projectTree } from '@/store/projects'
 import {
-  $currentCwd,
   $rememberedSessionRestorePending,
   $selectedStoredSessionId,
   $sessions,
@@ -619,7 +619,7 @@ bindTreeSideVisibility('left', $sidebarOpen, setSidebarOpen)
 // The file tree is workspace-scoped. A detached chat hides it; picking a
 // project brings it back. The terminal is NOT workspace-gated: unlike the old shell (where it
 // rode the rail's row and vanished with it), its zone stands on its own.
-const $hasWorkspace = computed($currentCwd, cwd => Boolean(cwd.trim()))
+const $hasWorkspace = computed($focusedCwd, cwd => Boolean(cwd.trim()))
 
 // The tree pane's own presence tracks ⌘J directly, not just the column's
 // collapse — otherwise a pane revealed into that shared column would drag the
