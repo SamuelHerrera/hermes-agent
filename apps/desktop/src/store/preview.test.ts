@@ -10,10 +10,12 @@ import {
   closePreviewForSource,
   closeRightRail,
   closeRightRailTab,
+  openBrowserPreviewTab,
   openPreview,
   previewTabId,
   type PreviewTarget,
-  progressPreviewServerRestart
+  progressPreviewServerRestart,
+  updatePreviewTabTarget
 } from './preview'
 
 function fileTarget(source: string): PreviewTarget {
@@ -68,18 +70,32 @@ describe('preview store', () => {
     expect($previewTabs.get().map(tab => tab.target.kind)).toEqual(['file', 'url', 'artifact'])
   })
 
-  // The Browser is a SINGLETON: the tab names the surface, not the page, so a
-  // second URL navigates the browser it already has instead of stacking a
-  // second Browser tab beside the first.
-  it('keeps one Browser tab — a second url swaps its target instead of adding a tab', () => {
+  it('keeps distinct web pages in native preview tabs', () => {
     openPreview(urlTarget('https://news.ycombinator.com'), 'tool-result')
     openPreview(urlTarget('https://www.reddit.com'), 'tool-result')
 
     const urlTabs = $previewTabs.get().filter(tab => tab.target.kind === 'url')
 
-    expect(urlTabs).toHaveLength(1)
-    expect(urlTabs[0].target.url).toBe('https://www.reddit.com')
-    expect($rightRailActiveTabId.get()).toBe(urlTabs[0].id)
+    expect(urlTabs.map(tab => tab.target.url)).toEqual(['https://news.ycombinator.com', 'https://www.reddit.com'])
+    expect($rightRailActiveTabId.get()).toBe('url:https://www.reddit.com')
+  })
+
+  it('opens explicit blank browser tabs with stable native-tab identities', () => {
+    openBrowserPreviewTab()
+    openBrowserPreviewTab()
+
+    const urlTabs = $previewTabs.get().filter(tab => tab.target.kind === 'url')
+
+    expect(urlTabs).toHaveLength(2)
+    expect(new Set(urlTabs.map(tab => tab.id)).size).toBe(2)
+    expect(urlTabs.map(tab => tab.target.url)).toEqual(['about:blank', 'about:blank'])
+
+    const activeId = $rightRailActiveTabId.get()!
+
+    updatePreviewTabTarget(activeId, target => ({ ...target, label: 'Example', url: 'https://example.com' }))
+
+    expect($previewTabs.get().find(tab => tab.id === activeId)?.target.url).toBe('https://example.com')
+    expect($rightRailActiveTabId.get()).toBe(activeId)
   })
 
   it('re-fronts an existing tab instead of duplicating it, refreshing its target', () => {

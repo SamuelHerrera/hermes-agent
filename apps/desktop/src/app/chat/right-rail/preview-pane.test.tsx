@@ -112,6 +112,36 @@ describe('PreviewPane console state', () => {
     forgetPreviewStripTools(tabId)
   })
 
+  it('shows browser chrome in embedded URL tabs and navigates from the address bar', async () => {
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(
+        <PreviewPane
+          embedded
+          tabId="url:about:blank"
+          target={{
+            kind: 'url',
+            label: 'New tab',
+            source: 'about:blank',
+            url: 'about:blank'
+          }}
+        />
+      )
+    })
+
+    const input = rendered.getByLabelText('Web address') as HTMLInputElement
+    const webview = rendered.container.querySelector('webview')
+
+    expect(input.value).toBe('about:blank')
+    expect(webview?.getAttribute('src')).toBe('about:blank')
+
+    fireEvent.change(input, { target: { value: 'example.com' } })
+    fireEvent.submit(input.closest('form')!)
+
+    expect(webview?.getAttribute('src')).toBe('https://example.com')
+    expect(input.value).toBe('https://example.com')
+  })
+
   it('renders authenticated remote HTML safely and honors source mode', async () => {
     const dataUrl = `data:text/html;base64,${btoa('<h1>remote</h1>')}`
 

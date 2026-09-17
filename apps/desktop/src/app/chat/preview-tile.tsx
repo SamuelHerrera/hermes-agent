@@ -37,7 +37,7 @@ function previewTitle(tabId: string): string {
   }
 
   if (target.kind === 'url') {
-    return 'Browser'
+    return target.label && target.label !== 'about:blank' ? target.label : 'Browser'
   }
 
   if (target.kind === 'artifact') {

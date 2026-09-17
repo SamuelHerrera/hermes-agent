@@ -21,6 +21,9 @@ import { $rightRailActiveTabId, type RightRailTabId, selectRightRailTab } from '
 
 export interface PreviewTarget {
   binary?: boolean
+  /** Stable identity for user-created browser tabs. URL targets that carry this
+   * key keep their native tab even as the page navigates to a different URL. */
+  browserTabKey?: string
   byteSize?: number
   /** Inline image bytes (a `data:` URL) when the renderer already holds them —
    * e.g. a pasted/dropped screenshot whose only on-disk copy is a transient
@@ -65,6 +68,7 @@ export interface PreviewTab {
 const TABS_STORAGE_KEY = 'hermes.desktop.previewTabs.v2'
 /** Superseded by the tab list above; cleared so it can't leak forever. */
 const LEGACY_SESSION_REGISTRY_KEY = 'hermes.desktop.sessionPreviews.v1'
+let browserTabSequence = 0
 
 function isPreviewTarget(value: unknown): value is PreviewTarget {
   if (!value || typeof value !== 'object') {
@@ -126,14 +130,9 @@ export function decodePreviewTabs(raw: string): PreviewTab[] {
       : tab
   )
 
-  // One Browser: rekey restored URL tabs onto the singleton id (rows written
-  // before the id existed carried one id per address) and keep only the
-  // LAST — the most recently opened page is the one the browser shows.
-  const lastUrl = tabs.findLast(tab => tab.target.kind === 'url')
-
-  return tabs
-    .filter(tab => tab.target.kind !== 'url' || tab === lastUrl)
-    .map(tab => (tab.target.kind === 'url' ? { ...tab, id: previewTabId(tab.target) } : tab))
+  return tabs.map(tab =>
+    tab.target.kind === 'url' && tab.id === 'url:browser' ? { ...tab, id: previewTabId(tab.target) } : tab
+  )
 }
 
 export const $previewTabs = persistentAtom<PreviewTab[]>(TABS_STORAGE_KEY, [], {
@@ -189,15 +188,32 @@ export const $previewReloadRequest = atom(0)
 export const $previewServerRestart = atom<PreviewServerRestart | null>(null)
 export const $previewServerRestartStatus = computed($previewServerRestart, restart => restart?.status ?? 'idle')
 
-/** The one Browser tab's id. URL targets all share it: the tab names the
- *  SURFACE (Browser), not the page, so opening a second URL navigates the
- *  browser it already has — re-front the tab, swap its target, and the pane
- *  rebuilds its webview against the new url. Files and artifacts stay keyed
- *  by identity; only the web surface is a singleton. */
-const BROWSER_TAB_ID: RightRailTabId = 'url:browser'
-
 export function previewTabId(target: PreviewTarget): RightRailTabId {
-  return target.kind === 'url' ? BROWSER_TAB_ID : `${target.kind}:${target.url}`
+  return target.kind === 'url' ? `url:${target.browserTabKey || target.url}` : `${target.kind}:${target.url}`
+}
+
+function newBrowserTabKey(): string {
+  browserTabSequence += 1
+
+  return `browser-${Date.now().toString(36)}-${browserTabSequence.toString(36)}`
+}
+
+/** Open a blank first-class browser tab. Unlike `openPreview(urlTarget)`, this
+ *  creates a unique tab even if another blank/page tab already exists. */
+export function openBrowserPreviewTab(callerPaneId?: string) {
+  const browserTabKey = newBrowserTabKey()
+
+  openPreview(
+    {
+      browserTabKey,
+      kind: 'url',
+      label: 'New tab',
+      source: `browser-tab:${browserTabKey}`,
+      url: 'about:blank'
+    },
+    'manual',
+    callerPaneId
+  )
 }
 
 // Browsing files is "peek at the source"; a tool or an explicit link handing
@@ -222,10 +238,28 @@ export function openPreview(target: PreviewTarget, source: PreviewRecordSource =
   const id = previewTabId(resolved)
   const current = $previewTabs.get()
   const index = current.findIndex(tab => tab.id === id)
-  const tab: PreviewTab = { anchor: current[index]?.anchor ?? defaultOpenPaneAnchor(callerPaneId), id, target: resolved }
+
+  const tab: PreviewTab = {
+    anchor: current[index]?.anchor ?? defaultOpenPaneAnchor(callerPaneId),
+    id,
+    target: resolved
+  }
 
   $previewTabs.set(index === -1 ? [...current, tab] : current.map((item, i) => (i === index ? tab : item)))
   selectRightRailTab(id)
+}
+
+export function updatePreviewTabTarget(tabId: string, update: (target: PreviewTarget) => PreviewTarget) {
+  const current = $previewTabs.get()
+  const index = current.findIndex(tab => tab.id === tabId)
+
+  if (index === -1) {
+    return
+  }
+
+  const next = update(current[index].target)
+
+  $previewTabs.set(current.map((tab, i) => (i === index ? { ...tab, target: next } : tab)))
 }
 
 export function closeRightRailTab(tabId: string) {

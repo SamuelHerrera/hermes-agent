@@ -17,6 +17,7 @@ import { invalidateStripTools } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
 import type { PaneStripTool } from '@/components/ui/pane-tab'
 import { translateNow } from '@/i18n'
+import { openBrowserPreviewTab } from '@/store/preview'
 
 import { createPreviewConsoleState, type PreviewConsoleState } from './preview-console-state'
 
@@ -78,6 +79,12 @@ export function previewStripTools(tabId: string): readonly PaneStripTool[] {
   const devTools = devToolsHandles.get(tabId)
 
   return [
+    {
+      icon: <Codicon name="add" size="0.8125rem" />,
+      id: 'preview-new-browser-tab',
+      label: 'New browser tab',
+      onSelect: () => openBrowserPreviewTab()
+    },
     {
       active: consoleOpen,
       icon: <Codicon name="terminal" size="0.8125rem" />,

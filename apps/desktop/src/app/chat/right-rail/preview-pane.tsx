@@ -12,7 +12,12 @@ import { openPreviewTargetInBrowser, remoteHtmlPreviewDocument } from '@/lib/loc
 import { rafCoalesce } from '@/lib/raf-coalesce'
 import { cn } from '@/lib/utils'
 import { notify, notifyError } from '@/store/notifications'
-import { $previewServerRestart, failPreviewServerRestart, type PreviewTarget } from '@/store/preview'
+import {
+  $previewServerRestart,
+  failPreviewServerRestart,
+  type PreviewTarget,
+  updatePreviewTabTarget
+} from '@/store/preview'
 
 import { ArtifactPreview } from './preview-artifact'
 import {
@@ -29,14 +34,20 @@ import { registerPreviewPageReader } from './preview-reader'
 import { previewConsoleState, registerPreviewDevTools } from './preview-strip-tools'
 
 type PreviewWebview = HTMLElement & {
+  canGoBack?: () => boolean
+  canGoForward?: () => boolean
   closeDevTools?: () => void
   executeJavaScript?: (code: string) => Promise<unknown>
   getTitle?: () => string
   getURL?: () => string
+  goBack?: () => void
+  goForward?: () => void
   isDevToolsOpened?: () => boolean
+  loadURL?: (url: string) => void
   openDevTools?: () => void
   reload?: () => void
   reloadIgnoringCache?: () => void
+  stop?: () => void
 }
 
 interface PreviewPaneProps {
@@ -76,6 +87,28 @@ function isModuleMimeError(message: string): boolean {
   const lower = message.toLowerCase()
 
   return lower.includes('failed to load module script') && lower.includes('mime type')
+}
+
+function normalizeBrowserAddress(value: string): string {
+  const trimmed = value.trim()
+
+  if (!trimmed || /^about:/i.test(trimmed)) {
+    return trimmed || 'about:blank'
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return trimmed
+  }
+
+  if (/^(localhost|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:[/?#].*)?$/i.test(trimmed)) {
+    return `http://${trimmed}`
+  }
+
+  if (!/\s/.test(trimmed) && trimmed.includes('.')) {
+    return `https://${trimmed}`
+  }
+
+  return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
 
 function PreviewLoadError({
@@ -138,6 +171,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const consoleBodyRef = useRef<HTMLDivElement | null>(null)
   const consoleShouldStickRef = useRef(true)
   const hostRef = useRef<HTMLDivElement | null>(null)
+  const initialTargetUrlRef = useRef(target.url)
   const lastReloadRequestRef = useRef(reloadRequest)
   const lastRestartEventRef = useRef('')
   const previewContentRef = useRef<HTMLDivElement | null>(null)
@@ -146,6 +180,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const consoleHeight = useStore(consoleState.$height)
   const consoleOpen = useStore(consoleState.$open)
   const [currentUrl, setCurrentUrl] = useState(target.url)
+  const [addressValue, setAddressValue] = useState(target.url)
   const [devtoolsOpen, setDevtoolsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<PreviewLoadErrorState | null>(null)
@@ -201,6 +236,45 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const restartingServer =
     previewServerRestart?.status === 'running' &&
     (previewServerRestart.url === target.url || previewServerRestart.url === currentUrl)
+
+  const persistBrowserLocation = useCallback(
+    (url: string, title?: string) => {
+      if (target.kind !== 'url' || !tabId) {
+        return
+      }
+
+      updatePreviewTabTarget(tabId, current =>
+        current.kind === 'url'
+          ? {
+              ...current,
+              label: title?.trim() || current.label || compactUrl(url),
+              source: current.browserTabKey ? url : current.source,
+              url
+            }
+          : current
+      )
+    },
+    [tabId, target.kind]
+  )
+
+  const navigateBrowser = useCallback(
+    (raw: string) => {
+      const next = normalizeBrowserAddress(raw)
+      const webview = webviewRef.current
+
+      setLoadError(null)
+      setCurrentUrl(next)
+      setAddressValue(next)
+      persistBrowserLocation(next)
+
+      if (webview?.loadURL) {
+        webview.loadURL(next)
+      } else {
+        webview?.setAttribute('src', next)
+      }
+    },
+    [persistBrowserLocation]
+  )
 
   const startConsoleResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -570,9 +644,12 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       return
     }
 
+    const initialUrl = initialTargetUrlRef.current
+
     host.replaceChildren()
     webviewRef.current = null
-    setCurrentUrl(target.url)
+    setCurrentUrl(initialUrl)
+    setAddressValue(initialUrl)
     setDevtoolsOpen(false)
     setLoadError(null)
     consoleState.reset()
@@ -587,7 +664,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     const webview = document.createElement('webview') as PreviewWebview
     webview.className = 'flex h-full w-full flex-1 bg-transparent'
     webview.setAttribute('partition', 'persist:hermes-preview')
-    webview.setAttribute('src', target.url)
+    webview.setAttribute('src', initialUrl)
     webview.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no,sandbox=yes')
 
     const onConsole = (event: Event) => {
@@ -610,7 +687,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       if ((detail.level ?? 0) >= 3 && isModuleMimeError(message)) {
         setLoadError({
           description: copy.moduleMimeDescription,
-          url: webview.getURL?.() || target.url
+          url: webview.getURL?.() || initialUrl
         })
         setLoading(false)
       }
@@ -622,6 +699,18 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       if (detail.url) {
         setLoadError(null)
         setCurrentUrl(detail.url)
+        setAddressValue(detail.url)
+        persistBrowserLocation(detail.url)
+      }
+    }
+
+    const onTitle = (event: Event) => {
+      const detail = event as Event & { title?: string }
+      const title = detail.title || webview.getTitle?.() || ''
+      const url = webview.getURL?.() || initialUrl
+
+      if (title || url) {
+        persistBrowserLocation(url, title)
       }
     }
 
@@ -645,7 +734,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       setLoadError({
         code: errorCode,
         description: detail.errorDescription || copy.unreachableDescription,
-        url: detail.validatedURL || webview.getURL?.() || target.url
+        url: detail.validatedURL || webview.getURL?.() || initialUrl
       })
       setLoading(false)
     }
@@ -666,6 +755,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     webview.addEventListener('did-navigate-in-page', onNavigate)
     webview.addEventListener('did-start-loading', onStart)
     webview.addEventListener('did-stop-loading', onStop)
+    webview.addEventListener('page-title-updated', onTitle)
     host.appendChild(webview)
     webviewRef.current = webview
 
@@ -678,33 +768,85 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       webview.removeEventListener('did-navigate-in-page', onNavigate)
       webview.removeEventListener('did-start-loading', onStart)
       webview.removeEventListener('did-stop-loading', onStop)
+      webview.removeEventListener('page-title-updated', onTitle)
       webview.remove()
     }
-  }, [appendConsoleEntry, consoleState, copy, isRemoteHtml, isWebPreview, target.url])
+  }, [appendConsoleEntry, consoleState, copy, isRemoteHtml, isWebPreview, persistBrowserLocation])
 
   return (
     <aside className="relative flex h-full w-full min-w-0 flex-col overflow-hidden bg-transparent text-muted-foreground">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {!embedded && (
+        {(!embedded || target.kind === 'url') && (
           <div className="pointer-events-none flex min-h-(--titlebar-height) items-center gap-1.5 border-b border-border/60 bg-background px-2 py-1">
-            <div className="min-w-0 flex-1">
-              <Tip label={copy.openTarget(currentUrl)}>
-                <a
-                  className="pointer-events-auto inline max-w-full truncate text-left text-xs font-medium text-foreground underline-offset-4 decoration-current/20 transition-colors hover:text-primary hover:underline"
-                  href={isRemoteHtmlTarget ? undefined : currentUrl}
-                  onClick={event => {
-                    if (isRemoteHtmlTarget) {
-                      event.preventDefault()
-                      void openPreviewTargetInBrowser(target).catch(error => notifyError(error, t.preview.unavailable))
-                    }
-                  }}
-                  rel="noreferrer"
-                  target={isRemoteHtmlTarget ? undefined : '_blank'}
+            {target.kind === 'url' ? (
+              <form
+                className="pointer-events-auto flex min-w-0 flex-1 items-center gap-1.5"
+                onSubmit={event => {
+                  event.preventDefault()
+                  navigateBrowser(addressValue)
+                }}
+              >
+                <button
+                  aria-label="Back"
+                  className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  onClick={() => webviewRef.current?.goBack?.()}
+                  type="button"
                 >
-                  {previewLabel || copy.fallbackTitle}
-                </a>
-              </Tip>
-            </div>
+                  ←
+                </button>
+                <button
+                  aria-label="Forward"
+                  className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                  onClick={() => webviewRef.current?.goForward?.()}
+                  type="button"
+                >
+                  →
+                </button>
+                <button
+                  aria-label={loading ? 'Stop loading' : 'Reload'}
+                  className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => (loading ? webviewRef.current?.stop?.() : reloadPreview())}
+                  type="button"
+                >
+                  {loading ? '×' : '↻'}
+                </button>
+                <input
+                  aria-label="Web address"
+                  className="h-6 min-w-0 flex-1 rounded-md border border-border/70 bg-muted/40 px-2 font-mono text-[0.6875rem] text-foreground outline-none transition focus:border-primary/70 focus:bg-background"
+                  onChange={event => setAddressValue(event.currentTarget.value)}
+                  onFocus={event => event.currentTarget.select()}
+                  placeholder="Search or enter address"
+                  value={addressValue}
+                />
+                <button
+                  className="h-6 shrink-0 rounded-md border border-border/70 px-2 text-[0.6875rem] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                  type="submit"
+                >
+                  Go
+                </button>
+              </form>
+            ) : (
+              <div className="min-w-0 flex-1">
+                <Tip label={copy.openTarget(currentUrl)}>
+                  <a
+                    className="pointer-events-auto inline max-w-full truncate text-left text-xs font-medium text-foreground underline-offset-4 decoration-current/20 transition-colors hover:text-primary hover:underline"
+                    href={isRemoteHtmlTarget ? undefined : currentUrl}
+                    onClick={event => {
+                      if (isRemoteHtmlTarget) {
+                        event.preventDefault()
+                        void openPreviewTargetInBrowser(target).catch(error =>
+                          notifyError(error, t.preview.unavailable)
+                        )
+                      }
+                    }}
+                    rel="noreferrer"
+                    target={isRemoteHtmlTarget ? undefined : '_blank'}
+                  >
+                    {previewLabel || copy.fallbackTitle}
+                  </a>
+                </Tip>
+              </div>
+            )}
           </div>
         )}
 
