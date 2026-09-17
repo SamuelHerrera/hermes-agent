@@ -437,15 +437,20 @@ def load_cli_config() -> Dict[str, Any]:
     else:
         config_path = project_config_path
 
+    # Keep portable install preferences aligned with setup/Desktop while
+    # retaining this loader's CLI-specific shape and legacy terminal aliases.
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
     # Default configuration
     defaults = {
         "model": {
-            "default": "",
+            "default": DEFAULT_CONFIG["model"]["default"],
             "base_url": "",
-            "provider": "auto",
+            "provider": DEFAULT_CONFIG["model"]["provider"],
         },
         "terminal": {
             "env_type": "local",
+            "timeout": DEFAULT_CONFIG["terminal"]["timeout"],
             "cwd": ".",  # "." is resolved to os.getcwd() at runtime
             "home_mode": "auto",
             "lifetime_seconds": 300,
@@ -472,11 +477,12 @@ def load_cli_config() -> Dict[str, Any]:
             "min_tail_user_messages": 1,  # Real user messages guaranteed in the tail (1 = existing single anchor)
         },
         "agent": {
-            "max_turns": 500,  # Default max tool-calling iterations (shared with subagents)
+            "max_turns": DEFAULT_CONFIG["agent"]["max_turns"],
             "verbose": False,
             "system_prompt": "",
             "prefill_messages_file": "",
-            "reasoning_effort": "",
+            "reasoning_effort": DEFAULT_CONFIG["agent"]["reasoning_effort"],
+            "coding_instructions": DEFAULT_CONFIG["agent"]["coding_instructions"],
             "service_tier": "",
             # Built-in personalities live in hermes_cli.personality
             # (BUILTIN_PERSONALITIES) — the single owner. Entries here are
@@ -486,6 +492,7 @@ def load_cli_config() -> Dict[str, Any]:
 
         "display": {
             "compact": False,
+            "personality": DEFAULT_CONFIG["display"]["personality"],
             "resume_display": "full",
             # Recap tuning for /resume — see hermes_cli/config.py DEFAULT_CONFIG.
             "resume_exchanges": 10,
@@ -497,7 +504,7 @@ def load_cli_config() -> Dict[str, Any]:
             # hermes_cli/config.py DEFAULT_CONFIG (display.show_reasoning).
             "show_reasoning": True,
             "reasoning_full": False,
-            "streaming": True,
+            "streaming": DEFAULT_CONFIG["display"]["streaming"],
             "busy_input_mode": "interrupt",
             "persistent_output": True,
             "persistent_output_max_lines": 200,
@@ -535,7 +542,9 @@ def load_cli_config() -> Dict[str, Any]:
             },
         },
         "delegation": {
-            "max_iterations": 45,  # Max tool-calling turns per child agent
+            "max_iterations": DEFAULT_CONFIG["delegation"]["max_iterations"],
+            "reasoning_effort": DEFAULT_CONFIG["delegation"]["reasoning_effort"],
+            "child_timeout_seconds": DEFAULT_CONFIG["delegation"]["child_timeout_seconds"],
             "model": "",       # Subagent model override (empty = inherit parent model)
             "provider": "",    # Subagent provider override (empty = inherit parent provider)
             "base_url": "",    # Direct OpenAI-compatible endpoint for subagents

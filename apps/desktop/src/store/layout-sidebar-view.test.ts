@@ -8,6 +8,7 @@ import {
   resetSidebarView,
   setSidebarGrouping,
   setSidebarOrdering,
+  SIDEBAR_DEFAULT_ROW_META,
   toggleSidebarRowMeta,
   toggleSidebarStatusFilter
 } from './layout'
@@ -19,10 +20,10 @@ beforeEach(() => {
 })
 
 describe('the sidebar as it ships', () => {
-  it('groups by project, sorts by recency, and pins the timestamp and preview', () => {
+  it('groups by project, sorts by recency, and uses the shipped metadata', () => {
     expect($sidebarGrouping.get()).toBe('project')
     expect($sidebarOrdering.get()).toBe('updated')
-    expect($sidebarRowMeta.get()).toEqual(['preview', 'updated'])
+    expect($sidebarRowMeta.get()).toEqual(SIDEBAR_DEFAULT_ROW_META)
   })
 
   it('offers no reset until something actually moves off the defaults', () => {
@@ -44,7 +45,7 @@ describe('the sidebar as it ships', () => {
 
     expect($sidebarGrouping.get()).toBe('project')
     expect($sidebarOrdering.get()).toBe('updated')
-    expect($sidebarRowMeta.get()).toEqual(['preview', 'updated'])
+    expect($sidebarRowMeta.get()).toEqual(SIDEBAR_DEFAULT_ROW_META)
     expect($sidebarViewCustomized.get()).toBe(false)
   })
 

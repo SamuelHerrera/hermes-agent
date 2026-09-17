@@ -19,7 +19,7 @@ import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 
 import { $backendThemes, $pendingSkinApply } from './backend-sync'
 import { hexToRgb, mix, readableOn } from './color'
-import { BUILTIN_THEME_LIST, DEFAULT_SKIN_NAME, DEFAULT_TYPOGRAPHY, nousTheme } from './presets'
+import { BUILTIN_THEME_LIST, DEFAULT_SKIN_NAME, DEFAULT_THEME_MODE, DEFAULT_TYPOGRAPHY, nousTheme } from './presets'
 import type { DesktopTheme, DesktopThemeColors } from './types'
 import { $userThemes, listAllThemes, resolveTheme } from './user-themes'
 
@@ -48,7 +48,7 @@ const normalizeSkin = (name: string | null): string =>
   name && resolveTheme(name) && !RETIRED_SKINS.has(name) ? name : DEFAULT_SKIN_NAME
 
 const normalizeMode = (value: string | null): ThemeMode =>
-  value === 'light' || value === 'dark' || value === 'system' ? value : 'light'
+  value === 'light' || value === 'dark' || value === 'system' ? value : DEFAULT_THEME_MODE
 
 // ─── Per-profile appearance persistence ─────────────────────────────────────
 // Skin and mode are each stored per profile. "default" isn't a real profile —
@@ -303,11 +303,11 @@ interface ThemeContextValue {
 const SKIN_LIST = BUILTIN_THEME_LIST.map(({ name, label, description }) => ({ name, label, description }))
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: nousTheme,
+  theme: deriveTheme(DEFAULT_SKIN_NAME, DEFAULT_THEME_MODE),
   themeName: DEFAULT_SKIN_NAME,
-  mode: 'light',
-  resolvedMode: 'light',
-  renderedMode: 'light',
+  mode: DEFAULT_THEME_MODE,
+  resolvedMode: DEFAULT_THEME_MODE,
+  renderedMode: DEFAULT_THEME_MODE,
   availableThemes: SKIN_LIST,
   setTheme: () => {},
   setMode: () => {}
@@ -343,7 +343,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 
   const [mode, setModeState] = useState<ThemeMode>(() =>
-    typeof window === 'undefined' ? 'light' : modePref.resolve(readBootProfileKey())
+    typeof window === 'undefined' ? DEFAULT_THEME_MODE : modePref.resolve(readBootProfileKey())
   )
 
   // Follow profile switches: paint the profile's assigned skin + mode and

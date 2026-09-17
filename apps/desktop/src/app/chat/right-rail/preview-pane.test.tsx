@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { registry } from '@/contrib/registry'
+import { $previewTabs } from '@/store/preview'
 import { $connection } from '@/store/session'
 
 import { PREVIEW_RENDERERS_AREA } from './preview-contrib'
@@ -36,6 +37,7 @@ describe('PreviewPane console state', () => {
   afterEach(() => {
     cleanup()
     $connection.set(null)
+    $previewTabs.set([])
     vi.unstubAllGlobals()
   })
 
@@ -173,6 +175,70 @@ describe('PreviewPane console state', () => {
 
     expect(webview?.getAttribute('src')).toBe('https://example.com')
     expect(input.value).toBe('https://example.com')
+  })
+
+  it('keeps the existing webview mounted while browser pages navigate internally', async () => {
+    const tabId = 'url:browser-test'
+
+    $previewTabs.set([
+      {
+        id: tabId,
+        target: {
+          browserTabKey: 'browser-test',
+          kind: 'url',
+          label: 'New tab',
+          source: 'browser-tab:browser-test',
+          url: 'https://accounts.google.com/'
+        }
+      }
+    ])
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(
+        <PreviewPane
+          embedded
+          tabId={tabId}
+          target={{
+            browserTabKey: 'browser-test',
+            kind: 'url',
+            label: 'New tab',
+            source: 'browser-tab:browser-test',
+            url: 'https://accounts.google.com/'
+          }}
+        />
+      )
+    })
+
+    const webview = rendered.container.querySelector('webview')
+
+    expect(webview).toBeInstanceOf(HTMLElement)
+    Object.defineProperty(webview, 'getURL', { configurable: true, value: () => 'https://www.youtube.com/' })
+
+    act(() => {
+      webview?.dispatchEvent(
+        Object.assign(new Event('did-navigate'), {
+          url: 'https://www.youtube.com/'
+        })
+      )
+    })
+
+    expect(rendered.container.querySelector('webview')).toBe(webview)
+    expect((rendered.getByLabelText('Web address') as HTMLInputElement).value).toBe('https://www.youtube.com/')
+    expect($previewTabs.get()[0]?.target.url).toBe('https://www.youtube.com/')
+    expect($previewTabs.get()[0]?.target.label).toBe('New tab')
+
+    act(() => {
+      webview?.dispatchEvent(
+        Object.assign(new Event('page-title-updated'), {
+          title: 'YouTube'
+        })
+      )
+    })
+
+    expect(rendered.container.querySelector('webview')).toBe(webview)
+    expect($previewTabs.get()[0]?.target.label).toBe('YouTube')
+    expect($previewTabs.get()[0]?.target.url).toBe('https://www.youtube.com/')
   })
 
   it('renders authenticated remote HTML safely and honors source mode', async () => {

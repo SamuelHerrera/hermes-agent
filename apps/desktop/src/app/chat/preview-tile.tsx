@@ -10,6 +10,8 @@
  * one bar instead of two.
  */
 
+import { useStore } from '@nanostores/react'
+
 import { findGroup } from '@/components/pane-shell/tree/model'
 import { $activeTreeGroup, $layoutTree, revealTreePane } from '@/components/pane-shell/tree/store'
 import { FileTypeIcon } from '@/components/ui/file-type-icon'
@@ -26,10 +28,9 @@ function targetFor(tabId: string): PreviewTarget | null {
   return $previewTabs.get().find(tab => tab.id === tabId)?.target ?? null
 }
 
-/** Tab title. A URL is a BROWSER — the tab names the surface, not the page, so
- *  it doesn't rename itself on every navigation. A file names the file; an
- *  artifact is titled rather than located, so its label is the whole name. */
-function previewTitle(tabId: string): string {
+/** User-visible tab title. A file names the file; an artifact is titled rather
+ * than located; a browser tab follows the loaded page title/URL. */
+function previewTabTitle(tabId: string): string {
   const target = targetFor(tabId)
 
   if (!target) {
@@ -50,6 +51,15 @@ function previewTitle(tabId: string): string {
   return tail || value || 'Preview'
 }
 
+/** Registered pane title. Browser tabs keep this stable while the live tab
+ * label above changes through `tabTitle`, otherwise every page title update
+ * replaces the pane contribution and can remount the guest webview. */
+function previewPaneTitle(tabId: string): string {
+  const target = targetFor(tabId)
+
+  return target?.kind === 'url' && target.browserTabKey ? 'Browser' : previewTabTitle(tabId)
+}
+
 /** The tab's lead glyph — the same file/tool icon family the file tree and code
  *  fences resolve through, so a `.tsx` peek and its sidebar row agree. */
 function PreviewTabLead({ tabId }: { tabId: string }) {
@@ -68,6 +78,16 @@ function PreviewTabLead({ tabId }: { tabId: string }) {
   }
 
   return <FileTypeIcon className="opacity-70" path={target.path || target.url} size="0.6875rem" />
+}
+
+/** Live tab label for preview tabs. Browser tabs can navigate and retitle many
+ * times inside one guest webview. The label must update without changing the
+ * pane contribution's registered `title`, because replacing that contribution
+ * can remount the guest webview and restart auth redirects. */
+function PreviewTabTitle({ tabId }: { tabId: string }) {
+  useStore($previewTabs)
+
+  return previewTabTitle(tabId)
 }
 
 const PREVIEW_TILE_PREFIX = 'preview-tile'
@@ -128,8 +148,9 @@ const watchPreviewTileMirror = paneMirror<PreviewTab>({
   dir: () => 'center',
   anchor: tab => tab.anchor,
   minWidth: '22rem',
-  title: previewTitle,
+  title: previewPaneTitle,
   tabLead: tabId => <PreviewTabLead tabId={tabId} />,
+  tabTitle: tabId => <PreviewTabTitle tabId={tabId} />,
   render: tabId => <PreviewTilePane tabId={tabId} />,
   close: tabId => {
     forgetPreviewStripTools(tabId)

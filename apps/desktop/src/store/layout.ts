@@ -238,11 +238,11 @@ export const $sidebarMessagingOpenIds = persistentAtom(
 // workspace's choice) — the "sidebar forgets my grouping every time I switch
 // workspaces" bug. The flat key keeps its historical name so an existing
 // choice survives the update.
-const $sidebarFlatAgentsGrouped = persistentAtom(SIDEBAR_AGENTS_GROUPED_STORAGE_KEY, false, Codecs.bool)
+const $sidebarFlatAgentsGrouped = persistentAtom(SIDEBAR_AGENTS_GROUPED_STORAGE_KEY, true, Codecs.bool)
 
 const $sidebarAllProfilesAgentsGrouped = persistentAtom(
   SIDEBAR_ALL_PROFILES_AGENTS_GROUPED_STORAGE_KEY,
-  false,
+  true,
   Codecs.bool
 )
 
@@ -294,8 +294,8 @@ export const SIDEBAR_SORT_KEYS: readonly SidebarSortKey[] = ['updated', 'created
 // the grouping to fall back to when the user leaves it.
 const $sidebarFlatGrouping = persistentAtom<SidebarGrouping>(
   SIDEBAR_GROUPING_STORAGE_KEY,
-  'date',
-  oneOf(['date', 'status'], 'date')
+  'status',
+  oneOf(['date', 'status'], 'status')
 )
 
 // All-profiles keeps its own grouping: `profile` only means anything there, and
@@ -313,7 +313,7 @@ const $sidebarAllProfilesGrouping = persistentAtom<SidebarGrouping>(
 // they used to inline the same literals in three places.
 const SIDEBAR_DEFAULT_GROUPING: SidebarGrouping = 'project'
 const SIDEBAR_DEFAULT_ORDERING: SidebarOrdering = 'updated'
-const SIDEBAR_DEFAULT_ROW_META: SidebarRowMeta[] = ['preview', 'updated']
+export const SIDEBAR_DEFAULT_ROW_META: SidebarRowMeta[] = ['preview', 'updated', 'tokens']
 
 const $sidebarSortKey = persistentAtom<SidebarSortKey>(
   SIDEBAR_SORT_KEY_STORAGE_KEY,

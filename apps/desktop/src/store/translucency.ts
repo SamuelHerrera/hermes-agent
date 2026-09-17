@@ -1,7 +1,7 @@
 /**
  * Window translucency (see-through window).
  *
- * One lever, 0–100. 0 = off (fully opaque, the default). Higher = more of the
+ * One lever, 0–100. 0 = off (fully opaque); the default is 10. Higher = more of the
  * desktop shows through the whole window — the main process maps it to the
  * native window opacity (`setOpacity`), the same effect as the Windows
  * shift-scroll trick. macOS + Windows only; Linux has no runtime window
@@ -16,15 +16,19 @@ import { persistString, storedString } from '@/lib/storage'
 
 const KEY = 'hermes.desktop.translucency.v1'
 
+// Keep the cold-start native window in electron/main.ts on the same default.
+export const DEFAULT_TRANSLUCENCY = 10
+
 const clamp = (n: number): number => Math.min(100, Math.max(0, Math.round(n)))
 
 const read = (): number => {
-  const n = Number(storedString(KEY))
+  const raw = storedString(KEY)
+  const n = raw === null ? DEFAULT_TRANSLUCENCY : Number(raw)
 
-  return Number.isFinite(n) ? clamp(n) : 0
+  return Number.isFinite(n) ? clamp(n) : DEFAULT_TRANSLUCENCY
 }
 
-export const $translucency = atom<number>(typeof window === 'undefined' ? 0 : read())
+export const $translucency = atom<number>(typeof window === 'undefined' ? DEFAULT_TRANSLUCENCY : read())
 
 export function setTranslucency(intensity: number): void {
   $translucency.set(clamp(intensity))

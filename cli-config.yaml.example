@@ -34,10 +34,10 @@ runtime:
 model:
   # Default model to use (can be overridden with --model flag)
   # Both "default" and "model" work as the key name here.
-  default: "anthropic/claude-opus-4.6"
+  default: "gpt-5.5"
   
   # Inference provider selection:
-  #   "auto"         - Auto-detect from credentials (default)
+  #   "auto"         - Auto-detect from credentials
   #   "openrouter"   - OpenRouter (requires: OPENROUTER_API_KEY or OPENAI_API_KEY)
   #   "nous"         - Nous Portal OAuth (requires: hermes auth add nous)
   #   "nous-api"     - Nous Portal API key (requires: NOUS_API_KEY)
@@ -67,11 +67,10 @@ model:
   #   It works with both no-auth and auth-enabled server modes.
   #
   # Can also be overridden for a single invocation with the --provider flag.
-  provider: "auto"
+  provider: "openai-codex"
   
-  # API configuration (falls back to OPENROUTER_API_KEY env var)
-  # api_key: "your-key-here"  # Uncomment to set here instead of .env
-  base_url: "https://openrouter.ai/api/v1"
+  # Sign in during setup. Credentials and custom endpoints are never bundled.
+  # base_url: "https://openrouter.ai/api/v1"  # Only for an explicitly selected endpoint
 
   # Azure Foundry keyless auth example:
   # provider: "azure-foundry"
@@ -272,7 +271,7 @@ terminal:
   cwd: "."  # For local backend: "." = current directory. Ignored for remote backends unless a backend documents otherwise.
   # Desktop xterm font. Install the font locally; Nerd Fonts render Powerlevel10k glyphs.
   # font_family: "MesloLGS NF"  # Also accepts a CSS stack; blank uses bundled JetBrains Mono.
-  timeout: 180
+  timeout: 1440
   # HOME policy for tool subprocesses:
   #   auto    - default: host uses your real HOME; containers use HERMES_HOME/home
   #   real    - force your real OS-user HOME
@@ -871,10 +870,10 @@ skills:
 # Agent Behavior
 # =============================================================================
 agent:
-  # Maximum tool-calling iterations per conversation (default: 500)
+  # Maximum tool-calling iterations per conversation (default: 2000)
   # Higher = more room for complex tasks, but costs more tokens
   # Recommended: 20-30 for focused tasks, 50-100 for open exploration
-  max_turns: 500
+  max_turns: 2000
 
   # Inactivity timeout for gateway agent runs (seconds, 0 = unlimited).
   # The agent can run indefinitely when actively calling tools or receiving
@@ -1382,7 +1381,7 @@ code_execution:
 # The delegate_task tool spawns child agents with isolated context.
 # Supports single tasks and batch mode (default 3 parallel, configurable).
 delegation:
-  max_iterations: 50                          # Max tool-calling turns per child (default: 50)
+  max_iterations: 500                         # Max tool-calling turns per child
   # max_concurrent_children: 3                # Max parallel child agents per batch (default: 3, floor: 1, no ceiling).
                                               # WARNING: values above 10 multiply API cost linearly.
   # max_spawn_depth: 1                        # Delegation tree depth cap (range: 1-3, default: 1 = flat).
@@ -1520,15 +1519,15 @@ display:
   # When enabled, a dim box shows the model's thought process above the response.
   # Toggle at runtime with /reasoning show or /reasoning hide.
   #   true:  Show the reasoning box
-  #   false: Hide reasoning (default)
-  show_reasoning: false
+  #   false: Hide reasoning
+  show_reasoning: true
 
   # Stream tokens to the terminal as they arrive instead of waiting for the
   # full response. The response box opens on first token and text appears
   # line-by-line. Tool calls are still captured silently.
-  #   true:  Stream tokens as they arrive (default)
-  #   false: Wait for the full response before rendering
-  streaming: true
+  #   true:  Stream tokens as they arrive
+  #   false: Wait for the full response before rendering (default)
+  streaming: false
 
   # Show [HH:MM] timestamps on user input and assistant response labels.
   # timestamps: false

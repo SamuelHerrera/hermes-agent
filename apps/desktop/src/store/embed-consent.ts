@@ -1,8 +1,8 @@
 import { type Codec, Codecs, persistentAtom } from '@/lib/persisted'
 
 // Privacy gate for inline embeds. Loading an embed reaches out to a third party
-// (IP, referrer, cookies), so by default we render a placeholder until the user
-// consents — per embed ("Load once") or per service ("Always allow YouTube").
+// (IP, referrer, cookies), so fresh installs use plain links. In ask mode the
+// user consents per embed ("Load once") or service ("Always allow YouTube").
 // Mirrors the tool-approval model, but purely client-side (the renderer is what
 // makes the request) so it never touches the gateway/config.yaml.
 export type EmbedMode = 'always' | 'ask' | 'off'
@@ -16,7 +16,7 @@ const modeCodec: Codec<EmbedMode> = {
 }
 
 /** Global default: ask (placeholder), always (auto-load), off (plain link). */
-export const $embedMode = persistentAtom<EmbedMode>(MODE_KEY, 'ask', modeCodec)
+export const $embedMode = persistentAtom<EmbedMode>(MODE_KEY, 'off', modeCodec)
 /** Providers granted a standing "always allow" (e.g. `youtube`, `twitter`). */
 export const $embedAllowed = persistentAtom<string[]>(ALLOWED_KEY, [], Codecs.stringArray)
 

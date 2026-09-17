@@ -2,10 +2,10 @@ from hermes_cli.config import DEFAULT_CONFIG
 from hermes_cli.web_server import CONFIG_SCHEMA
 
 
-def test_desktop_repo_discovery_defaults_preserve_existing_behavior():
+def test_desktop_repo_discovery_is_opt_in_on_fresh_installs():
     desktop = DEFAULT_CONFIG["desktop"]
 
-    assert desktop["repo_scan_enabled"] is True
+    assert desktop["repo_scan_enabled"] is False
     assert desktop["repo_scan_roots"] == []
     assert desktop["repo_scan_exclude_paths"] == []
 

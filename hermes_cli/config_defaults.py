@@ -5,7 +5,7 @@ verbatim from hermes_cli/config.py. Must not import from hermes_cli.config.
 """
 
 DEFAULT_CONFIG = {
-    "model": "",
+    "model": {"default": "gpt-5.5", "provider": "openai-codex"},
     "providers": {},
     "fallback_providers": [],
     "credential_pool_strategies": {},
@@ -34,7 +34,7 @@ DEFAULT_CONFIG = {
     # pressure. Reopening one re-resumes it from disk. 0/null disables.
     "max_live_sessions": 16,
     "agent": {
-        "max_turns": 500,
+        "max_turns": 2000,
         # Inactivity timeout for gateway agent execution (seconds).
         # The agent can run indefinitely as long as it's actively calling
         # tools or receiving API responses.  Only fires when the agent has
@@ -71,13 +71,13 @@ DEFAULT_CONFIG = {
         # Force-interrupt budget once gateway stop()/drain has begun
         # (seconds). Applies to SIGTERM/external stop and to the final
         # phase of in-band restart after any after-turn wait. 0 = interrupt
-        # immediately (the default).
+        # immediately.
         #
         # Keep this short and under systemd TimeoutStopSec — a long value
         # here invites SIGKILL-mid-cleanup. For in-band restart
         # (/restart, SIGUSR1), prefer restart_after_turn_timeout below so
         # active turns finish *before* stop() begins (#77184).
-        "restart_drain_timeout": 0,
+        "restart_drain_timeout": 180,
         # In-band restart wait for active turns to finish before stop()
         # (seconds). /restart and SIGUSR1 refuse new work, then wait up to
         # this cap for in-flight agents/cron/api runs to complete naturally
@@ -172,8 +172,14 @@ DEFAULT_CONFIG = {
         # system block — pin project-wide workflow rules here instead of editing
         # the shipped brief, e.g. "For UI work, don't run tsc/lint until I
         # approve. Clean the diff before you commit and push." Cache-safe:
-        # takes effect next session. Empty by default.
-        "coding_instructions": "",
+        # takes effect next session.
+        "coding_instructions": (
+            "Default to direct implementation. Do not delegate routine discovery, "
+            "implementation, testing, or intermediate reviews. Use subagents only "
+            "when parallel independent work has clear value or I explicitly request "
+            "it. Complete and verify the change first, then perform at most one "
+            "focused final review."
+        ),
         # When verify-on-stop finds edited code without fresh verification
         # evidence, append guidance for creative UI work (avoid broad
         # tsc/lint/test before visual approval) and clean-diff expectations.
@@ -286,6 +292,7 @@ DEFAULT_CONFIG = {
         # matches a key in this dict.
         # Edit directly in config.yaml (no CLI support due to dots in keys).
         "reasoning_overrides": {},
+        "reasoning_effort": "medium",
     },
 
     "terminal": {
@@ -306,7 +313,7 @@ DEFAULT_CONFIG = {
         # This lets users install a Nerd Font (or any custom font) and configure
         # it here without patching the built desktop app.
         "font_family": "",
-        "timeout": 180,
+        "timeout": 1440,
         # Bounded grace period (seconds) between SIGTERM and an escalated
         # SIGKILL when terminating a host process tree (browser daemons, etc.).
         # A daemon that stalls in its SIGTERM handler is force-killed after this
@@ -587,8 +594,8 @@ DEFAULT_CONFIG = {
     # - max_line_length: per-line cap applied when read_file emits a
     #                    line-numbered view (default 2000 chars).
     "tool_output": {
-        "max_bytes": 50_000,
-        "max_lines": 2000,
+        "max_bytes": 5_000_000,
+        "max_lines": 20000,
         "max_line_length": 2000,
     },
 
@@ -618,7 +625,7 @@ DEFAULT_CONFIG = {
         # the defaults are low. Set either to 0 to disable that cap (unlimited).
         "loop_caps": {
             "max_web_searches": 50,   # max web_search calls per turn (0 = unlimited)
-            "max_subagents": 50,      # max subagents spawned per turn (0 = unlimited)
+            "max_subagents": 5,       # max subagents spawned per turn (0 = unlimited)
         },
     },
 
@@ -701,7 +708,7 @@ DEFAULT_CONFIG = {
                                       # exceeds this many tokens, the next pass
                                       # re-summarizes the summary itself instead of
                                       # letting it grow without bound.
-        "hygiene_hard_message_limit": 5000,  # gateway session-hygiene force-compress threshold by message count
+        "hygiene_hard_message_limit": 400,  # gateway session-hygiene force-compress threshold by message count
         "hygiene_timeout_seconds": 30,  # max seconds gateway waits for pre-agent hygiene compression
                                       # WITHOUT forward progress. The summary call streams, so
                                       # this is an inactivity budget: a slow model still
@@ -1146,7 +1153,7 @@ DEFAULT_CONFIG = {
     
     "display": {
         "compact": False,
-        "personality": "",
+        "personality": "concise",
         "resume_display": "full",
         # Recap tuning for /resume and startup resume. The defaults match the
         # historical hardcoded values; expose them as config so power users can
@@ -1387,7 +1394,7 @@ DEFAULT_CONFIG = {
             # and the CLI/TUI derive their terminal column width from it. The
             # half-block fallback clamps to a legibility floor (it can't shrink
             # as far as true-pixel kitty/GUI without turning to mush).
-            "scale": 0.33,
+            "scale": 0.3,
             # Hard override for terminal column width. 0 = auto (derive from
             # scale); set a positive int only to pin the half-block/kitty width
             # independently of scale.
@@ -1781,7 +1788,7 @@ DEFAULT_CONFIG = {
         # extras" without silently stripping MCP tools the parent already has.
         # Set to false for strict intersection.
         "inherit_mcp_toolsets": True,
-        "max_iterations": 50,  # per-subagent iteration cap (each subagent gets its own budget,
+        "max_iterations": 500,  # per-subagent iteration cap (each subagent gets its own budget,
                                # independent of the parent's max_iterations)
         # Subagent summaries return to the parent's context verbatim. A batch
         # fan-out (N children) returns N summaries at once, which can exceed
@@ -1799,12 +1806,12 @@ DEFAULT_CONFIG = {
         # budget still applies.
         "max_summary_chars": 24000,
 
-        "child_timeout_seconds": 0,  # optional wall-clock cap per child agent. 0 (default)
+        "child_timeout_seconds": 99999999,  # optional wall-clock cap per child agent. 0
                                      # = no timeout: children fail only from real errors
                                      # (API, tools, iteration budget), never a delegation
                                      # stopwatch. Set a positive number of seconds
                                      # (floor 30s) to enforce a hard cap.
-        "reasoning_effort": "",  # subagent effort: "ultra", "max", "xhigh", "high",
+        "reasoning_effort": "medium",  # subagent effort: "ultra", "max", "xhigh", "high",
                                  # "medium", "low", "minimal", "none" (empty = inherit)
         "max_concurrent_children": 3,  # unified concurrency cap: max parallel children per batch
                                        # AND max concurrent background (background=true)
@@ -1893,12 +1900,14 @@ DEFAULT_CONFIG = {
         "presets": {
             "default": {
                 "reference_models": [
-                    {"provider": "openai-codex", "model": "gpt-5.5"},
-                    {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro"},
+                    {"provider": "openai-codex", "model": "gpt-5.5", "enabled": True},
+                    {"provider": "openai-codex", "model": "gpt-5.6-terra", "enabled": True},
                 ],
-                "aggregator": {"provider": "openrouter", "model": "anthropic/claude-opus-4.8"},
+                "aggregator": {"provider": "openai-codex", "model": "gpt-5.5"},
                 "max_tokens": 4096,
-                "enabled": True,
+                "enabled": False,
+                "degraded_reference_policy": "loud",
+                "fanout": "user_turn",
             }
         },
     },
@@ -1908,6 +1917,13 @@ DEFAULT_CONFIG = {
     # always goes to ~/.hermes/skills/.
     "skills": {
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
+        "disabled": [
+            "airtable", "audiocraft-audio-generation", "baoyu-article-illustrator",
+            "baoyu-comic", "jupyter-live-kernel", "linear", "manim-video",
+            "minecraft-modpack-server", "obsidian", "openhue", "pixel-art",
+            "pokemon-player", "polymarket", "songsee", "songwriting-and-ai-music",
+            "spotify", "xurl", "yuanbao",
+        ],
         # Substitute ${HERMES_SKILL_DIR} and ${HERMES_SESSION_ID} in SKILL.md
         # content with the absolute skill directory and the active session id
         # before the agent sees it.  Lets skill authors reference bundled
@@ -2353,7 +2369,7 @@ DEFAULT_CONFIG = {
         },
         # Wrap delivered cron responses with a header (task name) and footer
         # ("The agent cannot see this message").  Set to false for clean output.
-        "wrap_response": True,
+        "wrap_response": False,
         # Make cron deliveries CONTINUABLE: a user can reply to a cron brief
         # and the agent has it in context (no "what is Task #2?" amnesia).
         # Default False preserves the historical isolation guarantee (cron
@@ -2388,7 +2404,7 @@ DEFAULT_CONFIG = {
         # HERMES_CRON_SCRIPT_TIMEOUT. Keep this in sync with
         # cron.scheduler._DEFAULT_SCRIPT_TIMEOUT so config set recognizes the
         # same setting the scheduler reads.
-        "script_timeout_seconds": 3600,
+        "script_timeout_seconds": 10800,
         # Timeout (seconds) for SessionDB() init inside cron jobs.
         # SessionDB opens/migrates state.db synchronously and has no timeout
         # of its own against a wedged sqlite3.connect. An unbounded hang here
@@ -2527,7 +2543,7 @@ DEFAULT_CONFIG = {
             # Listing budget as a percentage of the active model's context
             # length. Effective budget = min(this % of context,
             # listing_max_tokens). Range 0..100.
-            "threshold_pct": 5,
+            "threshold_pct": 10,
             # When the model calls tool_search without a ``limit`` argument,
             # how many hits to return. Range 1..max_search_limit.
             "search_default_limit": 5,
@@ -2880,7 +2896,7 @@ DEFAULT_CONFIG = {
         # delivered as a fresh message if the preview has been visible at
         # least this many seconds, so the platform timestamp reflects
         # completion time. Telegram only; other platforms ignore it.
-        "fresh_final_after_seconds": 0.0,
+        "fresh_final_after_seconds": 60.0,
     },
 
     # Session storage — controls automatic cleanup of ~/.hermes/state.db.
@@ -2903,11 +2919,11 @@ DEFAULT_CONFIG = {
         # haven't been touched in ``auto_archive_days`` days, once per
         # (roughly) min_interval_hours.  "Touched" is last activity, not
         # creation, so an old-but-recently-used session is spared.  Pinned
-        # sessions are always exempt.  Off by default — opt in explicitly.
-        "auto_archive": False,
+        # sessions are always exempt. Archived sessions remain searchable.
+        "auto_archive": True,
         # Idle threshold (days of no activity) before auto-archive hides a
         # session.  Only applies when auto_archive is true.
-        "auto_archive_days": 3,
+        "auto_archive_days": 2,
         # VACUUM after a prune that actually deleted rows.  SQLite does not
         # reclaim disk space on DELETE — freed pages are just reused on
         # subsequent INSERTs — so without VACUUM the file stays bloated
@@ -3007,7 +3023,7 @@ DEFAULT_CONFIG = {
     "updates": {
         # Pre-update safety backup — ONE consolidated mechanism, three modes:
         #
-        #   quick (default) — snapshot critical small state files (pairing
+        #   quick — snapshot critical small state files (pairing
         #     JSONs, cron jobs, config.yaml, .env, auth.json, per-profile
         #     DBs) into <HERMES_HOME>/state-snapshots/ before the update.
         #     Files over 1 GiB (e.g. a bloated state.db) are skipped with a
@@ -3019,11 +3035,11 @@ DEFAULT_CONFIG = {
         #     ``hermes import``. Can add minutes on large homes. This is the
         #     #48200 (wrong-path wipe) safety net. ``--backup`` forces this
         #     for a single run.
-        #   off — no pre-update backup of any kind. ``--no-backup`` forces
+        #   off (default) — no pre-update backup of any kind. ``--no-backup`` forces
         #     this for a single run.
         #
         # Legacy boolean values are honored: true -> full, false -> off.
-        "pre_update_backup": "quick",
+        "pre_update_backup": False,
         # How many full pre-update backup zips to retain (mode ``full``).
         # Older ones are pruned automatically after each successful backup.
         # Values below 1 are floored to 1 — the backup just created is
@@ -3108,15 +3124,20 @@ DEFAULT_CONFIG = {
     },
 
 
+    # Image generation uses the bundled Codex provider. Authentication remains
+    # local to each install; this contains only the portable provider selection.
+    "image_gen": {
+        "provider": "openai-codex",
+        "model": "gpt-image-2-high",
+    },
+
     # X (Twitter) Search via xAI's built-in x_search Responses tool.
     # The tool registers when xAI credentials are available (SuperGrok
     # OAuth or XAI_API_KEY) AND the x_search toolset is enabled in
     # `hermes tools`. These settings tune the backing Responses API call.
     "x_search": {
-        # xAI model used for the Responses call. grok-4.5 is the
-        # recommended default; any Grok model with x_search tool
-        # access works.
-        "model": "grok-4.5",
+        # xAI model used for the Responses call; credentials remain per install.
+        "model": "grok-4.20-reasoning",
         # Optional reasoning effort sent to xAI Responses API models that
         # support it. Leave null to preserve the selected model's default.
         "reasoning_effort": None,
@@ -3326,7 +3347,7 @@ DEFAULT_CONFIG = {
     "desktop": {
         # Git repository discovery for the Desktop Projects sidebar. Empty
         # roots preserve the historical bounded scan of the user's home.
-        "repo_scan_enabled": True,
+        "repo_scan_enabled": False,
         "repo_scan_roots": [],
         "repo_scan_exclude_paths": [],
         # Extra Electron command-line flags appended to every desktop launch,

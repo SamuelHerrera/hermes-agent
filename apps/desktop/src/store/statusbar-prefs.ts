@@ -12,19 +12,9 @@ export function toggleStatusbarVisible() {
   $statusbarVisible.set(!$statusbarVisible.get())
 }
 
-// Items the bar hides until the user turns them on from its context menu. The
-// bar's job is to answer "is the backend healthy, where am I, what's it doing" —
-// route shortcuts (webhooks/agents), the terminal toggle, and the approval
-// pill are navigation, not status, so they start out of the way. The per-turn
-// running timer is a diagnostic most users don't watch, so it starts hidden too
-// and the bar stays quiet mid-turn.
-export const STATUSBAR_HIDDEN_BY_DEFAULT: readonly string[] = [
-  'agents',
-  'approval-mode',
-  'running-timer',
-  'terminal',
-  'webhooks'
-]
+// Keep the agent shortcut and per-turn timer hidden; other registered status
+// controls stay visible. Explicit saved layouts always take precedence.
+export const STATUSBAR_HIDDEN_BY_DEFAULT: readonly string[] = ['agents', 'running-timer']
 
 // Stored as the explicit hidden set (not the visible one) so an item added to
 // the bar in a later version shows up for existing users instead of silently

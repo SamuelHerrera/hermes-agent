@@ -807,10 +807,10 @@ function readPersistedThemeSource() {
       return parsed.themeSource
     }
   } catch {
-    // Missing / malformed → follow the OS like a fresh install.
+    // Missing / malformed → match the renderer's fresh-install dark mode.
   }
 
-  return 'system'
+  return 'dark'
 }
 
 function writePersistedThemeSource(mode) {
@@ -824,8 +824,8 @@ function writePersistedThemeSource(mode) {
 
 nativeTheme.themeSource = readPersistedThemeSource()
 
-// Window translucency (see-through window). One lever, 0–100; 0 = off (the
-// default). Mapped to the native window opacity so the desktop shows through
+// Window translucency (see-through window). One lever, 0–100; 0 = off,
+// 10 = default (see store/translucency). Native opacity lets the desktop show through
 // the whole window. Persisted so a cold launch applies it at window creation,
 // before the renderer reports its value. macOS + Windows only; `setOpacity` is
 // a no-op on Linux. See store/translucency.
@@ -841,7 +841,7 @@ function readPersistedTranslucency() {
   try {
     return clampIntensity(JSON.parse(fs.readFileSync(TRANSLUCENCY_CONFIG_PATH, 'utf8')).intensity)
   } catch {
-    return 0
+    return 10
   }
 }
 

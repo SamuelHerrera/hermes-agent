@@ -55,34 +55,37 @@ function openContextMenu(target: HTMLElement) {
 }
 
 describe('statusbar item visibility', () => {
-  it('hides the route/toggle items out of the box and keeps status items', () => {
-    bar([
+  it('renders the shipped visibility set and keeps status items', () => {
+    const items = [
       item('webhooks', 'Webhooks'),
       item('agents', 'Agents'),
       item('terminal', 'Terminal'),
       item('approval-mode', 'Approvals'),
       item('gateway-health', 'Gateway')
-    ])
+    ]
 
-    for (const label of ['Webhooks', 'Agents', 'Terminal', 'Approvals']) {
-      expect(screen.queryByText(label)).toBeNull()
+    bar(items)
+
+    for (const entry of items) {
+      expect(screen.queryByText(entry.label as string) === null).toBe(STATUSBAR_HIDDEN_BY_DEFAULT.includes(entry.id))
     }
 
     expect(screen.getByText('Gateway')).toBeTruthy()
   })
 
   it('shows an item once the user enables it from the bar context menu', async () => {
-    const statusbar = bar([item('webhooks', 'Webhooks'), item('gateway-health', 'Gateway')])
+    const hiddenId = STATUSBAR_HIDDEN_BY_DEFAULT[0]!
+    const statusbar = bar([item(hiddenId, 'Hidden item'), item('gateway-health', 'Gateway')])
 
-    expect(screen.queryByText('Webhooks')).toBeNull()
+    expect(screen.queryByText('Hidden item')).toBeNull()
 
     openContextMenu(statusbar)
 
-    const row = await screen.findByRole('menuitemcheckbox', { name: 'Webhooks' })
+    const row = await screen.findByRole('menuitemcheckbox', { name: 'Hidden item' })
     fireEvent.click(row)
 
-    expect($statusbarHiddenIds.get()).not.toContain('webhooks')
-    expect(within(statusbar).getByText('Webhooks')).toBeTruthy()
+    expect($statusbarHiddenIds.get()).not.toContain(hiddenId)
+    expect(within(statusbar).getByText('Hidden item')).toBeTruthy()
   })
 
   it('never lets the user hide a locked item (system icon / update pill)', async () => {
@@ -103,10 +106,7 @@ describe('statusbar item visibility', () => {
   })
 
   it('starts the per-turn readout hidden and restores it from the menu', async () => {
-    const statusbar = bar([
-      item('running-timer', 'Turn timer', { variant: 'text' }),
-      item('gateway-health', 'Gateway')
-    ])
+    const statusbar = bar([item('running-timer', 'Turn timer', { variant: 'text' }), item('gateway-health', 'Gateway')])
 
     expect(screen.queryByText('Turn timer')).toBeNull()
 
@@ -134,9 +134,8 @@ describe('reset to defaults', () => {
 
     expect($statusbarHiddenIds.get()).toEqual([...STATUSBAR_HIDDEN_BY_DEFAULT])
     expect(within(statusbar).getByText('Gateway')).toBeTruthy()
-    // Scoped to the bar: the menu stays open after a reset, so an unscoped query
-    // matches its still-listed 'Webhooks' checkbox row rather than a bar item.
-    expect(within(statusbar).queryByText('Webhooks')).toBeNull()
+    // Scoped to the bar: the menu stays open after a reset.
+    expect(within(statusbar).queryByText('Webhooks') === null).toBe(STATUSBAR_HIDDEN_BY_DEFAULT.includes('webhooks'))
   })
 
   it('disables the row when the layout is already default', async () => {
@@ -152,7 +151,7 @@ describe('reset to defaults', () => {
     const statusbar = bar([item('webhooks', 'Webhooks'), item('gateway-health', 'Gateway')])
 
     // Showing a default-hidden item counts…
-    $statusbarHiddenIds.set(STATUSBAR_HIDDEN_BY_DEFAULT.filter(id => id !== 'webhooks'))
+    $statusbarHiddenIds.set(STATUSBAR_HIDDEN_BY_DEFAULT.slice(1))
     openContextMenu(statusbar)
     expect(
       (await screen.findByRole('menuitem', { name: /reset to defaults/i })).getAttribute('data-disabled')

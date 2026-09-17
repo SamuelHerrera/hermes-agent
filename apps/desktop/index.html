@@ -19,7 +19,8 @@
         let bg = localStorage.getItem('hermes-boot-background')
         let scheme = localStorage.getItem('hermes-boot-color-scheme')
         if (!bg) {
-          const dark = window.matchMedia('(prefers-color-scheme: dark)').matches
+          const mode = localStorage.getItem('hermes-desktop-mode-v1')
+          const dark = mode === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : mode !== 'light'
           bg = dark ? '#111111' : '#f7f7f7'
           scheme = dark ? 'dark' : 'light'
         }
