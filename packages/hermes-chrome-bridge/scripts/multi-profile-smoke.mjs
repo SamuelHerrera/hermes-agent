@@ -36,7 +36,7 @@ const popups = []
 const pages = []
 const downloadedArtifacts = []
 const client = new Client({ name: 'two-profile-live-smoke', version: '1' })
-const evidence = { browser: chromium.executablePath(), profiles: [], checks: [] }
+const evidence = { browser: chromium.executablePath(), profiles: [], checks: [], metrics: [] }
 let transport
 const fixtureServer = createServer((request, response) => {
   if (request.url.startsWith('/download')) {
@@ -67,8 +67,10 @@ await new Promise(resolveListen => fixtureServer.listen(0, '127.0.0.1', resolveL
 const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`
 
 async function call(method, args = {}, expectedError) {
+  const started = Date.now()
   const response = await client.callTool({ name: `chrome_bridge_${method}`, arguments: args })
   const text = response.content.filter(item => item.type === 'text').map(item => item.text).join('\n')
+  evidence.metrics.push({ method, milliseconds: Date.now() - started, textBytes: Buffer.byteLength(text) })
   let result
   try { result = JSON.parse(text) } catch { result = { message: text } }
   const image = response.content.find(item => item.type === 'image')
@@ -158,6 +160,12 @@ try {
       assert.ok(JSON.stringify(snapshot).includes(label))
     }
     evidence.checks.push(`${label}: all snapshot formats tolerate native null labels`)
+    const minimal = await call('snapshot', { tabId: opened.tabId, selector: 'h1', fields: ['ref', 'text'], maxChars: 40, limit: 1 })
+    assert.equal(minimal.elements.length, 1)
+    assert.equal(minimal.elements[0].text, label)
+    assert.ok(JSON.stringify(minimal).length < 1000)
+    assert.ok(Object.keys(minimal.elements[0]).every(key => ['ref', 'text'].includes(key)))
+    await call('type', { tabId: opened.tabId, target: '#smoke-input', text: 'replace this fixture value' })
     await call('type', { tabId: opened.tabId, target: '#smoke-input', text: label })
     await call('click', { tabId: opened.tabId, target: '#smoke-button' })
     assert.equal((await call('query', { tabId: opened.tabId, selector: '#smoke-result' })).elements[0].text, label)
@@ -233,6 +241,15 @@ try {
     assert.ok(tabs.tabs.every(tab => !tab.url.includes('smoke-only')))
   }
   evidence.checks.push('selected tabs isolated; URL credentials redacted')
+  await popups[0].locator('#network-mode').selectOption('public')
+  await waitFor(() => call('tabs', { connectionId: pages[0].connectionId }),
+    value => value.tabs.every(tab => !tab.url.startsWith(fixtureOrigin)), 'public-only policy was not applied')
+  await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'TAB_NOT_CONTROLLABLE')
+  assert.ok(JSON.stringify(await call('query', { tabId: pages[1].tabId, selector: 'h1' })).includes('Bridge Test B'))
+  await popups[0].locator('#network-mode').selectOption('development')
+  await waitFor(() => call('tabs', { connectionId: pages[0].connectionId }),
+    value => value.tabs.some(tab => tab.url.startsWith(fixtureOrigin)), 'development policy was not restored')
+  evidence.checks.push('popup network policy applies live and independently per profile')
   await popups[0].getByRole('button', { name: 'Disconnect', exact: true }).click()
   await waitFor(() => call('status'), value => value.connectionCount === 1, 'disconnect not observed')
   await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'BRIDGE_DISCONNECTED')
@@ -268,6 +285,7 @@ try {
   await client.close().catch(() => undefined)
   await new Promise(resolveClose => fixtureServer.close(resolveClose))
   await writeFile(join(evidenceRoot, 'result.json'), JSON.stringify(evidence, null, 2))
-  console.log(JSON.stringify({ ...evidence, evidenceRoot }, null, 2))
+  console.log(JSON.stringify({ success: evidence.success, error: evidence.error, checks: evidence.checks,
+    requests: evidence.metrics.length, evidenceRoot }, null, 2))
   if (!evidenceRoot.startsWith(root + '/')) { await rm(root, { force: true, recursive: true }) }
 }

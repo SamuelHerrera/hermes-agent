@@ -50,11 +50,16 @@ export function createContentBridgeHandler(
 
     try {
       if (message.type === 'hermes.bridge.indicator') {
-        if (!exactKeys(message, ['active', 'type', 'version']) || typeof message.active !== 'boolean') {
+        const point = exactKeys(message, ['active', 'type', 'version', 'x', 'y']) &&
+          validDistance(message.x) && validDistance(message.y)
+
+        if ((!exactKeys(message, ['active', 'type', 'version']) && !point) || typeof message.active !== 'boolean') {
           return undefined
         }
 
-        if (message.active) { indicator?.activity() } else { indicator?.hide() }
+        if (message.active) {
+          indicator?.activity(point ? { x: message.x as number, y: message.y as number } : undefined)
+        } else { indicator?.hide() }
 
         return {
           result: { active: message.active },

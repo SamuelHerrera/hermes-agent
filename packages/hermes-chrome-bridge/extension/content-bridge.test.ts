@@ -28,6 +28,15 @@ function setup() {
 }
 
 describe('content bridge protocol', () => {
+  it('displays bounded trusted-input cursor coordinates and rejects malformed points', () => {
+    const { handler, indicator } = setup()
+    expect(handler({ type: 'hermes.bridge.indicator', version: 2, active: true, x: 120, y: 200 })).toBeDefined()
+    expect(indicator.activity).toHaveBeenCalledWith({ x: 120, y: 200 })
+
+    for (const point of [{ x: Infinity, y: 0 }, { x: 1 }, { x: '2', y: 1 }]) {
+      expect(handler({ type: 'hermes.bridge.indicator', version: 2, active: true, ...point })).toBeUndefined()
+    }
+  })
   it('accepts v2 requests to bypass historical v1-only listeners', () => {
     const {handler, inspector} = setup()
     expect(handler({type:'hermes.bridge.snapshot',version:2,format:'both'})).toMatchObject({type:'hermes.bridge.result',version:1})

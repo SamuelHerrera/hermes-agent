@@ -11,7 +11,7 @@ NEW DISPATCHERS MUST SEND REQUEST VERSION 2 for ping and EVERY content operation
 
 ## Trusted action resolution
 
-Send `{type:'hermes.bridge.resolve',version:1,target:<ref-or-selector>}` to the TOP frame content listener. It returns standard `hermes.bridge.result` envelope with:
+Send `{type:'hermes.bridge.resolve',version:2,target:<ref-or-selector>}` to the TOP frame content listener. It returns standard `hermes.bridge.result` envelope with:
 
 ```
 {ref,sensitive,editable,box:{x,y,width,height},documentId,
