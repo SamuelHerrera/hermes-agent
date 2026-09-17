@@ -45,7 +45,44 @@ const EVAL_ANNOTATIONS = {
   title: 'Arbitrary JavaScript execution; requires explicit user approval'
 } as const
 
+const INSPECTION_PROPERTIES = {
+  selector: { maxLength: 2048, minLength: 1, type: 'string' },
+  limit: { default: 60, maximum: 500, minimum: 1, type: 'integer' },
+  cursor: { maxLength: 4096, minLength: 1, type: 'string' },
+  maxChars: { default: 100, maximum: 240, minimum: 1, type: 'integer' },
+  fields: { type: 'array', maxItems: 8, items: { type: 'string', enum: ['ref', 'role', 'name', 'text', 'value', 'box', 'state', 'tag'] } },
+  visibleOnly: { default: true, type: 'boolean' }
+} as const
+
+const TRUSTED_PROPERTIES = {
+  inputRoute: { default: 'trusted', type: 'string', enum: ['trusted', 'dom_event'], description: 'Browser input by default. dom_event is an explicit untrusted downgrade; never automatic.' },
+  frameId: { minimum: 0, type: 'integer', description: 'Chrome frame ID; default main frame. Target selectors support open shadow roots.' }
+} as const
+
 const BASE_TOOLS = [
+  {
+    name: 'chrome_bridge_control',
+    description: 'Trusted drag; JS dialog inspect/accept/dismiss; cancel/detach; approved uploads (256 KiB total transferred as bytes, not shared paths); download with bounded completion to browser-host Downloads/hermes (not backend filesystem). No native dialogs.',
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    inputSchema: {
+      type: 'object', additionalProperties: false, required: ['tabId', 'action'],
+      properties: {
+        tabId: { type: 'integer', minimum: 1 },
+        frameId: { type: 'integer', minimum: 0 },
+        action: { type: 'string', enum: ['frames', 'drag', 'dialog_inspect', 'dialog_accept', 'dialog_dismiss', 'upload', 'download', 'cancel', 'detach'] },
+        target: { type: 'string', minLength: 1, maxLength: 2048 },
+        destination: { type: 'string', minLength: 1, maxLength: 2048 },
+        dialogId: { type: 'string', minLength: 1, maxLength: 128 },
+        promptText: { type: 'string', maxLength: 1000 },
+        files: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 4096 } },
+        approvalIntent: { type: 'string', enum: ['explicit-user-approved-files', 'explicit-user-approved-download'] },
+        url: { type: 'string', minLength: 1, maxLength: 8192 },
+        filename: { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$', maxLength: 200 },
+        timeoutMs: { type: 'integer', minimum: 100, maximum: 60000, default: 30000 },
+        maxBytes: { type: 'integer', minimum: 1, maximum: 20000000, default: 5000000 }
+      }
+    }
+  },
   {
     annotations: READ_ONLY_ANNOTATIONS,
     description: 'Discover connected Chrome profiles with public connectionId, label and sessionId. Without a target, returns all connections; with connectionId, checks that profile.',
@@ -77,6 +114,7 @@ const BASE_TOOLS = [
     inputSchema: {
       additionalProperties: false,
       properties: {
+        ...INSPECTION_PROPERTIES,
         format: { default: 'both', enum: ['accessibility', 'dom', 'both'], type: 'string' },
         tabId: { minimum: 1, type: 'integer' }
       },
@@ -90,7 +128,8 @@ const BASE_TOOLS = [
     inputSchema: {
       additionalProperties: false,
       properties: {
-        limit: { default: 20, maximum: 100, minimum: 1, type: 'integer' },
+        ...INSPECTION_PROPERTIES,
+        limit: { default: 20, maximum: 500, minimum: 1, type: 'integer' },
         selector: { maxLength: 2048, minLength: 1, type: 'string' },
         tabId: { minimum: 1, type: 'integer' }
       },
@@ -294,6 +333,12 @@ export const CHROME_BRIDGE_TOOLS: readonly Tool[] = BASE_TOOLS.map(tool => ({
     ...tool.inputSchema,
     properties: {
       ...tool.inputSchema.properties,
+      ...(['chrome_bridge_click', 'chrome_bridge_type', 'chrome_bridge_key', 'chrome_bridge_hover', 'chrome_bridge_scroll'].includes(tool.name) ? TRUSTED_PROPERTIES : {}),
+      ...(tool.name === 'chrome_bridge_screenshot' ? {
+        fullPage: { type: 'boolean', default: false },
+        target: { type: 'string', minLength: 1, maxLength: 2048 },
+        frameId: { type: 'integer', minimum: 0 }
+      } : {}),
       connectionId: {
         description: 'Public profile identity from chrome_bridge_status; never a credential.',
         type: 'string', pattern: `^${CONNECTION_ID_PATTERN}$`
