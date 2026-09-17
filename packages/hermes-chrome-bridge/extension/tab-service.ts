@@ -1,4 +1,4 @@
-import { isPublicHttpUrl } from './url-policy.js'
+import { isControllableHttpUrl } from './url-policy.js'
 
 export interface BrowserTabLike {
   active?: boolean
@@ -39,7 +39,7 @@ export interface TabListResult {
 }
 
 export class TabServiceError extends Error {
-  public constructor(public readonly code: 'TAB_NOT_CONTROLLABLE' | 'TAB_NOT_FOUND', message: string) {
+  public constructor(public readonly code: 'INVALID_ARGUMENTS' | 'TAB_NOT_CONTROLLABLE' | 'TAB_NOT_FOUND', message: string) {
     super(message)
     this.name = 'TabServiceError'
   }
@@ -123,7 +123,7 @@ function safeUrl(raw: string): { redacted: boolean, truncated: boolean, value: s
   policyUrl.username = ''
   policyUrl.password = ''
 
-  if (!isPublicHttpUrl(policyUrl.toString())) { return undefined }
+  if (!isControllableHttpUrl(policyUrl.toString())) { return undefined }
 
   let redacted = parsed.username.length > 0 || parsed.password.length > 0 ||
     parsed.search.length > 0 || parsed.hash.length > 0
@@ -175,7 +175,7 @@ export function redactTab(tab: BrowserTabLike, selected: boolean): SafeTab | und
 export interface TabService {
   assertControllable(tabId: number): Promise<void>
   getSelectedTabId(): number | undefined
-  list(): Promise<TabListResult>
+  list(options?: { limit?: number, offset?: number, search?: string }): Promise<TabListResult>
   select(tabId: number): Promise<{ selectedTabId: number }>
 }
 
@@ -205,7 +205,13 @@ export function createTabService(api: TabsApiLike, options: { maxTabs?: number }
     assertControllable,
     getSelectedTabId: () => selectedTabId,
 
-    async list(): Promise<TabListResult> {
+    async list({ limit = Math.min(20, maxTabs), offset = 0, search = '' } = {}): Promise<TabListResult> {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100 ||
+        !Number.isInteger(offset) || offset < 0 || offset > 100_000 ||
+        typeof search !== 'string' || search.length > 240) {
+        throw new TabServiceError('INVALID_ARGUMENTS', 'Invalid tab list bounds.')
+      }
+
       const safe = (await api.query({}))
         .map(tab => redactTab(tab, false))
         .filter((tab): tab is SafeTab => tab !== undefined)
@@ -219,13 +225,9 @@ export function createTabService(api: TabsApiLike, options: { maxTabs?: number }
         selectedTabId = safe.find(tab => tab.active)?.tabId ?? safe[0]?.tabId
       }
 
-      let tabs = safe.slice(0, maxTabs)
-      const selected = safe.find(tab => tab.tabId === selectedTabId)
-
-      if (selected !== undefined && !tabs.some(tab => tab.tabId === selected.tabId)) {
-        tabs = [...tabs.slice(0, -1), selected]
-          .sort((left, right) => left.windowId - right.windowId || left.tabId - right.tabId)
-      }
+      const needle = search.toLowerCase()
+      const matches = needle ? safe.filter(tab => `${tab.title} ${tab.url}`.toLowerCase().includes(needle)) : safe
+      let tabs = matches.slice(offset, offset + Math.min(limit, maxTabs))
 
       tabs = tabs.map(tab => ({ ...tab, selected: tab.tabId === selectedTabId }))
 
@@ -233,7 +235,7 @@ export function createTabService(api: TabsApiLike, options: { maxTabs?: number }
         count: tabs.length,
         ...(selectedTabId === undefined ? {} : { selectedTabId }),
         tabs,
-        truncated: safe.length > tabs.length
+        truncated: matches.length > offset + tabs.length
       }
     },
 

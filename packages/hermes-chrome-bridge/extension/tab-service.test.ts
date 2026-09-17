@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createTabService, redactTab } from './tab-service.js'
+import { setNetworkMode } from './url-policy.js'
+
+afterEach(() => setNetworkMode(undefined))
 
 interface FakeTab {
   active?: boolean
@@ -41,6 +44,20 @@ function setup(tabs: FakeTab[], maxTabs = 100) {
 }
 
 describe('safe tab service', () => {
+  it('pages and searches bounded tab metadata without repeating the selected tab', async () => {
+    const { service } = setup(Array.from({ length: 45 }, (_, i) => ({
+      active: i === 44, id: i + 1, title: `Development ${i}`, url: `http://localhost:5173/page-${i}`, windowId: 1
+    })))
+
+    const first = await service.list()
+    expect(first.tabs).toHaveLength(20)
+    expect(first.truncated).toBe(true)
+    const second = await service.list({ offset: 20, limit: 20 })
+    expect(second.tabs).toHaveLength(20)
+    expect(second.tabs.every(tab => !first.tabs.some(previous => previous.tabId === tab.tabId))).toBe(true)
+    const matches = await service.list({ search: 'development 44', limit: 2 })
+    expect(matches.tabs.map(tab => tab.tabId)).toEqual([45])
+  })
   it('lists controllable tabs deterministically and redacts secrets from URL and title', async () => {
     const querySecret = 'query-secret-should-never-leak'
     const pathToken = 'ghp_abcdefghijklmnopqrstuvwxyz123456'
@@ -112,6 +129,9 @@ describe('safe tab service', () => {
       { id: 12, title: 'Web Store', url: 'https://chromewebstore.google.com/detail/example', windowId: 1 }
     ])
 
+    await expect(service.list()).resolves.toMatchObject({ count: 3 })
+    await expect(service.assertControllable(10)).resolves.toBeUndefined()
+    setNetworkMode('public')
     await expect(service.list()).resolves.toMatchObject({ count: 1 })
     await expect(service.select(2)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })
     await expect(service.assertControllable(10)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })

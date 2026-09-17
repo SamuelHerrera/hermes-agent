@@ -1,4 +1,5 @@
 import type { ConnectionState } from './lifecycle.js'
+import { NETWORK_MODE_KEY } from './url-policy.js'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -34,6 +35,22 @@ const connectButton = requireElement<HTMLButtonElement>('#connect')
 const disconnectButton = requireElement<HTMLButtonElement>('#disconnect')
 const profileLabel = requireElement<HTMLInputElement>('#profile-label')
 const connectionId = requireElement<HTMLElement>('#connection-id')
+const networkMode = requireElement<HTMLSelectElement>('#network-mode')
+
+void chrome.storage.local.get(NETWORK_MODE_KEY).then(stored => {
+  networkMode.value = stored[NETWORK_MODE_KEY] === undefined || stored[NETWORK_MODE_KEY] === 'development'
+    ? 'development' : 'public'
+}).catch(() => {
+  networkMode.disabled = true
+  detail.textContent = 'Network settings could not be loaded.'
+})
+
+networkMode.addEventListener('change', () => {
+  networkMode.disabled = true
+  void chrome.storage.local.set({ [NETWORK_MODE_KEY]: networkMode.value })
+    .catch(() => { detail.textContent = 'Network setting could not be saved.' })
+    .finally(() => { networkMode.disabled = false })
+})
 
 function render(state: ConnectionState): void {
   if (document.activeElement !== profileLabel && state.identity !== undefined) {

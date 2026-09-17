@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
+  "minimum_chrome_version": "125",
   "name": "Hermes Chrome Bridge",
   "version": "0.1.0",
   "description": "Connect Hermes to Chrome through a local native messaging host.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxc/nMs86odPyWhOja1x0r1mnBtOXPa+As2Blon3AqCrhGHgu7xKDcivQGeG1Eu6LrSbYPrhpdOFeNNeIZni7R5dUtB2eO7V7WTgdWpig1Oh81EDLqsITNuWm85v8zok0Vpe9SazREt9rz9lhDNwxADjHgS1SoOjREvij89jx8CbE73OJKH2X88fvZhXT9r67jodRDsvTDM5+RbhXTi6D44Ihv0Ppe+ci2BQDu+BDhklDLQ1vcUPVXmnIzb6whXKzm1eviFjqDkMLIJT+6Vy97RNaOdPF02IjhCegBln+jccqeGYz8s3QlGK0p6VZ9AkR6Hd+FUVZLxGDUgrpSCTVQwIDAQAB",
   "permissions": [
     "nativeMessaging",
+    "debugger",
+    "downloads",
+    "webNavigation",
     "scripting",
     "storage"
   ],
@@ -28,7 +32,8 @@
       "js": [
         "content-script.js"
       ],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true
     }
   ]
 }

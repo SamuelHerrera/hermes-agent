@@ -40,7 +40,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(route).toHaveBeenCalledWith({
       arguments: {},
       method: 'status'
-    })
+    }, expect.any(AbortSignal))
     expect(result.content).toEqual([
       {
         text: JSON.stringify({
@@ -103,7 +103,7 @@ describe('Hermes Chrome bridge MCP server', () => {
       name: 'chrome_bridge_select_tab'
     })
 
-    expect(route).toHaveBeenCalledWith({ arguments: { tabId: 17 }, method: 'selectTab' })
+    expect(route).toHaveBeenCalledWith({ arguments: { tabId: 17 }, method: 'selectTab' }, expect.any(AbortSignal))
     expect(JSON.parse((selected.content as Array<{ text: string }>)[0]?.text ?? 'null')).toEqual({
       selectedTabId: 17
     })
@@ -135,7 +135,7 @@ describe('Hermes Chrome bridge MCP server', () => {
       { name: 'chrome_bridge_query', arguments: { tabId, selector: 'h1' } }
     ]) {
       expect((await client.callTool(call)).isError).not.toBe(true)
-      expect(route).toHaveBeenLastCalledWith(expect.objectContaining({ arguments: call.arguments }))
+      expect(route).toHaveBeenLastCalledWith(expect.objectContaining({ arguments: call.arguments }), expect.any(AbortSignal))
     }
 
     for (const arguments_ of [{ connectionId: 'wrong' }, { connectionId, extra: true }]) {
@@ -171,15 +171,15 @@ describe('Hermes Chrome bridge MCP server', () => {
     expect(query.isError).not.toBe(true)
     expect(route).toHaveBeenNthCalledWith(1, {
       arguments: { format: 'both', tabId: 7 }, method: 'snapshot'
-    })
+    }, expect.any(AbortSignal))
     expect(route).toHaveBeenNthCalledWith(2, {
       arguments: { limit: 20, selector: 'button.primary', tabId: 7 }, method: 'query'
-    })
+    }, expect.any(AbortSignal))
 
     for (const call of [
       { arguments: { format: 'invalid' }, name: 'chrome_bridge_snapshot' },
       { arguments: { selector: '', tabId: 7 }, name: 'chrome_bridge_query' },
-      { arguments: { limit: 101, selector: 'button', tabId: 7 }, name: 'chrome_bridge_query' },
+      { arguments: { limit: 501, selector: 'button', tabId: 7 }, name: 'chrome_bridge_query' },
       { arguments: { selector: 'button', tabId: 0 }, name: 'chrome_bridge_query' }
     ]) {
       await expect(client.callTool(call)).resolves.toMatchObject({ isError: true })
@@ -428,6 +428,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     const { tools } = await client.listTools()
 
     expect(tools.map(tool => tool.name)).toEqual([
+      'chrome_bridge_control',
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
@@ -473,6 +474,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     const { tools } = await client.listTools()
 
     expect(tools.map(tool => tool.name)).toEqual([
+      'chrome_bridge_control',
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',

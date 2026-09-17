@@ -1,6 +1,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { CONNECTION_ID_PATTERN } from './connection.js'
+import { TAB_LIST_PROPERTIES } from './tab-list-options.js'
 
 const EMPTY_INPUT_SCHEMA = {
   additionalProperties: false,
@@ -45,7 +46,53 @@ const EVAL_ANNOTATIONS = {
   title: 'Arbitrary JavaScript execution; requires explicit user approval'
 } as const
 
+const INSPECTION_PROPERTIES = {
+  frameId: { minimum: 0, type: 'integer', description: 'Frame ID from control/frames; default main frame.' },
+  selector: { maxLength: 2048, minLength: 1, type: 'string' },
+  limit: { default: 60, maximum: 500, minimum: 1, type: 'integer' },
+  cursor: { maxLength: 4096, minLength: 1, type: 'string' },
+  maxChars: { default: 100, maximum: 240, minimum: 1, type: 'integer' },
+  fields: { type: 'array', maxItems: 8, items: { type: 'string', enum: ['ref', 'role', 'name', 'text', 'value', 'box', 'state', 'tag'] } },
+  visibleOnly: { default: true, type: 'boolean' }
+} as const
+
+const TRUSTED_PROPERTIES = {
+  inputRoute: { default: 'trusted', type: 'string', enum: ['trusted', 'dom_event'], description: 'Browser input by default. dom_event is an explicit untrusted downgrade; never automatic.' },
+  frameId: { minimum: 0, type: 'integer', description: 'Chrome frame ID; default main frame. Selectors support open and closed shadow roots.' }
+} as const
+
+const POINT_PROPERTIES = {
+  x: { minimum: 0, maximum: 100000, type: 'number', description: 'Frame viewport CSS coordinate, paired with y instead of target.' },
+  y: { minimum: 0, maximum: 100000, type: 'number' }
+} as const
+
 const BASE_TOOLS = [
+  {
+    name: 'chrome_bridge_control',
+    description: 'Trusted drag; JS dialog inspect/accept/dismiss; cancel/detach; approved uploads (256 KiB total transferred as bytes, not shared paths); download with bounded completion to browser-host Downloads/hermes (not backend filesystem). No native dialogs.',
+    annotations: DESTRUCTIVE_OPEN_WORLD_ANNOTATIONS,
+    inputSchema: {
+      type: 'object', additionalProperties: false, required: ['tabId', 'action'],
+      properties: {
+        tabId: { type: 'integer', minimum: 1 },
+        frameId: { type: 'integer', minimum: 0 },
+        action: { type: 'string', enum: ['frames', 'drag', 'dialog_inspect', 'dialog_accept', 'dialog_dismiss', 'upload', 'download', 'cancel', 'detach', 'release'] },
+        target: { type: 'string', minLength: 1, maxLength: 2048 },
+        destination: { type: 'string', minLength: 1, maxLength: 2048 },
+        ...POINT_PROPERTIES,
+        destinationX: { minimum: 0, maximum: 100000, type: 'number' },
+        destinationY: { minimum: 0, maximum: 100000, type: 'number' },
+        dialogId: { type: 'string', minLength: 1, maxLength: 128 },
+        promptText: { type: 'string', maxLength: 1000 },
+        files: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 4096 } },
+        approvalIntent: { type: 'string', enum: ['explicit-user-approved-files', 'explicit-user-approved-download'] },
+        url: { type: 'string', minLength: 1, maxLength: 8192 },
+        filename: { type: 'string', pattern: '^[a-zA-Z0-9][a-zA-Z0-9._-]*$', maxLength: 200 },
+        timeoutMs: { type: 'integer', minimum: 100, maximum: 60000, default: 30000 },
+        maxBytes: { type: 'integer', minimum: 1, maximum: 20000000, default: 5000000 }
+      }
+    }
+  },
   {
     annotations: READ_ONLY_ANNOTATIONS,
     description: 'Discover connected Chrome profiles with public connectionId, label and sessionId. Without a target, returns all connections; with connectionId, checks that profile.',
@@ -77,6 +124,7 @@ const BASE_TOOLS = [
     inputSchema: {
       additionalProperties: false,
       properties: {
+        ...INSPECTION_PROPERTIES,
         format: { default: 'both', enum: ['accessibility', 'dom', 'both'], type: 'string' },
         tabId: { minimum: 1, type: 'integer' }
       },
@@ -90,7 +138,8 @@ const BASE_TOOLS = [
     inputSchema: {
       additionalProperties: false,
       properties: {
-        limit: { default: 20, maximum: 100, minimum: 1, type: 'integer' },
+        ...INSPECTION_PROPERTIES,
+        limit: { default: 20, maximum: 500, minimum: 1, type: 'integer' },
         selector: { maxLength: 2048, minLength: 1, type: 'string' },
         tabId: { minimum: 1, type: 'integer' }
       },
@@ -292,8 +341,21 @@ export const CHROME_BRIDGE_TOOLS: readonly Tool[] = BASE_TOOLS.map(tool => ({
   description: `${tool.description} Target connectionId explicitly when multiple profiles are connected. Namespaced tabId also binds the connection; labels are not selectors. Untargeted commands fail on ambiguity or after the implicit connection changes.`,
   inputSchema: {
     ...tool.inputSchema,
+    ...(['chrome_bridge_click', 'chrome_bridge_hover', 'chrome_bridge_type'].includes(tool.name) && 'required' in tool.inputSchema ? {
+      required: tool.inputSchema.required.filter(key => key !== 'target'),
+      oneOf: [{ required: ['target'] }, { required: ['x', 'y'] }]
+    } : {}),
     properties: {
       ...tool.inputSchema.properties,
+      detail: { type: 'string', enum: ['compact', 'full'], default: 'compact', description: 'Full retains diagnostic metadata; images are always image blocks.' },
+      ...(tool.name === 'chrome_bridge_tabs' ? TAB_LIST_PROPERTIES : {}),
+      ...(['chrome_bridge_click', 'chrome_bridge_hover', 'chrome_bridge_type', 'chrome_bridge_scroll'].includes(tool.name) ? POINT_PROPERTIES : {}),
+      ...(['chrome_bridge_click', 'chrome_bridge_type', 'chrome_bridge_key', 'chrome_bridge_hover', 'chrome_bridge_scroll'].includes(tool.name) ? TRUSTED_PROPERTIES : {}),
+      ...(tool.name === 'chrome_bridge_screenshot' ? {
+        fullPage: { type: 'boolean', default: false },
+        target: { type: 'string', minLength: 1, maxLength: 2048 },
+        frameId: { type: 'integer', minimum: 0 }
+      } : {}),
       connectionId: {
         description: 'Public profile identity from chrome_bridge_status; never a credential.',
         type: 'string', pattern: `^${CONNECTION_ID_PATTERN}$`

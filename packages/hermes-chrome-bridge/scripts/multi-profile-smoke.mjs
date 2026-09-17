@@ -2,7 +2,8 @@
 // Run from the repo after building: node packages/hermes-chrome-bridge/scripts/multi-profile-smoke.mjs
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync } from 'node:crypto'
-import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,15 +34,56 @@ await writeFile(join(extensionPath, 'manifest.json'), JSON.stringify(manifest))
 const contexts = []
 const popups = []
 const pages = []
+const downloadedArtifacts = []
 const client = new Client({ name: 'two-profile-live-smoke', version: '1' })
-const evidence = { browser: chromium.executablePath(), profiles: [], checks: [] }
+const evidence = { browser: chromium.executablePath(), profiles: [], checks: [], metrics: [] }
 let transport
+const fixtureServer = createServer((request, response) => {
+  if (request.url.startsWith('/download')) {
+    response.setHeader('Content-Type', 'text/plain')
+    response.setHeader('Content-Disposition', 'attachment; filename="hermes-fixture.txt"')
+    response.end('Hermes disposable development download\n')
+    return
+  }
+  response.setHeader('Content-Type', 'text/html; charset=utf-8')
+  if (request.url.startsWith('/frame')) {
+    response.end('<!doctype html><label>Frame input<input id="frame-input"></label>')
+    return
+  }
+  response.end(`<!doctype html><html><head><title>Hermes development fixture</title></head>
+    <body><h1>Development fixture</h1><p>Disposable localhost page; no real data.</p>
+    <input id="fixture-file" type="file" multiple aria-label="Fixture attachment">
+    <button id="modal" onclick="this.dataset.answer=String(confirm('Fixture dialog'))">Fixture dialog</button>
+    <div id="drag-source" draggable="true" style="display:inline-block;padding:20px;background:#ccf">Drag fixture</div>
+    <div id="drag-target" style="display:inline-block;padding:20px;background:#cfc">Drop fixture</div>
+    <section id="shadow-host"></section><section id="closed-host"></section>
+    <canvas id="paint" width="300" height="80" style="background:#eef"></canvas>
+    <iframe src="/frame" title="Same-origin test frame"></iframe>
+    <iframe src="http://localhost:${fixtureServer.address().port}/frame-cross" title="Cross-origin test frame"></iframe>
+    <script>document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML=
+    '<label>Shadow input<input id="shadow-input"></label>';
+    window.closedFixture=document.querySelector('#closed-host').attachShadow({mode:'closed'});
+    window.closedFixture.innerHTML='<label>Closed input<input id="closed-input"></label>';
+    document.querySelector('#paint').onclick=e=>{e.target.dataset.trusted=String(e.isTrusted);e.target.dataset.x=String(e.offsetX)};
+    document.querySelector('#paint').onpointermove=e=>{if(e.buttons===1&&e.isTrusted)e.target.dataset.moves=String(Number(e.target.dataset.moves||0)+1)};
+    document.querySelector('#drag-source').ondragstart=e=>e.dataTransfer.setData('text/plain','fixture');
+    document.querySelector('#drag-target').ondragover=e=>e.preventDefault();
+    document.querySelector('#drag-target').ondrop=e=>{e.preventDefault();e.currentTarget.dataset.dropped=e.dataTransfer.getData('text/plain')};
+    </script></body></html>`)
+})
+await new Promise(resolveListen => fixtureServer.listen(0, '127.0.0.1', resolveListen))
+const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`
 
 async function call(method, args = {}, expectedError) {
+  const started = Date.now()
   const response = await client.callTool({ name: `chrome_bridge_${method}`, arguments: args })
   const text = response.content.filter(item => item.type === 'text').map(item => item.text).join('\n')
+  evidence.metrics.push({ method, milliseconds: Date.now() - started, textBytes: Buffer.byteLength(text) })
   let result
   try { result = JSON.parse(text) } catch { result = { message: text } }
+  const image = response.content.find(item => item.type === 'image')
+  if (method === 'screenshot' && !expectedError) { assert.ok(image, 'screenshots must use MCP image content') }
+  if (image) { result.dataUrl = `data:${image.mimeType};base64,${image.data}` }
   if (expectedError) {
     assert.equal(response.isError, true, text)
     if (expectedError !== true) { assert.equal(result.code, expectedError, text) }
@@ -75,6 +117,8 @@ try {
     await copyFile(installed.manifestPath, join(profile, 'NativeMessagingHosts/com.nous.hermes_chrome_bridge.json'))
     const context = await chromium.launchPersistentContext(profile, {
       headless: false,
+      downloadsPath: join(root, `downloads-${contexts.length}`),
+      acceptDownloads: true,
       env: { ...process.env, HOME: browserHome },
       args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
       viewport: { width: 1000, height: 760 }
@@ -82,6 +126,18 @@ try {
     contexts.push(context)
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker')
     assert.ok(worker.url().startsWith(`chrome-extension://${extensionId}/`))
+    await worker.evaluate(() => {
+      globalThis.fixtureErrors = []
+      for (const [owner, methods] of [[globalThis.chrome.debugger, ['attach', 'sendCommand']], [globalThis.chrome.scripting, ['executeScript']]]) {
+        for (const method of methods) {
+          const original = owner[method].bind(owner)
+          owner[method] = async (...args) => {
+            try { return await original(...args) }
+            catch (error) { globalThis.fixtureErrors.push({ method, error: String(error) }); throw error }
+          }
+        }
+      }
+    })
     const popup = await context.newPage()
     popups.push(popup)
     await popup.goto(`chrome-extension://${extensionId}/popup.html`)
@@ -94,9 +150,9 @@ try {
     const identity = status.connections.find(connection => connection.label === label)
     assert.ok(identity, JSON.stringify(status))
     evidence.profiles.push(identity)
-    const opened = await call('open', { connectionId: identity.connectionId, url: 'https://example.com/?token=smoke-only', active: false })
-    const page = await waitFor(() => context.pages(), value => value.some(item => item.url().startsWith('https://example.com/')), 'opened page missing')
-    const publicPage = page.find(item => item.url().startsWith('https://example.com/'))
+    const opened = await call('open', { connectionId: identity.connectionId, url: `${fixtureOrigin}/?token=smoke-only`, active: false })
+    const page = await waitFor(() => context.pages(), value => value.some(item => item.url().startsWith(fixtureOrigin)), 'opened page missing')
+    const publicPage = page.find(item => item.url().startsWith(fixtureOrigin))
     await publicPage.waitForLoadState('domcontentloaded')
     // Distinguishable, non-secret fixture content on a real public page.
     await publicPage.locator('h1').evaluate((heading, text) => { heading.textContent = text }, label)
@@ -112,7 +168,10 @@ try {
       button.textContent = 'Check local input'
       const output = document.createElement('output')
       output.id = 'smoke-result'
-      button.addEventListener('click', () => { output.textContent = input.value })
+      button.addEventListener('click', event => {
+        output.textContent = input.value
+        output.dataset.trusted = String(event.isTrusted)
+      })
       body.append(input, button, output)
     })
     assert.equal(await publicPage.locator('input[type=hidden]').evaluate(input => input.labels), null)
@@ -121,13 +180,84 @@ try {
       assert.ok(JSON.stringify(snapshot).includes(label))
     }
     evidence.checks.push(`${label}: all snapshot formats tolerate native null labels`)
+    const minimal = await call('snapshot', { tabId: opened.tabId, selector: 'h1', fields: ['ref', 'text'], maxChars: 40, limit: 1 })
+    assert.equal(minimal.elements.length, 1)
+    assert.equal(minimal.elements[0].text, label)
+    assert.ok(JSON.stringify(minimal).length < 1000)
+    assert.ok(Object.keys(minimal.elements[0]).every(key => ['ref', 'text'].includes(key)))
+    await call('type', { tabId: opened.tabId, target: '#smoke-input', text: 'replace this fixture value' })
     await call('type', { tabId: opened.tabId, target: '#smoke-input', text: label })
     await call('click', { tabId: opened.tabId, target: '#smoke-button' })
     assert.equal((await call('query', { tabId: opened.tabId, selector: '#smoke-result' })).elements[0].text, label)
+    assert.equal(await publicPage.locator('#smoke-result').getAttribute('data-trusted'), 'true')
     const capture = await call('screenshot', { tabId: opened.tabId })
     assert.ok(capture.bytes > 0)
     await writeFile(join(evidenceRoot, `profile-${contexts.length}-interaction.png`), Buffer.from(capture.dataUrl.split(',')[1], 'base64'))
     evidence.checks.push(`${label}: MCP type/click/read-back and screenshot succeeded`)
+    for (const selector of ['#shadow-input', '#frame-input', '#closed-input']) {
+      const found = await call('query', { tabId: opened.tabId, selector })
+      assert.equal(found.elements.length, 1)
+      await call('type', { tabId: opened.tabId, target: found.elements[0].ref, text: label })
+      const value = selector === '#closed-input'
+        ? await publicPage.evaluate(() => globalThis.closedFixture.querySelector('input').value)
+        : await (selector === '#frame-input' ? publicPage.frameLocator('iframe[title="Same-origin test frame"]').locator(selector) : publicPage.locator(selector)).inputValue()
+      assert.equal(value, label)
+    }
+    evidence.checks.push(`${label}: shadow and same-origin frame refs drive trusted input`)
+    const frames = await call('control', { tabId: opened.tabId, action: 'frames' })
+    const crossFrameId = frames.frames.find(frame => frame.origin.startsWith('http://localhost:')).frameId
+    const cross = await call('query', { tabId: opened.tabId, frameId: crossFrameId, selector: '#frame-input', fields: ['ref'] })
+    assert.equal(cross.count, 1)
+    await call('type', { tabId: opened.tabId, frameId: crossFrameId, target: cross.elements[0].ref, text: 'Cross-origin input' })
+    assert.equal(await publicPage.frameLocator('iframe[title="Cross-origin test frame"]').locator('input').inputValue(), 'Cross-origin input')
+    await publicPage.locator('#paint').scrollIntoViewIfNeeded()
+    const canvas = await publicPage.locator('#paint').boundingBox()
+    await call('click', { tabId: opened.tabId, x: canvas.x + 17, y: canvas.y + 19 })
+    assert.equal(await publicPage.locator('#paint').getAttribute('data-trusted'), 'true')
+    assert.equal(await publicPage.locator('#paint').getAttribute('data-x'), '17')
+    await call('control', { tabId: opened.tabId, action: 'drag', x: canvas.x + 30, y: canvas.y + 30, destinationX: canvas.x + 100, destinationY: canvas.y + 50 })
+    assert.ok(Number(await publicPage.locator('#paint').getAttribute('data-moves')) > 1)
+    evidence.checks.push(`${label}: closed roots, cross-origin frame input, pixel clicks and canvas drag verified`)
+
+    const fixtureFile = join(root, `upload-${contexts.length}.txt`)
+    await writeFile(fixtureFile, `Disposable upload: ${label}`)
+    await call('control', { tabId: opened.tabId, action: 'upload', target: '#fixture-file',
+      files: [await realpath(fixtureFile)], approvalIntent: 'explicit-user-approved-files' })
+    assert.equal(await publicPage.locator('#fixture-file').evaluate(async input => input.files[0].text()), `Disposable upload: ${label}`)
+    const downloaded = await call('control', { tabId: opened.tabId, action: 'download',
+      url: `${fixtureOrigin}/download`, filename: `fixture-${extensionId}-${contexts.length}.txt`,
+      approvalIntent: 'explicit-user-approved-download', maxBytes: 10000 })
+    assert.equal(downloaded.completed, true)
+    const downloadedPath = await worker.evaluate(async id => (await globalThis.chrome.downloads.search({ id }))[0].filename, downloaded.downloadId)
+    assert.equal(await readFile(downloadedPath, 'utf8'), 'Hermes disposable development download\n')
+    downloadedArtifacts.push(downloadedPath)
+    evidence.checks.push(`${label}: upload bytes and completed download verified on disk`)
+
+    publicPage.on('dialog', () => {})
+    await call('click', { tabId: opened.tabId, target: '#modal' }, 'DIALOG_OPEN')
+    const dialog = await waitFor(() => call('control', { tabId: opened.tabId, action: 'dialog_inspect' }), value => value.dialogId, 'JS dialog missing')
+    await call('control', { tabId: opened.tabId, action: 'dialog_accept', dialogId: dialog.dialogId })
+    await publicPage.waitForFunction(() => globalThis.document.querySelector('#modal').dataset.answer === 'true')
+    evidence.checks.push(`${label}: JS dialog inspected and accepted by exact ID`)
+
+    await call('control', { tabId: opened.tabId, action: 'drag', target: '#drag-source', destination: '#drag-target' })
+    assert.equal(await publicPage.locator('#drag-target').getAttribute('data-dropped'), 'fixture')
+    evidence.checks.push(`${label}: HTML drag/drop reached the destination`)
+
+    await publicPage.locator('body').evaluate(body => { body.style.minHeight = '1800px' })
+    const full = await call('screenshot', { tabId: opened.tabId, fullPage: true, format: 'png' })
+    const fullBytes = Buffer.from(full.dataUrl.split(',')[1], 'base64')
+    assert.ok(fullBytes.readUInt32BE(20) > 760)
+    await writeFile(join(evidenceRoot, `profile-${contexts.length}-full.png`), fullBytes)
+    const elementImage = await call('screenshot', { tabId: opened.tabId, target: '#smoke-button', format: 'png' })
+    assert.ok(Buffer.from(elementImage.dataUrl.split(',')[1], 'base64').readUInt32BE(16) < 1000)
+    evidence.checks.push(`${label}: full-page and element screenshots verified as image bytes`)
+    await publicPage.evaluate(() => { const input = globalThis.document.createElement('input'); input.type = 'password'; input.id = 'focus-trap'; globalThis.document.body.append(input); input.focus() })
+    await call('key', { tabId: opened.tabId, frameId: crossFrameId, key: 'x' }, 'FRAME_NOT_FOCUSED')
+    await call('key', { tabId: opened.tabId, key: 'x' }, 'SENSITIVE_FIELD')
+    assert.equal(await publicPage.locator('#focus-trap').inputValue(), '')
+    await publicPage.evaluate(() => globalThis.document.querySelector('#focus-trap').remove())
+    evidence.checks.push(`${label}: nonfocused frame cannot redirect keys into a password field`)
     pages.push({ page: publicPage, tabId: opened.tabId, connectionId: identity.connectionId })
     evidence.version = context.browser()?.version()
   }
@@ -151,6 +281,15 @@ try {
     assert.ok(tabs.tabs.every(tab => !tab.url.includes('smoke-only')))
   }
   evidence.checks.push('selected tabs isolated; URL credentials redacted')
+  await popups[0].locator('#network-mode').selectOption('public')
+  await waitFor(() => call('tabs', { connectionId: pages[0].connectionId }),
+    value => value.tabs.every(tab => !tab.url.startsWith(fixtureOrigin)), 'public-only policy was not applied')
+  await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'TAB_NOT_CONTROLLABLE')
+  assert.ok(JSON.stringify(await call('query', { tabId: pages[1].tabId, selector: 'h1' })).includes('Bridge Test B'))
+  await popups[0].locator('#network-mode').selectOption('development')
+  await waitFor(() => call('tabs', { connectionId: pages[0].connectionId }),
+    value => value.tabs.some(tab => tab.url.startsWith(fixtureOrigin)), 'development policy was not restored')
+  evidence.checks.push('popup network policy applies live and independently per profile')
   await popups[0].getByRole('button', { name: 'Disconnect', exact: true }).click()
   await waitFor(() => call('status'), value => value.connectionCount === 1, 'disconnect not observed')
   await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'BRIDGE_DISCONNECTED')
@@ -161,7 +300,7 @@ try {
   assert.ok(reconnected.connections.some(item => item.connectionId === pages[0].connectionId))
   await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'STALE_TAB_ID')
   const fresh = await call('tabs', { connectionId: pages[0].connectionId })
-  const freshTabId = fresh.tabs.find(tab => tab.url.startsWith('https://example.com/')).tabId
+  const freshTabId = fresh.tabs.find(tab => tab.url.startsWith(fixtureOrigin)).tabId
   assert.ok(JSON.stringify(await call('query', { tabId: freshTabId, selector: 'h1' })).includes('Bridge Test A'))
   assert.ok(JSON.stringify(await call('query', { tabId: pages[1].tabId, selector: 'h1' })).includes('Bridge Test B'))
   evidence.checks.push('independent Disconnect/reconnect preserves identity, rejects stale tab IDs, leaves peer controllable')
@@ -173,6 +312,7 @@ try {
 } catch (error) {
   evidence.success = false
   evidence.error = String(error)
+  evidence.browserErrors = await Promise.all(contexts.map(context => context.serviceWorkers()[0]?.evaluate(() => globalThis.fixtureErrors).catch(() => [])))
   for (const [index, popup] of popups.entries()) {
     evidence[`popup${index}`] = await popup.locator('body').innerText().catch(() => 'unavailable')
   }
@@ -182,8 +322,11 @@ try {
     await popup.getByRole('button', { name: 'Disconnect', exact: true }).click({ timeout: 1000 }).catch(() => undefined)
   }
   await Promise.all(contexts.map(context => context.close()))
+  for (const path of downloadedArtifacts) { await rm(path, { force: true }) }
   await client.close().catch(() => undefined)
+  await new Promise(resolveClose => fixtureServer.close(resolveClose))
   await writeFile(join(evidenceRoot, 'result.json'), JSON.stringify(evidence, null, 2))
-  console.log(JSON.stringify({ ...evidence, evidenceRoot }, null, 2))
+  console.log(JSON.stringify({ success: evidence.success, error: evidence.error, checks: evidence.checks,
+    requests: evidence.metrics.length, evidenceRoot }, null, 2))
   if (!evidenceRoot.startsWith(root + '/')) { await rm(root, { force: true, recursive: true }) }
 }

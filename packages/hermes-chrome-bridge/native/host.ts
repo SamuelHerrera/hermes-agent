@@ -217,6 +217,8 @@ export class NativeMessagingHost {
         isObject(envelope.arguments)
       ) {
         this.writeBrowser(envelope)
+      } else if (envelope.type === 'cancel' && typeof envelope.id === 'string' && typeof envelope.controllerId === 'string') {
+        this.writeBrowser(envelope)
       } else if (envelope.type === 'error') {
         this.broker?.destroy()
       } else {

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { type BrokerConfig, ChromeBridgeBroker } from './broker.js'
+import { type BrokerConfig, ChromeBridgeBroker, connectBrokerClient } from './broker.js'
 
 const cleanups: Array<() => Promise<void>> = []
 
@@ -93,6 +93,124 @@ afterEach(async () => {
 })
 
 describe('authenticated local Chrome bridge broker', () => {
+  it('allows the advertised download deadline through both authenticated broker layers', async () => {
+    const { config } = await setupBroker({ clientTokens: { enrolled: 'c'.repeat(64) }, requestTimeoutMs: 20 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const client = await connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: 'c'.repeat(64), version: 1, requestTimeoutMs: 20 })
+
+    try {
+      const result = client.route({ method: 'control', arguments: { action: 'download', timeoutMs: 1000 } }).catch(error => ({ error: error.code }))
+      const request = await host.nextMessage()
+      await new Promise(resolve => setTimeout(resolve, 60))
+      host.send({ type: 'response', id: request.id, result: { complete: true } })
+      await expect(result).resolves.toMatchObject({ complete: true })
+    } finally { await client.close(); host.socket.destroy() }
+  })
+  it('attaches explicitly enrolled clients without replacing the host or leaking parallel responses', async () => {
+    const clientToken = 'c'.repeat(64)
+    const { broker, config } = await setupBroker({ clientTokens: { enrolled: clientToken } })
+    await expect(connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: config.token, version: 1 })).rejects.toMatchObject({ code: 'AUTH_REJECTED' })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const clients = await Promise.all([0, 1].map(() => connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: clientToken, version: 1 })))
+
+    try {
+      const pending = clients.map(client => client.route({ method: 'tabs', arguments: {} }))
+      const requests = [await host.nextMessage(), await host.nextMessage()]
+      expect(requests[0].id).not.toBe(requests[1].id)
+      host.send({ type: 'response', id: requests[1].id, result: 'second' })
+      host.send({ type: 'response', id: requests[0].id, result: 'first' })
+      await expect(Promise.all(pending)).resolves.toEqual(['first', 'second'])
+      expect(broker.status().connectionCount).toBe(1)
+    } finally { await Promise.all(clients.map(client => client.close())); host.socket.destroy() }
+  })
+
+  it('cancels only its own pending request and tolerates late native replies', async () => {
+    const { broker, config } = await setupBroker({ clientTokens: { enrolled: 'c'.repeat(64) }, maxPending: 1, requestTimeoutMs: 2_000 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const client = await connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: 'c'.repeat(64), version: 1 })
+
+    try {
+      const controller = new AbortController()
+      const result = client.route({ method: 'tabs', arguments: {} }, controller.signal)
+      const cancelled = await host.nextMessage()
+      const rejection = expect(result).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' })
+      controller.abort()
+      await rejection
+      expect(await host.nextMessage()).toMatchObject({ type: 'cancel', id: cancelled.id })
+      const next = client.route({ method: 'tabs', arguments: {} })
+      const request = await host.nextMessage()
+      host.send({ type: 'response', id: cancelled.id, result: 'late' })
+      host.send({ type: 'response', id: request.id, result: 'current' })
+      await expect(next).resolves.toBe('current')
+      expect(broker.status().connected).toBe(true)
+    } finally { await client.close(); host.socket.destroy() }
+  })
+
+  it('releases native pending slots on client disconnect and rejects on owner shutdown', async () => {
+    const { broker, config } = await setupBroker({ clientTokens: { enrolled: 'c'.repeat(64) }, maxPending: 1, requestTimeoutMs: 2_000 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const connect = async () => connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: 'c'.repeat(64), version: 1 })
+    const client = await connect()
+    const result = client.route({ method: 'tabs', arguments: {} })
+    await host.nextMessage()
+    const rejected = expect(result).rejects.toMatchObject({ code: 'BRIDGE_DISCONNECTED' })
+    await client.close()
+    await rejected
+    const other = await connect()
+    expect(await host.nextMessage()).toMatchObject({ type: 'cancel' })
+    const next = other.route({ method: 'tabs', arguments: {} })
+    await host.nextMessage()
+    const ownerRejected = expect(next).rejects.toMatchObject({ code: 'BRIDGE_DISCONNECTED' })
+    await broker.close()
+    await ownerRejected
+    await other.close()
+  })
+
+  it('assigns unspoofable controller identities and leases mutation tabs until release or disconnect', async () => {
+    const { config } = await setupBroker({ clientTokens: { enrolled: 'c'.repeat(64) } })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const connect = async () => connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: 'c'.repeat(64), version: 1 })
+    const first = await connect(), second = await connect()
+
+    try {
+      const listing = first.route({ method: 'tabs', arguments: {} })
+      const list = await host.nextMessage()
+      host.send({ type: 'response', id: list.id, result: { tabId: 7 } })
+      const { tabId } = await listing as { tabId: string }
+      const click = first.route({ method: 'click', arguments: { tabId }, controllerId: 'spoofed' } as Parameters<typeof first.route>[0])
+      const request = await host.nextMessage()
+      expect(request.controllerId).toEqual(expect.any(String))
+      expect(request.controllerId).not.toBe('spoofed')
+      expect(request.arguments).not.toHaveProperty('controllerId')
+      host.send({ type: 'response', id: request.id, result: true })
+      await click
+
+      for (const method of ['click', 'drag']) {
+        await expect(second.route({ method: method as Parameters<typeof second.route>[0]['method'], arguments: { tabId } })).rejects.toMatchObject({ code: 'TAB_BUSY' })
+      }
+
+      await first.releaseControl(tabId)
+      const next = second.route({ method: 'click', arguments: { tabId } })
+      const nextRequest = await host.nextMessage()
+      expect(nextRequest.controllerId).not.toBe(request.controllerId)
+      host.send({ type: 'response', id: nextRequest.id, result: true })
+      await next
+      await second.close()
+      // An acknowledged read after reconnect ensures the disconnect was processed.
+      const barrier = await connect()
+      await barrier.close()
+      const resumed = first.route({ method: 'click', arguments: { tabId } })
+      const resumedRequest = await host.nextMessage()
+      host.send({ type: 'response', id: resumedRequest.id, result: true })
+      await resumed
+    } finally { await first.close(); await second.close(); host.socket.destroy() }
+  })
+
   it('rejects invalid authentication, origin, and protocol version', async () => {
     for (const badHello of [
       { token: 'bad' },

@@ -14,6 +14,11 @@
       <label for="profile-label">Public profile label (no account details or secrets)</label>
       <input id="profile-label" maxlength="64" placeholder="Work, Personal…" autocomplete="off">
       <p id="connection-id"></p>
+      <label for="network-mode">Network access</label>
+      <select id="network-mode">
+        <option value="development">Development — public, localhost and LAN/VPN</option>
+        <option value="public">Public websites only</option>
+      </select>
       <div class="actions">
         <button id="connect" type="button">Connect</button>
         <button id="disconnect" class="secondary" type="button" hidden>Disconnect</button>

@@ -11,24 +11,30 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
 
-import { BridgeBrokerError, ChromeBridgeBroker } from './broker.js'
+import { BridgeBrokerError, ChromeBridgeBroker, connectBrokerClient } from './broker.js'
 import { parseTabId, validConnectionId } from './connection.js'
+import { INPUT_METHODS, INSPECTION_KEYS, validControlArguments, validInspectionOptions } from './control-options.js'
+import { prepareUploads } from './file-transfer.js'
 import {
+  readBrokerClientConfig,
   readRuntimeConfig,
   resolveHermesHome,
   runtimeDirectoryFor
 } from './runtime.js'
 import { CHROME_BRIDGE_TOOLS } from './schema.js'
+import { validTabListOptions } from './tab-list-options.js'
+import { toolOutput } from './tool-output.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
-  method: 'click' | 'close' | 'console' | 'eval' | 'focus' | 'hover' | 'key' | 'navigate' |
+  method: 'control' | 'click' | 'close' | 'console' | 'eval' | 'focus' | 'hover' | 'key' | 'navigate' |
     'open' | 'query' | 'screenshot' | 'scroll' | 'selectTab' | 'snapshot' | 'status' | 'tabs' |
     'type'
 }
 
 export interface ChromeBridgeRequestRouter {
-  route(request: ChromeBridgeRequest): Promise<unknown>
+  route(request: ChromeBridgeRequest, signal?: AbortSignal): Promise<unknown>
+  releaseControl?(tabId: string): Promise<void>
 }
 
 export interface ChromeBridgeServerOptions {
@@ -36,6 +42,7 @@ export interface ChromeBridgeServerOptions {
 }
 
 const TOOL_METHODS: Record<string, ChromeBridgeRequest['method']> = {
+  chrome_bridge_control: 'control',
   chrome_bridge_click: 'click',
   chrome_bridge_close: 'close',
   chrome_bridge_console: 'console',
@@ -59,17 +66,7 @@ function validPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && (value as number) > 0
 }
 
-function validTarget(value: unknown): boolean {
-  return typeof value === 'string' && value.length > 0 && value.length <= 2_048
-}
 
-function validModifiers(value: unknown): boolean {
-  if (!Array.isArray(value) || value.length > 4) { return false }
-  const allowed = new Set(['alt', 'ctrl', 'meta', 'shift'])
-
-  return value.every(modifier => typeof modifier === 'string' && allowed.has(modifier)) &&
-    new Set(value).size === value.length
-}
 
 function validConsoleLevels(value: unknown): boolean {
   if (!Array.isArray(value) || value.length > 5) { return false }
@@ -79,9 +76,6 @@ function validConsoleLevels(value: unknown): boolean {
     new Set(value).size === value.length
 }
 
-function validDistance(value: unknown): boolean {
-  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 100_000
-}
 
 function validToolArguments(method: ChromeBridgeRequest['method'], input: Record<string, unknown>): boolean {
   const arguments_ = { ...input }
@@ -100,6 +94,14 @@ function validToolArguments(method: ChromeBridgeRequest['method'], input: Record
 
   const keys = Object.keys(arguments_)
 
+  if (method === 'tabs') { return validTabListOptions(arguments_) }
+
+  if (method === 'control' && arguments_.action === 'release') {
+    return keys.length === 2 && validPositiveInteger(arguments_.tabId)
+  }
+
+  if (INPUT_METHODS.has(method)) { return validControlArguments(method, arguments_) }
+
   if (method === 'selectTab') {
     return keys.length === 1 && validPositiveInteger(arguments_.tabId)
   }
@@ -107,16 +109,16 @@ function validToolArguments(method: ChromeBridgeRequest['method'], input: Record
   if (method === 'snapshot') {
     const format = arguments_.format ?? 'both'
 
-    return keys.every(key => key === 'format' || key === 'tabId') &&
+    return keys.every(key => key === 'format' || key === 'tabId' || INSPECTION_KEYS.includes(key)) && validInspectionOptions(arguments_) &&
       (format === 'accessibility' || format === 'dom' || format === 'both') &&
       (arguments_.tabId === undefined || validPositiveInteger(arguments_.tabId))
   }
 
   if (method === 'query') {
     const validLimit = arguments_.limit === undefined ||
-      (Number.isInteger(arguments_.limit) && (arguments_.limit as number) > 0 && (arguments_.limit as number) <= 100)
+      (Number.isInteger(arguments_.limit) && (arguments_.limit as number) > 0 && (arguments_.limit as number) <= 500)
 
-    return keys.every(key => key === 'limit' || key === 'selector' || key === 'tabId') &&
+    return keys.every(key => key === 'tabId' || INSPECTION_KEYS.includes(key)) && validInspectionOptions(arguments_) &&
       validPositiveInteger(arguments_.tabId) &&
       typeof arguments_.selector === 'string' && arguments_.selector.length > 0 &&
       arguments_.selector.length <= 2_048 && validLimit
@@ -139,43 +141,6 @@ function validToolArguments(method: ChromeBridgeRequest['method'], input: Record
     return keys.length === 1 && validPositiveInteger(arguments_.tabId)
   }
 
-  if (method === 'click') {
-    const button = arguments_.button ?? 'left'
-
-    return keys.every(key => key === 'button' || key === 'tabId' || key === 'target') &&
-      validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target) &&
-      (button === 'left' || button === 'middle' || button === 'right')
-  }
-
-  if (method === 'type') {
-    const submit = arguments_.submit ?? false
-
-    return keys.every(key => key === 'submit' || key === 'tabId' || key === 'target' || key === 'text') &&
-      validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target) &&
-      typeof arguments_.text === 'string' && arguments_.text.length <= 100_000 && typeof submit === 'boolean'
-  }
-
-  if (method === 'key') {
-    const modifiers = arguments_.modifiers ?? []
-
-    return keys.every(key => key === 'key' || key === 'modifiers' || key === 'tabId') &&
-      validPositiveInteger(arguments_.tabId) && typeof arguments_.key === 'string' &&
-      arguments_.key.length > 0 && arguments_.key.length <= 64 && validModifiers(modifiers)
-  }
-
-  if (method === 'scroll') {
-    const deltaX = arguments_.deltaX ?? 0
-    const deltaY = arguments_.deltaY ?? 0
-
-    return keys.every(key => key === 'deltaX' || key === 'deltaY' || key === 'tabId' || key === 'target') &&
-      validPositiveInteger(arguments_.tabId) && validDistance(deltaX) && validDistance(deltaY) &&
-      (deltaX !== 0 || deltaY !== 0) && (arguments_.target === undefined || validTarget(arguments_.target))
-  }
-
-  if (method === 'hover') {
-    return keys.length === 2 && validPositiveInteger(arguments_.tabId) && validTarget(arguments_.target)
-  }
-
   if (method === 'eval') {
     const timeoutMs = arguments_.timeoutMs ?? 2_000
 
@@ -193,16 +158,6 @@ function validToolArguments(method: ChromeBridgeRequest['method'], input: Record
     return keys.every(key => key === 'levels' || key === 'limit' || key === 'tabId') &&
       validPositiveInteger(arguments_.tabId) && validConsoleLevels(levels) && Number.isInteger(limit) &&
       (limit as number) >= 1 && (limit as number) <= 200
-  }
-
-  if (method === 'screenshot') {
-    const format = arguments_.format ?? 'png'
-
-    return keys.every(key => key === 'format' || key === 'quality' || key === 'tabId') &&
-      validPositiveInteger(arguments_.tabId) && (format === 'jpeg' || format === 'png') &&
-      (arguments_.quality === undefined ||
-        (format === 'jpeg' && Number.isInteger(arguments_.quality) &&
-          (arguments_.quality as number) >= 1 && (arguments_.quality as number) <= 100))
   }
 
   return keys.length === 0
@@ -258,6 +213,21 @@ export async function createDefaultRouter(options: {
   hermesHome?: string
 } = {}): Promise<DefaultRouterHandle> {
   const hermesHome = resolveHermesHome(options.hermesHome)
+  let clientConfig
+
+  try {
+    clientConfig = await readBrokerClientConfig(join(runtimeDirectoryFor(hermesHome), 'broker-client.json'))
+  } catch (error) {
+    // Invalid enrollment or an unavailable owner must never silently start a different owner.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error }
+  }
+
+  if (clientConfig !== undefined) {
+    const client = await connectBrokerClient(clientConfig)
+
+    return { close: () => client.close(), router: client }
+  }
+
   const configPath = join(runtimeDirectoryFor(hermesHome), 'config.json')
   let config
 
@@ -290,7 +260,7 @@ export function createChromeBridgeServer(
     tools: [...CHROME_BRIDGE_TOOLS]
   }))
 
-  server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const method = TOOL_METHODS[request.params.name]
 
     if (method === undefined) {
@@ -300,8 +270,8 @@ export function createChromeBridgeServer(
       }
     }
 
-    const toolArguments = request.params.arguments ?? {}
-    const validArguments = validToolArguments(method, toolArguments)
+    const { detail = 'compact', ...toolArguments } = request.params.arguments ?? {}
+    const validArguments = (detail === 'compact' || detail === 'full') && validToolArguments(method, toolArguments)
 
     if (!validArguments) {
       return {
@@ -324,13 +294,32 @@ export function createChromeBridgeServer(
     }
 
     try {
+      if (extra.signal.aborted) { throw new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled') }
+
+      if (method === 'control' && toolArguments.action === 'release') {
+        if (!router.releaseControl || typeof toolArguments.tabId !== 'string') {
+          throw new BridgeBrokerError('INVALID_ARGUMENTS', 'Release requires a current namespaced tab ID.')
+        }
+
+        await router.releaseControl(toolArguments.tabId)
+
+        return { content: toolOutput(method, { released: true }) }
+      }
+
+      let wireArguments = toolArguments
+
+      if (method === 'control' && toolArguments.action === 'upload') {
+        const { files, ...rest } = toolArguments
+        wireArguments = { ...rest, filePayloads: await prepareUploads(files as string[]) }
+      }
+
       const result = await router.route({
-        arguments: toolArguments,
+        arguments: wireArguments,
         method
-      })
+      }, extra.signal)
 
       return {
-        content: [{ text: JSON.stringify(result), type: 'text' }]
+        content: toolOutput(method, result, detail as 'compact' | 'full')
       }
     } catch (error) {
       const code = error instanceof BridgeBrokerError ? error.code : 'BRIDGE_ERROR'

@@ -33,6 +33,16 @@ class FakeDocument {
 }
 
 describe('visible Hermes control indicator', () => {
+  it('tracks browser-input coordinates without requiring a DOM action target', () => {
+    const document = new FakeDocument()
+    const indicator = createControlIndicator(document as unknown as Document)
+    indicator.activity({ x: 123, y: 234 })
+    const cursor = document.documentElement.children[0]?.shadow?.children[1]?.children[1]
+    expect(cursor?.style.transform).toBe('translate(123px, 234px)')
+    indicator.activity({ x: 222, y: 333 })
+    expect(cursor?.style.transform).toBe('translate(222px, 333px)')
+    indicator.destroy()
+  })
   it('shows at an action target, dims after inactivity, and hides explicitly', () => {
     const document = new FakeDocument()
     let idle: (() => void) | undefined

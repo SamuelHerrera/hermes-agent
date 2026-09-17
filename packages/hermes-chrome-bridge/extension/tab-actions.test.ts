@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createTabActions, TabActionError } from './tab-actions.js'
+import { setNetworkMode } from './url-policy.js'
+
+afterEach(() => setNetworkMode(undefined))
 
 function setup() {
   const assertControllable = vi.fn(async () => undefined)
@@ -20,6 +23,15 @@ function setup() {
 }
 
 describe('safe tab navigation actions', () => {
+  it('opens development hosts and applies policy changes to subsequent navigation', async () => {
+    const { actions, tabs } = setup()
+    await actions.open({ active: false, url: 'http://localhost:5173/' })
+    await actions.navigate({ tabId: 21, url: 'http://192.168.68.64:9119/' })
+    expect(tabs.update).toHaveBeenCalledWith(21, { url: 'http://192.168.68.64:9119/' })
+    setNetworkMode('public')
+    await expect(actions.navigate({ tabId: 21, url: 'http://localhost:5173/' }))
+      .rejects.toMatchObject({ code: 'URL_BLOCKED' })
+  })
   it('opens and navigates only public HTTP(S) URLs without returning URL data', async () => {
     const { actions, assertControllable, tabs } = setup()
 
@@ -50,6 +62,7 @@ describe('safe tab navigation actions', () => {
     'https://chromewebstore.google.com/detail/example',
     'https://user:password@example.test/'
   ])('blocks unsafe navigation target %s without echoing it', async url => {
+    setNetworkMode('public')
     const { actions, tabs } = setup()
 
     try {

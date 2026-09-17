@@ -19,7 +19,7 @@ describe('built MV3 extension artifacts', () => {
       background: { service_worker: 'background.js', type: 'module' },
       host_permissions: ['<all_urls>'],
       manifest_version: 3,
-      permissions: ['nativeMessaging', 'scripting', 'storage']
+      permissions: expect.arrayContaining(['nativeMessaging', 'debugger', 'downloads', 'webNavigation', 'scripting', 'storage'])
     })
     expect(manifest.permissions).not.toEqual(expect.arrayContaining(['activeTab', 'tabs']))
     expect(manifest.content_scripts).toEqual(expect.arrayContaining([
