@@ -1,4 +1,4 @@
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 
 export const HOST_NAME = 'com.nous.hermes_chrome_bridge'
 export const PROTOCOL_VERSION = 1
@@ -71,5 +71,9 @@ export function nativeManifestPath(
     )
   }
 
-  throw new Error('Windows native host installation requires a signed executable launcher')
+  if (platform === 'win32') {
+    return win32.join(userHome, 'AppData', 'Local', 'Hermes', 'NativeMessagingHosts', `${HOST_NAME}.json`)
+  }
+
+  throw new Error('unsupported native host platform')
 }
