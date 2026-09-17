@@ -892,7 +892,11 @@ export function closeAllTreeTabs(paneId: string): void {
 export function treePanesWithPrefix(prefix: string): string[] {
   const tree = $layoutTree.get()
 
-  return tree ? allPaneIds(tree).filter(id => id.startsWith(prefix)) : []
+  const trees = !isSecondaryWindow()
+    ? Object.values($tabbedScreenTrees.get())
+    : []
+
+  return [...new Set([...trees, ...(tree ? [tree] : [])].flatMap(allPaneIds))].filter(id => id.startsWith(prefix))
 }
 
 /**
@@ -996,7 +1000,28 @@ export function removeTreePane(paneId: string) {
 
   logUatEvent('tabs', 'pane.remove.requested', { paneId, present: Boolean(tree && allPaneIds(tree).includes(paneId)) })
 
-  if (tree) {
+  if (!isSecondaryWindow()) {
+    const trees = $tabbedScreenTrees.get()
+    let next = trees
+
+    for (const [id, saved] of Object.entries(trees)) {
+      if (
+        ($layoutSurfaceMode.get() !== 'tabbed' || id !== $activeTabbedScreen.get()) &&
+        allPaneIds(saved).includes(paneId)
+      ) {
+        next = {
+          ...next,
+          [id]: ensureTabbedScreenContent(removePane(saved, paneId) ?? emptyTabbedScreen(defaultTree ?? saved, id))
+        }
+      }
+    }
+
+    if (next !== trees) {
+      $tabbedScreenTrees.set(next)
+    }
+  }
+
+  if (tree && allPaneIds(tree).includes(paneId)) {
     rememberPaneShare(tree, paneId)
     commit(removePane(tree, paneId), 'pane.remove')
   }

@@ -74,6 +74,21 @@ function cloneNavigation(tree: LayoutNode, screenId?: string): LayoutNode {
  * Normal structural operations still prune empty splits; only an entirely
  * empty desktop gets this one placeholder back. */
 export function ensureTabbedScreenContent(tree: LayoutNode): LayoutNode {
+  // Older/default screens can retain Files in the Sessions group after their
+  // last content pane is closed. There need not be a primary workspace on this
+  // desktop, so repair the rail independently of that permanent chat host.
+  const sessions = findGroupOfPane(tree, 'sessions')
+
+  if (sessions?.panes.includes('files')) {
+    const withoutFiles = replaceNode(tree, sessions.id, () => ({
+      ...sessions,
+      panes: sessions.panes.filter(id => id !== 'files'),
+      active: sessions.active === 'files' ? 'sessions' : sessions.active
+    }))
+
+    return ensureTabbedScreenContent(normalize(split('row', [withoutFiles, group(['files'])], [4.4, 1]))!)
+  }
+
   if (allPaneIds(tree).some(id => id !== 'sessions' && id !== 'files')) {
     return tree
   }

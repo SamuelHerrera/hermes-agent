@@ -134,7 +134,11 @@ export function ScrollWindowsMinimap() {
   )
 }
 
-export function tabbedScreenPaneCount(tree: LayoutNode, workspaceEmptyPlaceholder: boolean): number {
+export function tabbedScreenPaneCount(
+  tree: LayoutNode,
+  workspaceEmptyPlaceholder: boolean,
+  shownPaneIds: ReadonlySet<string>
+): number {
   return allPaneIds(tree).filter(pane => {
     if (pane === 'sessions' || pane === 'files') {
       return false
@@ -147,11 +151,13 @@ export function tabbedScreenPaneCount(tree: LayoutNode, workspaceEmptyPlaceholde
       return false
     }
 
-    return true
+    return shownPaneIds.has(pane)
   }).length
 }
 
 export function ScrollWindowsWorkspaceChips() {
+  const panes = useContributions('panes')
+  const hidden = useStore($hiddenTreePanes)
   const mode = useStore($layoutSurfaceMode)
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const filesVisible = useStore($paneVisible('files'))
@@ -163,10 +169,11 @@ export function ScrollWindowsWorkspaceChips() {
   const workspaces = useStore($scrollWindowWorkspaces)
   const activeWorkspaceId = mode === 'tabbed' ? tabbedScreenId : scrollWorkspaceId
   const fileToggleActive = mode === 'scroll-windows' ? fileBrowserOpen : filesVisible
+  const shownPaneIds = new Set(panes.filter(pane => !hidden.has(pane.id)).map(pane => pane.id))
 
   const counts = new Map(
     mode === 'tabbed'
-      ? Object.entries(tabbedTrees).map(([id, tree]) => [id, tabbedScreenPaneCount(tree, workspaceEmptyPlaceholder)] as const)
+      ? Object.entries(tabbedTrees).map(([id, tree]) => [id, tabbedScreenPaneCount(tree, workspaceEmptyPlaceholder, shownPaneIds)] as const)
       : workspaces.map(workspace => [workspace.id, workspace.windowIds.length] as const)
   )
 

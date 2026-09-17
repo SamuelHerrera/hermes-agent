@@ -26,24 +26,80 @@ async function setup() {
   return { store, screens, model, registry, initial }
 }
 
+it('repairs Files beside an empty center when a saved desktop stacked it with Sessions', async () => {
+  const { store, screens, model } = await setup()
+  screens.$tabbedScreenTrees.set({ ...screens.$tabbedScreenTrees.get(), '5': model.group(['sessions', 'files']) })
+  store.setActiveTabbedScreen('5')
+  const tree = store.$layoutTree.get()!
+  expect(model.findGroupOfPane(tree, 'sessions')!.panes).toEqual(['sessions'])
+  expect(model.findGroupOfPane(tree, 'files')!.panes).toEqual(['files'])
+  const groups = model.groupLeafIds(tree).map(id => model.findGroup(tree, id)!)
+  expect(groups.map(g => g.panes)).toEqual([['sessions'], [], ['files']])
+  expect(groups[1].emptyWorkspace).toBe(true)
+  expect(screens.ensureTabbedScreenContent(tree)).toBe(tree)
+})
+
+it('removes a disposed pane from its inactive desktop without switching focus', async () => {
+  const { store, screens, model, registry } = await setup()
+  registry.register({ id: 'terminal-instance:gone', area: 'panes', data: { placement: 'main' }, render: () => null })
+  store.moveTreePanesToTabbedScreen(['terminal-instance:gone'], '5')
+  store.setActiveTabbedScreen('1')
+  const active = store.$layoutTree.get()
+  store.removeTreePane('terminal-instance:gone')
+  expect(screens.$activeTabbedScreen.get()).toBe('1')
+  expect(store.$layoutTree.get()).toBe(active)
+  expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['5'])).not.toContain('terminal-instance:gone')
+  expect(screens.tabbedScreenOwner('terminal-instance:gone')).toBeUndefined()
+})
+
+it.each(['tabbed', 'scroll-windows'] as const)(
+  'prunes stale mirrored terminals on inactive desktops in %s mode',
+  async mode => {
+    const { store, screens, model } = await setup()
+    const { setLayoutSurfaceMode } = await import('./scroll-windows/store')
+    setLayoutSurfaceMode(mode)
+    const { atom } = await import('nanostores')
+    const { paneMirror } = await import('@/app/chat/pane-mirror')
+    screens.$tabbedScreenTrees.set({
+      ...screens.$tabbedScreenTrees.get(),
+      '5': model.split('row', [model.group(['sessions', 'files']), model.group(['terminal-instance:deleted'])])
+    })
+    paneMirror<{ id: string }>({
+      source: atom([]),
+      prefix: 'terminal-instance',
+      key: t => t.id,
+      minWidth: '1rem',
+      title: () => 'Terminal',
+      render: () => null,
+      close: () => undefined
+    })()
+    expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['5'])).toEqual(['sessions', 'files'])
+    expect(store.treePanesWithPrefix('terminal-instance:')).toEqual([])
+  }
+)
+
 it('retains an empty center after closing the last secondary-screen tab', async () => {
   const { store, model, registry } = await setup()
   store.setActiveTabbedScreen('2')
+
   const dispose = registry.register({
     id: 'session-tile:last',
     area: 'panes',
     data: { placement: 'main' },
     render: () => null
   })
+
   store.revealTreePane('session-tile:last')
   store.removeTreePane('session-tile:last')
   dispose()
 
   const tree = store.$layoutTree.get()!
+
   const emptyGroups = model
     .groupLeafIds(tree)
     .map(id => model.findGroup(tree, id)!)
     .filter(g => g.panes.length === 0)
+
   expect(emptyGroups).toHaveLength(1)
   expect(model.allPaneIds(tree)).toEqual(['sessions', 'files'])
 })
@@ -136,8 +192,16 @@ it('does not count the empty workspace placeholder as a tabbed-screen tab', asyn
   const { initial } = await setup()
   const { tabbedScreenPaneCount } = await import('./scroll-windows/titlebar')
 
-  expect(tabbedScreenPaneCount(initial, true)).toBe(0)
-  expect(tabbedScreenPaneCount(initial, false)).toBe(1)
+  expect(tabbedScreenPaneCount(initial, true, new Set(['workspace']))).toBe(0)
+  expect(tabbedScreenPaneCount(initial, false, new Set(['workspace']))).toBe(1)
+})
+
+it('does not count hidden terminal tabs or stale unregistered pane ids', async () => {
+  const { model } = await setup()
+  const { tabbedScreenPaneCount } = await import('./scroll-windows/titlebar')
+  const tree = model.group(['sessions', 'files', 'terminal-instance:hidden', 'terminal-instance:deleted'])
+  expect(tabbedScreenPaneCount(tree, false, new Set())).toBe(0)
+  expect(tabbedScreenPaneCount(tree, false, new Set(['terminal-instance:hidden']))).toBe(1)
 })
 
 it('moves a tab to another numbered screen', async () => {
