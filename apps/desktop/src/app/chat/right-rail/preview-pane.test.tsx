@@ -1,8 +1,7 @@
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { registry } from '@/contrib/registry'
-import { $rightRailActiveTabId } from '@/store/layout'
 import { $connection } from '@/store/session'
 
 import { PREVIEW_RENDERERS_AREA } from './preview-contrib'
@@ -37,7 +36,6 @@ describe('PreviewPane console state', () => {
   afterEach(() => {
     cleanup()
     $connection.set(null)
-    $rightRailActiveTabId.set(null)
     vi.unstubAllGlobals()
   })
 
@@ -114,10 +112,9 @@ describe('PreviewPane console state', () => {
     forgetPreviewStripTools(tabId)
   })
 
-  it('contributes preview console and DevTools as one active browser toolbar submenu', async () => {
+  it('keeps preview console and DevTools in the browser toolbar submenu', async () => {
     const tabId = 'url:http://localhost:5174'
     forgetPreviewStripTools(tabId)
-    $rightRailActiveTabId.set(tabId)
 
     await act(async () => {
       render(
@@ -133,22 +130,14 @@ describe('PreviewPane console state', () => {
       )
     })
 
-    const tools = registry.getArea('titleBar.tools.right')
-    const contribution = tools.find(item => item.id === `preview-browser-tools:${tabId}-0`)
+    const browserTools = screen.getByRole('button', { name: 'Browser tools' })
 
-    const tool = contribution?.data as {
-      icon: { props?: { name?: string } }
-      id: string
-      menuItems: { icon: { props?: { name?: string } }; id: string; onSelect?: () => void }[]
-    }
+    expect(browserTools.closest('form')).toBeTruthy()
+    fireEvent.pointerDown(browserTools)
+    expect(await screen.findByRole('menuitem', { name: /show preview console/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /open preview devtools/i }).getAttribute('data-disabled')).toBe('')
 
-    expect(tool.id).toBe('preview-browser-tools')
-    expect(tool.icon.props?.name).toBe('tools')
-    expect(tool.menuItems.map(item => item.id)).toEqual(['preview-console', 'preview-devtools'])
-    expect(tool.menuItems[0].icon.props?.name).toBe('output')
-    expect(tool.menuItems[1].icon.props?.name).toBe('debug-alt')
-
-    act(() => tool.menuItems[0].onSelect?.())
+    fireEvent.click(screen.getByRole('menuitem', { name: /show preview console/i }))
     expect(previewConsoleState(tabId).$open.get()).toBe(true)
 
     forgetPreviewStripTools(tabId)

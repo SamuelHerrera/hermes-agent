@@ -2,8 +2,8 @@ import { useStore } from '@nanostores/react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { setTitlebarToolGroup } from '@/app/contrib/panes'
 import { Codicon } from '@/components/ui/codicon'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip } from '@/components/ui/tooltip'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -13,7 +13,6 @@ import { guardGuestPointers } from '@/lib/guest-pointer-guard'
 import { openPreviewTargetInBrowser, remoteHtmlPreviewDocument } from '@/lib/local-preview'
 import { rafCoalesce } from '@/lib/raf-coalesce'
 import { cn } from '@/lib/utils'
-import { $rightRailActiveTabId } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $previewServerRestart,
@@ -180,7 +179,6 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const previewContentRef = useRef<HTMLDivElement | null>(null)
   const webviewRef = useRef<PreviewWebview | null>(null)
   const previewServerRestart = useStore($previewServerRestart)
-  const activePreviewTabId = useStore($rightRailActiveTabId)
   const consoleHeight = useStore(consoleState.$height)
   const consoleOpen = useStore(consoleState.$open)
   const [currentUrl, setCurrentUrl] = useState(target.url)
@@ -413,75 +411,6 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     webview.openDevTools()
   }, [])
-
-  // Publish the active browser tab's tooling to the app toolbar as one submenu.
-  // The native tab strip stays reserved for tabs/drag/reorder/close; console and
-  // DevTools are browser-toolbar actions for the selected preview tab.
-  useEffect(() => {
-    const groupId = tabId ? `preview-browser-tools:${tabId}` : 'preview-browser-tools:unknown'
-
-    if (!isWebPreview || !tabId || target.kind !== 'url' || activePreviewTabId !== tabId) {
-      setTitlebarToolGroup(groupId, [], 'right')
-
-      return () => setTitlebarToolGroup(groupId, [], 'right')
-    }
-
-    // Remote HTML renders in a sandboxed iframe, not a webview — there is no
-    // console and no DevTools to offer.
-    if (isRemoteHtml) {
-      setTitlebarToolGroup(groupId, [], 'right')
-
-      return () => setTitlebarToolGroup(groupId, [], 'right')
-    }
-
-    setTitlebarToolGroup(
-      groupId,
-      [
-        {
-          icon: <Codicon name="tools" size="0.875rem" />,
-          id: 'preview-browser-tools',
-          label: copy.browserTools,
-          menuItems: [
-            {
-              active: consoleOpen,
-              icon: <Codicon name="output" size="0.8125rem" />,
-              id: 'preview-console',
-              label: consoleOpen ? copy.hideConsole : copy.showConsole,
-              onSelect: () => consoleState.setOpen(open => !open)
-            },
-            {
-              active: devtoolsOpen,
-              disabled: !devtoolsAvailable,
-              icon: <Codicon name="debug-alt" size="0.8125rem" />,
-              id: 'preview-devtools',
-              label: devtoolsOpen ? copy.hideDevTools : copy.openDevTools,
-              onSelect: toggleDevTools
-            }
-          ],
-          title: copy.browserTools
-        }
-      ],
-      'right'
-    )
-
-    return () => setTitlebarToolGroup(groupId, [], 'right')
-  }, [
-    activePreviewTabId,
-    consoleOpen,
-    consoleState,
-    copy.browserTools,
-    copy.hideConsole,
-    copy.hideDevTools,
-    copy.openDevTools,
-    copy.showConsole,
-    devtoolsAvailable,
-    devtoolsOpen,
-    isRemoteHtml,
-    isWebPreview,
-    tabId,
-    target.kind,
-    toggleDevTools
-  ])
 
   // Publish the PAGE reader for this tab (the read_preview tool): extract the
   // rendered page's title + visible text from the webview. innerText (not
@@ -883,6 +812,30 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
                 >
                   Go
                 </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label={copy.browserTools}
+                      className="grid size-6 shrink-0 place-items-center rounded-md border border-border/70 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title={copy.browserTools}
+                      type="button"
+                    >
+                      <Codicon name="tools" size="0.875rem" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-48" sideOffset={6}>
+                    <DropdownMenuItem onSelect={() => consoleState.setOpen(open => !open)}>
+                      <Codicon name="output" size="0.8125rem" />
+                      <span className="flex-1">{consoleOpen ? copy.hideConsole : copy.showConsole}</span>
+                      {consoleOpen && <Codicon name="check" size="0.75rem" />}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={!devtoolsAvailable} onSelect={toggleDevTools}>
+                      <Codicon name="debug-alt" size="0.8125rem" />
+                      <span className="flex-1">{devtoolsOpen ? copy.hideDevTools : copy.openDevTools}</span>
+                      {devtoolsOpen && <Codicon name="check" size="0.75rem" />}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </form>
             ) : (
               <div className="min-w-0 flex-1">
