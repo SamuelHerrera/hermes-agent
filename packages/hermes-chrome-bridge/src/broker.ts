@@ -3,7 +3,7 @@ import { chmod, lstat, unlink } from 'node:fs/promises'
 import { createConnection, createServer, type Server, type Socket } from 'node:net'
 
 import { parseTabId, safeConnectionLabel, validConnectionId } from './connection.js'
-import { writeRuntimeStatus } from './runtime.js'
+import { isLocalBrokerSocketPath, writeRuntimeStatus } from './runtime.js'
 import type { ChromeBridgeRequest, ChromeBridgeRequestRouter } from './server.js'
 
 const IPC_REQUEST_MAX_BYTES = 1024 * 1024
@@ -12,6 +12,8 @@ const DEFAULT_MAX_PENDING = 32
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 2_000
 
 export interface BrokerConfig {
+  /** Explicit client enrollment; never reuse the native-host token. */
+  clientTokens?: Record<string, string>
   handshakeTimeoutMs?: number
   maxPending?: number
   origin: string
@@ -44,6 +46,8 @@ interface ConnectionStatus {
 interface HostConnection extends ConnectionStatus {
   socket: Socket
   pending: Map<string, PendingRequest>
+  retired: Set<string>
+  leases: Map<number, string>
 }
 
 interface PendingRequest {
@@ -132,7 +136,137 @@ async function removeStaleSocket(socketPath: string): Promise<void> {
   })
 }
 
+export interface BrokerClientConfig {
+  socketPath: string
+  clientId: string
+  token: string
+  version: 1
+  requestTimeoutMs?: number
+}
+
+export interface BrokerClient extends ChromeBridgeRequestRouter {
+  releaseControl(tabId: string): Promise<void>
+  route(request: ChromeBridgeRequest, signal?: AbortSignal): Promise<unknown>
+  close(): Promise<void>
+}
+
+/** Attach only using an explicitly issued client credential, never a host config. */
+export async function connectBrokerClient(config: BrokerClientConfig): Promise<BrokerClient> {
+  if (!isLocalBrokerSocketPath(config.socketPath)) { throw new BridgeBrokerError('INVALID_ARGUMENTS', 'shared broker endpoint must be local') }
+  const socket = createConnection(config.socketPath)
+  const pending = new Map<string, PendingRequest>()
+  let buffer: Buffer = Buffer.alloc(0)
+  let ready = false
+  let accept!: () => void
+  let reject!: (error: Error) => void
+  const handshake = new Promise<void>((resolve, fail) => { accept = resolve; reject = fail })
+
+  const fail = (error: BridgeBrokerError): void => {
+    reject(error)
+
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error) }
+    pending.clear()
+    socket.destroy()
+  }
+
+  const timer = setTimeout(() => fail(new BridgeBrokerError('AUTH_REJECTED', 'client handshake timed out')), DEFAULT_HANDSHAKE_TIMEOUT_MS)
+  socket.once('connect', () => socket.write(`${JSON.stringify({ type: 'client.hello', clientId: config.clientId, token: config.token, version: config.version })}\n`))
+  socket.on('error', () => fail(new BridgeBrokerError('BRIDGE_DISCONNECTED', 'shared broker unavailable')))
+  socket.on('close', () => fail(new BridgeBrokerError('BRIDGE_DISCONNECTED', 'shared broker disconnected')))
+  socket.on('data', chunk => {
+    try {
+      buffer = Buffer.concat([buffer, chunk])
+
+      for (;;) {
+        const newline = buffer.indexOf(0x0a)
+
+        if (newline < 0) {
+          if (buffer.length > IPC_RESPONSE_MAX_BYTES) { throw new Error('oversize') }
+
+          break
+        }
+
+        if (newline > IPC_RESPONSE_MAX_BYTES) { throw new Error('oversize') }
+        const envelope = parseEnvelope(buffer.subarray(0, newline))
+        buffer = buffer.subarray(newline + 1)
+
+        if (envelope.type === 'error') {
+          fail(new BridgeBrokerError(typeof envelope.code === 'string' ? envelope.code : 'AUTH_REJECTED', 'shared broker rejected client'))
+
+          return
+        }
+
+        if (!ready) {
+          if (envelope.type !== 'hello.ok' || envelope.version !== 1) { throw new Error('handshake') }
+          ready = true
+          accept()
+
+          continue
+        }
+
+        if (envelope.type !== 'response' || typeof envelope.id !== 'string') { throw new Error('response') }
+        const item = pending.get(envelope.id)
+
+        if (item === undefined) { continue }
+        pending.delete(envelope.id)
+        clearTimeout(item.timer)
+
+        if (isObject(envelope.error)) {
+          item.reject(new BridgeBrokerError(typeof envelope.error.code === 'string' ? envelope.error.code : 'BRIDGE_ERROR', 'shared broker request failed'))
+        } else if ('result' in envelope) { item.resolve(envelope.result) }
+        else { item.reject(new BridgeBrokerError('INVALID_ENVELOPE', 'invalid broker response')) }
+      }
+    } catch { fail(new BridgeBrokerError('INVALID_ENVELOPE', 'invalid broker response')) }
+  })
+
+  try { await handshake } finally { clearTimeout(timer) }
+
+  return {
+    async releaseControl(this: BrokerClient, tabId) {
+      await this.route({ method: 'control.release' as ChromeBridgeRequest['method'], arguments: { tabId } })
+    },
+    async close() { fail(new BridgeBrokerError('BRIDGE_DISCONNECTED', 'client closed')) },
+    async route(request, signal) {
+      if (signal?.aborted) { throw new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled') }
+
+      if (socket.destroyed) { throw new BridgeBrokerError('BRIDGE_DISCONNECTED', 'shared broker disconnected') }
+
+      if (pending.size >= DEFAULT_MAX_PENDING) { throw new BridgeBrokerError('BRIDGE_BUSY', 'too many pending client requests') }
+      const id = randomUUID()
+      const encoded = `${JSON.stringify({ ...request, id, type: 'request' })}\n`
+
+      if (Buffer.byteLength(encoded) > IPC_REQUEST_MAX_BYTES) { throw new BridgeBrokerError('INVALID_ENVELOPE', 'client request too large') }
+
+      return new Promise((resolve, rejectRequest) => {
+        const requestTimer = setTimeout(() => {
+          const item = pending.get(id)
+          pending.delete(id)
+          socket.write(`${JSON.stringify({ type: 'cancel', id })}\n`)
+          item?.reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'shared broker request timed out'))
+        }, config.requestTimeoutMs ?? 10_000)
+
+        const abort = (): void => {
+          if (!pending.has(id)) { return }
+          pending.delete(id)
+          clearTimeout(requestTimer)
+          socket.write(`${JSON.stringify({ type: 'cancel', id })}\n`)
+          rejectRequest(new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled'))
+        }
+
+        const cleanup = (): void => signal?.removeEventListener('abort', abort)
+        pending.set(id, {
+          resolve: value => { cleanup(); resolve(value) },
+          reject: error => { cleanup(); rejectRequest(error) }, timer: requestTimer
+        })
+        signal?.addEventListener('abort', abort, { once: true })
+        socket.write(encoded)
+      })
+    }
+  }
+}
+
 export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
+  private readonly localControllerId = randomUUID()
   private hosts = new Map<string, HostConnection>()
   private sockets = new Set<Socket>()
   private implicitSession?: string
@@ -149,16 +283,16 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
 
   public async start(): Promise<void> {
     if (process.platform === 'win32') {
-      throw new Error('Windows broker requires a supported signed native launcher')
-    }
+      if (!this.config.socketPath.startsWith('\\\\.\\pipe\\hermes-chrome-bridge-')) { throw new Error('Windows broker requires a local Hermes named pipe') }
+    } else { await removeStaleSocket(this.config.socketPath) }
 
-    await removeStaleSocket(this.config.socketPath)
     this.server = createServer(socket => this.accept(socket))
     await new Promise<void>((resolve, reject) => {
       this.server?.once('error', reject)
       this.server?.listen(this.config.socketPath, resolve)
     })
-    await chmod(this.config.socketPath, 0o600)
+
+    if (process.platform !== 'win32') { await chmod(this.config.socketPath, 0o600) }
     this.persistStatus()
   }
 
@@ -180,7 +314,28 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
     }
   }
 
-  public async route(request: ChromeBridgeRequest): Promise<unknown> {
+  public async releaseControl(tabId: string): Promise<void> {
+    this.releaseClientControl(tabId, this.localControllerId)
+  }
+
+  private releaseClientControl(tabId: string, controllerId: string): void {
+    const tab = parseTabId(tabId)
+    const host = tab === undefined ? undefined : this.hosts.get(tab.connectionId)
+
+    if (tab === undefined || host?.sessionId !== tab.sessionId) { throw new BridgeBrokerError('STALE_TAB_ID', 'rediscover tabs before releasing control') }
+    const owner = host.leases.get(tab.tabId)
+
+    if (owner !== undefined && owner !== controllerId) { throw new BridgeBrokerError('TAB_BUSY', 'tab is controlled by another client') }
+    host.leases.delete(tab.tabId)
+  }
+
+  public async route(request: ChromeBridgeRequest, signal?: AbortSignal): Promise<unknown> {
+    return this.routeForClient(request, signal, this.localControllerId)
+  }
+
+  private async routeForClient(request: ChromeBridgeRequest, signal: AbortSignal | undefined, controllerId: string): Promise<unknown> {
+    if (signal?.aborted) { throw new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled') }
+
     if (request.method === 'status' && request.arguments.connectionId === undefined) { return this.status() }
     const arguments_ = { ...request.arguments }
     const tab = parseTabId(arguments_.tabId)
@@ -229,18 +384,54 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       throw new BridgeBrokerError('BRIDGE_BUSY', 'native Chrome bridge has too many pending requests')
     }
 
+    // Unknown/new actions fail closed as mutations until explicitly classified read-only.
+    const mutation = !['console', 'query', 'screenshot', 'snapshot', 'status', 'tabs'].includes(request.method)
+
+    if (mutation && Number.isSafeInteger(arguments_.tabId)) {
+      const tabId = arguments_.tabId as number
+      const owner = host.leases.get(tabId)
+
+      if (owner !== undefined && owner !== controllerId) { throw new BridgeBrokerError('TAB_BUSY', 'tab is controlled by another client') }
+      host.leases.set(tabId, controllerId)
+    }
+
     const id = randomUUID()
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        const item = host.pending.get(id)
         host.pending.delete(id)
-        reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'native Chrome bridge request timed out'))
+        retire()
+        this.send(host.socket, { type: 'cancel', id, controllerId })
+        item?.reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'native Chrome bridge request timed out'))
       }, this.config.requestTimeoutMs ?? 10_000)
 
-      host.pending.set(id, { reject, resolve: value => resolve(this.scopeResult(host, value)), timer })
+      const retire = (): void => {
+        host.retired.add(id)
+
+        if (host.retired.size > 1024) { host.retired.delete(host.retired.values().next().value!) }
+      }
+
+      const abort = (): void => {
+        const item = host.pending.get(id)
+
+        if (item === undefined) { return }
+        host.pending.delete(id)
+        clearTimeout(timer)
+        retire()
+        this.send(host.socket, { type: 'cancel', id, controllerId })
+        item.reject(new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled'))
+      }
+
+      const cleanup = (): void => signal?.removeEventListener('abort', abort)
+      host.pending.set(id, {
+        reject: error => { cleanup(); reject(error) },
+        resolve: value => { cleanup(); resolve(this.scopeResult(host, value)) }, timer
+      })
+      signal?.addEventListener('abort', abort, { once: true })
 
       try {
-        this.send(host.socket, { arguments: arguments_, id, method: request.method, type: 'request' })
+        this.send(host.socket, { arguments: arguments_, controllerId, id, method: request.method, type: 'request' })
       } catch (error) {
         clearTimeout(timer)
         host.pending.delete(id)
@@ -260,6 +451,7 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       this.server = undefined
     }
 
+    if (process.platform === 'win32') { return }
     await unlink(this.config.socketPath).catch(error => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {throw error}
     })
@@ -269,6 +461,9 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
     this.sockets.add(socket)
     let host: HostConnection | undefined
     let authenticated = false
+    let client = false
+    const controllerId = randomUUID()
+    const clientRequests = new Map<string, AbortController>()
     let buffer = Buffer.alloc(0)
 
     const handshakeTimer = setTimeout(() => {
@@ -283,7 +478,7 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
 
         for (;;) {
           const newline = buffer.indexOf(0x0a)
-          const maxBytes = authenticated ? IPC_RESPONSE_MAX_BYTES : IPC_REQUEST_MAX_BYTES
+          const maxBytes = authenticated && !client ? IPC_RESPONSE_MAX_BYTES : IPC_REQUEST_MAX_BYTES
 
           if (newline === -1) {
             if (buffer.length > maxBytes) {
@@ -303,6 +498,65 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
           }
 
           const envelope = parseEnvelope(line)
+
+          if (!authenticated && envelope.type === 'client.hello') {
+            const expected = typeof envelope.clientId === 'string' && Object.hasOwn(this.config.clientTokens ?? {}, envelope.clientId)
+              ? this.config.clientTokens?.[envelope.clientId] : undefined
+
+            if (envelope.version !== 1 || expected === undefined || expected === this.config.token || !tokensEqual(envelope.token, expected)) {
+              clearTimeout(handshakeTimer)
+              this.rejectSocket(socket, 'AUTH_REJECTED', 'client enrollment rejected')
+
+              return
+            }
+
+            authenticated = true
+            client = true
+            clearTimeout(handshakeTimer)
+            this.send(socket, { type: 'hello.ok', version: 1 })
+
+            continue
+          }
+
+          if (client) {
+            if (envelope.type === 'cancel' && typeof envelope.id === 'string') {
+              clientRequests.get(envelope.id)?.abort()
+              clientRequests.delete(envelope.id)
+
+              continue
+            }
+
+            if (envelope.type !== 'request' || typeof envelope.id !== 'string' || envelope.id.length > 128 ||
+                typeof envelope.method !== 'string' || !isObject(envelope.arguments) || clientRequests.has(envelope.id)) {
+              throw new BridgeBrokerError('INVALID_ENVELOPE', 'invalid client request')
+            }
+
+            if (clientRequests.size >= (this.config.maxPending ?? DEFAULT_MAX_PENDING)) {
+              throw new BridgeBrokerError('BRIDGE_BUSY', 'too many client requests')
+            }
+
+            const id = envelope.id
+            const controller = new AbortController()
+
+            const pending = envelope.method === 'control.release'
+              ? Promise.resolve().then(() => {
+                this.releaseClientControl(String((envelope.arguments as Record<string, unknown>).tabId), controllerId)
+
+                return { released: true }
+              })
+              : this.routeForClient({ method: envelope.method as ChromeBridgeRequest['method'], arguments: envelope.arguments }, controller.signal, controllerId)
+
+            clientRequests.set(id, controller)
+            void pending.then(result => {
+              if (!socket.destroyed && !socket.writableEnded) { socket.write(`${JSON.stringify({ type: 'response', id, result })}\n`) }
+            }, (error: unknown) => {
+              if (!socket.destroyed && !socket.writableEnded) { this.send(socket, { type: 'response', id, error: { code: error instanceof BridgeBrokerError ? error.code : 'BRIDGE_ERROR', message: 'shared broker request failed' } }) }
+            }).finally(() => {
+              if (clientRequests.get(id) === controller) { clientRequests.delete(id) }
+            })
+
+            continue
+          }
 
           if (!authenticated) {
             if (envelope.type !== 'hello' || !this.validHello(envelope)) {
@@ -335,6 +589,8 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
               sessionId: randomUUID(),
               connectedAt: this.connectedAt,
               pending: new Map(),
+              retired: new Set(),
+              leases: new Map(),
               socket
             }
             this.hosts.set(connectionId, host)
@@ -365,6 +621,15 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
       clearTimeout(handshakeTimer)
       this.sockets.delete(socket)
 
+      for (const controller of clientRequests.values()) { controller.abort() }
+      clientRequests.clear()
+
+      for (const connected of this.hosts.values()) {
+        for (const [tabId, owner] of connected.leases) {
+          if (owner === controllerId) { connected.leases.delete(tabId) }
+        }
+      }
+
       if (host !== undefined) {this.disconnectHost(host, 'native host disconnected')}
     })
     socket.on('error', () => {
@@ -385,6 +650,8 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
     }
 
     const pending = host.pending.get(envelope.id)
+
+    if (host.retired.delete(envelope.id)) { return }
 
     if (pending === undefined) {
       throw new BridgeBrokerError('INVALID_ENVELOPE', 'host response has an unknown request ID')

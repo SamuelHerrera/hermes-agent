@@ -5,8 +5,8 @@ import { PassThrough } from 'node:stream'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { ChromeBridgeBroker } from '../src/broker.js'
-import { type RuntimeConfig, writePrivateJson } from '../src/runtime.js'
+import { ChromeBridgeBroker, connectBrokerClient } from '../src/broker.js'
+import { ensurePrivateRuntimeDirectory, readBrokerClientConfig, type RuntimeConfig, writePrivateJson } from '../src/runtime.js'
 
 import { FakeChromeProcess } from './fake-chrome.js'
 import {
@@ -96,6 +96,50 @@ afterEach(async () => {
 })
 
 describe('native messaging host', () => {
+  it('runs two explicit temporary-home clients through real native stdio and forwards cancellation', async () => {
+    const root = await mkdtemp('/tmp/hcb-shared-')
+    temporaryDirectories.push(root)
+    const config: RuntimeConfig = { origin, socketPath: join(root, 'broker.sock'), statusPath: join(root, 'status.json'), token: 'b'.repeat(64), version: 1, clientTokens: { first: 'c'.repeat(64), second: 'd'.repeat(64) } }
+    const configPath = join(root, 'config.json')
+    await writePrivateJson(configPath, config)
+    const broker = new ChromeBridgeBroker(config)
+    brokers.push(broker)
+    await broker.start()
+
+    const clients = await Promise.all(['first', 'second'].map(async clientId => {
+      const home = join(root, clientId, 'chrome-bridge')
+      await ensurePrivateRuntimeDirectory(home)
+      const path = join(home, 'broker-client.json')
+      await writePrivateJson(path, { clientId, token: config.clientTokens![clientId], socketPath: config.socketPath, version: 1 })
+
+      return connectBrokerClient(await readBrokerClientConfig(path))
+    }))
+
+    const chrome = new FakeChromeProcess({ configPath, hostPath: join(process.cwd(), 'dist/native/host.js'), origin })
+    fakeChromes.push(chrome)
+
+    try {
+      expect(await chrome.receive()).toMatchObject({ type: 'bridge.ready' })
+      const controller = new AbortController()
+      const first = clients[0].route({ method: 'tabs', arguments: {} }, controller.signal)
+      const second = clients[1].route({ method: 'tabs', arguments: {} })
+      const requests = [await chrome.receive(), await chrome.receive()] as Array<Record<string, unknown>>
+      expect(requests[0].controllerId).not.toBe(requests[1].controllerId)
+      const rejected = expect(first).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' })
+      controller.abort()
+      await rejected
+      expect(await chrome.receive()).toMatchObject({ type: 'cancel', id: requests[0].id, controllerId: requests[0].controllerId })
+      chrome.send({ type: 'response', id: requests[0].id, result: 'late' })
+      chrome.send({ type: 'response', id: requests[1].id, result: 'second' })
+      await expect(second).resolves.toBe('second')
+      const pending = clients[1].route({ method: 'tabs', arguments: {} })
+      await chrome.receive()
+      const disconnected = expect(pending).rejects.toMatchObject({ code: 'BRIDGE_DISCONNECTED' })
+      await broker.close()
+      await disconnected
+    } finally { await Promise.all(clients.map(client => client.close())) }
+  })
+
   it('closes the native channel on invalid identity rather than leaving Chrome connecting', async () => {
     const { broker, configPath, input, output } = await setup(false)
     input.write(encodeNativeMessage({ type: 'bridge.identity', version: 1,

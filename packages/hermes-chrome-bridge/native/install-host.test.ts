@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { resolveHermesHome } from '../src/runtime.js'
 
@@ -16,6 +17,7 @@ import {
   normalizeExtensionOrigin,
   originFromExtensionId
 } from './manifest.js'
+import * as windowsLauncher from './windows-launcher.js'
 
 const temporaryDirectories: string[] = []
 const execFileAsync = promisify(execFile)
@@ -53,8 +55,8 @@ describe('native host origin and manifest', () => {
     expect(nativeManifestPath('/home/test', 'linux')).toBe(
       `/home/test/.config/google-chrome/NativeMessagingHosts/${HOST_NAME}.json`
     )
-    expect(() => nativeManifestPath('C:\\Users\\test', 'win32')).toThrow(
-      'Windows native host installation requires a signed executable launcher'
+    expect(nativeManifestPath('C:\\Users\\test', 'win32')).toBe(
+      `C:\\Users\\test\\AppData\\Local\\Hermes\\NativeMessagingHosts\\${HOST_NAME}.json`
     )
   })
 
@@ -99,6 +101,56 @@ describe('native host origin and manifest', () => {
     )) as Record<string, unknown>
 
     expect(manifest).toMatchObject({ allowed_origins: [origin], name: HOST_NAME })
+  })
+
+  it('installs a real Windows PE plus JSON launcher paths and registers only after files exist', async context => {
+    const goPath = existsSync('/opt/homebrew/bin/go') ? '/opt/homebrew/bin/go' : 'go'
+
+    try { await execFileAsync(goPath, ['version']) } catch { context.skip('Go compiler is unavailable');
+
+ return }
+
+    const root = await mkdtemp(join(tmpdir(), 'hcb-win-install-'))
+    temporaryDirectories.push(root)
+
+    const registration = vi.spyOn(windowsLauncher, 'registerWindowsHost').mockImplementation(async path => {
+      const manifest = JSON.parse(await readFile(path, 'utf8')) as { path: string }
+      await windowsLauncher.verifyWindowsLauncher(manifest.path)
+    })
+
+    try {
+      const installed = await installNativeHost({ builtHostPath: join(root, 'host.js'), extensionId, platform: 'win32',
+        hermesHome: join(root, 'owner'), manifestDirectory: join(root, 'manifests'), goPath })
+
+      expect(installed.wrapperPath.endsWith('.exe')).toBe(true)
+      expect(registration).toHaveBeenCalledWith(installed.manifestPath)
+      const launcher = JSON.parse(await readFile(`${installed.wrapperPath}.json`, 'utf8')) as Record<string, unknown>
+      expect(launcher.ConfigPath).toBe(installed.configPath)
+      expect(launcher).not.toHaveProperty('token')
+    } finally { registration.mockRestore() }
+  }, 120_000)
+
+  it('refuses to steal an existing browser registration from another Hermes home', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hcb-owner-'))
+    temporaryDirectories.push(root)
+    const options = { builtHostPath: '/package/host.js', extensionId, manifestDirectory: join(root, 'manifests') }
+    const first = await installNativeHost({ ...options, hermesHome: join(root, 'owner') })
+    const before = await readFile(first.manifestPath, 'utf8')
+    await expect(installNativeHost({ ...options, hermesHome: join(root, 'client') })).rejects.toThrow('already registered')
+    expect(await readFile(first.manifestPath, 'utf8')).toBe(before)
+    await expect(stat(join(root, 'client', 'chrome-bridge', 'config.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('preserves owner authentication and status on a same-home reinstall', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hcb-reinstall-'))
+    temporaryDirectories.push(root)
+    const options = { builtHostPath: '/package/host.js', extensionId, manifestDirectory: join(root, 'manifests'), hermesHome: join(root, 'owner') }
+    const first = await installNativeHost(options)
+    const before = await readFile(first.configPath, 'utf8')
+    const status = await readFile(first.statusPath, 'utf8')
+    await installNativeHost(options)
+    expect(await readFile(first.configPath, 'utf8') === before).toBe(true)
+    expect(await readFile(first.statusPath, 'utf8')).toBe(status)
   })
 
   it('installs private runtime files and an absolute executable wrapper in temp destinations', async () => {
