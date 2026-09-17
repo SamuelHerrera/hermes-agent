@@ -198,6 +198,7 @@ export const en: Translations = {
   },
 
   titlebar: {
+    views: 'Views',
     hideSidebar: 'Hide sidebar',
     showSidebar: 'Show sidebar',
     search: 'Search',

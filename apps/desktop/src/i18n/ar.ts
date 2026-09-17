@@ -166,6 +166,7 @@ export const ar = defineLocale({
     message: reason => `العرض البرمجي نشط — تم اكتشاف شاشة بعيدة (${reason}). تم تعطيل تسريع GPU لمنع الوميض.`
   },
   titlebar: {
+    views: 'العروض',
     hideSidebar: 'إخفاء الشريط الجانبي',
     showSidebar: 'إظهار الشريط الجانبي',
     search: 'بحث',

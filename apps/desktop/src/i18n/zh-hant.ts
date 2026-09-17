@@ -193,6 +193,7 @@ export const zhHant = defineLocale({
   },
 
   titlebar: {
+    views: '檢視',
     hideSidebar: '隱藏側邊欄',
     showSidebar: '顯示側邊欄',
     search: '搜尋',

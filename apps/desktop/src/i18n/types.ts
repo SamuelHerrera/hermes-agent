@@ -241,6 +241,7 @@ export interface Translations {
   }
 
   titlebar: {
+    views: string
     hideSidebar: string
     showSidebar: string
     search: string

@@ -193,6 +193,7 @@ export const zh: Translations = {
   },
 
   titlebar: {
+    views: '视图',
     hideSidebar: '隐藏侧边栏',
     showSidebar: '显示侧边栏',
     search: '搜索',

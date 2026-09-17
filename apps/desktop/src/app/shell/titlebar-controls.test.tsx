@@ -254,8 +254,15 @@ describe('TitlebarControls', () => {
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
     fireEvent.click(more)
 
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Views', 'Settings'])
+    const controlsToolbar = screen.getByRole('toolbar', { name: 'More controls' })
+    expect(within(controlsToolbar).getByRole('button', { name: 'Mute haptics' })).toBeTruthy()
+    expect(within(controlsToolbar).getByRole('button', { name: 'Layout editor' })).toBeTruthy()
+    expect(within(controlsToolbar).getByRole('button', { name: 'HUD mode' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Views' }), { key: 'ArrowRight' })
+
     expect(screen.queryByRole('menuitem', { name: 'Command Center' })).toBeNull()
-    expect(screen.getByRole('menuitem', { name: 'Approvals' })).toBeTruthy()
+    expect(await screen.findByRole('menuitem', { name: 'Approvals' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Gateway' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Workspace' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Project' })).toBeNull()
@@ -267,11 +274,9 @@ describe('TitlebarControls', () => {
     expect(await screen.findByRole('menuitem', { name: 'Artifacts' })).toBeTruthy()
     expect(await screen.findByRole('menuitem', { name: 'Kanban' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Files' })).toBeNull()
-    expect(await screen.findByRole('menuitem', { name: 'Mute haptics' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Mute haptics' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'More controls' })).toBeNull()
-    const controlsToolbar = await screen.findByRole('toolbar', { name: 'More controls' })
-    expect(within(controlsToolbar).getByRole('button', { name: 'Layout editor' })).toBeTruthy()
-    expect(within(controlsToolbar).getByRole('button', { name: 'HUD mode' })).toBeTruthy()
+
     expect(screen.queryByRole('menuitem', { name: /Layout editor/ })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'HUD mode' })).toBeNull()
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeTruthy()
@@ -282,8 +287,8 @@ describe('TitlebarControls', () => {
     expect(labels.indexOf('Webhooks')).toBeGreaterThan(labels.indexOf('Scheduled'))
     expect(labels.indexOf('Webhooks')).toBeLessThan(labels.indexOf('Capabilities'))
 
-    const menuItems = screen.getAllByRole('menuitem')
-    expect(menuItems.at(-1)?.textContent).toContain('Settings')
+    const viewsMenu = screen.getByRole('menuitem', { name: 'Capabilities' }).closest('[role="menu"]')!
+    expect(within(viewsMenu as HTMLElement).queryByRole('menuitem', { name: 'Settings' })).toBeNull()
   })
 
   it('keeps lower-priority actions menu-only when the sidebar is widened', () => {

@@ -199,6 +199,7 @@ export const ja = defineLocale({
   },
 
   titlebar: {
+    views: 'ビュー',
     hideSidebar: 'サイドバーを非表示',
     showSidebar: 'サイドバーを表示',
     search: '検索',

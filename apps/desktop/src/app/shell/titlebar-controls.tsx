@@ -97,7 +97,7 @@ const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
 const GATEWAY_STATUSBAR_ID = 'gateway-health'
-const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set(['layout-surface', 'keep-awake', 'restart-backend', 'restart-gateway', 'layout', 'hud'])
+const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set(['layout-surface', 'keep-awake', 'restart-backend', 'restart-gateway', 'layout', 'hud', 'haptics'])
 const WEBHOOKS_STATUSBAR_ID = 'webhooks'
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
@@ -722,6 +722,7 @@ function TitlebarOverflowMenu({
   statusbarItems: readonly StatusbarItem[]
   tools: readonly TitlebarTool[]
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
   const webhooksItem = statusbarItems.find(item => item.id === WEBHOOKS_STATUSBAR_ID)
@@ -729,21 +730,14 @@ function TitlebarOverflowMenu({
   const cronTool = tools.find(tool => tool.id === 'cron')
   const utilityTools = tools.filter(tool => TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
   const mainTools = tools.filter(tool => !TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
-  const renderedToolIds = new Set<string>()
-
-  if (cronTool) {
-    renderedToolIds.add(cronTool.id)
-  }
-
-  const toolsBeforeUtility = mainTools.filter(tool => !renderedToolIds.has(tool.id) && tool.id !== 'haptics' && tool.id !== 'settings')
-  const toolsAfterUtility = mainTools.filter(tool => tool.id === 'haptics' || tool.id === 'settings')
-
-  const hasMenuRows =
+  const viewTools = mainTools.filter(tool => tool.id !== 'cron' && tool.id !== 'settings')
+  const settingsTool = mainTools.find(tool => tool.id === 'settings')
+  const hasViews =
     mainStatusbarItems.length > 0 ||
     Boolean(cronTool) ||
     Boolean(webhooksItem) ||
-    toolsBeforeUtility.length > 0 ||
-    toolsAfterUtility.length > 0
+    viewTools.length > 0
+  const hasMenuRows = hasViews || Boolean(settingsTool)
 
   if (statusbarItems.length === 0 && tools.length === 0) {
     return null
@@ -768,12 +762,12 @@ function TitlebarOverflowMenu({
           </Button>
         </DropdownMenuTrigger>
       </Tip>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-64">
         {utilityTools.length > 0 ? (
           <>
             <div
               aria-label="More controls"
-              className="mx-0.5 mb-1 flex items-center gap-1 rounded-md bg-(--ui-bg-muted)/45 p-1"
+              className="mx-0.5 mb-1 flex flex-wrap items-center gap-1 rounded-md bg-(--ui-bg-muted)/45 p-1"
               role="toolbar"
             >
               {utilityTools.map(tool => (
@@ -783,22 +777,27 @@ function TitlebarOverflowMenu({
             {hasMenuRows ? <DropdownMenuSeparator /> : null}
           </>
         ) : null}
-        {mainStatusbarItems.map(item => (
-          <TitlebarOverflowStatusbarItem item={item} key={`status:${item.id}`} navigate={navigate} onClose={close} />
-        ))}
-        {mainStatusbarItems.length > 0 && (Boolean(cronTool) || Boolean(webhooksItem) || toolsBeforeUtility.length > 0) ? (
-          <DropdownMenuSeparator />
+        {hasViews ? (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <MenuRow icon={<TitlebarIcon name="layout" />} label={t.titlebar.views} />
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-56">
+              {mainStatusbarItems.map(item => (
+                <TitlebarOverflowStatusbarItem item={item} key={`status:${item.id}`} navigate={navigate} onClose={close} />
+              ))}
+              {mainStatusbarItems.length > 0 && (Boolean(cronTool) || Boolean(webhooksItem) || viewTools.length > 0) ? (
+                <DropdownMenuSeparator />
+              ) : null}
+              {cronTool ? <TitlebarOverflowToolItem navigate={navigate} onClose={close} tool={cronTool} /> : null}
+              {webhooksItem ? <TitlebarOverflowStatusbarItem item={webhooksItem} navigate={navigate} onClose={close} /> : null}
+              {viewTools.map(tool => (
+                <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
         ) : null}
-        {cronTool ? <TitlebarOverflowToolItem key={cronTool.id} navigate={navigate} onClose={close} tool={cronTool} /> : null}
-        {webhooksItem ? (
-          <TitlebarOverflowStatusbarItem item={webhooksItem} key={`status:${webhooksItem.id}`} navigate={navigate} onClose={close} />
-        ) : null}
-        {toolsBeforeUtility.map(tool => (
-          <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
-        ))}
-        {toolsAfterUtility.map(tool => (
-          <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
-        ))}
+        {settingsTool ? <TitlebarOverflowToolItem navigate={navigate} onClose={close} tool={settingsTool} /> : null}
       </DropdownMenuContent>
     </DropdownMenu>
   )
