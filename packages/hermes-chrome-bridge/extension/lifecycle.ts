@@ -89,7 +89,8 @@ function isRequest(value: Record<string, unknown>): value is Record<string, unkn
   method: string
   type: 'request'
 } {
-  return hasExactKeys(value, ['arguments', 'id', 'method', 'type']) &&
+  return hasExactKeys(value, ['arguments', 'id', 'method', 'type', ...(value.controllerId === undefined ? [] : ['controllerId'])]) &&
+    (value.controllerId === undefined || typeof value.controllerId === 'string' && value.controllerId.length > 0 && value.controllerId.length <= 128) &&
     value.type === 'request' &&
     typeof value.id === 'string' && value.id.length > 0 &&
     typeof value.method === 'string' && value.method.length > 0 &&
@@ -117,6 +118,7 @@ export function createConnectionController(
   const listeners = new Set<(state: ConnectionState) => void>()
   const ignoredDisconnects = new WeakSet<NativePortLike>()
   const readyPorts = new WeakSet<NativePortLike>()
+  const activeRequests = new Map<string, { controllerId?: string, abort: AbortController }>()
   let intentGeneration = 0
   let identity: ConnectionIdentity | undefined
   let persistenceQueue: Promise<void> = Promise.resolve()
@@ -148,6 +150,9 @@ export function createConnectionController(
   }
 
   const closePort = (): void => {
+    for (const pending of activeRequests.values()) { pending.abort.abort() }
+    activeRequests.clear()
+
     if (port === undefined) { return }
     const closing = port
     port = undefined
@@ -280,8 +285,25 @@ export function createConnectionController(
       return
     }
 
+    if (message.type === 'cancel' && hasExactKeys(message, ['type', 'id', 'controllerId']) &&
+        typeof message.id === 'string' && message.id.length <= 128 &&
+        typeof message.controllerId === 'string' && message.controllerId.length <= 128) {
+      const pending = activeRequests.get(message.id)
+
+      if (pending?.controllerId === message.controllerId) { pending.abort.abort() }
+
+      return
+    }
+
     if (isRequest(message)) {
       const request = message as NativeRequest
+
+      if (activeRequests.has(request.id) || activeRequests.size >= 128) { rejectInvalidMessage(nativePort);
+
+ return }
+
+      const pending = { controllerId: request.controllerId, abort: new AbortController() }
+      activeRequests.set(request.id, pending)
 
       const response = dependencies.requestHandler === undefined
         ? Promise.resolve({
@@ -292,14 +314,14 @@ export function createConnectionController(
             id: request.id,
             type: 'response' as const
           })
-        : dependencies.requestHandler(request)
+        : dependencies.requestHandler(request, pending.abort.signal)
 
       void response
         .then(result => {
-          if (port === nativePort) { nativePort.postMessage(result) }
+          if (port === nativePort && !pending.abort.signal.aborted) { nativePort.postMessage(result) }
         })
         .catch(() => {
-          if (port === nativePort) {
+          if (port === nativePort && !pending.abort.signal.aborted) {
             nativePort.postMessage({
               error: { code: 'BRIDGE_ERROR', message: 'The Chrome bridge request failed.' },
               id: request.id,
@@ -307,6 +329,7 @@ export function createConnectionController(
             })
           }
         })
+        .finally(() => { if (activeRequests.get(request.id) === pending) { activeRequests.delete(request.id) } })
 
       return
     }

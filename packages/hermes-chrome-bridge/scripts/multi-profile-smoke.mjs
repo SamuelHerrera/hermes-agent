@@ -2,7 +2,7 @@
 // Run from the repo after building: node packages/hermes-chrome-bridge/scripts/multi-profile-smoke.mjs
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync } from 'node:crypto'
-import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -53,11 +53,19 @@ const fixtureServer = createServer((request, response) => {
   response.end(`<!doctype html><html><head><title>Hermes development fixture</title></head>
     <body><h1>Development fixture</h1><p>Disposable localhost page; no real data.</p>
     <input id="fixture-file" type="file" multiple aria-label="Fixture attachment">
+    <button id="modal" onclick="this.dataset.answer=String(confirm('Fixture dialog'))">Fixture dialog</button>
     <div id="drag-source" draggable="true" style="display:inline-block;padding:20px;background:#ccf">Drag fixture</div>
     <div id="drag-target" style="display:inline-block;padding:20px;background:#cfc">Drop fixture</div>
-    <section id="shadow-host"></section><iframe src="/frame" title="Same-origin test frame"></iframe>
+    <section id="shadow-host"></section><section id="closed-host"></section>
+    <canvas id="paint" width="300" height="80" style="background:#eef"></canvas>
+    <iframe src="/frame" title="Same-origin test frame"></iframe>
+    <iframe src="http://localhost:${fixtureServer.address().port}/frame-cross" title="Cross-origin test frame"></iframe>
     <script>document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML=
     '<label>Shadow input<input id="shadow-input"></label>';
+    window.closedFixture=document.querySelector('#closed-host').attachShadow({mode:'closed'});
+    window.closedFixture.innerHTML='<label>Closed input<input id="closed-input"></label>';
+    document.querySelector('#paint').onclick=e=>{e.target.dataset.trusted=String(e.isTrusted);e.target.dataset.x=String(e.offsetX)};
+    document.querySelector('#paint').onpointermove=e=>{if(e.buttons===1&&e.isTrusted)e.target.dataset.moves=String(Number(e.target.dataset.moves||0)+1)};
     document.querySelector('#drag-source').ondragstart=e=>e.dataTransfer.setData('text/plain','fixture');
     document.querySelector('#drag-target').ondragover=e=>e.preventDefault();
     document.querySelector('#drag-target').ondrop=e=>{e.preventDefault();e.currentTarget.dataset.dropped=e.dataTransfer.getData('text/plain')};
@@ -118,6 +126,18 @@ try {
     contexts.push(context)
     const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker')
     assert.ok(worker.url().startsWith(`chrome-extension://${extensionId}/`))
+    await worker.evaluate(() => {
+      globalThis.fixtureErrors = []
+      for (const [owner, methods] of [[globalThis.chrome.debugger, ['attach', 'sendCommand']], [globalThis.chrome.scripting, ['executeScript']]]) {
+        for (const method of methods) {
+          const original = owner[method].bind(owner)
+          owner[method] = async (...args) => {
+            try { return await original(...args) }
+            catch (error) { globalThis.fixtureErrors.push({ method, error: String(error) }); throw error }
+          }
+        }
+      }
+    })
     const popup = await context.newPage()
     popups.push(popup)
     await popup.goto(`chrome-extension://${extensionId}/popup.html`)
@@ -174,21 +194,35 @@ try {
     assert.ok(capture.bytes > 0)
     await writeFile(join(evidenceRoot, `profile-${contexts.length}-interaction.png`), Buffer.from(capture.dataUrl.split(',')[1], 'base64'))
     evidence.checks.push(`${label}: MCP type/click/read-back and screenshot succeeded`)
-    for (const selector of ['#shadow-input', '#frame-input']) {
+    for (const selector of ['#shadow-input', '#frame-input', '#closed-input']) {
       const found = await call('query', { tabId: opened.tabId, selector })
       assert.equal(found.elements.length, 1)
       await call('type', { tabId: opened.tabId, target: found.elements[0].ref, text: label })
-      const value = selector === '#frame-input'
-        ? await publicPage.frameLocator('iframe').locator(selector).inputValue()
-        : await publicPage.locator(selector).inputValue()
+      const value = selector === '#closed-input'
+        ? await publicPage.evaluate(() => globalThis.closedFixture.querySelector('input').value)
+        : await (selector === '#frame-input' ? publicPage.frameLocator('iframe[title="Same-origin test frame"]').locator(selector) : publicPage.locator(selector)).inputValue()
       assert.equal(value, label)
     }
     evidence.checks.push(`${label}: shadow and same-origin frame refs drive trusted input`)
+    const frames = await call('control', { tabId: opened.tabId, action: 'frames' })
+    const crossFrameId = frames.frames.find(frame => frame.origin.startsWith('http://localhost:')).frameId
+    const cross = await call('query', { tabId: opened.tabId, frameId: crossFrameId, selector: '#frame-input', fields: ['ref'] })
+    assert.equal(cross.count, 1)
+    await call('type', { tabId: opened.tabId, frameId: crossFrameId, target: cross.elements[0].ref, text: 'Cross-origin input' })
+    assert.equal(await publicPage.frameLocator('iframe[title="Cross-origin test frame"]').locator('input').inputValue(), 'Cross-origin input')
+    await publicPage.locator('#paint').scrollIntoViewIfNeeded()
+    const canvas = await publicPage.locator('#paint').boundingBox()
+    await call('click', { tabId: opened.tabId, x: canvas.x + 17, y: canvas.y + 19 })
+    assert.equal(await publicPage.locator('#paint').getAttribute('data-trusted'), 'true')
+    assert.equal(await publicPage.locator('#paint').getAttribute('data-x'), '17')
+    await call('control', { tabId: opened.tabId, action: 'drag', x: canvas.x + 30, y: canvas.y + 30, destinationX: canvas.x + 100, destinationY: canvas.y + 50 })
+    assert.ok(Number(await publicPage.locator('#paint').getAttribute('data-moves')) > 1)
+    evidence.checks.push(`${label}: closed roots, cross-origin frame input, pixel clicks and canvas drag verified`)
 
     const fixtureFile = join(root, `upload-${contexts.length}.txt`)
     await writeFile(fixtureFile, `Disposable upload: ${label}`)
     await call('control', { tabId: opened.tabId, action: 'upload', target: '#fixture-file',
-      files: [fixtureFile], approvalIntent: 'explicit-user-approved-files' })
+      files: [await realpath(fixtureFile)], approvalIntent: 'explicit-user-approved-files' })
     assert.equal(await publicPage.locator('#fixture-file').evaluate(async input => input.files[0].text()), `Disposable upload: ${label}`)
     const downloaded = await call('control', { tabId: opened.tabId, action: 'download',
       url: `${fixtureOrigin}/download`, filename: `fixture-${extensionId}-${contexts.length}.txt`,
@@ -200,10 +234,10 @@ try {
     evidence.checks.push(`${label}: upload bytes and completed download verified on disk`)
 
     publicPage.on('dialog', () => {})
-    const answer = publicPage.evaluate(() => globalThis.confirm('Disposable Hermes test'))
+    await call('click', { tabId: opened.tabId, target: '#modal' }, 'DIALOG_OPEN')
     const dialog = await waitFor(() => call('control', { tabId: opened.tabId, action: 'dialog_inspect' }), value => value.dialogId, 'JS dialog missing')
     await call('control', { tabId: opened.tabId, action: 'dialog_accept', dialogId: dialog.dialogId })
-    assert.equal(await answer, true)
+    await publicPage.waitForFunction(() => globalThis.document.querySelector('#modal').dataset.answer === 'true')
     evidence.checks.push(`${label}: JS dialog inspected and accepted by exact ID`)
 
     await call('control', { tabId: opened.tabId, action: 'drag', target: '#drag-source', destination: '#drag-target' })
@@ -272,6 +306,7 @@ try {
 } catch (error) {
   evidence.success = false
   evidence.error = String(error)
+  evidence.browserErrors = await Promise.all(contexts.map(context => context.serviceWorkers()[0]?.evaluate(() => globalThis.fixtureErrors).catch(() => [])))
   for (const [index, popup] of popups.entries()) {
     evidence[`popup${index}`] = await popup.locator('body').innerText().catch(() => 'unavailable')
   }

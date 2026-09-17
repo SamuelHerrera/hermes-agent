@@ -1,4 +1,5 @@
 import { INPUT_METHODS, INSPECTION_KEYS, validControlArguments, validInspectionOptions } from '../src/control-options.js'
+import { validTabListOptions } from '../src/tab-list-options.js'
 
 import { DebuggerError, type DebuggerService } from './debugger-service.js'
 import type { ConnectionStatus } from './lifecycle.js'
@@ -13,7 +14,7 @@ interface DispatcherDependencies {
   getConnectionState(): ConnectionStatus
   pageRuntimeService?: PageRuntimeService
   screenshotService: ScreenshotService
-  sendTabMessage(tabId: number, message: unknown): Promise<unknown>
+  sendTabMessage(tabId: number, message: unknown, frameId?: number): Promise<unknown>
   tabActions: TabActions
   tabService: TabService
 }
@@ -170,7 +171,9 @@ async function pageResult(
   let response: unknown
 
   try {
-    response = await dependencies.sendTabMessage(tabId, message)
+    const { frameId, ...payload } = message
+    response = frameId === undefined ? await dependencies.sendTabMessage(tabId, payload)
+      : await dependencies.sendTabMessage(tabId, payload, Number(frameId))
   } catch {
     throw new PageRequestError('TAB_UNREACHABLE', 'The selected tab could not be reached.')
   }
@@ -271,8 +274,8 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
       }
 
       if (request.method === 'tabs') {
-        if (!exactKeys(request.arguments, [])) {
-          return error(request.id, 'INVALID_ARGUMENTS', 'tabs does not accept arguments.')
+        if (!validTabListOptions(request.arguments)) {
+          return error(request.id, 'INVALID_ARGUMENTS', 'tabs accepts bounded limit, offset and search.')
         }
 
         return {
@@ -280,7 +283,7 @@ export function createBridgeRequestDispatcher(dependencies: DispatcherDependenci
           result: {
             bridgeConnected: true,
             nativeConnected: dependencies.getConnectionState() === 'connected',
-            ...await dependencies.tabService.list()
+            ...await dependencies.tabService.list(request.arguments)
           },
           type: 'response'
         }

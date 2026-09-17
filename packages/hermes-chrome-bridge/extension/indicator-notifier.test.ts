@@ -19,7 +19,7 @@ describe('indicator disconnect notifier', () => {
     expect(sendMessage).toHaveBeenCalledWith(1, {
       active: false,
       type: 'hermes.bridge.indicator',
-      version: 1
+      version: 2
     })
   })
 })

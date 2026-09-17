@@ -3,6 +3,16 @@ import { describe, expect, it } from 'vitest'
 import { validControlArguments, validInspectionOptions } from './control-options.js'
 
 describe('control boundary', () => {
+  it('accepts bounded coordinate gestures without ambiguous or incomplete targets', () => {
+    expect(validControlArguments('click', { tabId: 1, x: 50, y: 80 })).toBe(true)
+    expect(validControlArguments('control', { tabId: 1, action: 'drag', x: 50, y: 80, destinationX: 150, destinationY: 180 })).toBe(true)
+
+    for (const point of [{ x: 1 }, { x: NaN, y: 2 }, { x: -1, y: 2 }, { x: 1, y: 2, target: '#a' }]) {
+      expect(validControlArguments('click', { tabId: 1, ...point })).toBe(false)
+    }
+
+    expect(validControlArguments('click', { tabId: 1, x: 1, y: 2, inputRoute: 'dom_event' })).toBe(false)
+  })
   it('validates trusted input and explicit downgrade with frame selection', () => {
     expect(validControlArguments('click', { tabId: 1, target: '#a', frameId: 2 })).toBe(true)
     expect(validControlArguments('click', { tabId: 1, target: '#a', inputRoute: 'dom_event' })).toBe(true)

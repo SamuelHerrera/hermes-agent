@@ -13,6 +13,55 @@ function setup() {
 }
 
 describe('trusted debugger service', () => {
+  it('returns from dialog-opening input so the next tool can handle the dialog', async () => {
+    let release!: () => void
+    const blocked = new Promise<void>(resolve => { release = resolve })
+
+    const service = createDebuggerService({
+      attach: async () => undefined, detach: async () => undefined, assertControllable: async () => undefined,
+      prepare: async () => ({ x: 1, y: 1, sensitive: false, editable: false, boundingBox: { x: 0, y: 0, width: 2, height: 2 } }),
+      send: async (_tab, method, params) => {
+        if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') {
+          service.event(1, 'Page.javascriptDialogOpening', { type: 'confirm' })
+          await blocked
+        }
+
+        if (method === 'Page.handleJavaScriptDialog') { release() }
+
+        return {}
+      }
+    })
+
+    try {
+      const action = service.run(1, 'click', {}).then(() => 'completed', error => error.code)
+      expect(await Promise.race([action, new Promise(resolve => setTimeout(() => resolve('blocked'), 2000))])).toBe('DIALOG_OPEN')
+      const dialog = await service.run(1, 'dialog_inspect', {}) as { dialogId: string }
+      await service.run(1, 'dialog_accept', { dialogId: dialog.dialogId })
+    } finally { release() }
+  })
+  it('releases pressed keys when a request is cancelled', async () => {
+    let release!: () => void
+    let entered!: () => void
+    const pressed = new Promise<void>(resolve => { entered = resolve })
+    const blocked = new Promise<void>(resolve => { release = resolve })
+
+    const send = vi.fn(async (_tab: number, method: string, params: Record<string, unknown>) => {
+      if (method === 'Input.dispatchKeyEvent' && params.type === 'keyDown') { entered(); await blocked }
+
+      return {}
+    })
+
+    const service = createDebuggerService({ send, attach: async () => undefined, detach: async () => undefined,
+      assertControllable: async () => undefined,
+      prepare: async () => ({ x: 1, y: 1, sensitive: false, editable: true, boundingBox: { x: 0, y: 0, width: 2, height: 2 } }) })
+
+    const action = service.run(1, 'key', { key: 'Shift' }).catch(error => error.code)
+    await pressed
+    await service.cancel(1)
+    release()
+    expect(await action).toBe('CANCELLED')
+    expect(send).toHaveBeenCalledWith(1, 'Input.dispatchKeyEvent', expect.objectContaining({ type: 'keyUp', key: 'Shift' }))
+  })
   it('types through browser input and refuses sensitive fields', async () => {
     const { service, send, prepare } = setup()
     await service.run(2, 'type', { target: '#text', text: 'hello', submit: true })

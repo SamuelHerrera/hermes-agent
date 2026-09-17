@@ -1,6 +1,7 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js'
 
 import { CONNECTION_ID_PATTERN } from './connection.js'
+import { TAB_LIST_PROPERTIES } from './tab-list-options.js'
 
 const EMPTY_INPUT_SCHEMA = {
   additionalProperties: false,
@@ -46,6 +47,7 @@ const EVAL_ANNOTATIONS = {
 } as const
 
 const INSPECTION_PROPERTIES = {
+  frameId: { minimum: 0, type: 'integer', description: 'Frame ID from control/frames; default main frame.' },
   selector: { maxLength: 2048, minLength: 1, type: 'string' },
   limit: { default: 60, maximum: 500, minimum: 1, type: 'integer' },
   cursor: { maxLength: 4096, minLength: 1, type: 'string' },
@@ -56,7 +58,12 @@ const INSPECTION_PROPERTIES = {
 
 const TRUSTED_PROPERTIES = {
   inputRoute: { default: 'trusted', type: 'string', enum: ['trusted', 'dom_event'], description: 'Browser input by default. dom_event is an explicit untrusted downgrade; never automatic.' },
-  frameId: { minimum: 0, type: 'integer', description: 'Chrome frame ID; default main frame. Target selectors support open shadow roots.' }
+  frameId: { minimum: 0, type: 'integer', description: 'Chrome frame ID; default main frame. Selectors support open and closed shadow roots.' }
+} as const
+
+const POINT_PROPERTIES = {
+  x: { minimum: 0, maximum: 100000, type: 'number', description: 'Frame viewport CSS coordinate, paired with y instead of target.' },
+  y: { minimum: 0, maximum: 100000, type: 'number' }
 } as const
 
 const BASE_TOOLS = [
@@ -69,9 +76,12 @@ const BASE_TOOLS = [
       properties: {
         tabId: { type: 'integer', minimum: 1 },
         frameId: { type: 'integer', minimum: 0 },
-        action: { type: 'string', enum: ['frames', 'drag', 'dialog_inspect', 'dialog_accept', 'dialog_dismiss', 'upload', 'download', 'cancel', 'detach'] },
+        action: { type: 'string', enum: ['frames', 'drag', 'dialog_inspect', 'dialog_accept', 'dialog_dismiss', 'upload', 'download', 'cancel', 'detach', 'release'] },
         target: { type: 'string', minLength: 1, maxLength: 2048 },
         destination: { type: 'string', minLength: 1, maxLength: 2048 },
+        ...POINT_PROPERTIES,
+        destinationX: { minimum: 0, maximum: 100000, type: 'number' },
+        destinationY: { minimum: 0, maximum: 100000, type: 'number' },
         dialogId: { type: 'string', minLength: 1, maxLength: 128 },
         promptText: { type: 'string', maxLength: 1000 },
         files: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string', minLength: 1, maxLength: 4096 } },
@@ -331,8 +341,15 @@ export const CHROME_BRIDGE_TOOLS: readonly Tool[] = BASE_TOOLS.map(tool => ({
   description: `${tool.description} Target connectionId explicitly when multiple profiles are connected. Namespaced tabId also binds the connection; labels are not selectors. Untargeted commands fail on ambiguity or after the implicit connection changes.`,
   inputSchema: {
     ...tool.inputSchema,
+    ...(['chrome_bridge_click', 'chrome_bridge_hover', 'chrome_bridge_type'].includes(tool.name) && 'required' in tool.inputSchema ? {
+      required: tool.inputSchema.required.filter(key => key !== 'target'),
+      oneOf: [{ required: ['target'] }, { required: ['x', 'y'] }]
+    } : {}),
     properties: {
       ...tool.inputSchema.properties,
+      detail: { type: 'string', enum: ['compact', 'full'], default: 'compact', description: 'Full retains diagnostic metadata; images are always image blocks.' },
+      ...(tool.name === 'chrome_bridge_tabs' ? TAB_LIST_PROPERTIES : {}),
+      ...(['chrome_bridge_click', 'chrome_bridge_hover', 'chrome_bridge_type', 'chrome_bridge_scroll'].includes(tool.name) ? POINT_PROPERTIES : {}),
       ...(['chrome_bridge_click', 'chrome_bridge_type', 'chrome_bridge_key', 'chrome_bridge_hover', 'chrome_bridge_scroll'].includes(tool.name) ? TRUSTED_PROPERTIES : {}),
       ...(tool.name === 'chrome_bridge_screenshot' ? {
         fullPage: { type: 'boolean', default: false },

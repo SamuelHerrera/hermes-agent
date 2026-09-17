@@ -11,16 +11,19 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
 
-import { BridgeBrokerError, ChromeBridgeBroker } from './broker.js'
+import { BridgeBrokerError, ChromeBridgeBroker, connectBrokerClient } from './broker.js'
 import { parseTabId, validConnectionId } from './connection.js'
 import { INPUT_METHODS, INSPECTION_KEYS, validControlArguments, validInspectionOptions } from './control-options.js'
 import { prepareUploads } from './file-transfer.js'
 import {
+  readBrokerClientConfig,
   readRuntimeConfig,
   resolveHermesHome,
   runtimeDirectoryFor
 } from './runtime.js'
 import { CHROME_BRIDGE_TOOLS } from './schema.js'
+import { validTabListOptions } from './tab-list-options.js'
+import { toolOutput } from './tool-output.js'
 
 export interface ChromeBridgeRequest {
   arguments: Record<string, unknown>
@@ -30,7 +33,8 @@ export interface ChromeBridgeRequest {
 }
 
 export interface ChromeBridgeRequestRouter {
-  route(request: ChromeBridgeRequest): Promise<unknown>
+  route(request: ChromeBridgeRequest, signal?: AbortSignal): Promise<unknown>
+  releaseControl?(tabId: string): Promise<void>
 }
 
 export interface ChromeBridgeServerOptions {
@@ -89,6 +93,12 @@ function validToolArguments(method: ChromeBridgeRequest['method'], input: Record
   }
 
   const keys = Object.keys(arguments_)
+
+  if (method === 'tabs') { return validTabListOptions(arguments_) }
+
+  if (method === 'control' && arguments_.action === 'release') {
+    return keys.length === 2 && validPositiveInteger(arguments_.tabId)
+  }
 
   if (INPUT_METHODS.has(method)) { return validControlArguments(method, arguments_) }
 
@@ -203,6 +213,21 @@ export async function createDefaultRouter(options: {
   hermesHome?: string
 } = {}): Promise<DefaultRouterHandle> {
   const hermesHome = resolveHermesHome(options.hermesHome)
+  let clientConfig
+
+  try {
+    clientConfig = await readBrokerClientConfig(join(runtimeDirectoryFor(hermesHome), 'broker-client.json'))
+  } catch (error) {
+    // Invalid enrollment or an unavailable owner must never silently start a different owner.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error }
+  }
+
+  if (clientConfig !== undefined) {
+    const client = await connectBrokerClient(clientConfig)
+
+    return { close: () => client.close(), router: client }
+  }
+
   const configPath = join(runtimeDirectoryFor(hermesHome), 'config.json')
   let config
 
@@ -235,7 +260,7 @@ export function createChromeBridgeServer(
     tools: [...CHROME_BRIDGE_TOOLS]
   }))
 
-  server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const method = TOOL_METHODS[request.params.name]
 
     if (method === undefined) {
@@ -245,8 +270,8 @@ export function createChromeBridgeServer(
       }
     }
 
-    const toolArguments = request.params.arguments ?? {}
-    const validArguments = validToolArguments(method, toolArguments)
+    const { detail = 'compact', ...toolArguments } = request.params.arguments ?? {}
+    const validArguments = (detail === 'compact' || detail === 'full') && validToolArguments(method, toolArguments)
 
     if (!validArguments) {
       return {
@@ -269,6 +294,18 @@ export function createChromeBridgeServer(
     }
 
     try {
+      if (extra.signal.aborted) { throw new BridgeBrokerError('REQUEST_CANCELLED', 'request cancelled') }
+
+      if (method === 'control' && toolArguments.action === 'release') {
+        if (!router.releaseControl || typeof toolArguments.tabId !== 'string') {
+          throw new BridgeBrokerError('INVALID_ARGUMENTS', 'Release requires a current namespaced tab ID.')
+        }
+
+        await router.releaseControl(toolArguments.tabId)
+
+        return { content: toolOutput(method, { released: true }) }
+      }
+
       let wireArguments = toolArguments
 
       if (method === 'control' && toolArguments.action === 'upload') {
@@ -279,10 +316,10 @@ export function createChromeBridgeServer(
       const result = await router.route({
         arguments: wireArguments,
         method
-      })
+      }, extra.signal)
 
       return {
-        content: [{ text: JSON.stringify(result), type: 'text' }]
+        content: toolOutput(method, result, detail as 'compact' | 'full')
       }
     } catch (error) {
       const code = error instanceof BridgeBrokerError ? error.code : 'BRIDGE_ERROR'

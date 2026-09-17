@@ -1,7 +1,7 @@
 import { isTrustedPopupCommand } from './background-policy.js'
 import { downloadToBrowserHost } from './debugger-download.js'
 import { createDebuggerService } from './debugger-service.js'
-import { prepareChromeTarget, sendFrameMessage, uploadChromeFiles } from './debugger-target.js'
+import { clearFrameSessions, prepareChromeTarget, sendFrameMessage, trackFrameSession, uploadChromeFiles } from './debugger-target.js'
 import { createIdentityStore } from './identity-store.js'
 import { hideControlIndicators } from './indicator-notifier.js'
 import {
@@ -47,7 +47,7 @@ const screenshotService = createScreenshotService({
   beforeCapture: async tabId => {
     const refresh = chrome.tabs.sendMessage(tabId, {
       type: 'hermes.bridge.indicator.refresh',
-      version: 1
+      version: 2
     }).catch(() => undefined)
 
     await Promise.race([
@@ -69,12 +69,12 @@ const pageRuntimeService = createPageRuntimeService()
 const debuggerService = createDebuggerService({
   assertControllable: async tabId => tabService.assertControllable(tabId),
   attach: async tabId => chrome.debugger.attach({ tabId }, '1.3'),
-  detach: async tabId => chrome.debugger.detach({ tabId }),
+  detach: async tabId => { clearFrameSessions(tabId); await chrome.debugger.detach({ tabId }) },
   send: async (tabId, method, params) => (await chrome.debugger.sendCommand({ tabId }, method, params) ?? {}) as Record<string, unknown>,
   prepare: prepareChromeTarget,
   upload: uploadChromeFiles,
   frames: async tabId => ({ frames: (await chrome.webNavigation.getAllFrames({ tabId }) ?? []).filter(f => isControllableHttpUrl(f.url)).slice(0, 100).map(f => ({ frameId: f.frameId, parentFrameId: f.parentFrameId, origin: new URL(f.url).origin })) }),
-  indicate: async (tabId, x, y) => chrome.tabs.sendMessage(tabId, { type: 'hermes.bridge.indicator', active: true, x, y, version: 1 }).catch(() => undefined),
+  indicate: async (tabId, x, y) => chrome.tabs.sendMessage(tabId, { type: 'hermes.bridge.indicator', active: true, x, y, version: 2 }).catch(() => undefined),
   download: async (args, check) => downloadToBrowserHost({
     download: async options => chrome.downloads.download(options),
     search: async options => chrome.downloads.search(options),
@@ -84,10 +84,12 @@ const debuggerService = createDebuggerService({
 })
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId !== undefined) { trackFrameSession(source.tabId, source.sessionId, method, (params ?? {}) as Record<string, unknown>) }
+
   if (source.tabId !== undefined) { debuggerService.event(source.tabId, method, (params ?? {}) as Record<string, unknown>) }
 })
 chrome.debugger.onDetach.addListener((source, reason) => {
-  if (source.tabId !== undefined) { debuggerService.detached(source.tabId, reason) }
+  if (source.tabId !== undefined) { clearFrameSessions(source.tabId); debuggerService.detached(source.tabId, reason) }
 })
 chrome.tabs.onRemoved.addListener(tabId => { void debuggerService.cancel(tabId) })
 chrome.tabs.onUpdated.addListener((tabId, change) => {
@@ -102,7 +104,7 @@ const dispatchRequest = createBridgeRequestDispatcher({
   getConnectionState: () => controller.getState().connection,
   pageRuntimeService,
   screenshotService,
-  sendTabMessage: async (tabId, message) => sendFrameMessage(tabId, message),
+  sendTabMessage: async (tabId, message, frameId) => sendFrameMessage(tabId, message, frameId),
   tabActions,
   tabService
 })
@@ -119,9 +121,21 @@ controller = createConnectionController({
 
     return stored[OPT_IN_KEY] === true
   },
-  requestHandler: async request => { await networkReady;
+  requestHandler: async (request, signal) => {
+    await networkReady
 
- return dispatchRequest(request) },
+    if (signal?.aborted) { return { id: request.id, type: 'response', error: { code: 'REQUEST_CANCELLED', message: 'Request cancelled.' } } }
+    const mutation = !['status', 'tabs', 'query', 'snapshot', 'screenshot', 'console'].includes(request.method)
+
+    const cancel = (): void => {
+      if (mutation && typeof request.arguments.tabId === 'number') { void debuggerService.cancel(request.arguments.tabId) }
+    }
+
+    signal?.addEventListener('abort', cancel, { once: true })
+
+    try { return await dispatchRequest(request) }
+    finally { signal?.removeEventListener('abort', cancel) }
+  },
   writeOptIn: async optedIn => {
     await chrome.storage.local.set({ [OPT_IN_KEY]: optedIn })
   }

@@ -66,6 +66,10 @@ const PREFIXED_TOKEN = /\b(?:gh[pousr]_|sk[-_](?:live|test)[-_]|eyJ)[A-Za-z0-9._
 const SENSITIVE_IDENTITY = /(?:api[-_ ]?(?:key|token)|access[-_ ]?token|auth(?:orization)?|bearer|client[-_ ]?secret|credential|password|passcode|secret|token|one[-_ ]?time|2fa|otp|card|cc[-_ ]?(?:csc|cvv|exp|number)|cvv|cvc|security[-_ ]?code|expiry|expiration)/iu
 const ROLE_LIST = /^[a-z][a-z0-9-]{0,63}(?:\s+[a-z][a-z0-9-]{0,63})*$/u
 
+function shadowRootFor(element: Element): ShadowRoot | null {
+  return element.shadowRoot ?? (typeof chrome !== 'undefined' ? chrome.dom?.openOrClosedShadowRoot(element as HTMLElement) : null) ?? null
+}
+
 function clampLimit(value: number | undefined, maximum: number): number {
   if (value === undefined) { return maximum }
 
@@ -336,7 +340,9 @@ export function createPageInspector(
 
         if (visibleOnly && !visible(element)) { continue }
 
-        if (element.shadowRoot) { visit(element.shadowRoot) }
+        const shadow = shadowRootFor(element)
+
+        if (shadow) { visit(shadow) }
 
         if (element.tagName === 'IFRAME' || element.tagName === 'FRAME') {
           const frame = element as HTMLIFrameElement
@@ -372,7 +378,9 @@ export function createPageInspector(
         yield node
 
         if (isEligible(node) && (!visibleOnly || visible(node))) {
-          if (node.shadowRoot) { yield* walk(node.shadowRoot) }
+          const shadow = shadowRootFor(node)
+
+          if (shadow) { yield* walk(shadow) }
 
           if (node.tagName === 'IFRAME' || node.tagName === 'FRAME') {
             let child: Document | null = null

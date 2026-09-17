@@ -23,8 +23,24 @@ export async function sendFrameMessage(tabId: number, message: unknown, frameId 
 interface Locator { steps: Array<{ kind: string, selector: string }> }
 interface Located { locator: Locator, ref: string, sensitive: boolean, documentId: string }
 
+const frameSessions = new Map<number, Map<string, { parent?: string }>>()
+
+export function trackFrameSession(tabId: number, parent: string | undefined, method: string, params: Record<string, unknown>): void {
+  if (method === 'Target.attachedToTarget' && (params.targetInfo as { type?: string } | undefined)?.type === 'iframe' && typeof params.sessionId === 'string') {
+    const sessions = frameSessions.get(tabId) ?? new Map<string, { parent?: string }>()
+    frameSessions.set(tabId, sessions)
+    sessions.set(params.sessionId, { parent })
+    void chrome.debugger.sendCommand({ tabId, sessionId: params.sessionId }, 'Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: false }).catch(() => undefined)
+  }
+
+  if (method === 'Target.detachedFromTarget' && typeof params.sessionId === 'string') { frameSessions.get(tabId)?.delete(params.sessionId) }
+}
+
+export function clearFrameSessions(tabId: number): void { frameSessions.delete(tabId) }
+
 // Serializable isolated-world function. Never reads input values or page secrets.
-export function inspectTarget(locator: Locator | null, action: string, payloads?: Array<{ name: string, data: string }>, allowedUrls?: string[]) {
+export function inspectTarget(locator: Locator | null, action: string, payloads?: Array<{ name: string, data: string }> | null, allowedUrls?: string[] | null, point?: { x: number, y: number } | null) {
+  const shadow = (node: Element): ShadowRoot | null => node.shadowRoot ?? (typeof chrome !== 'undefined' ? chrome.dom?.openOrClosedShadowRoot(node as HTMLElement) : null) ?? null
   let root: Document | ShadowRoot = document
   let element: Element | null = null
 
@@ -35,8 +51,10 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
       if (!element) { throw new Error('STALE_TARGET') }
 
       if (step.kind === 'shadow') {
-        if (!element.shadowRoot) { throw new Error('CLOSED_SHADOW_ROOT') }
-        root = element.shadowRoot
+        const child = shadow(element)
+
+        if (!child) { throw new Error('SHADOW_ROOT_UNAVAILABLE') }
+        root = child
       } else if (step.kind === 'frame') {
         const child: Document | null = (element as HTMLIFrameElement).contentDocument
 
@@ -48,7 +66,9 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
     element = document.activeElement
 
     for (let depth = 0; depth < 32 && element; depth++) {
-      if (element.shadowRoot?.activeElement) { element = element.shadowRoot.activeElement;
+      const active = shadow(element)?.activeElement
+
+      if (active) { element = active;
 
  continue }
 
@@ -63,14 +83,24 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
 
       break
     }
-  } else { element = document.elementFromPoint(innerWidth / 2, innerHeight / 2) }
+  } else {
+    const x = point?.x ?? innerWidth / 2, y = point?.y ?? innerHeight / 2
+    element = document.elementFromPoint(x, y)
+
+    for (let depth = 0; depth < 32 && element; depth++) {
+      const hit = shadow(element)?.elementFromPoint(x, y)
+
+      if (!hit || hit === element) { break }
+      element = hit
+    }
+  }
 
   if (!element) { throw new Error('ELEMENT_NOT_FOUND') }
 
   if (element.tagName === 'IFRAME' && action !== 'screenshot') { throw new Error('FRAME_TARGET_REQUIRED') }
 
   // Unknown custom elements may hide a focused secret in a closed root: fail closed.
-  if (element.tagName.includes('-') && !element.shadowRoot) { throw new Error('CLOSED_SHADOW_ROOT') }
+  if (element.tagName.includes('-') && !shadow(element) && (typeof chrome === 'undefined' || !chrome.dom?.openOrClosedShadowRoot)) { throw new Error('CLOSED_SHADOW_ROOT') }
   const control = element.closest('input,textarea,select,[contenteditable]') ?? element
   const a = (name: string) => control.getAttribute(name) ?? ''
   const labels = Array.from((control as HTMLInputElement).labels ?? []).map(label => label.textContent ?? '').join(' ')
@@ -81,12 +111,12 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
 
   if (allowedUrls && !allowedUrls.includes(element.ownerDocument.URL)) { throw new Error('TARGET_URL_CHANGED') }
 
-  if (action !== 'screenshot' && action !== 'inspect') { element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }) }
+  if (!point && action !== 'screenshot' && action !== 'inspect') { element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }) }
   const r = element.getBoundingClientRect()
 
   if (action !== 'screenshot' && action !== 'key' && action !== 'inspect') {
     const owner = element.getRootNode() as Document | ShadowRoot
-    const hit = owner.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    const hit = owner.elementFromPoint(point?.x ?? r.x + r.width / 2, point?.y ?? r.y + r.height / 2)
 
     if (!hit || (hit !== element && (!element.contains(hit) || hit.closest('input,textarea,select,[contenteditable]') !== null))) { throw new Error('TARGET_OCCLUDED') }
   }
@@ -123,7 +153,7 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
     control.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  return { x: x + r.width / 2, y: y + r.height / 2, boundingBox: { x, y, width: r.width, height: r.height }, sensitive, editable, fileInput, urls }
+  return { x: point ? point.x + x - r.x : x + r.width / 2, y: point ? point.y + y - r.y : y + r.height / 2, boundingBox: { x, y, width: r.width, height: r.height }, sensitive, editable, fileInput, urls }
 }
 
 export async function prepareChromeTarget(tabId: number, action: string, args: Record<string, unknown>): Promise<PreparedTarget> {
@@ -132,6 +162,7 @@ export async function prepareChromeTarget(tabId: number, action: string, args: R
 
   if (!frame || !isControllableHttpUrl(frame.url)) { throw new DebuggerError('TARGET_URL_BLOCKED', 'The frame URL is not permitted.') }
   let located: Located | undefined
+  const point = typeof args.x === 'number' && typeof args.y === 'number' ? { x: args.x, y: args.y } : null
 
   if (typeof args.target === 'string') {
     const response = await sendFrameMessage(tabId, { type: 'hermes.bridge.resolve', version: 1, target: args.target }, frameId) as { type?: string, result?: Located, error?: { code?: string } }
@@ -142,13 +173,13 @@ export async function prepareChromeTarget(tabId: number, action: string, args: R
     if (located.sensitive && action !== 'screenshot') { throw new DebuggerError('SENSITIVE_FIELD', 'Sensitive input is blocked.') }
   }
 
-  const results = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: inspectTarget, args: [located?.locator ?? null, action === 'key' ? 'key' : 'inspect'] })
+  const results = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: inspectTarget, args: [located?.locator ?? null, action === 'key' ? 'key' : 'inspect', null, null, point] })
   let target = results[0]?.result
 
   if (!target || !target.urls.every(isControllableHttpUrl)) { throw new DebuggerError('TARGET_URL_BLOCKED', 'The frame URL is not permitted.') }
 
   if (action !== 'screenshot' && action !== 'key') {
-    const checked = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: inspectTarget, args: [located?.locator ?? null, action, undefined, target.urls] })
+    const checked = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: inspectTarget, args: [located?.locator ?? null, action, null, target.urls, point] })
     target = checked[0]?.result
 
     if (!target || !target.urls.every(isControllableHttpUrl)) { throw new DebuggerError('TARGET_URL_BLOCKED', 'The frame URL changed.') }
@@ -162,34 +193,56 @@ export async function prepareChromeTarget(tabId: number, action: string, args: R
     await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: (value: string) => document.documentElement.setAttribute('data-hermes-frame-probe', value), args: [marker] })
 
     try {
-      const tree = await chrome.debugger.sendCommand({ tabId }, 'Page.getFrameTree') as { frameTree: { frame: { id: string }, childFrames?: unknown[] } }
-      const frames: string[] = []
+      await chrome.debugger.sendCommand({ tabId }, 'Target.setAutoAttach', { autoAttach: true, flatten: true, waitForDebuggerOnStart: false })
+      const sessions = frameSessions.get(tabId) ?? new Map<string, { parent?: string }>()
+      const roots = new Map<string | undefined, string>()
+      let cdpFrame: string | undefined
+      let foundSession: string | undefined
 
-      const collect = (node: typeof tree.frameTree) => { frames.push(node.frame.id);
+      for (const sessionId of [undefined, ...sessions.keys()]) {
+        const debuggee = { tabId, ...(sessionId ? { sessionId } : {}) }
+        const tree = await chrome.debugger.sendCommand(debuggee, 'Page.getFrameTree') as { frameTree: { frame: { id: string }, childFrames?: unknown[] } }
+        roots.set(sessionId, tree.frameTree.frame.id)
+        const frames: string[] = []
+
+        const collect = (node: typeof tree.frameTree): void => { frames.push(node.frame.id);
 
  for (const child of node.childFrames ?? []) { collect(child as typeof node) } }
 
-      collect(tree.frameTree)
-      let cdpFrame: string | undefined
+        collect(tree.frameTree)
 
-      for (const id of frames) {
-        const world = await chrome.debugger.sendCommand({ tabId }, 'Page.createIsolatedWorld', { frameId: id, worldName: 'hermes-frame-binding' }) as { executionContextId: number }
-        const result = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', { contextId: world.executionContextId, expression: `document.documentElement.getAttribute('data-hermes-frame-probe') === ${JSON.stringify(marker)}`, returnByValue: true }) as { result: { value?: boolean } }
+        for (const id of frames) {
+          try {
+            const world = await chrome.debugger.sendCommand(debuggee, 'Page.createIsolatedWorld', { frameId: id, worldName: 'hermes-frame-binding' }) as { executionContextId: number }
+            const result = await chrome.debugger.sendCommand(debuggee, 'Runtime.evaluate', { contextId: world.executionContextId, expression: `document.documentElement.getAttribute('data-hermes-frame-probe') === ${JSON.stringify(marker)}`, returnByValue: true }) as { result: { value?: boolean } }
 
-        if (result.result.value) { cdpFrame = id;
+            if (result.result.value) { cdpFrame = id; foundSession = sessionId;
 
  break }
+          } catch { /* Cross-process frame worlds belong to their attached session. */ }
+        }
+
+        if (cdpFrame) { break }
       }
 
       if (!cdpFrame) { throw new DebuggerError('FRAME_UNAVAILABLE', 'The frame could not be bound to the debugger.') }
-      const owner = await chrome.debugger.sendCommand({ tabId }, 'DOM.getFrameOwner', { frameId: cdpFrame }) as { backendNodeId: number }
-      const box = await chrome.debugger.sendCommand({ tabId }, 'DOM.getBoxModel', owner) as { model: { content: number[] } }
-      const q = box.model.content
+      let ownerSession = foundSession && roots.get(foundSession) === cdpFrame ? sessions.get(foundSession)?.parent : foundSession
 
-      // Non-axis-aligned transforms cannot safely map CSS input coordinates.
-      if (Math.abs(q[1]! - q[3]!) > 0.5 || Math.abs(q[0]! - q[6]!) > 0.5) { throw new DebuggerError('FRAME_TRANSFORM_UNSUPPORTED', 'Rotated frame input is unsupported.') }
-      target.x += q[0]!; target.y += q[1]!
-      target.boundingBox.x += q[0]!; target.boundingBox.y += q[1]!
+      for (let depth = 0; depth < 16; depth++) {
+        const debuggee = { tabId, ...(ownerSession ? { sessionId: ownerSession } : {}) }
+        const owner = await chrome.debugger.sendCommand(debuggee, 'DOM.getFrameOwner', { frameId: cdpFrame }) as { backendNodeId: number }
+        const box = await chrome.debugger.sendCommand(debuggee, 'DOM.getBoxModel', owner) as { model: { content: number[] } }
+        const q = box.model.content
+
+        if (Math.abs(q[1]! - q[3]!) > 0.5 || Math.abs(q[0]! - q[6]!) > 0.5) { throw new DebuggerError('FRAME_TRANSFORM_UNSUPPORTED', 'Rotated frame input is unsupported.') }
+        target.x += q[0]!; target.y += q[1]!
+        target.boundingBox.x += q[0]!; target.boundingBox.y += q[1]!
+
+        if (!ownerSession) { break }
+        const tree = await chrome.debugger.sendCommand(debuggee, 'Page.getFrameTree') as { frameTree: { frame: { id: string } } }
+        cdpFrame = tree.frameTree.frame.id
+        ownerSession = sessions.get(ownerSession)?.parent
+      }
     } finally {
       await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: () => document.documentElement.removeAttribute('data-hermes-frame-probe') }).catch(() => undefined)
     }

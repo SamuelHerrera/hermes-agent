@@ -19,7 +19,7 @@ export async function hideControlIndicators(api: IndicatorTabsApi): Promise<void
         await api.sendMessage(tab.id, {
           active: false,
           type: 'hermes.bridge.indicator',
-          version: 1
+          version: 2
         })
       } catch {
         // Tabs without an injected content script are expected and remain untouched.

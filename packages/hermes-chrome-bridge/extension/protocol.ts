@@ -4,6 +4,7 @@ export type BridgeMethod = 'click' | 'close' | 'console' | 'eval' | 'focus' | 'h
 
 export interface NativeRequest {
   arguments: Record<string, unknown>
+  controllerId?: string
   id: string
   method: string
   type: 'request'
@@ -16,4 +17,4 @@ export interface NativeResponse {
   type: 'response'
 }
 
-export type NativeRequestHandler = (request: NativeRequest) => Promise<NativeResponse>
+export type NativeRequestHandler = (request: NativeRequest, signal?: AbortSignal) => Promise<NativeResponse>

@@ -35,7 +35,7 @@ describe('MCP response projection integration', () => {
     const response = await client.callTool({ name: 'chrome_bridge_tabs', arguments: { detail: 'full' } })
     expect(response.isError).not.toBe(true)
     expect(response.content).toEqual([{ type: 'text', text: JSON.stringify(data) }])
-    expect(route).toHaveBeenCalledWith({ method: 'tabs', arguments: {} })
+    expect(route).toHaveBeenCalledWith({ method: 'tabs', arguments: {} }, expect.any(AbortSignal))
     const rejected = await client.callTool({ name: 'chrome_bridge_tabs', arguments: { detail: 'invalid' } })
     expect(rejected.isError).toBe(true)
     expect(route).toHaveBeenCalledTimes(1)

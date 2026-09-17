@@ -70,6 +70,31 @@ beforeEach(() => {
 })
 
 describe('extension connection lifecycle', () => {
+  it('cancels only the matching controller request and aborts all work on disconnect', async () => {
+    const nativePort = new FakePort()
+    const signals: AbortSignal[] = []
+    const pending = deferred<{ id: string, type: 'response', result: object }>()
+
+    const controller = createConnectionController({
+      connectNative: () => nativePort, readOptIn: async () => true, writeOptIn: async () => undefined,
+      requestHandler: async (_request, signal) => { signals.push(signal!);
+
+ return pending.promise }
+    })
+
+    await controller.start()
+    nativePort.onMessage.emit({ connected: true, type: 'bridge.ready', version: 1 })
+    nativePort.onMessage.emit({ type: 'request', method: 'click', arguments: { tabId: 1 }, id: 'first', controllerId: 'owner' })
+    expect(signals).toHaveLength(1)
+    nativePort.onMessage.emit({ type: 'cancel', id: 'first', controllerId: 'other' })
+    expect(signals[0].aborted).toBe(false)
+    nativePort.onMessage.emit({ type: 'cancel', id: 'first', controllerId: 'owner' })
+    expect(signals[0].aborted).toBe(true)
+    nativePort.onMessage.emit({ type: 'request', method: 'click', arguments: { tabId: 2 }, id: 'second', controllerId: 'owner' })
+    await controller.disconnect()
+    expect(signals[1].aborted).toBe(true)
+    pending.resolve({ id: 'first', type: 'response', result: {} })
+  })
   it('does not connect on startup until the user explicitly opts in', async () => {
     const { connectNative, controller } = setup(false)
 
@@ -209,7 +234,7 @@ describe('extension connection lifecycle', () => {
     port.onMessage.emit(request)
     await vi.waitFor(() => expect(port.sent).toHaveLength(1))
 
-    expect(requestHandler).toHaveBeenCalledWith(request)
+    expect(requestHandler).toHaveBeenCalledWith(request, expect.any(AbortSignal))
     expect(port.sent).toEqual([{ id: 'request-1', result: { count: 0 }, type: 'response' }])
   })
 

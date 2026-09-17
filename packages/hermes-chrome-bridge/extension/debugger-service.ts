@@ -26,9 +26,24 @@ interface Dependencies {
 
 export function createDebuggerService(deps: Dependencies) {
   const dialogs = new Map<number, { dialogId: string, type: string }>()
+  const dialogWaiters = new Map<number, Set<(error: Error) => void>>()
+  const held = new Map<number, Map<string, { method: string, params: Record<string, unknown> }>>()
+
+  const releaseHeld = async (id: number) => {
+    const input = held.get(id)
+    held.delete(id)
+
+    for (const release of input?.values() ?? []) {
+      await Promise.race([deps.send(id, release.method, release.params).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 500))])
+    }
+  }
 
   const event = (id: number, method: string, params: Record<string, unknown>) => {
-    if (method === 'Page.javascriptDialogOpening') { dialogs.set(id, { dialogId: crypto.randomUUID(), type: ['alert', 'confirm', 'prompt', 'beforeunload'].includes(String(params.type)) ? String(params.type) : 'unknown' }) }
+    if (method === 'Page.javascriptDialogOpening') {
+      dialogs.set(id, { dialogId: crypto.randomUUID(), type: ['alert', 'confirm', 'prompt', 'beforeunload'].includes(String(params.type)) ? String(params.type) : 'unknown' })
+
+      for (const reject of dialogWaiters.get(id) ?? []) { reject(new DebuggerError('DIALOG_OPEN', 'A JavaScript dialog is open; inspect and handle it before continuing.')) }
+    }
 
     if (method === 'Page.javascriptDialogClosed') { dialogs.delete(id) }
   }
@@ -41,7 +56,12 @@ export function createDebuggerService(deps: Dependencies) {
 
   const cancel = async (id: number) => {
     generations.set(id, generation(id) + 1)
+
+    for (const reject of dialogWaiters.get(id) ?? []) { reject(new DebuggerError('CANCELLED', 'The browser action was cancelled.')) }
+
+    if (dialogs.has(id)) { await Promise.race([deps.send(id, 'Page.handleJavaScriptDialog', { accept: false }).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 500))]) }
     dialogs.delete(id)
+    await releaseHeld(id)
 
     if (attached.delete(id)) { await deps.detach(id).catch(() => undefined) }
   }
@@ -72,10 +92,36 @@ export function createDebuggerService(deps: Dependencies) {
         check()
         await deps.assertControllable(id)
         check()
-        const result = await deps.send(id, method, params)
-        check()
+        const input = held.get(id) ?? new Map<string, { method: string, params: Record<string, unknown> }>()
+        held.set(id, input)
 
-        return result
+        if (method === 'Input.dispatchKeyEvent') {
+          if (params.type === 'keyDown') { input.set(`key:${String(params.key)}`, { method, params: { type: 'keyUp', key: params.key, windowsVirtualKeyCode: params.windowsVirtualKeyCode, modifiers: 0 } }) }
+
+          if (params.type === 'keyUp') { input.delete(`key:${String(params.key)}`) }
+        }
+
+        if (method === 'Input.dispatchMouseEvent') {
+          if (params.type === 'mousePressed') { input.set('mouse', { method, params: { type: 'mouseReleased', button: params.button, x: -1, y: -1, clickCount: 1 } }) }
+
+          if (params.type === 'mouseReleased') { input.delete('mouse') }
+        }
+
+        const waiters = dialogWaiters.get(id) ?? new Set<(error: Error) => void>()
+        dialogWaiters.set(id, waiters)
+        let rejectDialog!: (error: Error) => void
+        const dialog = new Promise<never>((_resolve, reject) => { rejectDialog = reject })
+
+        if (method.startsWith('Input.')) { waiters.add(rejectDialog) }
+
+        try {
+          const result = await Promise.race([deps.send(id, method, params), dialog])
+          check()
+
+          return result
+        } finally { waiters.delete(rejectDialog);
+
+ if (!waiters.size) { dialogWaiters.delete(id) } }
       }
 
       if (action === 'frames') { return deps.frames?.(id) ?? { frames: [] } }
@@ -89,6 +135,7 @@ export function createDebuggerService(deps: Dependencies) {
 
         if (args.promptText !== undefined) { throw new DebuggerError('SENSITIVE_DIALOG', 'Prompt text cannot be safely classified; use the browser manually.') }
         await send('Page.handleJavaScriptDialog', { accept: action === 'dialog_accept' })
+        await releaseHeld(id)
         dialogs.delete(id)
 
         return { handled: true }
@@ -127,7 +174,7 @@ export function createDebuggerService(deps: Dependencies) {
 
       const key = async (name: string, modifiers: string[] = []) => {
         const mask = modifiers.reduce((n, m) => n | ({ alt: 1, ctrl: 2, meta: 4, shift: 8 }[m] ?? 0), 0)
-        const codes: Record<string, number> = { Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 }
+        const codes: Record<string, number> = { Shift: 16, Control: 17, Alt: 18, Meta: 91, Enter: 13, Tab: 9, Escape: 27, Backspace: 8, Delete: 46, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, ' ': 32 }
         const code = codes[name] ?? (name.length === 1 ? name.toUpperCase().charCodeAt(0) : 0)
         const params = { key: name, modifiers: mask, windowsVirtualKeyCode: code, ...(name.length === 1 && mask === 0 ? { text: name } : {}), ...(name === 'Enter' ? { text: '\r' } : {}) }
         await send('Input.dispatchKeyEvent', { ...params, type: 'keyDown' })
@@ -186,12 +233,13 @@ export function createDebuggerService(deps: Dependencies) {
       if (action === 'scroll') { await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: target.x, y: target.y, deltaX: args.deltaX ?? 0, deltaY: args.deltaY ?? 0 }) }
 
       if (action === 'drag') {
-        const destination = await deps.prepare(id, action, { ...args, target: args.destination })
+        const destination = await deps.prepare(id, action, { ...args, target: args.destination, x: args.destinationX, y: args.destinationY })
 
         if (destination.sensitive) { throw new DebuggerError('SENSITIVE_FIELD', 'Sensitive browser input is blocked.') }
         await mouse('mousePressed')
 
         for (let step = 1; step <= 12; step++) {
+          await deps.indicate?.(id, target.x + (destination.x - target.x) * step / 12, target.y + (destination.y - target.y) * step / 12)
           await send('Input.dispatchMouseEvent', { type: 'mouseMoved', buttons: 1, button: 'left', x: target.x + (destination.x - target.x) * step / 12, y: target.y + (destination.y - target.y) * step / 12 })
         }
 
@@ -203,8 +251,16 @@ export function createDebuggerService(deps: Dependencies) {
 
     // JS dialogs can block an in-flight input command; their capabilities must
     // be handled out of band, but retain the same generation check.
-    if (action.startsWith('dialog_') && attached.has(id)) { return work() }
-    const next = (queues.get(id) ?? Promise.resolve()).catch(() => undefined).then(work)
+    const safeWork = async () => {
+      try { return await work() }
+      catch (error) {
+        if (!(error instanceof DebuggerError && error.code === 'DIALOG_OPEN')) { await releaseHeld(id) }
+        throw error
+      }
+    }
+
+    if (action.startsWith('dialog_') && attached.has(id)) { return safeWork() }
+    const next = (queues.get(id) ?? Promise.resolve()).catch(() => undefined).then(safeWork)
     queues.set(id, next)
     void next.finally(() => { if (queues.get(id) === next) { queues.delete(id) } }).catch(() => undefined)
 
@@ -230,6 +286,9 @@ export function createDebuggerService(deps: Dependencies) {
   }
 
   return { run, cancel, event, operation, disconnect: async () => { await Promise.all([...new Set([...queues.keys(), ...attached])].map(cancel)) }, reconnect: () => revoked.clear(), detached: (id: number, reason?: string) => { attached.delete(id); dialogs.delete(id); generations.set(id, generation(id) + 1);
+
+    for (const reject of dialogWaiters.get(id) ?? []) { reject(new DebuggerError('CANCELLED', 'The browser debugger was detached.')) }
+    void releaseHeld(id)
 
  if (reason === 'canceled_by_user') { revoked.add(id) } } }
 }
