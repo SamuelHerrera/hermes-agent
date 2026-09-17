@@ -34,10 +34,17 @@ await writeFile(join(extensionPath, 'manifest.json'), JSON.stringify(manifest))
 const contexts = []
 const popups = []
 const pages = []
+const downloadedArtifacts = []
 const client = new Client({ name: 'two-profile-live-smoke', version: '1' })
 const evidence = { browser: chromium.executablePath(), profiles: [], checks: [] }
 let transport
 const fixtureServer = createServer((request, response) => {
+  if (request.url.startsWith('/download')) {
+    response.setHeader('Content-Type', 'text/plain')
+    response.setHeader('Content-Disposition', 'attachment; filename="hermes-fixture.txt"')
+    response.end('Hermes disposable development download\n')
+    return
+  }
   response.setHeader('Content-Type', 'text/html; charset=utf-8')
   if (request.url.startsWith('/frame')) {
     response.end('<!doctype html><label>Frame input<input id="frame-input"></label>')
@@ -45,9 +52,16 @@ const fixtureServer = createServer((request, response) => {
   }
   response.end(`<!doctype html><html><head><title>Hermes development fixture</title></head>
     <body><h1>Development fixture</h1><p>Disposable localhost page; no real data.</p>
+    <input id="fixture-file" type="file" multiple aria-label="Fixture attachment">
+    <div id="drag-source" draggable="true" style="display:inline-block;padding:20px;background:#ccf">Drag fixture</div>
+    <div id="drag-target" style="display:inline-block;padding:20px;background:#cfc">Drop fixture</div>
     <section id="shadow-host"></section><iframe src="/frame" title="Same-origin test frame"></iframe>
     <script>document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML=
-    '<label>Shadow input<input id="shadow-input"></label>';</script></body></html>`)
+    '<label>Shadow input<input id="shadow-input"></label>';
+    document.querySelector('#drag-source').ondragstart=e=>e.dataTransfer.setData('text/plain','fixture');
+    document.querySelector('#drag-target').ondragover=e=>e.preventDefault();
+    document.querySelector('#drag-target').ondrop=e=>{e.preventDefault();e.currentTarget.dataset.dropped=e.dataTransfer.getData('text/plain')};
+    </script></body></html>`)
 })
 await new Promise(resolveListen => fixtureServer.listen(0, '127.0.0.1', resolveListen))
 const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`
@@ -58,6 +72,7 @@ async function call(method, args = {}, expectedError) {
   let result
   try { result = JSON.parse(text) } catch { result = { message: text } }
   const image = response.content.find(item => item.type === 'image')
+  if (method === 'screenshot' && !expectedError) { assert.ok(image, 'screenshots must use MCP image content') }
   if (image) { result.dataUrl = `data:${image.mimeType};base64,${image.data}` }
   if (expectedError) {
     assert.equal(response.isError, true, text)
@@ -92,6 +107,8 @@ try {
     await copyFile(installed.manifestPath, join(profile, 'NativeMessagingHosts/com.nous.hermes_chrome_bridge.json'))
     const context = await chromium.launchPersistentContext(profile, {
       headless: false,
+      downloadsPath: join(root, `downloads-${contexts.length}`),
+      acceptDownloads: true,
       env: { ...process.env, HOME: browserHome },
       args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
       viewport: { width: 1000, height: 760 }
@@ -149,6 +166,50 @@ try {
     assert.ok(capture.bytes > 0)
     await writeFile(join(evidenceRoot, `profile-${contexts.length}-interaction.png`), Buffer.from(capture.dataUrl.split(',')[1], 'base64'))
     evidence.checks.push(`${label}: MCP type/click/read-back and screenshot succeeded`)
+    for (const selector of ['#shadow-input', '#frame-input']) {
+      const found = await call('query', { tabId: opened.tabId, selector })
+      assert.equal(found.elements.length, 1)
+      await call('type', { tabId: opened.tabId, target: found.elements[0].ref, text: label })
+      const value = selector === '#frame-input'
+        ? await publicPage.frameLocator('iframe').locator(selector).inputValue()
+        : await publicPage.locator(selector).inputValue()
+      assert.equal(value, label)
+    }
+    evidence.checks.push(`${label}: shadow and same-origin frame refs drive trusted input`)
+
+    const fixtureFile = join(root, `upload-${contexts.length}.txt`)
+    await writeFile(fixtureFile, `Disposable upload: ${label}`)
+    await call('control', { tabId: opened.tabId, action: 'upload', target: '#fixture-file',
+      files: [fixtureFile], approvalIntent: 'explicit-user-approved-files' })
+    assert.equal(await publicPage.locator('#fixture-file').evaluate(async input => input.files[0].text()), `Disposable upload: ${label}`)
+    const downloaded = await call('control', { tabId: opened.tabId, action: 'download',
+      url: `${fixtureOrigin}/download`, filename: `fixture-${extensionId}-${contexts.length}.txt`,
+      approvalIntent: 'explicit-user-approved-download', maxBytes: 10000 })
+    assert.equal(downloaded.completed, true)
+    const downloadedPath = await worker.evaluate(async id => (await globalThis.chrome.downloads.search({ id }))[0].filename, downloaded.downloadId)
+    assert.equal(await readFile(downloadedPath, 'utf8'), 'Hermes disposable development download\n')
+    downloadedArtifacts.push(downloadedPath)
+    evidence.checks.push(`${label}: upload bytes and completed download verified on disk`)
+
+    publicPage.on('dialog', () => {})
+    const answer = publicPage.evaluate(() => globalThis.confirm('Disposable Hermes test'))
+    const dialog = await waitFor(() => call('control', { tabId: opened.tabId, action: 'dialog_inspect' }), value => value.dialogId, 'JS dialog missing')
+    await call('control', { tabId: opened.tabId, action: 'dialog_accept', dialogId: dialog.dialogId })
+    assert.equal(await answer, true)
+    evidence.checks.push(`${label}: JS dialog inspected and accepted by exact ID`)
+
+    await call('control', { tabId: opened.tabId, action: 'drag', target: '#drag-source', destination: '#drag-target' })
+    assert.equal(await publicPage.locator('#drag-target').getAttribute('data-dropped'), 'fixture')
+    evidence.checks.push(`${label}: HTML drag/drop reached the destination`)
+
+    await publicPage.locator('body').evaluate(body => { body.style.minHeight = '1800px' })
+    const full = await call('screenshot', { tabId: opened.tabId, fullPage: true, format: 'png' })
+    const fullBytes = Buffer.from(full.dataUrl.split(',')[1], 'base64')
+    assert.ok(fullBytes.readUInt32BE(20) > 760)
+    await writeFile(join(evidenceRoot, `profile-${contexts.length}-full.png`), fullBytes)
+    const elementImage = await call('screenshot', { tabId: opened.tabId, target: '#smoke-button', format: 'png' })
+    assert.ok(Buffer.from(elementImage.dataUrl.split(',')[1], 'base64').readUInt32BE(16) < 1000)
+    evidence.checks.push(`${label}: full-page and element screenshots verified as image bytes`)
     pages.push({ page: publicPage, tabId: opened.tabId, connectionId: identity.connectionId })
     evidence.version = context.browser()?.version()
   }
@@ -203,6 +264,7 @@ try {
     await popup.getByRole('button', { name: 'Disconnect', exact: true }).click({ timeout: 1000 }).catch(() => undefined)
   }
   await Promise.all(contexts.map(context => context.close()))
+  for (const path of downloadedArtifacts) { await rm(path, { force: true }) }
   await client.close().catch(() => undefined)
   await new Promise(resolveClose => fixtureServer.close(resolveClose))
   await writeFile(join(evidenceRoot, 'result.json'), JSON.stringify(evidence, null, 2))
