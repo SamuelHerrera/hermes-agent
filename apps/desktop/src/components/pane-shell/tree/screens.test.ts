@@ -78,6 +78,62 @@ it.each(['tabbed', 'scroll-windows'] as const)(
   }
 )
 
+it.each(['tabbed', 'scroll-windows'] as const)(
+  'preserves filtered terminal ownership but removes real deletion in %s mode',
+  async mode => {
+    const { store, screens, model, registry } = await setup()
+    const { $terminals, closeTerminal } = await import('@/app/right-sidebar/terminal/terminals')
+    const { watchTerminalPanes } = await import('@/app/right-sidebar/terminal/panes')
+    const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+    const { setLayoutSurfaceMode } = await import('./scroll-windows/store')
+    $showAllProfiles.set(true)
+    watchTerminalPanes()
+    $terminals.set([
+      { id: 'profile-a-first', profile: 'a', kind: 'user', title: 'First', auto: false, cwd: '/tmp' },
+      { id: 'profile-a-second', profile: 'a', kind: 'user', title: 'Second', auto: false, cwd: '/tmp' }
+    ])
+    const pane = 'terminal-instance:profile-a-first'
+    store.moveTreePanesToTabbedScreen([pane, 'terminal-instance:profile-a-second'], '5')
+    store.setActiveTabbedScreen('1')
+    setLayoutSurfaceMode(mode)
+    const saved = screens.$tabbedScreenTrees.get()['5']
+    $activeGatewayProfile.set('b')
+    $showAllProfiles.set(false)
+    expect(registry.getArea('panes').some(p => p.id === pane)).toBe(false)
+    expect($terminals.get()).toHaveLength(2)
+    expect(screens.$tabbedScreenTrees.get()['5']).toEqual(saved)
+    expect(screens.tabbedScreenOwner(pane)).toBe('5')
+    $showAllProfiles.set(true)
+    expect(registry.getArea('panes').some(p => p.id === pane)).toBe(true)
+    expect(screens.$tabbedScreenTrees.get()['5']).toEqual(saved)
+    $showAllProfiles.set(false)
+    closeTerminal('profile-a-first')
+    expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['5'])).not.toContain(pane)
+    expect(screens.tabbedScreenOwner('terminal-instance:profile-a-second')).toBe('5')
+    $showAllProfiles.set(true)
+    expect(registry.getArea('panes').some(p => p.id === pane)).toBe(false)
+    expect($terminals.get()).toHaveLength(1)
+  }
+)
+
+it('retains scoped-out terminal placement when the mirror first restores', async () => {
+  const { screens, model, registry } = await setup()
+  const { $terminals, closeTerminal } = await import('@/app/right-sidebar/terminal/terminals')
+  const { watchTerminalPanes } = await import('@/app/right-sidebar/terminal/panes')
+  const { $activeGatewayProfile, $showAllProfiles } = await import('@/store/profile')
+  $activeGatewayProfile.set('b')
+  $showAllProfiles.set(false)
+  $terminals.set([{ id: 'saved-a', profile: 'a', kind: 'user', title: 'Saved', auto: false, cwd: '/tmp' }])
+  const pane = 'terminal-instance:saved-a'
+  const saved = model.split('row', [model.group(['sessions']), model.group([pane]), model.group(['files'])])
+  screens.$tabbedScreenTrees.set({ ...screens.$tabbedScreenTrees.get(), '5': saved })
+  watchTerminalPanes()
+  expect(screens.$tabbedScreenTrees.get()['5']).toEqual(saved)
+  expect(registry.getArea('panes').some(p => p.id === pane)).toBe(false)
+  closeTerminal('saved-a')
+  expect(model.allPaneIds(screens.$tabbedScreenTrees.get()['5'])).not.toContain(pane)
+})
+
 it('retains an empty center after closing the last secondary-screen tab', async () => {
   const { store, model, registry } = await setup()
   store.setActiveTabbedScreen('2')

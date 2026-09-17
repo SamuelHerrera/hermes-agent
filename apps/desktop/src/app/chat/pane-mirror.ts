@@ -18,6 +18,9 @@ import type { TileDock } from '@/store/session-states'
 export interface PaneMirror<T> {
   /** Reactive source list. */
   source: ReadableAtom<T[]>
+  /** Unfiltered lifetime list, when source is only a visibility projection.
+   *  Filtered-out tiles keep their saved desktop placement until truly removed. */
+  retainedSource?: ReadableAtom<readonly T[]>
   /** Extra atoms whose changes should re-sync (e.g. titles living elsewhere). */
   also?: ReadableAtom<unknown>[]
   /** Stable key + pane-id seed for a tile. */
@@ -76,6 +79,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
   const sync = () => {
     const tiles = cfg.source.get()
     const wanted = new Set(tiles.map(cfg.key))
+    const retained = cfg.retainedSource ? new Set(cfg.retainedSource.get().map(cfg.key)) : wanted
 
     for (const tile of tiles) {
       const key = cfg.key(tile)
@@ -130,16 +134,18 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
       if (!wanted.has(key)) {
         entry.dispose()
         registered.delete(key)
-        removeTreePane(paneId(key))
+
+        if (!retained.has(key)) {
+          removeTreePane(paneId(key))
+        }
       }
     }
 
-    // Prune tree panes the SHARED tree persisted for a tile we never registered
-    // this session and that isn't wanted now — a profile switch reloads with the
-    // other profile's tile panes still stacked in. (`registered` is empty after a
-    // reload, so the loop above can't catch these.)
+    // Prune genuinely removed tiles even after reload, when registered is empty.
+    // A filtered source may exclude still-owned tiles: retain those saved slots
+    // without registering their content until they become visible again.
     for (const id of treePanesWithPrefix(`${cfg.prefix}:`)) {
-      if (!wanted.has(id.slice(cfg.prefix.length + 1))) {
+      if (!retained.has(id.slice(cfg.prefix.length + 1))) {
         removeTreePane(id)
       }
     }
@@ -148,6 +154,7 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
   return () => {
     sync()
     cfg.source.listen(sync)
+    cfg.retainedSource?.listen(sync)
     cfg.also?.forEach(atom => atom.listen(sync))
   }
 }
