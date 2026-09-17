@@ -64,7 +64,10 @@ function setup() {
     eval: vi.fn(async () => ({ title: 'Test' }))
   }
 
+  const debuggerService = { run: vi.fn(async (_id: number, action: string, args: Record<string, unknown>) => action === 'screenshot' ? screenshotService.capture(args as { format: 'jpeg' | 'png', tabId: number }) : { route: 'trusted', dispatched: true }), operation: vi.fn(async (_id: number, fn: () => Promise<unknown>) => fn()), cancel: vi.fn(), event: vi.fn(), disconnect: vi.fn(), detached: vi.fn(), reconnect: vi.fn() }
+
   const dispatch = createBridgeRequestDispatcher({
+    debuggerService,
     getConnectionState: () => 'connected',
     pageRuntimeService,
     screenshotService,
@@ -73,10 +76,18 @@ function setup() {
     tabService
   })
 
-  return { dispatch, pageRuntimeService, screenshotService, sendTabMessage, tabActions, tabService }
+  return { debuggerService, dispatch, pageRuntimeService, screenshotService, sendTabMessage, tabActions, tabService }
 }
 
 describe('background bridge request dispatch', () => {
+  it('routes default input through debugger and forwards projection bounds', async () => {
+    const { dispatch, debuggerService, sendTabMessage } = setup()
+    await dispatch({ id: 'trusted', type: 'request', method: 'click', arguments: { tabId: 9, target: '#a' } })
+    expect(debuggerService.run).toHaveBeenCalledWith(9, 'click', { tabId: 9, target: '#a' })
+    expect(sendTabMessage).not.toHaveBeenCalled()
+    await dispatch({ id: 'inspect', type: 'request', method: 'snapshot', arguments: { tabId: 9, selector: 'button', limit: 500, fields: ['ref'], maxChars: 100, visibleOnly: true } })
+    expect(sendTabMessage).toHaveBeenCalledWith(9, expect.objectContaining({ selector: 'button', limit: 500, fields: ['ref'], maxChars: 100, visibleOnly: true }))
+  })
   it('returns bounded safe tab discovery through the tabs method', async () => {
     const { dispatch, tabService } = setup()
 
@@ -182,7 +193,7 @@ describe('background bridge request dispatch', () => {
     for (const request of [
       { arguments: { format: 'invalid' }, id: '1', method: 'snapshot' },
       { arguments: { selector: '', tabId: 1 }, id: '2', method: 'query' },
-      { arguments: { limit: 101, selector: 'button', tabId: 1 }, id: '3', method: 'query' }
+      { arguments: { limit: 501, selector: 'button', tabId: 1 }, id: '3', method: 'query' }
     ]) {
       await expect(dispatch({ ...request, type: 'request' })).resolves.toMatchObject({
         error: { code: 'INVALID_ARGUMENTS' }
@@ -271,7 +282,7 @@ describe('background bridge request dispatch', () => {
     expect(tabActions.close).toHaveBeenCalledWith({ tabId: 22 })
   })
 
-  it('routes click, type, key, scroll, and hover with strict bounded payloads', async () => {
+  it('routes explicitly downgraded DOM actions with strict bounded payloads', async () => {
     const { dispatch, sendTabMessage } = setup()
 
     const requests = [
@@ -283,7 +294,7 @@ describe('background bridge request dispatch', () => {
     ]
 
     for (const request of requests) {
-      await expect(dispatch({ ...request, type: 'request' })).resolves.toMatchObject({ type: 'response' })
+      await expect(dispatch({ ...request, arguments: { ...request.arguments, inputRoute: 'dom_event' }, type: 'request' })).resolves.toMatchObject({ type: 'response' })
     }
 
     expect(sendTabMessage.mock.calls.map(call => call[1])).toEqual([

@@ -179,7 +179,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     for (const call of [
       { arguments: { format: 'invalid' }, name: 'chrome_bridge_snapshot' },
       { arguments: { selector: '', tabId: 7 }, name: 'chrome_bridge_query' },
-      { arguments: { limit: 101, selector: 'button', tabId: 7 }, name: 'chrome_bridge_query' },
+      { arguments: { limit: 501, selector: 'button', tabId: 7 }, name: 'chrome_bridge_query' },
       { arguments: { selector: 'button', tabId: 0 }, name: 'chrome_bridge_query' }
     ]) {
       await expect(client.callTool(call)).resolves.toMatchObject({ isError: true })
@@ -428,6 +428,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     const { tools } = await client.listTools()
 
     expect(tools.map(tool => tool.name)).toEqual([
+      'chrome_bridge_control',
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',
@@ -473,6 +474,7 @@ describe('Hermes Chrome bridge MCP server', () => {
     const { tools } = await client.listTools()
 
     expect(tools.map(tool => tool.name)).toEqual([
+      'chrome_bridge_control',
       'chrome_bridge_status',
       'chrome_bridge_tabs',
       'chrome_bridge_select_tab',

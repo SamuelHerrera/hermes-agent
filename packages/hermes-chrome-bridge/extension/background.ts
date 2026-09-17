@@ -1,4 +1,7 @@
 import { isTrustedPopupCommand } from './background-policy.js'
+import { downloadToBrowserHost } from './debugger-download.js'
+import { createDebuggerService } from './debugger-service.js'
+import { prepareChromeTarget, sendFrameMessage, uploadChromeFiles } from './debugger-target.js'
 import { createIdentityStore } from './identity-store.js'
 import { hideControlIndicators } from './indicator-notifier.js'
 import {
@@ -10,6 +13,12 @@ import { createBridgeRequestDispatcher } from './request-dispatch.js'
 import { createScreenshotService } from './screenshot-service.js'
 import { createTabActions } from './tab-actions.js'
 import { createTabService } from './tab-service.js'
+import { isControllableHttpUrl, NETWORK_MODE_KEY, setNetworkMode } from './url-policy.js'
+
+const networkReady = chrome.storage.local.get(NETWORK_MODE_KEY).then(stored => setNetworkMode(stored[NETWORK_MODE_KEY] ?? 'development'))
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[NETWORK_MODE_KEY]) { setNetworkMode(changes[NETWORK_MODE_KEY].newValue ?? 'development') }
+})
 
 const OPT_IN_KEY = 'hermesChromeBridgeOptIn'
 
@@ -57,13 +66,43 @@ const screenshotService = createScreenshotService({
 
 const pageRuntimeService = createPageRuntimeService()
 
+const debuggerService = createDebuggerService({
+  assertControllable: async tabId => tabService.assertControllable(tabId),
+  attach: async tabId => chrome.debugger.attach({ tabId }, '1.3'),
+  detach: async tabId => chrome.debugger.detach({ tabId }),
+  send: async (tabId, method, params) => (await chrome.debugger.sendCommand({ tabId }, method, params) ?? {}) as Record<string, unknown>,
+  prepare: prepareChromeTarget,
+  upload: uploadChromeFiles,
+  frames: async tabId => ({ frames: (await chrome.webNavigation.getAllFrames({ tabId }) ?? []).filter(f => isControllableHttpUrl(f.url)).slice(0, 100).map(f => ({ frameId: f.frameId, parentFrameId: f.parentFrameId, origin: new URL(f.url).origin })) }),
+  indicate: async (tabId, x, y) => chrome.tabs.sendMessage(tabId, { type: 'hermes.bridge.indicator', active: true, x, y, version: 1 }).catch(() => undefined),
+  download: async (args, check) => downloadToBrowserHost({
+    download: async options => chrome.downloads.download(options),
+    search: async options => chrome.downloads.search(options),
+    cancel: async id => chrome.downloads.cancel(id),
+    pause: async () => new Promise(resolve => setTimeout(resolve, 100))
+  }, args, check)
+})
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (source.tabId !== undefined) { debuggerService.event(source.tabId, method, (params ?? {}) as Record<string, unknown>) }
+})
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (source.tabId !== undefined) { debuggerService.detached(source.tabId, reason) }
+})
+chrome.tabs.onRemoved.addListener(tabId => { void debuggerService.cancel(tabId) })
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  if (change.status === 'loading' || change.url !== undefined) { void debuggerService.cancel(tabId) }
+})
+chrome.runtime.onSuspend.addListener(() => { void debuggerService.disconnect() })
+
 let controller: ReturnType<typeof createConnectionController>
 
 const dispatchRequest = createBridgeRequestDispatcher({
+  debuggerService,
   getConnectionState: () => controller.getState().connection,
   pageRuntimeService,
   screenshotService,
-  sendTabMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message),
+  sendTabMessage: async (tabId, message) => sendFrameMessage(tabId, message),
   tabActions,
   tabService
 })
@@ -80,7 +119,9 @@ controller = createConnectionController({
 
     return stored[OPT_IN_KEY] === true
   },
-  requestHandler: dispatchRequest,
+  requestHandler: async request => { await networkReady;
+
+ return dispatchRequest(request) },
   writeOptIn: async optedIn => {
     await chrome.storage.local.set({ [OPT_IN_KEY]: optedIn })
   }
@@ -98,6 +139,7 @@ controller.subscribe(state => {
   const connected = state.connection === 'connected'
 
   if (bridgeWasConnected && !connected) {
+    void debuggerService.disconnect()
     void hideControlIndicators({
       query: async () => chrome.tabs.query({}),
       sendMessage: async (tabId, message) => chrome.tabs.sendMessage(tabId, message)
@@ -120,6 +162,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
     return false
   }
+
+  if (message.type === 'bridge.connect') { debuggerService.reconnect() }
 
   const action = message.type === 'bridge.connect'
     ? controller.connect(message.label)
