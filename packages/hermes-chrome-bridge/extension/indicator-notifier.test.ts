@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { hideControlIndicators } from './indicator-notifier.js'
+import { hideControlIndicators, notifyControlActivity } from './indicator-notifier.js'
 
 describe('indicator disconnect notifier', () => {
+  it('sends only cursor coordinates to the top frame, never broadcasting target metadata', async () => {
+    const sendMessage = vi.fn(async () => undefined)
+    const target = { x: 43, y: 57, sensitive: false, boundingBox: { x: 0 }, ref: 'private-ref' }
+    await notifyControlActivity({ sendMessage }, 1, target)
+    expect(sendMessage).toHaveBeenCalledExactlyOnceWith(1, { type: 'hermes.bridge.indicator', active: true, version: 2, x: 43, y: 57 }, { frameId: 0 })
+  })
   it('hides all reachable indicators and ignores unavailable tabs', async () => {
     const sendMessage = vi.fn(async (tabId: number) => {
       if (tabId === 2) { throw new Error('content script unavailable') }

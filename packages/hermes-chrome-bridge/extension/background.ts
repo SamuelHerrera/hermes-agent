@@ -3,7 +3,7 @@ import { downloadToBrowserHost } from './debugger-download.js'
 import { createDebuggerService } from './debugger-service.js'
 import { clearFrameSessions, prepareChromeTarget, sendFrameMessage, trackFrameSession, uploadChromeFiles } from './debugger-target.js'
 import { createIdentityStore } from './identity-store.js'
-import { hideControlIndicators } from './indicator-notifier.js'
+import { hideControlIndicators, notifyControlActivity } from './indicator-notifier.js'
 import {
   type ConnectionState,
   createConnectionController
@@ -74,7 +74,7 @@ const debuggerService = createDebuggerService({
   prepare: prepareChromeTarget,
   upload: uploadChromeFiles,
   frames: async tabId => ({ frames: (await chrome.webNavigation.getAllFrames({ tabId }) ?? []).filter(f => isControllableHttpUrl(f.url)).slice(0, 100).map(f => ({ frameId: f.frameId, parentFrameId: f.parentFrameId, origin: new URL(f.url).origin })) }),
-  indicate: async (tabId, x, y) => chrome.tabs.sendMessage(tabId, { type: 'hermes.bridge.indicator', active: true, x, y, version: 2 }).catch(() => undefined),
+  indicate: async (tabId, x, y) => notifyControlActivity(chrome.tabs, tabId, { x, y }),
   download: async (args, check) => downloadToBrowserHost({
     download: async options => chrome.downloads.download(options),
     search: async options => chrome.downloads.search(options),

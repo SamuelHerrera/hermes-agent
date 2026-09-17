@@ -1,6 +1,15 @@
 interface IndicatorTabsApi {
   query(): Promise<Array<{ id?: number }>>
-  sendMessage(tabId: number, message: unknown): Promise<unknown>
+  sendMessage(tabId: number, message: unknown, options?: { frameId: number }): Promise<unknown>
+}
+
+export async function notifyControlActivity(api: Pick<IndicatorTabsApi, 'sendMessage'>, tabId: number, point?: { x: number, y: number }): Promise<void> {
+  try {
+    await api.sendMessage(tabId, {
+      type: 'hermes.bridge.indicator', active: true, version: 2,
+      ...(point ? { x: point.x, y: point.y } : {})
+    }, { frameId: 0 })
+  } catch { /* The indicator is cosmetic; never repeat an input to display it. */ }
 }
 
 export async function hideControlIndicators(api: IndicatorTabsApi): Promise<void> {
