@@ -100,6 +100,34 @@ try {
     await publicPage.waitForLoadState('domcontentloaded')
     // Distinguishable, non-secret fixture content on a real public page.
     await publicPage.locator('h1').evaluate((heading, text) => { heading.textContent = text }, label)
+    await publicPage.locator('body').evaluate(body => {
+      const document = body.ownerDocument
+      const hidden = document.createElement('input')
+      hidden.type = 'hidden'
+      body.prepend(hidden)
+      const input = document.createElement('input')
+      input.id = 'smoke-input'
+      const button = document.createElement('button')
+      button.id = 'smoke-button'
+      button.textContent = 'Check local input'
+      const output = document.createElement('output')
+      output.id = 'smoke-result'
+      button.addEventListener('click', () => { output.textContent = input.value })
+      body.append(input, button, output)
+    })
+    assert.equal(await publicPage.locator('input[type=hidden]').evaluate(input => input.labels), null)
+    for (const format of ['dom', 'accessibility', 'both']) {
+      const snapshot = await call('snapshot', { tabId: opened.tabId, format })
+      assert.ok(JSON.stringify(snapshot).includes(label))
+    }
+    evidence.checks.push(`${label}: all snapshot formats tolerate native null labels`)
+    await call('type', { tabId: opened.tabId, target: '#smoke-input', text: label })
+    await call('click', { tabId: opened.tabId, target: '#smoke-button' })
+    assert.equal((await call('query', { tabId: opened.tabId, selector: '#smoke-result' })).elements[0].text, label)
+    const capture = await call('screenshot', { tabId: opened.tabId })
+    assert.ok(capture.bytes > 0)
+    await writeFile(join(evidenceRoot, `profile-${contexts.length}-interaction.png`), Buffer.from(capture.dataUrl.split(',')[1], 'base64'))
+    evidence.checks.push(`${label}: MCP type/click/read-back and screenshot succeeded`)
     pages.push({ page: publicPage, tabId: opened.tabId, connectionId: identity.connectionId })
     evidence.version = context.browser()?.version()
   }

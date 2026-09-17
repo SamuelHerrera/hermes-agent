@@ -149,9 +149,10 @@ function inferRole(element: Element): string | undefined {
 }
 
 function labelledText(element: Element): string | undefined {
-  const labels = (element as Element & { labels?: ArrayLike<Element> }).labels
+  const labels = (element as Element & { labels?: ArrayLike<Element> | null }).labels
 
-  if (labels === undefined) { return undefined }
+  // Native HTMLInputElement.labels is null for hidden inputs, not an empty list.
+  if (labels === undefined || labels === null) { return undefined }
 
   const text = Array.from(labels)
     .map(label => label.textContent ?? '')

@@ -63,6 +63,21 @@ class FakeDocument {
 }
 
 describe('safe page inspector', () => {
+  it('handles hidden inputs with null native labels in every snapshot format', () => {
+    const hidden = new FakeElement({ attributes: { type: 'hidden' }, tagName: 'input' })
+    Object.defineProperty(hidden, 'labels', { value: null })
+    const button = new FakeElement({ tagName: 'button', text: 'Inbox' })
+    const inspector = createPageInspector(new FakeDocument([hidden, button]) as unknown as Document)
+
+    for (const format of ['dom', 'accessibility', 'both'] as const) {
+      const snapshot = inspector.snapshot({ format })
+      expect(snapshot.elements).toHaveLength(2)
+      expect(snapshot.elements[1]).toMatchObject(format === 'dom' ? { text: 'Inbox' } : { name: 'Inbox' })
+    }
+
+    expect(inspector.query({ selector: 'input' }).count).toBe(1)
+  })
+
   it('returns useful accessibility and DOM metadata with stable refs and bounds', () => {
     const button = new FakeElement({
       attributes: { 'aria-label': 'Submit order' },
