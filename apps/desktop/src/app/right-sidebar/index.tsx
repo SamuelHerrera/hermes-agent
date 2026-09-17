@@ -3,6 +3,7 @@ import type { ComponentProps } from 'react'
 
 import { TreeSkeleton } from '@/components/chat/skeletons'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
@@ -59,6 +60,8 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
   const canCollapse = Object.values(openState).some(Boolean)
 
   const previewFile = async (path: string) => {
+    const anchor = defaultOpenPaneAnchor('files')
+
     try {
       const preview = await normalizeOrLocalPreviewTarget(path, effectiveCwd || undefined)
 
@@ -66,7 +69,7 @@ export function RightSidebarPane({ onActivateFile, onActivateFolder }: RightSide
         throw new Error(r.couldNotPreview(path))
       }
 
-      openPreview(preview, 'file-browser')
+      openPreview(preview, 'file-browser', anchor)
     } catch (error) {
       notifyError(error, r.previewUnavailable)
     }

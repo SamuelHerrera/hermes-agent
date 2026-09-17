@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
 import { memo, useState } from 'react'
 
 import { StatusRow } from '@/components/chat/status-row'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
@@ -48,9 +49,10 @@ export const PreviewStatusRow = memo(function PreviewStatusRow({ item, onDismiss
     }
 
     setOpening(true)
+    const anchor = defaultOpenPaneAnchor()
 
     try {
-      openPreview(await resolveTarget(), 'tool-result')
+      openPreview(await resolveTarget(), 'tool-result', anchor)
     } catch (error) {
       notifyError(error, t.preview.unavailable)
     } finally {
@@ -59,6 +61,8 @@ export const PreviewStatusRow = memo(function PreviewStatusRow({ item, onDismiss
   }
 
   const openDefaultTarget = async () => {
+    const anchor = defaultOpenPaneAnchor()
+
     try {
       const target = await resolveTarget()
 
@@ -69,7 +73,7 @@ export const PreviewStatusRow = memo(function PreviewStatusRow({ item, onDismiss
       // (Remote HTML stays on openPreviewTargetInBrowser, which stages a
       // sanitized local copy before opening it.)
       if (target.kind === 'file' && target.previewKind !== 'html' && isDesktopFsRemoteMode()) {
-        openPreview(target, 'tool-result')
+        openPreview(target, 'tool-result', anchor)
 
         return
       }

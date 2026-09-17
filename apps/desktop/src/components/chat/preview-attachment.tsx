@@ -2,6 +2,7 @@ import { useStore } from '@nanostores/react'
 import { useEffect, useRef, useState } from 'react'
 
 import { useSessionView } from '@/app/chat/session-view'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { useI18n } from '@/i18n'
 import { MonitorPlay } from '@/lib/icons'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
@@ -56,6 +57,7 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
     const requestToken = ++requestTokenRef.current
     const requestTarget = target
     const requestCwd = cwd
+    const anchor = defaultOpenPaneAnchor()
 
     setOpening(true)
 
@@ -75,7 +77,7 @@ export function PreviewAttachment({ source = 'manual', target }: { source?: Prev
         throw new Error(`Could not open preview target: ${requestTarget}`)
       }
 
-      openPreview(preview, source)
+      openPreview(preview, source, anchor)
     } catch (error) {
       if (
         !mountedRef.current ||

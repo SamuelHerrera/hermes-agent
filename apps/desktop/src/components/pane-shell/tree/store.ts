@@ -527,6 +527,51 @@ export function registerLayoutResetHandler(fn: () => void): () => void {
  *  click lands on a non-focusable surface). Tracked by trackActiveTreeGroup. */
 export const $activeTreeGroup = atom<null | string>(isSecondaryWindow() ? null : readKey(ACTIVE_GROUP_KEY))
 
+// Sidebar/menu actions have no content caller. Keep the last content panel as
+// their fallback even after a click in the fixed navigation panel.
+let lastContentGroup: null | string = null
+
+/** Resolve normal opens: caller panel, focused content panel, then workspace.
+ * Capture before async work so a later focus change cannot retarget the open.
+ * Hover is deliberately not focus. Explicit split/drop actions keep their own
+ * direction and anchor. */
+export function defaultOpenPaneAnchor(callerPaneId?: string): string | undefined {
+  const tree = $layoutTree.get()
+
+  if (!tree) {
+    return undefined
+  }
+
+  const focusedId = $activeTreeGroup.get()
+  const groups = groupLeafIds(tree).map(id => findGroup(tree, id))
+
+  const candidates = [
+    callerPaneId ? findGroupOfPane(tree, callerPaneId) : null,
+    focusedId ? findGroup(tree, focusedId) : null,
+    lastContentGroup ? findGroup(tree, lastContentGroup) : null,
+    findGroupOfPane(tree, 'workspace'),
+    // An empty desktop's content slot takes priority over standing tool panes.
+    ...(groups.some(group => group?.panes.length === 0) ? [] : groups)
+  ]
+
+  for (const group of candidates) {
+    if (!group || fixedLeftPanelOwns(group) || group.minimized) {
+      continue
+    }
+
+    const shown = shownPanesInGroup(group)
+
+    const anchor = shown.includes(callerPaneId ?? '') ? callerPaneId :
+      shown.includes(group.active ?? '') ? group.active : shown[0]
+
+    if (anchor) {
+      return anchor
+    }
+  }
+
+  return undefined
+}
+
 /** Bumped whenever a pane's contributed STRIP TOOLS change shape (a toggle
  *  flipped, a handle registered). The strip reads `stripTools()` during render,
  *  so it needs one signal to re-read — generic on purpose: the tree knows
@@ -539,6 +584,13 @@ export function invalidateStripTools() {
 
 /** Record the interacted zone (pointerdown / focusin). Idempotent. */
 export function noteActiveTreeGroup(groupId: null | string) {
+  const tree = $layoutTree.get()
+  const group = tree && groupId ? findGroup(tree, groupId) : null
+
+  if (group && !fixedLeftPanelOwns(group)) {
+    lastContentGroup = group.id
+  }
+
   if (groupId !== $activeTreeGroup.get()) {
     $activeTreeGroup.set(groupId)
 
@@ -677,19 +729,9 @@ function focusedSessionGroup(): GroupNode | null {
   return tabTargetGroup(group => group.panes.some(isSessionStripPane))
 }
 
-/** The pane a NEW session tab should dock beside (⌘T): the focused chat zone's
- *  active session pane, else its first. Null when no zone hosts a chat strip —
- *  the caller falls back to the workspace. */
+/** New sessions follow the same focused-panel policy as files and pages. */
 export function focusedSessionTabAnchor(): null | string {
-  const group = focusedSessionGroup()
-
-  if (!group) {
-    return null
-  }
-
-  const active = group.active
-
-  return active && isSessionStripPane(active) ? active : (group.panes.find(isSessionStripPane) ?? null)
+  return defaultOpenPaneAnchor() ?? null
 }
 
 /** ⌘W: close the FOCUSED tile zone's active tab, unless it's the uncloseable
@@ -1615,6 +1657,10 @@ function adoptContributedPanes(): void {
 
     let target = findGroupOfPane(next, anchor ?? '')?.id
     let pos = dock?.pos ?? 'center'
+
+    if (placement === 'main' && pos === 'center' && !findGroupOfPane(next, dock?.pane ?? '')) {
+      target = groupLeafIds(next).find(id => findGroup(next, id)?.panes.length === 0) ?? target
+    }
 
     // Parking an empty workspace and then removing the outgoing profile's
     // tiles can leave no main group at all. `mainId` is only REGISTERED, not

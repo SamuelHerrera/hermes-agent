@@ -15,7 +15,7 @@ import { $activeTreeGroup, $layoutTree, revealTreePane } from '@/components/pane
 import { FileTypeIcon } from '@/components/ui/file-type-icon'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { $rightRailActiveTabId, type RightRailTabId, selectRightRailTab } from '@/store/layout'
-import { $previewTabs, closeRightRailTab, type PreviewTarget } from '@/store/preview'
+import { $previewTabs, closeRightRailTab, type PreviewTab, type PreviewTarget } from '@/store/preview'
 
 import { paneMirror } from './pane-mirror'
 import { PreviewTilePane } from './right-rail/preview'
@@ -120,15 +120,13 @@ export function watchPreviewTiles(): void {
   $activeTreeGroup.listen(follow)
 }
 
-const watchPreviewTileMirror = paneMirror<{ id: string }>({
+const watchPreviewTileMirror = paneMirror<PreviewTab>({
   source: $previewTabs,
   key: tab => tab.id,
   prefix: PREVIEW_TILE_PREFIX,
-  // Identical to route (page) tiles: its own zone docked beside main, sized by
-  // the split weights. NOT anchored to the file tree — the old rail was a
-  // files-adjacent strip, and carrying that over welded preview into the file
-  // browser's zone, so ⌘J (toggle file browser) took the preview with it.
-  dir: () => 'right',
+  // Normal opens are tabs in their caller's panel, not automatic splits.
+  dir: () => 'center',
+  anchor: tab => tab.anchor,
   minWidth: '22rem',
   title: previewTitle,
   tabLead: tabId => <PreviewTabLead tabId={tabId} />,

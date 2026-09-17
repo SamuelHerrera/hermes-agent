@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { gatewayEventCompletedFileDiff } from '@/lib/gateway-events'
 import { normalizeOrLocalPreviewTarget } from '@/lib/local-preview'
 import {
@@ -81,10 +82,16 @@ export function usePreviewRouting({ baseHandleGatewayEvent, currentCwd, requestG
           $sessionTiles.get().some(tile => tile.runtimeId === sid)
 
         if (target && (!event.session_id || onScreen(event.session_id))) {
+          const tile = $sessionTiles.get().find(tile => tile.runtimeId === event.session_id)
+
+          const caller = event.session_id === $activeSessionId.get() ? 'workspace' :
+            tile ? `session-tile:${tile.storedSessionId}` : undefined
+          const anchor = defaultOpenPaneAnchor(caller)
+
           void normalizeOrLocalPreviewTarget(target, $currentCwd.get() || currentCwd || undefined).then(resolved => {
             if (resolved) {
               const trimmedLabel = typeof label === 'string' ? label.trim() : ''
-              openPreview(trimmedLabel ? { ...resolved, label: trimmedLabel } : resolved, 'tool-result')
+              openPreview(trimmedLabel ? { ...resolved, label: trimmedLabel } : resolved, 'tool-result', anchor)
             }
           })
         }

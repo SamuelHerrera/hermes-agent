@@ -120,6 +120,17 @@ describe('open_preview', () => {
     const tiles = $sessionTiles.get()
 
     $sessionTiles.set([{ dir: 'right', runtimeId: 'tile-runtime', storedSessionId: 'stored-tile' }])
+    const tree = await import('@/components/pane-shell/tree/store')
+    const { group, split } = await import('@/components/pane-shell/tree/model')
+    const main = group(['workspace'])
+    const { registry } = await import('@/contrib/registry')
+
+    const disposers = ['workspace', 'session-tile:stored-tile'].map(id =>
+      registry.register({ id, area: 'panes', data: { placement: 'main' }, render: () => null })
+    )
+
+    tree.$layoutTree.set(split('row', [main, group(['session-tile:stored-tile'])]))
+    tree.noteActiveTreeGroup(main.id)
     render(<Harness />)
 
     try {
@@ -132,7 +143,10 @@ describe('open_preview', () => {
       })
 
       await waitFor(() => expect($previewTarget.get()?.path).toBe('/tmp/from-tile.html'))
+      expect($previewTabs.get()[0].anchor).toBe('session-tile:stored-tile')
     } finally {
+      disposers.forEach(dispose => dispose())
+      tree.$layoutTree.set(null)
       $sessionTiles.set(tiles)
     }
   })

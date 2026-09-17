@@ -15,6 +15,7 @@ import { RightSidebarPane } from '@/app/right-sidebar'
 import type { GroupSetter } from '@/app/shell/group-setter'
 import type { StatusbarItem } from '@/app/shell/statusbar-controls'
 import type { TitlebarTool } from '@/app/shell/titlebar-controls'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { DecodeText } from '@/components/ui/decode-text'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -68,10 +69,11 @@ export const $restartPreviewServer = atom<((url: string, context?: string) => Pr
 
 /** Open a file from the tree in the real preview pipeline. */
 function previewFile(path: string) {
+  const anchor = defaultOpenPaneAnchor('files')
   void normalizeOrLocalPreviewTarget(path, $currentCwd.get() || undefined)
     .then(target => {
       if (target) {
-        openPreview(target, 'file-browser')
+        openPreview(target, 'file-browser', anchor)
       }
     })
     .catch(() => undefined)

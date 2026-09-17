@@ -31,7 +31,7 @@ describe('changed files without native Git review', () => {
     expect(screen.queryByRole('button', { name: /^review/i })).toBeNull()
     const file = screen.getByRole('button', { name: /example.ts/ })
     fireEvent.click(file)
-    await waitFor(() => expect(openPreview).toHaveBeenCalledWith(target, 'file-browser'))
+    await waitFor(() => expect(openPreview).toHaveBeenCalledWith(target, 'file-browser', undefined))
     expect(normalize).toHaveBeenCalledWith('src/example.ts', '/tile/repo')
     fireEvent.contextMenu(file)
     expect(screen.getByRole('menuitem', { name: 'Open File' })).toBeTruthy()

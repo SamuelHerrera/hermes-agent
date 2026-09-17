@@ -17,6 +17,7 @@ import { PreviewAttachment } from '@/components/chat/preview-attachment'
 import { chunkByLines, SyntaxHighlighter } from '@/components/chat/shiki-highlighter'
 import { ZoomableImage } from '@/components/chat/zoomable-image'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -307,6 +308,8 @@ function ChatFileLink({
   const c = t.statusStack.coding
 
   const openFile = () => {
+    const anchor = defaultOpenPaneAnchor()
+
     void (async () => {
       try {
         const preview = await normalizeOrLocalPreviewTarget(target, cwd)
@@ -318,7 +321,7 @@ function ChatFileLink({
         if (localFs && (preview.binary || preview.previewKind === 'binary')) {
           await openDesktopPath(actionPath)
         } else {
-          openPreview(preview, 'file-browser')
+          openPreview(preview, 'file-browser', anchor)
         }
       } catch (error) {
         notifyError(error, t.rightSidebar.previewUnavailable)

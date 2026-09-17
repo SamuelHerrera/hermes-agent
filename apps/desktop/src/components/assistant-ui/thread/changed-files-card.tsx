@@ -4,6 +4,7 @@ import { type FC, type ReactNode, useCallback, useMemo } from 'react'
 import { useSessionView } from '@/app/chat/session-view'
 import { type ChangedFile, deriveChangedFiles } from '@/components/assistant-ui/thread/changed-files'
 import { WIDGET_SHELL_CLASS } from '@/components/chat/widget-shell'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -85,12 +86,14 @@ function ChangedFileRow({ file, viewCwd }: { file: ChangedFile; viewCwd: null | 
   const actionLabel = displayPath(actionPath)
 
   const openInEditor = useCallback(() => {
+    const anchor = defaultOpenPaneAnchor()
+
     void (async () => {
       try {
         const preview = await normalizeOrLocalPreviewTarget(file.path, viewCwd)
 
         if (preview) {
-          openPreview(preview, 'file-browser')
+          openPreview(preview, 'file-browser', anchor)
         }
       } catch (error) {
         notifyError(error, t.rightSidebar.previewUnavailable)

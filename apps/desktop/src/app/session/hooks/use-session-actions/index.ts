@@ -5,7 +5,7 @@ import type { NavigateFunction } from 'react-router'
 import { archivedTerminalIds } from '@/app/right-sidebar/terminal/archive'
 import { closeTerminal } from '@/app/right-sidebar/terminal/terminals'
 import { allPaneIds } from '@/components/pane-shell/tree/model'
-import { $layoutTree, revealTreePane } from '@/components/pane-shell/tree/store'
+import { $layoutTree, defaultOpenPaneAnchor, revealTreePane } from '@/components/pane-shell/tree/store'
 import { deleteSession, getAllSessionMessages, getLatestSessionMessages, setSessionArchived } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { type ChatMessage, preserveLocalAssistantErrors, toChatMessages } from '@/lib/chat-messages'
@@ -544,7 +544,8 @@ export function useSessionActions({
    *  list (Cursor-style draft tab); it surfaces on the next refresh once the
    *  first message persists a turn. "Open in split" keeps the listed behavior. */
   const openNewSessionTile = useCallback(
-    async (dir: TileDock = 'right', options?: { cwd?: null | string; listed?: boolean; source?: string }) => {
+    async (dir: TileDock = 'center', options?: { cwd?: null | string; listed?: boolean; source?: string }) => {
+      const anchor = defaultOpenPaneAnchor()
       const source = options?.source ?? 'unspecified'
       const explicitCwd = options?.cwd?.trim() || ''
 
@@ -609,7 +610,7 @@ export function useSessionActions({
         const runtimeInfo = applyRuntimeInfo(created.info, { foreground: false })
         updateSessionState(created.session_id, state => (runtimeInfo ? { ...state, ...runtimeInfo } : state), stored)
 
-        openSessionTile(stored, dir, undefined, undefined, {
+        openSessionTile(stored, dir, anchor, undefined, {
           runtimeId: created.session_id,
           workspaceCwd: runtimeInfo?.cwd ?? explicitCwd
         })

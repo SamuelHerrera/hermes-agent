@@ -1,5 +1,6 @@
 import { atom, computed } from 'nanostores'
 
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { persistentAtom } from '@/lib/persisted'
 import { normalize } from '@/lib/text'
 
@@ -56,6 +57,7 @@ export interface PreviewServerRestart {
 export type PreviewRecordSource = 'explicit-link' | 'file-browser' | 'manual' | 'tool-result'
 
 export interface PreviewTab {
+  anchor?: string
   id: RightRailTabId
   target: PreviewTarget
 }
@@ -215,12 +217,12 @@ function previewTargetForSource(target: PreviewTarget, source: PreviewRecordSour
 /** Open (or re-front) the tab for `target`. Re-opening an existing tab refreshes
  *  its target so a stale label/path can't outlive the thing it points at. The
  *  only way anything reaches a preview. */
-export function openPreview(target: PreviewTarget, source: PreviewRecordSource = 'manual') {
+export function openPreview(target: PreviewTarget, source: PreviewRecordSource = 'manual', callerPaneId?: string) {
   const resolved = previewTargetForSource(target, source)
   const id = previewTabId(resolved)
   const current = $previewTabs.get()
   const index = current.findIndex(tab => tab.id === id)
-  const tab: PreviewTab = { id, target: resolved }
+  const tab: PreviewTab = { anchor: current[index]?.anchor ?? defaultOpenPaneAnchor(callerPaneId), id, target: resolved }
 
   $previewTabs.set(index === -1 ? [...current, tab] : current.map((item, i) => (i === index ? tab : item)))
   selectRightRailTab(id)

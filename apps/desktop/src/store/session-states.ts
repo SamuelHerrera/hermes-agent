@@ -729,7 +729,7 @@ export function openBackgroundSessionTile(storedSessionId: string, profile: stri
 
 export function openSessionTile(
   storedSessionId: string,
-  dir: TileDock = 'right',
+  dir: TileDock = 'center',
   anchor?: string,
   before?: null | string,
   initial?: Pick<SessionTile, 'runtimeId' | 'workspaceCwd'>

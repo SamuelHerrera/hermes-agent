@@ -10,7 +10,7 @@ import type { ReadableAtom } from 'nanostores'
 import type { ReactElement, ReactNode, PointerEvent as ReactPointerEvent } from 'react'
 
 import type { DoubleTapContext } from '@/components/pane-shell/tree/renderer/drag-session'
-import { registerPaneCloser, removeTreePane, treePanesWithPrefix } from '@/components/pane-shell/tree/store'
+import { defaultOpenPaneAnchor, registerPaneCloser, removeTreePane, treePanesWithPrefix } from '@/components/pane-shell/tree/store'
 import type { PaneStripTool } from '@/components/ui/pane-tab'
 import { registry } from '@/contrib/registry'
 import type { TileDock } from '@/store/session-states'
@@ -24,9 +24,9 @@ export interface PaneMirror<T> {
   key: (tile: T) => string
   /** Pane-id namespace — the id is `${prefix}:${key}`. */
   prefix: string
-  /** Dock on adoption (default right; `center` = stack into anchor's zone). */
+  /** Dock on adoption (default center; edges are explicit split requests). */
   dir?: (tile: T) => TileDock | undefined
-  /** Pane to dock against (default `workspace`) — a drop's target zone. */
+  /** Caller/drop pane. Otherwise use the focused content panel. */
   anchor?: (tile: T) => string | undefined
   /** Center docks: the strip slot (stack before this pane id). */
   before?: (tile: T) => null | string | undefined
@@ -102,8 +102,8 @@ export function paneMirror<T>(cfg: PaneMirror<T>): () => void {
           stripTools: cfg.stripTools ? () => cfg.stripTools!(key) : undefined,
           dock: {
             before: cfg.before?.(tile),
-            pane: cfg.anchor?.(tile) ?? 'workspace',
-            pos: cfg.dir?.(tile) ?? 'right'
+            pane: cfg.anchor?.(tile) ?? defaultOpenPaneAnchor() ?? 'workspace',
+            pos: cfg.dir?.(tile) ?? 'center'
           },
           minWidth: cfg.minWidth,
           // Every mirrored tile is a full workspace surface docked beside main —

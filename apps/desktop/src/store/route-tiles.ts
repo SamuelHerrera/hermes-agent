@@ -7,13 +7,13 @@ import type { TileDock } from './session-states'
 
 /**
  * Route (page) tiles — a full-page view (Capabilities / Messaging / Artifacts,
- * or any plugin route) rendered as a layout-tree pane BESIDE the main thread,
+ * or any plugin route) rendered as a tab in the caller/focused panel,
  * the page analog of session tiles. Persisted by path so they re-open on boot.
  */
 export interface RouteTile {
   /** The route path this tile renders, e.g. `/skills`. */
   path: string
-  /** Where to dock against main on adoption (default right; center = tab). */
+  /** Where to dock on adoption (default center; edges explicitly split). */
   dir?: TileDock
 }
 
@@ -36,9 +36,9 @@ function saveTiles(tiles: RouteTile[]) {
   writeJson(TILES_KEY, tiles.length === 0 ? null : tiles)
 }
 
-/** Open (or front) a page tile for a route, docked on `dir` (default right).
+/** Open (or front) a page tile for a route, docked on `dir` (default center).
  *  Idempotent — an already-open tile keeps its original dock. */
-export function openRouteTile(path: string, dir: TileDock = 'right') {
+export function openRouteTile(path: string, dir: TileDock = 'center') {
   const tiles = $routeTiles.get()
 
   if (!tiles.some(t => t.path === path)) {

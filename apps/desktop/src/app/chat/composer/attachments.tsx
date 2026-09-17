@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import { useSessionView } from '@/app/chat/session-view'
 import { ImageLightbox } from '@/components/chat/zoomable-image'
+import { defaultOpenPaneAnchor } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { useImageDownload } from '@/hooks/use-image-download'
@@ -78,6 +79,8 @@ function AttachmentPill({ attachment, onRemove }: { attachment: ComposerAttachme
       return
     }
 
+    const anchor = defaultOpenPaneAnchor()
+
     const rawTarget =
       attachment.path ||
       attachment.detail ||
@@ -98,7 +101,7 @@ function AttachmentPill({ attachment, onRemove }: { attachment: ComposerAttachme
         throw new Error(c.couldNotPreview(attachment.label))
       }
 
-      openPreview(preview, 'manual')
+      openPreview(preview, 'manual', anchor)
     } catch (error) {
       notifyError(error, c.previewUnavailable)
     }

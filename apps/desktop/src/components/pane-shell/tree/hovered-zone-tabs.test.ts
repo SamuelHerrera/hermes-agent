@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// The tab verbs (⌘1…⌘9, ⌃Tab, ⌘W / ⌘T) target the zone under the POINTER when
+// Existing-tab verbs (⌘1…⌘9, ⌃Tab, ⌘W) target the zone under the POINTER when
 // there is one, so hovering a pane and hitting ⌘2 lands there without clicking
 // in first. Pointer off the panes falls back to the last interacted zone.
 
@@ -71,7 +71,7 @@ describe('hovered zone retargets the tab verbs', () => {
     expect(activeOf('grp-main')).toBe('workspace')
   })
 
-  it('⌃Tab and the ⌘T / ⌘W family follow the same hovered zone', async () => {
+  it('⌃Tab and ⌘W follow hover while new tabs stay in the focused panel', async () => {
     const { activeOf, model, tree } = await setup()
 
     tree.noteActiveTreeGroup('grp-main')
@@ -81,7 +81,7 @@ describe('hovered zone retargets the tab verbs', () => {
     expect(activeOf('grp-side')).toBe('session-tile:c')
     expect(activeOf('grp-main')).toBe('workspace')
 
-    expect(tree.focusedSessionTabAnchor()).toBe('session-tile:c')
+    expect(tree.focusedSessionTabAnchor()).toBe('workspace')
 
     expect(tree.closeFocusedSessionTab()).toBe(true)
     expect(model.allPaneIds(tree.$layoutTree.get()!)).not.toContain('session-tile:c')
