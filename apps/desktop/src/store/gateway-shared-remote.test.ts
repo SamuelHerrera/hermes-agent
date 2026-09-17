@@ -28,7 +28,7 @@ vi.mock('@/hermes', () => ({
 vi.mock('@/store/session', () => ({ setGatewayState: vi.fn() }))
 vi.mock('@/store/notify-baseline', () => ({ markNativeNotifyBaseline: vi.fn() }))
 
-const { $gateway, configureGatewayRegistry, ensureGatewayForProfile, setPrimaryGateway } = await import('./gateway')
+const { $gateway, backgroundGatewayForProfile, configureGatewayRegistry, ensureGatewayForProfile, setPrimaryGateway } = await import('./gateway')
 
 type DesktopStub = { getConnection: ReturnType<typeof vi.fn> }
 
@@ -54,6 +54,34 @@ afterEach(() => {
 })
 
 describe('ensureGatewayForProfile under a shared global remote', () => {
+  it('scopes a background request without changing the foreground socket', async () => {
+    const primary = makePrimary()
+    setPrimaryGateway(primary as never, 'default')
+    const foreground = $gateway.get()
+    installDesktop({
+      getConnection: vi.fn(async () => ({ port: 4242, profile: 'background', sharedPrimary: true, token: 't' }))
+    })
+
+    const route = await backgroundGatewayForProfile('background')
+
+    expect(route.gateway).toBe(primary)
+    expect(route.params).toEqual({ profile: 'background' })
+    expect($gateway.get()).toBe(foreground)
+    expect(gatewayMocks.connect).not.toHaveBeenCalled()
+  })
+
+  it('fails closed rather than sending a background request to the primary on a dial failure', async () => {
+    const primary = makePrimary()
+    setPrimaryGateway(primary as never, 'default')
+    const foreground = $gateway.get()
+    installDesktop({
+      getConnection: vi.fn(async () => ({ authMode: 'token', baseUrl: 'https://isolated.invalid', mode: 'remote', profile: 'unreachable', wsUrl: 'wss://isolated.invalid/api/ws' }))
+    })
+
+    await expect(backgroundGatewayForProfile('unreachable')).rejects.toThrow()
+    expect($gateway.get()).toBe(foreground)
+  })
+
   it('activates the primary socket for an explicitly shared-primary descriptor', async () => {
     const primary = makePrimary()
     setPrimaryGateway(primary as never, 'default')

@@ -427,7 +427,7 @@ def test_prompt_submit_fails_open_inline_when_compute_host_dispatch_breaks(monke
     monkeypatch.setattr(
         server,
         "_run_prompt_submit",
-        lambda rid, sid, _session, text: inline_calls.append((rid, sid, text)),
+        lambda rid, sid, _session, text, *, parse_inline_goal=False: inline_calls.append((rid, sid, text, parse_inline_goal)),
     )
     monkeypatch.setattr(server.threading, "Thread", _ImmediateThread)
 
@@ -447,7 +447,7 @@ def test_prompt_submit_fails_open_inline_when_compute_host_dispatch_breaks(monke
         "id": "fallback-turn",
         "result": {"status": "streaming"},
     }
-    assert inline_calls == [("fallback-turn", "iso-fallback", "hello")]
+    assert inline_calls == [("fallback-turn", "iso-fallback", "hello", True)]
     assert session.get("_compute_host_active") is not True
 
 

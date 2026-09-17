@@ -133,6 +133,31 @@ export function activeGateway(): HermesGateway | null {
   return g.secondaries.get(g.activeKey)?.gateway ?? g.primaryGateway
 }
 
+export function primaryGatewayProfile(): string {
+  return g.primaryProfile
+}
+
+/** Resolve the normal authenticated route without switching the foreground. */
+export async function backgroundGatewayForProfile(profile: string): Promise<{
+  gateway: HermesGateway
+  params: { profile?: string }
+}> {
+  const key = normKey(profile)
+  const shared = key !== g.primaryProfile && await sharedPrimaryRoute(key)
+
+  if (key !== g.primaryProfile && !shared) {
+    await openGatewayForProfile(key)
+  }
+
+  const gateway = key === g.primaryProfile || shared ? g.primaryGateway : g.secondaries.get(key)?.gateway
+
+  if (!gateway || !isOpen(gateway)) {
+    throw new Error(`Hermes backend for ${key} is not connected`)
+  }
+
+  return { gateway, params: shared ? { profile: key } : {} }
+}
+
 // Mirror a backend's connection state into the global composer state, but only
 // when that backend is the one the user is currently looking at. Lets the
 // composer reflect the active profile's socket without a background reconnect

@@ -7858,6 +7858,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         compact_rows: bool = False,
         include_pinned: bool = False,
         session_key: str = None,
+        include_empty_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """List sessions with preview (first user message) and last active timestamp.
 
@@ -7912,6 +7913,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         Pass ``session_key`` to restrict results to one stable gateway
         conversation scope (DM, group, channel, or thread, including the
         configured per-user isolation policy).
+        ``include_empty_ids`` admits explicitly reserved durable chats below
+        ``min_message_count``. Other filters and SQL pagination still apply.
         """
         # Rows carry token/cost totals — drain queued deltas first so
         # listings (sidebar, /resume, dashboards) show exact counters.
@@ -7954,8 +7957,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
             where_clauses.append(clause)
             params.extend(clause_params)
         if min_message_count > 0:
-            where_clauses.append("s.message_count >= ?")
-            params.append(min_message_count)
+            if include_empty_ids:
+                placeholders = ",".join("?" for _ in include_empty_ids)
+                where_clauses.append(f"(s.message_count >= ? OR s.id IN ({placeholders}))")
+                params.extend([min_message_count, *include_empty_ids])
+            else:
+                where_clauses.append("s.message_count >= ?")
+                params.append(min_message_count)
         if archived_only:
             where_clauses.append("s.archived = 1")
         elif not include_archived:

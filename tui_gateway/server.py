@@ -270,6 +270,7 @@ _LONG_HANDLERS = frozenset(
         "projects.record_repos",
         "projects.for_cwd",
         "projects.tree",
+        "session.spawn",
         "projects.project_sessions",
         # Setup readiness RPCs are polled by the Desktop frontend on connect
         # and periodically (use-status-snapshot → evaluateRuntimeReadiness).
@@ -6309,13 +6310,32 @@ def _apply_project_workspace(task_id: str, path: str, _name: str = "") -> None:
         logger.debug("failed to emit session.info after project workspace move", exc_info=True)
 
 
+def _request_session_spawn(task_id: str, args: dict) -> dict:
+    # Resolve only the caller's transport, never its execution configuration.
+    with _sessions_lock:
+        match = next(((sid, s) for sid, s in _sessions.items()
+                      if s.get("session_key") == task_id or getattr(s.get("agent"), "session_id", None) == task_id), None)
+    if not match or _session_source(match[1]) != "desktop":
+        return {"success": False, "status": "unavailable", "error": "A connected Desktop chat is required."}
+    payload = dict(args)
+    # A shared-primary socket serves multiple Hermes profiles. Its transport
+    # label is not the caller's profile. Own-profile backend aliases, however,
+    # must keep the Desktop alias rather than the backend's launch name.
+    payload["caller_profile_scope"] = match[1].get("profile_name") if match[1].get("profile_home") else None
+    answer = _block("session.spawn.request", match[0], payload, timeout=90)
+    if not answer:
+        return {"success": False, "status": "unknown", "error": "Desktop handoff timed out or caller stopped. Retry the identical arguments/key; the independent chat may already be running."}
+    return json.loads(answer)
+
+
 def _wire_callbacks(sid: str):
     from tools.terminal_tool import set_sudo_password_callback
     from tools.skills_tool import set_secret_capture_callback
-    from tools.project_tools import set_project_workspace_callback
+    from tools.project_tools import set_project_workspace_callback, set_session_spawn_callback
 
     set_sudo_password_callback(lambda: _block("sudo.request", sid, {}, timeout=120))
     set_project_workspace_callback(_apply_project_workspace)
+    set_session_spawn_callback(_request_session_spawn)
 
     def secret_cb(env_var, prompt, metadata=None):
         pl = {"prompt": prompt, "env_var": env_var}
@@ -12888,11 +12908,16 @@ def _project_tree_inputs(
     which already has sessions — avoiding the distinct-cwd scan + git probes on
     that per-turn path. One projects.db connection serves both reads.
     """
+    from hermes_cli import projects_db as pdb
+
+    with pdb.connect_closing() as conn:
+        spawned_ids = {row[0] for row in conn.execute("SELECT session_id FROM session_spawns WHERE session_id IS NOT NULL")}
     rows = db.list_sessions_rich(
         limit=session_limit,
         offset=0,
         order_by_last_active=True,
         min_message_count=1,
+        **({"include_empty_ids": sorted(spawned_ids)} if spawned_ids else {}),
         # Include children here so delegate subagent sessions can be re-attached
         # under their visible parent rows in the Projects tree. The builder still
         # drops orphan/internal children, and compression tips are projected by
@@ -12905,6 +12930,9 @@ def _project_tree_inputs(
         # reads per build on a long-lived database.
         compact_rows=True,
     )
+    # Reserved project chats are durable before their first turn starts. Keep
+    # those rows visible (including start failures), without exposing unrelated
+    # blank composer drafts or inventing a message to defeat the normal filter.
     sessions = [_project_tree_row(r) for r in rows]
     # Parallel-warm the git cache so build_tree's resolver reads it instead of
     # cold-probing each cwd in sequence (matters on the drill-in path, which
@@ -12979,6 +13007,7 @@ def _build_project_tree(
             for project in pdb.list_deleted_projects(conn)
             for folder in project.folders
         }
+        spawned_ids = [row[0] for row in conn.execute("SELECT session_id FROM session_spawns WHERE session_id IS NOT NULL")]
 
     def _is_removed_workspace(path: str) -> bool:
         target = os.path.normcase(os.path.realpath(path))
@@ -13003,6 +13032,8 @@ def _build_project_tree(
                 "exclude_sources": _PROJECT_TREE_EXCLUDED_SOURCES,
                 "compact_rows": True,
             }
+            if spawned_ids:
+                kwargs["include_empty_ids"] = spawned_ids
             if archived_only:
                 kwargs["archived_only"] = True
             rows = db.list_sessions_rich(**kwargs)

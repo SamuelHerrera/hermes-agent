@@ -24,6 +24,8 @@ import nodePath from 'node:path'
 export const MOCK_REPLY = 'Hello from the mock inference server! The full boot chain is working.'
 
 export interface MockServerOptions {
+  /** Exercise the real agent tool registry and Desktop handoff bridge. */
+  sessionSpawnArgs?: Record<string, unknown>
   /** Pause the matching stream after its first token for session-switch E2E coverage. */
   holdFirstStreamForPrompt?: string
 /** Pause the first completion whose request JSON contains this text. */
@@ -420,6 +422,21 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
           const isCorrectionSwitchTrigger = messages.some(
             message => typeof message?.content === 'string' && message.content.includes(CORRECTION_SWITCH_TRIGGER),
           )
+
+          if (userText.includes('E2E_PROJECT_SPAWN_CALLER') && options.sessionSpawnArgs) {
+            const calls = messages.flatMap(message => message.tool_calls ?? [])
+              .filter(call => call.function?.name === 'tool_call')
+            const result = messages.find(message => message.role === 'tool' && calls.some(call => call.id === message.tool_call_id))
+            const described = messages.some(message => (message.tool_calls ?? []).some((call: { function?: { name?: string } }) => call.function?.name === 'tool_describe'))
+            const turn: ScriptedTurn = result
+              ? { text: `Spawn tool result: ${String(result.content)}` }
+              : described
+                ? { text: 'Starting the independent project chat.', toolCalls: [{ name: 'tool_call', args: { name: 'session_spawn', arguments: options.sessionSpawnArgs } }] }
+                : { text: 'Discovering the project tool.', toolCalls: [{ name: 'tool_describe', args: { name: 'session_spawn' } }] }
+            if (stream) streamScriptedTurn(res, model, turn)
+            else nonStreamingScriptedTurn(res, model, turn)
+            return
+          }
 
           if (userText.includes('E2E_SESSION_GOAL_TOOL')) {
             const calls = messages.flatMap(message => message.tool_calls ?? [])

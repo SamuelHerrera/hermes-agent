@@ -66,6 +66,7 @@ import {
   setWorkspaceCwdOwner,
   setYoloActive
 } from '@/store/session'
+import { handleSessionSpawnRequest, handleSpawnChanged } from '@/store/session-spawn'
 import { dropSessionState } from '@/store/session-states'
 import { pruneDelegateFallbackSubagents, pruneFinishedSessionSubagents, upsertSubagent } from '@/store/subagents'
 import { reportMcpToolResult } from '@/store/suggestion-providers/repair'
@@ -301,6 +302,16 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
     (event: RpcEvent) => {
       const payload = event.payload as GatewayEventPayload | undefined
       const explicitSid = event.session_id || ''
+
+      if (event.type === 'session.spawn.request' && explicitSid) {
+        void handleSessionSpawnRequest(event)
+
+        return
+      }
+
+      if (event.type === 'sessions.changed') {
+        handleSpawnChanged(event)
+      }
 
       const route = resolveGatewayEventSessionId({
         activeSessionId: activeSessionIdRef.current,

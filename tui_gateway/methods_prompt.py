@@ -1337,6 +1337,11 @@ def _(rid, params: dict) -> dict:
     return _respond(rid, params, "result", allow_expired=True)
 
 
+@method("session.spawn.respond")
+def _(rid, params: dict) -> dict:
+    return _respond(rid, params, "result", allow_expired=True)
+
+
 @method("sudo.respond")
 def _(rid, params: dict) -> dict:
     return _respond(rid, params, "password", allow_expired=True)

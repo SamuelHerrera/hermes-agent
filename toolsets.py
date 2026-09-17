@@ -259,7 +259,7 @@ TOOLSETS = {
 
     "project": {
         "description": "Desktop Projects — create/switch named workspaces (GUI sessions only)",
-        "tools": ["project_list", "project_create", "project_switch"],
+        "tools": ["project_list", "project_create", "project_switch", "session_spawn"],
         "includes": []
     },
 

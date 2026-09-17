@@ -146,6 +146,57 @@ Tools for driving desktop [Projects](../user-guide/cli.md) — named, multi-fold
 | `project_create` | Create a desktop Project (a named workspace) and switch this chat into it. Pass `path` to anchor it to a repo/folder. | — |
 | `project_list` | List the desktop Projects and which one is active. | — |
 | `project_switch` | Switch this chat into an existing Project (by name, slug, or id); moves the session workspace to the project's primary folder. | — |
+| `session_spawn` | Create and start an independent, durable top-level project chat; return its session link without waiting for completion. | Connected Desktop renderer |
+
+### Independent project chats
+
+`session_spawn(project, prompt, title?, idempotency_key?, open_tab=false)` extends
+the existing `project` toolset. It does not move the caller, copy its history,
+model override, approval choices or execution identity, or create a delegate
+child. The new chat uses the target Hermes profile's normal model and permission
+configuration. Only the supplied self-contained prompt is handed off.
+
+- **Project resolution:** an existing ID, slug or unambiguous case-insensitive
+  name in the caller's Desktop backend/profile namespace. Unknown, ambiguous,
+  missing-directory and conflicting-folder targets fail before creating a chat.
+  Use `Hermes-profile::project` for another configured Desktop profile/backend;
+  these are **Hermes profiles, not Chrome profiles**. Unqualified names never
+  search unrelated backends or silently fall back to another profile.
+- **Routing:** Desktop resolves its existing authenticated backend connection
+  without activating it. `session.spawn` on that backend uses the normal
+  `session.create` and `prompt.submit` lifecycle. Project association, cwd and
+  available Git metadata are persisted before submission. Backend
+  `sessions.changed` events refresh the project sidebar without a reload.
+- **Result:** `session_id` is durable; `runtime_session_id` is for live controls.
+  `project`, `profile`, `cwd`, `status`, `success`, `idempotency_key`, and a
+  clickable `@session:profile/id` link describe the accepted handoff. `started`
+  means the asynchronous first turn was accepted, **not** that the work finished
+  successfully. The caller can finish or be cancelled without stopping it.
+- **Retries:** use the same key and identical prompt/title. Reusing a key for
+  different work is rejected. Without a key, identical handoffs deduplicate
+  deterministically; give a new explicit key for intentionally separate work.
+  Reservations survive backend restarts. Concurrent requests may initially
+  return `creating` or `starting`; repeat with the same key to read the receipt.
+- **Partial failures:** `start_failed`, `start_unknown` and `creation_failed`
+  retain the allocated session ID/link when available. A crash between turn
+  acceptance and recording its receipt deliberately remains uncertain, rather
+  than replaying the prompt. Inspect the existing transcript/live state before
+  manually submitting anything. A pre-allocation failure has no session link;
+  report it instead of inventing one. Keys are never automatically released.
+- **Tabs:** `open_tab=true` appends a background tab while preserving current
+  tabs, selection and drafts. For an inactive profile it saves the tab in that
+  profile's tab set (`saved_for_profile`); it appears when that profile is opened,
+  without forcibly switching the user there. Default is no tab.
+- **Availability:** both Desktop renderer and target backend need this version.
+  Reopen Desktop after updating and start a **new caller conversation** for tool
+  discovery. Existing conversations retain their frozen tool catalog and prompt
+  cache. With deferred tools, discover `session_spawn` normally and invoke it
+  through `tool_call`. No live schema mutation is required.
+
+The connected renderer is needed to initiate/route the handoff. Once accepted,
+the task is backend-owned; a caller close/cancel does not cancel it. This is not
+a scheduler: a backend crash can interrupt live execution, and an uncertain
+first turn is never automatically replayed. Reuse the session link to recover.
 
 ## `memory` toolset
 

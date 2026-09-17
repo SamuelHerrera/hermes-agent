@@ -11,6 +11,17 @@ method = _registry.method
 _profile_scoped = _registry.profile_scoped
 
 
+@method("session.spawn")
+def _(rid, params: dict) -> dict:
+    import sys
+    from tui_gateway.session_spawn import spawn
+
+    try:
+        return _ok(rid, spawn(sys.modules[__name__], params))
+    except ValueError as exc:
+        return _err(rid, 5063, str(exc))
+
+
 @method("session.create")
 def _(rid, params: dict) -> dict:
     sid = uuid.uuid4().hex[:8]

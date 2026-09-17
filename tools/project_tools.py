@@ -23,6 +23,22 @@ from tools.registry import registry
 # workspace + refreshes the sidebar. ``None`` in CLI / messaging contexts — the
 # DB write still happens; there's just no live GUI session to move.
 _workspace_callback: Optional[Callable[[str, str, str], None]] = None
+_spawn_callback: Optional[Callable[[str, dict], dict]] = None
+
+
+def set_session_spawn_callback(fn) -> None:
+    global _spawn_callback
+    _spawn_callback = fn
+
+
+def session_spawn(project: str, prompt: str, title: str = "", idempotency_key=None,
+                  open_tab: bool = False, task_id: Optional[str] = None) -> str:
+    if not _spawn_callback or not task_id:
+        return json.dumps({"success": False, "status": "unavailable", "error": "A connected Hermes Desktop session is required."})
+    return json.dumps(_spawn_callback(task_id, {
+        "project": project, "prompt": prompt, "title": title,
+        "idempotency_key": idempotency_key, "open_tab": open_tab,
+    }))
 
 
 def set_project_workspace_callback(fn: Optional[Callable[[str, str, str], None]]) -> None:
@@ -186,4 +202,39 @@ registry.register(
         },
     },
     handler=lambda args, **kw: project_switch(project=args.get("project", ""), task_id=kw.get("task_id")),
+)
+
+registry.register(
+    name="session_spawn",
+    toolset="project",
+    schema={
+        "name": "session_spawn",
+        "description": (
+            "Start an independent, durable top-level chat in an existing Hermes Desktop project. "
+            "Does not move this chat or create a child task. Send a self-contained prompt; no "
+            "conversation history or caller overrides are copied. Returns immediately after "
+            "initial-turn acceptance, with a clickable @session link. Project accepts ID, slug, "
+            "or unambiguous name in this Desktop backend/profile; use Hermes-profile::project "
+            "for another configured backend/profile (not a Chrome profile). Reuse an "
+            "idempotency_key after timeouts. If omitted, identical handoffs deduplicate; use "
+            "a new key only for intentionally separate work. Inspect partial-failure status "
+            "and the returned session before manually resubmitting."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "Existing project ID, slug or name; optionally Hermes-profile::project"},
+                "prompt": {"type": "string", "description": "Only this self-contained prompt is handed off"},
+                "title": {"type": "string", "description": "Optional initial chat title"},
+                "idempotency_key": {"type": "string", "description": "Stable unique key for retries of this handoff"},
+                "open_tab": {"type": "boolean", "description": "Add a background tab without changing focus; default false"},
+            },
+            "required": ["project", "prompt"],
+        },
+    },
+    handler=lambda args, **kw: session_spawn(
+        project=args.get("project", ""), prompt=args.get("prompt", ""),
+        title=args.get("title", ""), idempotency_key=args.get("idempotency_key"),
+        open_tab=args.get("open_tab", False), task_id=kw.get("task_id"),
+    ),
 )

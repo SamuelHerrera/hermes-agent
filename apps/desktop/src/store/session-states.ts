@@ -705,6 +705,28 @@ function syncTileStripOrder() {
  *  An unanchored open (⌘T, ⌘⇧T on a tile that predates anchors) docks into the
  *  FOCUSED chat zone — the same zone ⌘1…⌘9 and ⌘W act on — so a new tab lands
  *  in the strip the user is looking at, not always main's. */
+/** Save to the target profile's tab set without replacing or activating a tab. */
+export function openBackgroundSessionTile(storedSessionId: string, profile: string, cwd?: string): string {
+  const key = normalizeProfileKey(profile)
+
+  if (key === profileKey()) {
+    if (!$sessionTiles.get().some(tile => tile.storedSessionId === storedSessionId)) {
+      openSessionTile(storedSessionId, 'center', 'workspace', undefined, { workspaceCwd: cwd })
+    }
+
+    return 'opened_background'
+  }
+
+  const tiles = tilesByProfile[key] ?? []
+
+  if (!tiles.some(tile => tile.storedSessionId === storedSessionId)) {
+    tilesByProfile[key] = [...tiles, { storedSessionId, dir: 'center', anchor: 'workspace' }]
+    persistTiles()
+  }
+
+  return 'saved_for_profile'
+}
+
 export function openSessionTile(
   storedSessionId: string,
   dir: TileDock = 'right',

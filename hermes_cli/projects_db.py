@@ -85,6 +85,16 @@ CREATE TABLE IF NOT EXISTS project_meta (
     value  TEXT
 );
 
+-- Independent chat handoffs: the reservation is committed BEFORE creation.
+-- Retained across retries/restarts; never garbage-collected with live sessions.
+CREATE TABLE IF NOT EXISTS session_spawns (
+    request_key TEXT PRIMARY KEY,
+    fingerprint TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    session_id TEXT,
+    result TEXT NOT NULL
+);
+
 -- History is independent of sidebar visibility and remembered settings.
 -- Saved projects use their id; inferred workspaces use their path.
 CREATE TABLE IF NOT EXISTS project_recents (
