@@ -3,6 +3,14 @@ import { type MockBackendFixture, setupMockBackend, waitForAppReady } from './fi
 
 let fixture: MockBackendFixture
 
+interface TerminalTestWindow extends Window {
+  hermesDesktop: { terminal: {
+    start: (options: { persistent: boolean; reference: unknown }) => Promise<{ id: string }>
+    read: (id: string, after: number) => Promise<{ events: Array<{ data?: string }> }>
+    dispose: (id: string) => Promise<boolean>
+  } }
+}
+
 test.beforeEach(async () => {
   fixture = await setupMockBackend()
   await waitForAppReady(fixture, 120_000)
@@ -18,7 +26,7 @@ test('compact app controls stay in the header and extra actions stay in the menu
   page.on('pageerror', error => errors.push(error.message))
   const toolbar = page.getByLabel('App controls', { exact: true })
   const menu = toolbar.getByRole('button', { name: 'More app actions' })
-  const createNew = toolbar.getByRole('button', { name: 'Create new', exact: true })
+  const createNew = toolbar.getByRole('button', { name: 'New session', exact: true })
   const inlineNames = () => toolbar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
 
   await expect(createNew).toBeVisible()
@@ -65,41 +73,76 @@ test('compact app controls stay in the header and extra actions stay in the menu
   expect(errors).toEqual([])
 })
 
-test('plus menu opens session, project and terminal actions', async ({}, testInfo) => {
+test('separate header buttons open session, project and terminal actions', async ({}, testInfo) => {
   const { page } = fixture
   const toolbar = page.getByLabel('App controls', { exact: true })
-  const plus = toolbar.getByRole('button', { name: 'Create new', exact: true })
+  await expect(toolbar.getByRole('button', { name: 'Create new', exact: true })).toHaveCount(0)
   const composer = page.locator('[contenteditable="true"]:visible').first()
   await composer.fill('Keep this draft before creating a new session')
   for (const name of ['New session', 'New project', 'New terminal']) {
-    await expect(toolbar.getByRole('button', { name, exact: true })).toHaveCount(0)
+    await expect(toolbar.getByRole('button', { name, exact: true })).toBeVisible()
   }
 
-  await plus.click()
-  await expect(page.getByRole('menuitem')).toHaveText(['New session', 'New project', 'New terminal'])
-  await page.screenshot({ path: testInfo.outputPath('plus-menu.png'), fullPage: true })
-  await page.getByRole('menuitem', { name: 'New session', exact: true }).click()
+  await page.screenshot({ path: testInfo.outputPath('creation-buttons.png'), fullPage: true })
+  await toolbar.getByRole('button', { name: 'New session', exact: true }).click()
   await expect(page.getByRole('menu')).toHaveCount(0)
   await expect(composer).toHaveText('')
 
-  await plus.click()
-  await page.getByRole('menuitem', { name: 'New project', exact: true }).click()
+  await toolbar.getByRole('button', { name: 'New project', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('heading', { name: 'New project', exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
 
-  await plus.click()
-  await page.getByRole('menuitem', { name: 'New terminal', exact: true }).click()
+  await toolbar.getByRole('button', { name: 'New terminal', exact: true }).click()
   await expect(page.locator('.xterm:visible').first()).toBeVisible()
   await expect(page.getByRole('menu')).toHaveCount(0)
   const tab = page.locator('[data-tree-tab^="terminal-instance:"]').first()
   const id = (await tab.getAttribute('data-tree-tab'))!.slice('terminal-instance:'.length)
-  await page.locator(`[data-persistent-terminal="${id}"] .xterm-helper-textarea`).focus()
-  await page.keyboard.type('printf "PLUS_%s\\n" "MENU_OK"')
-  await page.keyboard.press('Enter')
-  await expect.poll(() => page.evaluate(id => {
+  const host = page.locator(`[data-persistent-terminal="${id}"]`)
+  // xterm mounts before its async PTY start; don't send input until attached.
+  await expect(host.getByRole('status', { name: 'Loading', exact: true })).toHaveCount(0)
+  const input = host.locator('.xterm-helper-textarea')
+  await input.focus()
+  await expect(input).toBeFocused()
+  await input.pressSequentially('printf "HEADER_%s\\n" "TERMINAL_OK"')
+  await input.press('Enter')
+  // The persistent host owns output; reviveBuffer is only the legacy PTY path.
+  const observer = await page.evaluate(async id => {
     const saved = JSON.parse(localStorage.getItem('hermes.desktop.terminals.v1') || '{}')
-    return saved.terminals?.find((terminal: { id: string }) => terminal.id === id)?.reviveBuffer ?? ''
-  }, id)).toContain('PLUS_MENU_OK')
-  await page.screenshot({ path: testInfo.outputPath('plus-terminal.png'), fullPage: true })
+    const terminal = saved.terminals.find((terminal: { id: string }) => terminal.id === id)
+    return (window as unknown as TerminalTestWindow).hermesDesktop.terminal.start({ persistent: true, reference: terminal.reference })
+  }, id)
+  try {
+    await expect.poll(() => page.evaluate(async observerId => {
+      const result = await (window as unknown as TerminalTestWindow).hermesDesktop.terminal.read(observerId, 0)
+      return result.events.map(event => event.data ?? '').join('')
+    }, observer.id)).toContain('HEADER_TERMINAL_OK')
+  } finally {
+    await page.evaluate(observerId => (window as unknown as TerminalTestWindow).hermesDesktop.terminal.dispose(observerId), observer.id)
+  }
+  await page.screenshot({ path: testInfo.outputPath('header-terminal.png'), fullPage: true })
+})
+
+test('approval, keep-awake and layout preferences live in the dropdown', async ({}, testInfo) => {
+  const { page } = fixture
+  const toolbar = page.getByLabel('App controls', { exact: true })
+  const menu = toolbar.getByRole('button', { name: 'More app actions' })
+  await expect(toolbar.getByRole('button', { name: /Approval|Keep computer awake|Use .*layout/ })).toHaveCount(0)
+  await menu.click()
+  await expect(page.getByRole('menuitem', { name: 'Keep computer awake: Off', exact: true })).toBeVisible()
+  await page.getByRole('menuitem', { name: /Approval/ }).hover()
+  await expect(page.getByRole('menuitemradio', { name: /^Smart/ })).toBeChecked()
+  await page.screenshot({ path: testInfo.outputPath('approval-submenu.png'), fullPage: true })
+  await page.getByRole('menuitemradio', { name: /^Manual/ }).click()
+  await menu.click()
+  await page.getByRole('menuitem', { name: /Approval/ }).hover()
+  await expect(page.getByRole('menuitemradio', { name: /^Manual/ })).toBeChecked()
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Escape')
+  await menu.click()
+  await page.getByRole('menuitem', { name: 'Use scroll-window layout', exact: true }).click()
+  await menu.click()
+  await expect(page.getByRole('menuitem', { name: 'Use tabbed layout', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('preferences-menu.png'), fullPage: true })
+  await page.getByRole('menuitem', { name: 'Use tabbed layout', exact: true }).click()
 })

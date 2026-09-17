@@ -92,7 +92,7 @@ export interface TitlebarTool {
   to?: string
 }
 
-const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['approval-mode', 'terminal'])
+const PINNED_TITLEBAR_STATUSBAR_IDS = new Set(['terminal'])
 const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
@@ -411,7 +411,7 @@ export function TitlebarControls({
     }
   }
 
-  const leftToolbarTools: TitlebarTool[] = [
+  const preferenceTools: TitlebarTool[] = [
     {
       active: layoutSurfaceMode === 'scroll-windows',
       icon: <TitlebarIcon name={layoutSurfaceMode === 'scroll-windows' ? 'layout' : 'multiple-windows'} />,
@@ -431,10 +431,8 @@ export function TitlebarControls({
       onSelect: () => {
         triggerHaptic('tap')
         void setKeepAwake(!keepAwake)
-      },
-      title: t.settings.config.keepAwakeDesc
-    },
-    ...leftTools
+      }
+    }
   ]
 
   const newChatTool: TitlebarTool | null = onNewSession
@@ -616,7 +614,7 @@ export function TitlebarControls({
     item =>
       !item.hidden &&
       item.id !== 'command-center' &&
-      (item.lockedVisible || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+      (item.lockedVisible || item.id === 'approval-mode' || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
   )
 
   const pinnedStatusbarItemsById = new Map(
@@ -624,13 +622,13 @@ export function TitlebarControls({
   )
 
   const terminalStatusbarItem = pinnedStatusbarItemsById.get('terminal')
-  const approvalStatusbarItem = pinnedStatusbarItemsById.get('approval-mode')
 
   const overflowStatusbarItems = visibleStatusbarItems.filter(
     item => !isPinnedTitlebarStatusbarItem(item) && isActionableTitlebarStatusbarItem(item)
   )
 
   const overflowOptionalToolbarTools = [
+    ...preferenceTools,
     ...overflowWorkspacePageTools,
     ...contributedPageTools,
     ...visibleLocalServiceTools,
@@ -683,19 +681,16 @@ export function TitlebarControls({
           tools={overflowOptionalToolbarTools}
         />
         <TitlebarProfileMenu />
-        {leftToolbarTools
+        {leftTools
           .filter(tool => !tool.hidden)
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         {pinnedSystemTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
-        {approvalStatusbarItem && <TitlebarStatusbarItemButton item={approvalStatusbarItem} navigate={navigate} />}
-        <TitlebarCreateMenu
-          navigate={navigate}
-          terminal={terminalStatusbarItem}
-          tools={[...(newChatTool ? [newChatTool] : []), ...pinnedWorkspacePageTools]}
-        />
+        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
+        {pinnedWorkspacePageTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
+        {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
       </div>
     </>
   )
@@ -715,43 +710,6 @@ function MenuRow({ icon, label }: { icon?: ReactNode; label: ReactNode }) {
       {icon ? <span className="grid size-4 shrink-0 place-items-center">{icon}</span> : null}
       <span className="min-w-0 truncate">{label}</span>
     </>
-  )
-}
-
-function TitlebarCreateMenu({
-  navigate,
-  terminal,
-  tools
-}: {
-  navigate: ReturnType<typeof useNavigate>
-  terminal?: StatusbarItem
-  tools: readonly TitlebarTool[]
-}) {
-  const { t } = useI18n()
-  const [open, setOpen] = useState(false)
-  const close = () => setOpen(false)
-
-  return (
-    <DropdownMenu onOpenChange={setOpen} open={open}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          aria-label={t.titlebar.createNew}
-          className={cn(titlebarButtonClass, 'bg-transparent data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground')}
-          onPointerDown={event => event.stopPropagation()}
-          size="icon-titlebar"
-          type="button"
-          variant="ghost"
-        >
-          <TitlebarIcon name="add" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-44">
-        {tools.map(tool => (
-          <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
-        ))}
-        {terminal && <TitlebarOverflowStatusbarItem item={terminal} navigate={navigate} onClose={close} />}
-      </DropdownMenuContent>
-    </DropdownMenu>
   )
 }
 

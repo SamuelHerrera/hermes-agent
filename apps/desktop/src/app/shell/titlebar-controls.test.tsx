@@ -74,7 +74,7 @@ describe('TitlebarControls', () => {
     expect(container.querySelector('[data-sidebar-toolbar-backdrop]')).toBeNull()
   })
 
-  it('combines session, project and terminal actions under the plus menu', async () => {
+  it('exposes session, project and terminal as separate one-click buttons', () => {
     const onNewSession = vi.fn()
     const onNewTerminal = vi.fn()
     render(
@@ -87,58 +87,42 @@ describe('TitlebarControls', () => {
       </MemoryRouter>
     )
 
-    const plus = screen.getByRole('button', { name: 'Create new' })
-    expect(plus.querySelector('.codicon-add')).toBeTruthy()
-
-    for (const label of ['New session', 'New project', 'New terminal']) {
-      expect(screen.queryByRole('button', { name: label })).toBeNull()
-    }
-
-    const openMenu = () => {
-      fireEvent.pointerDown(plus, { button: 0, pointerType: 'mouse' })
-      fireEvent.pointerUp(plus, { button: 0, pointerType: 'mouse' })
-      fireEvent.click(plus)
-    }
-
-    openMenu()
+    expect(screen.queryByRole('button', { name: 'Create new' })).toBeNull()
     expect(onNewSession).not.toHaveBeenCalled()
     expect(onNewTerminal).not.toHaveBeenCalled()
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['New session', 'New project', 'New terminal'])
-    fireEvent.click(screen.getByRole('menuitem', { name: 'New session' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New session' }))
     expect(onNewSession).toHaveBeenCalledOnce()
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-
-    openMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'New project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     expect($projectDialog.get()?.mode).toBe('create')
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
-
-    openMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'New terminal' }))
+    fireEvent.click(screen.getByRole('button', { name: 'New terminal' }))
     expect(onNewTerminal).toHaveBeenCalledOnce()
-    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 
-  it('toggles keep-awake directly from the app toolbar', () => {
+  it('toggles keep-awake from the dropdown instead of the app toolbar', async () => {
     render(
       <MemoryRouter>
         <TitlebarControls onNewSession={vi.fn()} onOpenSettings={vi.fn()} />
       </MemoryRouter>
     )
 
-    const enable = screen.getByRole('button', { name: 'Keep computer awake: Off' })
-    expect(enable.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByRole('button', { name: /Keep computer awake/ })).toBeNull()
+    openAppMenu()
+    const enable = screen.getByRole('menuitem', { name: 'Keep computer awake: Off' })
     expect(enable.querySelector('.codicon-unlock')).toBeTruthy()
 
     fireEvent.click(enable)
 
     expect($keepAwake.get()).toBe(true)
-    const disable = screen.getByRole('button', { name: 'Keep computer awake: On' })
-    expect(disable.getAttribute('aria-pressed')).toBe('true')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    openAppMenu()
+    const disable = screen.getByRole('menuitem', { name: 'Keep computer awake: On' })
     expect(disable.querySelector('.codicon-lock')).toBeTruthy()
+    fireEvent.click(disable)
+    expect($keepAwake.get()).toBe(false)
   })
 
-  it('toggles scroll-window layout from the header', () => {
+  it('toggles scroll-window layout from the dropdown instead of the header', async () => {
     act(() => $layoutSurfaceMode.set('tabbed'))
     render(
       <MemoryRouter>
@@ -146,10 +130,15 @@ describe('TitlebarControls', () => {
       </MemoryRouter>
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use scroll-window layout' }))
+    expect(screen.queryByRole('button', { name: 'Use scroll-window layout' })).toBeNull()
+    openAppMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Use scroll-window layout' }))
 
     expect($layoutSurfaceMode.get()).toBe('scroll-windows')
-    expect(screen.getByRole('button', { name: 'Use tabbed layout' })).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    openAppMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Use tabbed layout' }))
+    expect($layoutSurfaceMode.get()).toBe('tabbed')
   })
 
   it('keeps requested app controls visible and moves the rest behind the dots menu', async () => {
@@ -250,11 +239,10 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
-      'Use scroll-window layout',
-      'Keep computer awake: Off',
       'Codex usage unavailable',
-      'Approval mode: Off',
-      'Create new'
+      'New session',
+      'New project',
+      'Show terminal'
     ])
     expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
@@ -265,7 +253,7 @@ describe('TitlebarControls', () => {
     fireEvent.click(more)
 
     expect(screen.queryByRole('menuitem', { name: 'Command Center' })).toBeNull()
-    expect(screen.queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: 'Approvals' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Gateway' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Workspace' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Project' })).toBeNull()
@@ -320,11 +308,10 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
-      'Use scroll-window layout',
-      'Keep computer awake: Off',
       'Codex usage unavailable',
-      'Approval mode: Off',
-      'Create new'
+      'New session',
+      'New project',
+      'Show terminal'
     ])
   })
 
@@ -393,6 +380,13 @@ describe('TitlebarControls', () => {
     })
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Capabilities' })).toBeNull())
-    expect(screen.getByRole('button', { name: 'Create new' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'New session' })).toBeTruthy()
   })
 })
+
+function openAppMenu() {
+  const more = screen.getByRole('button', { name: 'More app actions' })
+  fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
+  fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
+  fireEvent.click(more)
+}

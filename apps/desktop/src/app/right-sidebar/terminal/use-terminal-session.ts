@@ -18,7 +18,7 @@ import { observeActiveTerminalResize } from './active-resize'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
 import { mirrorSelection, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
-import { hydrateTerminalState, loadPersistentTerminalRuntime } from './persistent-runtime'
+import { hydrateTerminalState, loadPersistentTerminalRuntime, onTerminalData } from './persistent-runtime'
 import { watchTerminalProcess } from './process-title'
 import {
   isAddSelectionShortcut,
@@ -350,7 +350,7 @@ export function createHostPlaybackGate(write: (data: string, callback: () => voi
     })
 
   return {
-    isSuppressed: () => depth > 0,
+    isSuppressed: (userInput = false) => depth > 0 && !userInput,
     suppress,
     writePlayback
   }
@@ -854,8 +854,8 @@ export function useTerminalSession({
     // live event playback. Physical keyboard/paste still flows normally.
     const hostPlayback = createHostPlaybackGate((data, done) => term.write(data, done))
 
-    const dataDisposable = term.onData(data => {
-      if (hostPlayback.isSuppressed()) {
+    const dataDisposable = onTerminalData(term, (data, userInput) => {
+      if (hostPlayback.isSuppressed(userInput)) {
         return
       }
 

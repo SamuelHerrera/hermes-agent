@@ -590,8 +590,7 @@ export async function setupPackagedApp(): Promise<PackagedAppFixture> {
 // ─── Wait helpers ──────────────────────────────────────────────────────
 
 export async function selectCreateAction(page: Page, action: 'New session' | 'New project' | 'New terminal'): Promise<void> {
-  await page.getByLabel('App controls', { exact: true }).getByRole('button', { name: 'Create new', exact: true }).click()
-  await page.getByRole('menuitem', { name: action, exact: true }).click()
+  await page.getByLabel('App controls', { exact: true }).getByRole('button', { name: action, exact: true }).click()
 }
 
 /**
