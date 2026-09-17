@@ -108,7 +108,8 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: /Keep computer awake/ })).toBeNull()
     openAppMenu()
-    const enable = screen.getByRole('menuitem', { name: 'Keep computer awake: Off' })
+    const enable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Keep computer awake: Off' })
+    expect(enable.getAttribute('aria-pressed')).toBe('false')
     expect(enable.querySelector('.codicon-unlock')).toBeTruthy()
 
     fireEvent.click(enable)
@@ -116,7 +117,8 @@ describe('TitlebarControls', () => {
     expect($keepAwake.get()).toBe(true)
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     openAppMenu()
-    const disable = screen.getByRole('menuitem', { name: 'Keep computer awake: On' })
+    const disable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Keep computer awake: On' })
+    expect(disable.getAttribute('aria-pressed')).toBe('true')
     expect(disable.querySelector('.codicon-lock')).toBeTruthy()
     fireEvent.click(disable)
     expect($keepAwake.get()).toBe(false)
@@ -132,12 +134,12 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: 'Use scroll-window layout' })).toBeNull()
     openAppMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Use scroll-window layout' }))
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Use scroll-window layout' }))
 
     expect($layoutSurfaceMode.get()).toBe('scroll-windows')
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     openAppMenu()
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Use tabbed layout' }))
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Use tabbed layout' }))
     expect($layoutSurfaceMode.get()).toBe('tabbed')
   })
 
@@ -240,9 +242,9 @@ describe('TitlebarControls', () => {
       'More app actions',
       'Profiles',
       'Codex usage unavailable',
-      'New session',
       'New project',
-      'Show terminal'
+      'Show terminal',
+      'New session'
     ])
     expect(appControls.children[1]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
@@ -309,9 +311,9 @@ describe('TitlebarControls', () => {
       'More app actions',
       'Profiles',
       'Codex usage unavailable',
-      'New session',
       'New project',
-      'Show terminal'
+      'Show terminal',
+      'New session'
     ])
   })
 

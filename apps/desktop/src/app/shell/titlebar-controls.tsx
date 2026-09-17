@@ -97,7 +97,7 @@ const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
 const GATEWAY_STATUSBAR_ID = 'gateway-health'
-const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set(['restart-backend', 'restart-gateway', 'layout', 'hud'])
+const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set(['layout-surface', 'keep-awake', 'restart-backend', 'restart-gateway', 'layout', 'hud'])
 const WEBHOOKS_STATUSBAR_ID = 'webhooks'
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
@@ -688,9 +688,9 @@ export function TitlebarControls({
           ))}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
         {pinnedSystemTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
-        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
         {pinnedWorkspacePageTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
         {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
+        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
       </div>
     </>
   )
