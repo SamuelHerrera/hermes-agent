@@ -26,6 +26,7 @@ import type { ConfigFieldSchema, HermesConfigRecord } from '@/types/hermes'
 import { setHermesConfigCache, useHermesConfigRecord } from '../hooks/use-config-record'
 import { useOnProfileSwitch } from '../hooks/use-on-profile-switch'
 import { PanelEmpty } from '../overlays/panel'
+import { QuestionsView } from '../questions'
 
 import { ConfigField } from './config-field'
 import { enumOptionsFor, getNested, isExternalMemoryProvider, sectionFieldEntries, setNested } from './helpers'
@@ -316,6 +317,7 @@ export function ConfigSettings({
             onChange={on => void setKeepAwake(on)}
           />
           <QuickEntrySettings />
+          <QuestionsView settingsOnly />
         </>
       )}
       {/* Device-local attach/preview byte cap (main-process IPC guard). Chat is

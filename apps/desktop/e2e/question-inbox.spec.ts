@@ -33,10 +33,8 @@ async function rpc(page: Page, method: string, params: Record<string, unknown> =
 }
 
 async function openInbox(page: Page) {
-  await page.getByRole('button', { name: 'More app actions', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Views', exact: true }).hover()
-  await page.getByRole('menuitem', { name: 'Questions', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Questions', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: /^Notifications(?: \(\d+\))?$/ }).click()
+  await expect(page.getByRole('dialog', { name: 'Notifications', exact: true })).toBeVisible()
 }
 
 test('durable question inbox survives restart, accumulates, and resumes a late answer', async ({}, testInfo) => {
@@ -55,9 +53,13 @@ test('durable question inbox survives restart, accumulates, and resumes a late a
       .toContain('Question inbox fixture completed independent work.')
     expect(before.map((row: any) => row.status)).toEqual(['open', 'open'])
     expect(before.map((row: any) => row.requires_user)).toEqual([true, false])
+    await expect(desktop.page.getByRole('button', { name: 'Notifications (2)', exact: true })).toBeVisible()
     await openInbox(desktop.page)
     await expect(desktop.page.getByRole('article')).toHaveCount(2)
     await desktop.page.screenshot({ path: testInfo.outputPath('questions-accumulated.png'), fullPage: true })
+    await desktop.page.getByRole('button', { name: 'Which release needs your approval?', exact: true }).click()
+    await expect(desktop.page.getByRole('dialog', { name: 'Notifications', exact: true })).not.toBeVisible()
+    await expect(desktop.page.getByText('Question inbox fixture completed independent work.', { exact: true }).first()).toBeVisible()
 
     await desktop.app.close()
     desktop = await launchDesktop(buildAppEnv(fixture.sandbox))
@@ -66,7 +68,7 @@ test('durable question inbox survives restart, accumulates, and resumes a late a
     await waitForAppReady({ ...fixture, ...desktop }, 120_000)
     const after = (await rpc(desktop.page, 'questions.list')).questions
     expect(after.map((row: any) => row.id)).toEqual(before.map((row: any) => row.id))
-    if (!await desktop.page.getByRole('heading', { name: 'Questions', exact: true }).isVisible()) await openInbox(desktop.page)
+    await openInbox(desktop.page)
     await expect(desktop.page.getByRole('article')).toHaveCount(2)
     const hard = desktop.page.getByRole('article').filter({ hasText: 'Which release needs your approval?' })
     await hard.getByLabel('Release B', { exact: true }).check()
@@ -79,6 +81,8 @@ test('durable question inbox survives restart, accumulates, and resumes a late a
     expect(history[0].answered_by).toBe('user')
     expect(history[0].answer).toBe('Release B')
     expect(history[1].status).toBe('open')
+    await expect(desktop.page.getByRole('button', { name: 'Notifications (1)', exact: true })).toBeVisible()
+    await desktop.page.getByRole('button', { name: 'Question settings', exact: true }).click()
     await desktop.page.getByText('Question settings', { exact: true }).click()
     await desktop.page.getByLabel('Soft review delay in seconds, 0 disables').fill('0')
     await desktop.page.getByRole('button', { name: 'Save', exact: true }).click()

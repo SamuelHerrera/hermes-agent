@@ -29,17 +29,19 @@ export interface QuestionRowCopy {
 }
 
 interface QuestionRowProps {
+  compact?: boolean
   row: Question
   copy: QuestionRowCopy
   onAnswer: (answer: string | string[]) => Promise<void>
   onOpen: () => void
 }
 
-export function QuestionRow({ row, copy, onAnswer, onOpen }: QuestionRowProps) {
+export function QuestionRow({ row, copy, onAnswer, onOpen, compact = false }: QuestionRowProps) {
   const [selected, setSelected] = useState<string[]>([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [showOther, setShowOther] = useState(!compact || !row.choices?.length)
   const answered = row.status === 'answered'
   const answer = row.delivery_pending ? (row.answer ?? '') : text.trim() || (row.multi_select ? selected : selected[0])
   const hasAnswer = Array.isArray(answer) ? answer.length > 0 : Boolean(answer)
@@ -62,14 +64,24 @@ export function QuestionRow({ row, copy, onAnswer, onOpen }: QuestionRowProps) {
   }
 
   return (
-    <article className="grid gap-3 border-b border-(--ui-stroke-tertiary) py-5">
+    <article
+      className={`grid border-b border-(--ui-stroke-tertiary) ${compact ? 'gap-2 py-3 last:border-0' : 'gap-3 py-5'}`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-(--ui-text-tertiary)">
         <span>{row.requires_user ? copy.hard : copy.soft}</span>
         <Button onClick={onOpen} size="xs" variant="text">
           {copy.session}
         </Button>
       </div>
-      <h2 className="whitespace-pre-wrap break-words text-sm font-medium">{row.question}</h2>
+      <h2 className="whitespace-pre-wrap break-words text-sm font-medium">
+        {compact ? (
+          <button className="cursor-pointer text-left hover:underline" onClick={onOpen}>
+            {row.question}
+          </button>
+        ) : (
+          row.question
+        )}
+      </h2>
       {row.review?.reason && <p className="text-xs text-(--ui-text-secondary)">{row.review.reason}</p>}
       {answered ? (
         <>
@@ -98,9 +110,16 @@ export function QuestionRow({ row, copy, onAnswer, onOpen }: QuestionRowProps) {
             void submit()
           }}
         >
-          <fieldset aria-label={row.question} className="grid gap-2" disabled={busy}>
+          <fieldset
+            aria-label={row.question}
+            className={compact ? 'flex flex-wrap gap-2' : 'grid gap-2'}
+            disabled={busy}
+          >
             {(row.choices ?? []).map(choice => (
-              <label className="flex items-start gap-2 whitespace-pre-wrap break-words text-sm" key={choice}>
+              <label
+                className={`flex items-start gap-2 whitespace-pre-wrap break-words ${compact ? 'cursor-pointer rounded border border-(--ui-stroke-secondary) px-2 py-1 text-xs has-checked:border-primary has-checked:bg-primary/10' : 'text-sm'}`}
+                key={choice}
+              >
                 <input
                   checked={!text && selected.includes(choice)}
                   name={row.id}
@@ -119,15 +138,24 @@ export function QuestionRow({ row, copy, onAnswer, onOpen }: QuestionRowProps) {
                 <span>{choice}</span>
               </label>
             ))}
-            <Textarea
-              aria-label={copy.other}
-              onChange={event => {
-                setText(event.target.value)
-                setSelected([])
-              }}
-              placeholder={copy.other}
-              value={text}
-            />
+            {!showOther && (
+              <Button onClick={() => setShowOther(true)} size="xs" type="button" variant="text">
+                {copy.other}
+              </Button>
+            )}
+            {showOther && (
+              <Textarea
+                aria-label={copy.other}
+                className={compact ? 'min-h-0 w-full text-xs' : undefined}
+                onChange={event => {
+                  setText(event.target.value)
+                  setSelected([])
+                }}
+                placeholder={copy.other}
+                rows={compact ? 2 : undefined}
+                value={text}
+              />
+            )}
           </fieldset>
           {error && (
             <p className="text-sm text-destructive" role="alert">

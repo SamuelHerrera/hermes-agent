@@ -1320,6 +1320,7 @@ def _(rid, params: dict) -> dict:
         include_answered=params.get("include_answered") is True,
         query=str(params.get("query") or "")[:1000],
         offset=int(params.get("offset", 0)), limit=int(params.get("limit", 200))),
+        "open_count": QuestionInbox().count_open(),
         "settings": {"clarify_timeout": get_clarify_timeout(),
                      "clarify_soft_timeout": cfg.get("clarify_soft_timeout", 120),
                      "clarify_review_timeout": cfg.get("clarify_review_timeout", 60)}})

@@ -1,6 +1,8 @@
 import type { Locale } from '@/i18n'
 
 const en = {
+  notifications: 'Notifications',
+  loading: 'Loading questions…',
   previous: 'Previous',
   resume: 'Continue with saved answer',
   title: 'Questions',
@@ -33,6 +35,8 @@ const en = {
 export const questionCopy: Record<Locale, typeof en> = {
   en,
   ja: {
+    notifications: '通知',
+    loading: '質問を読み込み中…',
     previous: '前へ',
     resume: '保存した回答で続行',
     title: '質問',
@@ -62,6 +66,8 @@ export const questionCopy: Record<Locale, typeof en> = {
     help: '待機終了後も質問を保存します。自動判断可能な質問はMarkdownメモリとHindsightで一度だけ確認します。根拠が不足する場合は未回答のままです。必須の質問には自動回答しません。既に許可された独立した作業のみ続行できます。'
   },
   zh: {
+    notifications: '通知',
+    loading: '正在加载问题…',
     previous: '上一页',
     resume: '使用已保存的回答继续',
     title: '问题',
@@ -91,6 +97,8 @@ export const questionCopy: Record<Locale, typeof en> = {
     help: '等待结束后问题仍会保存。可自动判断的问题将通过Markdown记忆和Hindsight进行一次只读审核。证据不足时保持待回答。必须由用户回答的问题不会自动回答。只能继续已授权且独立的工作。'
   },
   'zh-hant': {
+    notifications: '通知',
+    loading: '正在載入問題…',
     previous: '上一頁',
     resume: '使用已儲存的回答繼續',
     title: '問題',
@@ -120,6 +128,8 @@ export const questionCopy: Record<Locale, typeof en> = {
     help: '等待結束後問題仍會儲存。可自動判斷的問題將透過Markdown記憶和Hindsight進行一次唯讀審核。證據不足時保持待回答。必須由使用者回答的問題不會自動回答。只能繼續已授權且獨立的工作。'
   },
   ar: {
+    notifications: 'الإشعارات',
+    loading: 'جارٍ تحميل الأسئلة…',
     previous: 'السابق',
     resume: 'المتابعة بالإجابة المحفوظة',
     title: 'الأسئلة',

@@ -30,7 +30,7 @@ interface InboxResponse {
   settings: QuestionSettings
 }
 
-export function QuestionsView() {
+export function QuestionsView({ settingsOnly = false }: { settingsOnly?: boolean }) {
   const gateway = useStore($gateway)
   const activeProfile = useStore($activeProfile)
   const connection = useStore($connection)
@@ -42,11 +42,24 @@ export function QuestionsView() {
   }
 
   return (
-    <QuestionsInbox gateway={gateway} key={`${activeProfile}:${connection?.baseUrl}:${profile}`} profile={profile} />
+    <QuestionsInbox
+      gateway={gateway}
+      key={`${activeProfile}:${connection?.baseUrl}:${profile}`}
+      profile={profile}
+      settingsOnly={settingsOnly}
+    />
   )
 }
 
-function QuestionsInbox({ gateway, profile }: { gateway: HermesGateway; profile: string | null }) {
+function QuestionsInbox({
+  gateway,
+  profile,
+  settingsOnly
+}: {
+  gateway: HermesGateway
+  profile: string | null
+  settingsOnly: boolean
+}) {
   const { locale } = useI18n()
   const copy = questionCopy[locale]
   const navigate = useNavigate()
@@ -120,6 +133,16 @@ function QuestionsInbox({ gateway, profile }: { gateway: HermesGateway; profile:
   }
 
   const rows = data?.questions ?? []
+
+  if (settingsOnly) {
+    return (
+      <section id="question-settings">
+        {error && <ErrorState description={error} title={copy.failed} />}
+        {!data && !error && <PageLoader />}
+        {data && <QuestionSettingsForm gateway={gateway} profile={profile} settings={data.settings} />}
+      </section>
+    )
+  }
 
   return (
     <PageSearchShell

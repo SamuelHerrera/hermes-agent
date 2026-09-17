@@ -2430,9 +2430,10 @@ agent:
 
 ### Desktop question inbox and soft review
 
-Open **More app actions → Views → Questions** to browse the current backend/profile's
-questions, choose options (including multiple selections), enter a free-text answer,
-open the originating session, or edit the three timeout settings. Settings apply to
+Click the **Notifications bell in the app header** to browse the current backend/profile's
+open questions. Its badge shows the outstanding count. Choose options (including multiple
+selections), enter a free-text answer, or click a question to focus its originating chat.
+The gear opens **Settings → Advanced → Question settings** for the three timeouts. Settings apply to
 new questions. Open questions and answer history are saved in the profile's
 `questions.db` and survive renderer/backend restarts. No existing transcript is
 rewritten, and historical questions are not backfilled.

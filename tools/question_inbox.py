@@ -52,6 +52,11 @@ class QuestionInbox:
             row = db.execute("SELECT payload FROM questions WHERE id=?", (question_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def count_open(self) -> int:
+        with self._db() as db:
+            return db.execute("SELECT count(*) FROM questions WHERE status='open' "
+                              "OR json_extract(payload, '$.delivery_pending')=1").fetchone()[0]
+
     def list(self, *, include_answered: bool = False, limit: int = 200, offset: int = 0,
              query: str = "") -> list[dict]:
         clauses = [] if include_answered else ["(status='open' OR json_extract(payload, '$.delivery_pending')=1)"]

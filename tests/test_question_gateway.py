@@ -113,3 +113,15 @@ def test_idle_answer_uses_explicit_queue_semantics(gateway, monkeypatch):
     monkeypatch.setitem(gateway._methods, "prompt.submit", lambda rid, params: calls.append(params) or {"result": {"status": "queued"}})
     gateway._methods["questions.respond"](1, {"question_id": row["id"], "answer": "CSV"})
     assert calls[0]["queued"] is True
+
+
+def test_notification_count_is_not_limited_by_the_visible_page(gateway):
+    store = QuestionInbox()
+    rows = [store.create(session_id="durable", runtime_id="runtime", question=f"Question {i}", choices=None) for i in range(3)]
+    store.answer(rows[0]["id"], "done", actor="user")
+    result = gateway._methods["questions.list"](1, {"limit": 1})["result"]
+    assert len(result["questions"]) == 1
+    assert result["open_count"] == 2
+    store.answer(rows[1]["id"], "saved", actor="user", delivery_pending=True)
+    result = gateway._methods["questions.list"](2, {"limit": 1, "offset": 1})["result"]
+    assert result["open_count"] == 2  # Interrupted deliveries still need attention.
