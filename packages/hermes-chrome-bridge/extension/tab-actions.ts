@@ -1,4 +1,4 @@
-import { isPublicHttpUrl } from './url-policy.js'
+import { isControllableHttpUrl } from './url-policy.js'
 
 interface BrowserTabResult {
   id?: number
@@ -33,7 +33,7 @@ export interface TabActions {
 }
 
 function safeNavigationUrl(raw: string): string {
-  if (!isPublicHttpUrl(raw)) {
+  if (!isControllableHttpUrl(raw)) {
     throw new TabActionError('URL_BLOCKED', 'The requested navigation URL is blocked.')
   }
 

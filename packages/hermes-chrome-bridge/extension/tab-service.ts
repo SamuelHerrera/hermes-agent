@@ -1,4 +1,4 @@
-import { isPublicHttpUrl } from './url-policy.js'
+import { isControllableHttpUrl } from './url-policy.js'
 
 export interface BrowserTabLike {
   active?: boolean
@@ -123,7 +123,7 @@ function safeUrl(raw: string): { redacted: boolean, truncated: boolean, value: s
   policyUrl.username = ''
   policyUrl.password = ''
 
-  if (!isPublicHttpUrl(policyUrl.toString())) { return undefined }
+  if (!isControllableHttpUrl(policyUrl.toString())) { return undefined }
 
   let redacted = parsed.username.length > 0 || parsed.password.length > 0 ||
     parsed.search.length > 0 || parsed.hash.length > 0

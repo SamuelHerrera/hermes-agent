@@ -1,3 +1,20 @@
+export const NETWORK_MODE_KEY = 'hermesChromeBridgeNetworkMode'
+let networkMode: 'development' | 'public' = 'development'
+
+export function setNetworkMode(value: unknown): void {
+  networkMode = value === undefined || value === 'development' ? 'development' : 'public'
+}
+
+function mappedIpv4(hostname: string): string {
+  const match = /^\[::ffff:([\da-f]+):([\da-f]+)\]$/u.exec(hostname)
+
+  if (match === null) { return hostname }
+  const high = Number.parseInt(match[1] as string, 16)
+  const low = Number.parseInt(match[2] as string, 16)
+
+  return [high >> 8, high & 255, low >> 8, low & 255].join('.')
+}
+
 function isPrivateIpv4(hostname: string): boolean {
   const parts = hostname.split('.')
 
@@ -33,25 +50,42 @@ function isRestrictedBrowserPage(url: URL): boolean {
     (hostname === 'chrome.google.com' && url.pathname.toLowerCase().startsWith('/webstore'))
 }
 
-export function isPublicHttpUrl(value: unknown): value is string {
+function permittedUrl(value: unknown, development: boolean): value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 8_192) { return false }
 
   try {
     const url = new URL(value)
-    const hostname = url.hostname.replace(/\.$/u, '').toLowerCase()
+    const hostname = mappedIpv4(url.hostname.replace(/\.$/u, '').toLowerCase())
 
     if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username !== '' || url.password !== '') {
       return false
     }
 
-    if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') ||
-      hostname.endsWith('.internal') || isPrivateIpv4(hostname) || isPrivateIpv6(hostname) ||
-      isRestrictedBrowserPage(url)) {
+    if (isRestrictedBrowserPage(url) || hostname === 'metadata.google.internal' ||
+      hostname.endsWith('.metadata.google.internal') || hostname === '100.100.100.200' ||
+      hostname === '[fd00:ec2::254]' || hostname.startsWith('169.254.') ||
+      hostname === '[::]' || /^\[ff/iu.test(hostname) ||
+      (/^\d+\.\d+\.\d+\.\d+$/u.test(hostname) && Number(hostname.split('.')[0]) >= 224)) {
       return false
     }
+
+    if (!development && (hostname === 'localhost' || hostname.endsWith('.localhost') ||
+      hostname.endsWith('.local') || hostname.endsWith('.internal') ||
+      (!hostname.includes('.') && !hostname.includes(':')) ||
+      isPrivateIpv4(hostname) || isPrivateIpv6(hostname))) { return false }
 
     return true
   } catch {
     return false
   }
+}
+
+/** Strict hostname policy; not a DNS resolver or a network firewall. */
+export function isPublicHttpUrl(value: unknown): value is string {
+  return permittedUrl(value, false)
+}
+
+/** Development access is intentional; metadata and browser chrome remain excluded. */
+export function isControllableHttpUrl(value: unknown): value is string {
+  return permittedUrl(value, networkMode === 'development')
 }

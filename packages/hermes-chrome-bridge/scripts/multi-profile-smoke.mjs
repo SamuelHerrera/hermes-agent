@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,12 +37,28 @@ const pages = []
 const client = new Client({ name: 'two-profile-live-smoke', version: '1' })
 const evidence = { browser: chromium.executablePath(), profiles: [], checks: [] }
 let transport
+const fixtureServer = createServer((request, response) => {
+  response.setHeader('Content-Type', 'text/html; charset=utf-8')
+  if (request.url.startsWith('/frame')) {
+    response.end('<!doctype html><label>Frame input<input id="frame-input"></label>')
+    return
+  }
+  response.end(`<!doctype html><html><head><title>Hermes development fixture</title></head>
+    <body><h1>Development fixture</h1><p>Disposable localhost page; no real data.</p>
+    <section id="shadow-host"></section><iframe src="/frame" title="Same-origin test frame"></iframe>
+    <script>document.querySelector('#shadow-host').attachShadow({mode:'open'}).innerHTML=
+    '<label>Shadow input<input id="shadow-input"></label>';</script></body></html>`)
+})
+await new Promise(resolveListen => fixtureServer.listen(0, '127.0.0.1', resolveListen))
+const fixtureOrigin = `http://127.0.0.1:${fixtureServer.address().port}`
 
 async function call(method, args = {}, expectedError) {
   const response = await client.callTool({ name: `chrome_bridge_${method}`, arguments: args })
   const text = response.content.filter(item => item.type === 'text').map(item => item.text).join('\n')
   let result
   try { result = JSON.parse(text) } catch { result = { message: text } }
+  const image = response.content.find(item => item.type === 'image')
+  if (image) { result.dataUrl = `data:${image.mimeType};base64,${image.data}` }
   if (expectedError) {
     assert.equal(response.isError, true, text)
     if (expectedError !== true) { assert.equal(result.code, expectedError, text) }
@@ -94,9 +111,9 @@ try {
     const identity = status.connections.find(connection => connection.label === label)
     assert.ok(identity, JSON.stringify(status))
     evidence.profiles.push(identity)
-    const opened = await call('open', { connectionId: identity.connectionId, url: 'https://example.com/?token=smoke-only', active: false })
-    const page = await waitFor(() => context.pages(), value => value.some(item => item.url().startsWith('https://example.com/')), 'opened page missing')
-    const publicPage = page.find(item => item.url().startsWith('https://example.com/'))
+    const opened = await call('open', { connectionId: identity.connectionId, url: `${fixtureOrigin}/?token=smoke-only`, active: false })
+    const page = await waitFor(() => context.pages(), value => value.some(item => item.url().startsWith(fixtureOrigin)), 'opened page missing')
+    const publicPage = page.find(item => item.url().startsWith(fixtureOrigin))
     await publicPage.waitForLoadState('domcontentloaded')
     // Distinguishable, non-secret fixture content on a real public page.
     await publicPage.locator('h1').evaluate((heading, text) => { heading.textContent = text }, label)
@@ -112,7 +129,10 @@ try {
       button.textContent = 'Check local input'
       const output = document.createElement('output')
       output.id = 'smoke-result'
-      button.addEventListener('click', () => { output.textContent = input.value })
+      button.addEventListener('click', event => {
+        output.textContent = input.value
+        output.dataset.trusted = String(event.isTrusted)
+      })
       body.append(input, button, output)
     })
     assert.equal(await publicPage.locator('input[type=hidden]').evaluate(input => input.labels), null)
@@ -124,6 +144,7 @@ try {
     await call('type', { tabId: opened.tabId, target: '#smoke-input', text: label })
     await call('click', { tabId: opened.tabId, target: '#smoke-button' })
     assert.equal((await call('query', { tabId: opened.tabId, selector: '#smoke-result' })).elements[0].text, label)
+    assert.equal(await publicPage.locator('#smoke-result').getAttribute('data-trusted'), 'true')
     const capture = await call('screenshot', { tabId: opened.tabId })
     assert.ok(capture.bytes > 0)
     await writeFile(join(evidenceRoot, `profile-${contexts.length}-interaction.png`), Buffer.from(capture.dataUrl.split(',')[1], 'base64'))
@@ -161,7 +182,7 @@ try {
   assert.ok(reconnected.connections.some(item => item.connectionId === pages[0].connectionId))
   await call('query', { tabId: pages[0].tabId, selector: 'h1' }, 'STALE_TAB_ID')
   const fresh = await call('tabs', { connectionId: pages[0].connectionId })
-  const freshTabId = fresh.tabs.find(tab => tab.url.startsWith('https://example.com/')).tabId
+  const freshTabId = fresh.tabs.find(tab => tab.url.startsWith(fixtureOrigin)).tabId
   assert.ok(JSON.stringify(await call('query', { tabId: freshTabId, selector: 'h1' })).includes('Bridge Test A'))
   assert.ok(JSON.stringify(await call('query', { tabId: pages[1].tabId, selector: 'h1' })).includes('Bridge Test B'))
   evidence.checks.push('independent Disconnect/reconnect preserves identity, rejects stale tab IDs, leaves peer controllable')
@@ -183,6 +204,7 @@ try {
   }
   await Promise.all(contexts.map(context => context.close()))
   await client.close().catch(() => undefined)
+  await new Promise(resolveClose => fixtureServer.close(resolveClose))
   await writeFile(join(evidenceRoot, 'result.json'), JSON.stringify(evidence, null, 2))
   console.log(JSON.stringify({ ...evidence, evidenceRoot }, null, 2))
   if (!evidenceRoot.startsWith(root + '/')) { await rm(root, { force: true, recursive: true }) }

@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createTabService, redactTab } from './tab-service.js'
+import { setNetworkMode } from './url-policy.js'
+
+afterEach(() => setNetworkMode(undefined))
 
 interface FakeTab {
   active?: boolean
@@ -112,6 +115,9 @@ describe('safe tab service', () => {
       { id: 12, title: 'Web Store', url: 'https://chromewebstore.google.com/detail/example', windowId: 1 }
     ])
 
+    await expect(service.list()).resolves.toMatchObject({ count: 3 })
+    await expect(service.assertControllable(10)).resolves.toBeUndefined()
+    setNetworkMode('public')
     await expect(service.list()).resolves.toMatchObject({ count: 1 })
     await expect(service.select(2)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })
     await expect(service.assertControllable(10)).rejects.toMatchObject({ code: 'TAB_NOT_CONTROLLABLE' })
