@@ -6,11 +6,14 @@ import {
   allPaneIds,
   findGroup,
   findGroupOfPane,
+  findParentSplit,
   group,
   groupLeafIds,
+  insertAtGroup,
   isLayoutNode,
   type LayoutNode,
   normalize,
+  removePane,
   replaceNode,
   split
 } from './model'
@@ -58,6 +61,52 @@ export function emptyTabbedScreen(tree: LayoutNode, screenId?: string): LayoutNo
   return ensureTabbedScreenContent(cloneNavigation(tree, screenId))
 }
 
+function rightPanelAnchor(tree: LayoutNode) {
+  return findGroupOfPane(tree, 'workspace') ?? findGroupOfPane(tree, 'sessions') ??
+    groupLeafIds(tree).map(id => findGroup(tree, id)).find(group => group && !group.panes.includes('files')) ??
+    null
+}
+
+function filesAlreadyRightOfAnchor(tree: LayoutNode): boolean {
+  const files = findGroupOfPane(tree, 'files')
+
+  if (!files || files.panes.includes('sessions') || files.panes.includes('workspace')) {
+    return false
+  }
+
+  const parent = findParentSplit(tree, files.id)
+
+  if (!parent || parent.orientation !== 'row') {
+    return false
+  }
+
+  const filesIndex = parent.children.findIndex(child => child.id === files.id)
+  const workspaceIndex = parent.children.findIndex(child => allPaneIds(child).includes('workspace'))
+
+  const anchorIndex = workspaceIndex >= 0 ? workspaceIndex : parent.children.findIndex(child => {
+    const panes = allPaneIds(child)
+
+    return panes.includes('sessions')
+  })
+
+  return anchorIndex >= 0 && filesIndex > anchorIndex
+}
+
+/** Files is shared navigation chrome, but it must live in the right rail on
+ * every numbered desktop. Persisted/custom trees can still carry older shapes
+ * where Files was stacked into Sessions or the main tab strip; repair those at
+ * every screen boundary so focusing desktop 1 cannot pull Files back left. */
+export function enforceFilesRightPanel(tree: LayoutNode): LayoutNode {
+  if (!findGroupOfPane(tree, 'files') || filesAlreadyRightOfAnchor(tree)) {
+    return tree
+  }
+
+  const withoutFiles = removePane(tree, 'files')
+  const anchor = withoutFiles ? rightPanelAnchor(withoutFiles) : null
+
+  return anchor && withoutFiles ? (insertAtGroup(withoutFiles, anchor.id, 'files', 'right', undefined, false) ?? tree) : tree
+}
+
 function cloneNavigation(tree: LayoutNode, screenId?: string): LayoutNode {
   const id = screenId ? `${tree.id}:screen-${screenId}` : tree.id
 
@@ -74,6 +123,8 @@ function cloneNavigation(tree: LayoutNode, screenId?: string): LayoutNode {
  * Normal structural operations still prune empty splits; only an entirely
  * empty desktop gets this one placeholder back. */
 export function ensureTabbedScreenContent(tree: LayoutNode): LayoutNode {
+  tree = enforceFilesRightPanel(tree)
+
   // Older/default screens can retain Files in the Sessions group after their
   // last content pane is closed. There need not be a primary workspace on this
   // desktop, so repair the rail independently of that permanent chat host.

@@ -434,8 +434,8 @@ registry.registerMany([
 // Layout presets — CHAT (main) always dominates.
 // ---------------------------------------------------------------------------
 
-// The REAL default: one fixed left panel (sessions + file tree), chat main, and
-// non-navigation panels on the other side / bottom.
+// The REAL default: fixed sessions on the left, chat main, and Files locked to
+// the right rail with non-navigation panels on the other side / bottom.
 //
 // Preview tiles are DYNAMIC panes (like session tiles), so no preset names one:
 // they're registered by watchPreviewTiles as tabs open, and dockPaneBeside lands
@@ -444,22 +444,22 @@ registry.registerMany([
 // tree, never as a tab stacked into the files sidebar.
 const DEFAULT_TREE = split(
   'row',
-  [group(['sessions', 'files'], { id: 'grp-sessions' }), group(['workspace'], { id: 'grp-main' })],
-  [1, 3.4],
+  [group(['sessions'], { id: 'grp-sessions' }), group(['workspace'], { id: 'grp-main' }), group(['files'], { id: 'grp-files' })],
+  [1, 3.4, 1],
   'spl-root'
 )
 
-const FOCUS_TREE = split('row', [group(['sessions', 'files']), group(['workspace', 'terminal'])], [1, 4.6])
+const FOCUS_TREE = split('row', [group(['sessions']), group(['workspace', 'terminal']), group(['files'])], [1, 4.6, 1])
 
 const TERMINAL_TREE = split(
   'column',
-  [split('row', [group(['sessions', 'files']), group(['workspace'])], [1, 3.2]), group(['terminal'])],
+  [split('row', [group(['sessions']), group(['workspace']), group(['files'])], [1, 3.2, 1]), group(['terminal'])],
   [3, 1]
 )
 
 const QUAD_TREE = split(
   'column',
-  [split('row', [group(['sessions', 'files']), group(['workspace'])], [1, 3]), group(['terminal'])],
+  [split('row', [group(['sessions']), group(['workspace']), group(['files'])], [1, 3, 1]), group(['terminal'])],
   [3, 1]
 )
 

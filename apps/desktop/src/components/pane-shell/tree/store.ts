@@ -47,6 +47,7 @@ import {
   $activeTabbedScreen,
   $tabbedScreenTrees,
   emptyTabbedScreen,
+  enforceFilesRightPanel,
   ensureTabbedScreenContent,
   saveTabbedScreen,
   tabbedScreenOwner
@@ -1608,7 +1609,7 @@ function redirectFromFixedLeftPanel(
 }
 
 function enforceFixedLeftPanel(tree: LayoutNode): LayoutNode {
-  let next = tree
+  let next = enforceFilesRightPanel(tree)
   const leftGroup = findGroupOfPane(next, 'sessions')
   const extras = leftGroup?.panes.filter(paneId => !FIXED_LEFT_PANEL_PANES.has(paneId)) ?? []
 
