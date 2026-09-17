@@ -206,6 +206,7 @@ import { serializeJsonBody, setJsonRequestHeaders } from './oauth-net-request'
 import { openRemotePersistentTerminal } from './persistent-remote-terminal'
 import { openLocalPersistentTerminal } from './persistent-terminal'
 import { createKeepAwake } from './power-save'
+import { installPreviewBrowserSession } from './preview-browser-session'
 import { FirstRunSetupResetError, runPrimaryBackendStartup } from './primary-backend-startup'
 import { rehomePrimaryConnection } from './primary-connection-rehome'
 import { decideProfileDeleteAction, profileNameFromDeleteRequest, resolveRouteProfile } from './profile-delete-routing'
@@ -13308,6 +13309,7 @@ app.whenReady().then(() => {
   }
 
   installMediaPermissions()
+  installPreviewBrowserSession({ app, rememberLog, sessionModule: session })
   registerMediaProtocol()
   installEmbedReferer()
   registerDeepLinkProtocol()

@@ -58,7 +58,7 @@ interface PreviewPaneProps {
   onRestartServer?: (url: string, context?: string) => Promise<string>
   reloadRequest?: number
   /** The preview tab this pane renders. Keys the per-tab console store and the
-   *  DevTools handle the STRIP glyphs read (see preview-strip-tools). */
+   *  browser-toolbar DevTools handle (see preview-strip-tools). */
   tabId?: string
   target: PreviewTarget
 }
@@ -719,6 +719,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     const webview = document.createElement('webview') as PreviewWebview
     webview.className = 'flex h-full w-full flex-1 bg-transparent'
+    webview.setAttribute('allowpopups', '')
     webview.setAttribute('partition', 'persist:hermes-preview')
     webview.setAttribute('src', initialUrl)
     webview.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no,sandbox=yes')

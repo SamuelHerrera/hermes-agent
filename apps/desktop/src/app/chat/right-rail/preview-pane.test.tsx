@@ -175,6 +175,8 @@ describe('PreviewPane console state', () => {
     const webview = rendered.container.querySelector('webview')
 
     expect(input.value).toBe('about:blank')
+    expect(webview?.hasAttribute('allowpopups')).toBe(true)
+    expect(webview?.getAttribute('partition')).toBe('persist:hermes-preview')
     expect(webview?.getAttribute('src')).toBe('about:blank')
 
     fireEvent.change(input, { target: { value: 'example.com' } })
