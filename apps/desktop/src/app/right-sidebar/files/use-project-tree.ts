@@ -242,6 +242,9 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
   }
 
   const openState = readProjectTreeView(projectTreeViewKey(resolvedCwd, connectionKey)).openState
+  // Publish the resolved folder before child reads so newer disclosure actions
+  // target its view and remain authoritative when restoration finishes.
+  setProjectTree(latest => ({ ...latest, resolvedCwd, openState }))
   const data = error ? [] : await restoreOpenChildren(entries, openState, requestId)
 
   setProjectTree(latest => {
@@ -252,7 +255,6 @@ async function loadRoot(cwd: string, { force = false }: { force?: boolean } = {}
     return {
       ...latest,
       data,
-      openState,
       loaded: true,
       resolvedCwd,
       rootError: error || null,

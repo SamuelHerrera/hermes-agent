@@ -325,6 +325,38 @@ describe('useProjectTree', () => {
     expect(result.current.data[0]?.children).toBeUndefined()
   })
 
+  it('keeps collapse-all authoritative while remembered children are still loading', async () => {
+    readDir.mockImplementation(async path =>
+      ok(path === '/a' ? [{ name: 'src', path: '/a/src', isDirectory: true }] : [])
+    )
+    const { result } = renderHook(() => useProjectTree('/a'))
+    await waitFor(() => expect(result.current.data).toHaveLength(1))
+    act(() => result.current.setNodeOpen('/a/src', true))
+
+    let finishChildren: (value: HermesReadDirResult) => void = () => {}
+    let childReadStarted = false
+    readDir.mockImplementation(async path => {
+      if (path === '/a') {return ok([{ name: 'src', path: '/a/src', isDirectory: true }])}
+      childReadStarted = true
+
+      return new Promise(resolve => {
+        finishChildren = resolve
+      })
+    })
+    let refresh: Promise<void>
+    act(() => {
+      refresh = result.current.refreshRoot()
+    })
+    await waitFor(() => expect(childReadStarted).toBe(true))
+    act(() => result.current.collapseAll())
+    await act(async () => {
+      finishChildren(ok([{ name: 'file.ts', path: '/a/src/file.ts', isDirectory: false }]))
+      await refresh
+    })
+    expect(result.current.rootLoading).toBe(false)
+    expect(result.current.openState).toEqual({})
+  })
+
   it('reloads when cwd changes', async () => {
     readDir.mockResolvedValueOnce(ok([{ name: 'one', path: '/a/one', isDirectory: false }]))
     readDir.mockResolvedValueOnce(ok([{ name: 'two', path: '/b/two', isDirectory: false }]))
