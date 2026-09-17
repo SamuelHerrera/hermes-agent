@@ -7,6 +7,7 @@ import type { Contribution } from '@/contrib/types'
 import { setCronJobs } from '@/store/cron'
 import { $keepAwake } from '@/store/keep-awake'
 import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } from '@/store/layout'
+import { $previewTabs, closeRightRail } from '@/store/preview'
 import { $activeGatewayProfile, $profiles, $showAllProfiles } from '@/store/profile'
 import { $projectDialog, closeProjectDialog } from '@/store/projects'
 
@@ -34,6 +35,7 @@ afterEach(() => {
   act(() => $keepAwake.set(false))
   act(() => setSidebarOpen(true))
   act(() => setCronJobs([]))
+  act(() => closeRightRail())
   act(() => closeProjectDialog())
   act(() => $profiles.set([]))
   act(() => $activeGatewayProfile.set('default'))
@@ -45,7 +47,11 @@ afterEach(() => {
 
 describe('TitlebarControls', () => {
   it('keeps the sidebar toggle in the titlebar when the sidebar is hidden', () => {
-    render(<MemoryRouter><TitlebarControls onOpenSettings={vi.fn()} /></MemoryRouter>)
+    render(
+      <MemoryRouter>
+        <TitlebarControls onOpenSettings={vi.fn()} />
+      </MemoryRouter>
+    )
     const toggle = screen.getByRole('button', { name: 'Hide sidebar' })
     expect(toggle.closest('[data-titlebar-sidebar-toggle]')).toBeTruthy()
     expect(within(screen.getByLabelText('App controls')).getByRole('button', { name: 'Hide sidebar' })).toBe(toggle)
@@ -61,7 +67,9 @@ describe('TitlebarControls', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByLabelText('App controls').style.top).toBe('calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))')
+    expect(screen.getByLabelText('App controls').style.top).toBe(
+      'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
+    )
   })
 
   it('leaves the aligned sidebar toolbar row visually transparent', () => {
@@ -74,7 +82,7 @@ describe('TitlebarControls', () => {
     expect(container.querySelector('[data-sidebar-toolbar-backdrop]')).toBeNull()
   })
 
-  it('exposes session, project and terminal as separate one-click buttons', () => {
+  it('exposes session, browser, project and terminal as separate one-click buttons', () => {
     const onNewSession = vi.fn()
     const onNewTerminal = vi.fn()
     render(
@@ -92,6 +100,9 @@ describe('TitlebarControls', () => {
     expect(onNewTerminal).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'New session' }))
     expect(onNewSession).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'New browser tab' }))
+    expect($previewTabs.get()).toHaveLength(1)
+    expect($previewTabs.get()[0].target).toMatchObject({ kind: 'url', url: 'about:blank' })
     fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     expect($projectDialog.get()?.mode).toBe('create')
     fireEvent.click(screen.getByRole('button', { name: 'New terminal' }))
@@ -108,7 +119,9 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: /Keep computer awake/ })).toBeNull()
     openAppMenu()
-    const enable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Keep computer awake: Off' })
+    const enable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', {
+      name: 'Keep computer awake: Off'
+    })
     expect(enable.getAttribute('aria-pressed')).toBe('false')
     expect(enable.querySelector('.codicon-unlock')).toBeTruthy()
 
@@ -117,7 +130,9 @@ describe('TitlebarControls', () => {
     expect($keepAwake.get()).toBe(true)
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     openAppMenu()
-    const disable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Keep computer awake: On' })
+    const disable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', {
+      name: 'Keep computer awake: On'
+    })
     expect(disable.getAttribute('aria-pressed')).toBe('true')
     expect(disable.querySelector('.codicon-lock')).toBeTruthy()
     fireEvent.click(disable)
@@ -134,12 +149,18 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: 'Use scroll-window layout' })).toBeNull()
     openAppMenu()
-    fireEvent.click(within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Use scroll-window layout' }))
+    fireEvent.click(
+      within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', {
+        name: 'Use scroll-window layout'
+      })
+    )
 
     expect($layoutSurfaceMode.get()).toBe('scroll-windows')
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     openAppMenu()
-    fireEvent.click(within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Use tabbed layout' }))
+    fireEvent.click(
+      within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', { name: 'Use tabbed layout' })
+    )
     expect($layoutSurfaceMode.get()).toBe('tabbed')
   })
 
@@ -244,6 +265,7 @@ describe('TitlebarControls', () => {
       'Codex usage unavailable',
       'New project',
       'Show terminal',
+      'New browser tab',
       'New session'
     ])
     expect(appControls.children[1]).toBe(more)
@@ -301,7 +323,12 @@ describe('TitlebarControls', () => {
           onNewSession={vi.fn()}
           onOpenSettings={vi.fn()}
           statusbarItems={[
-            { icon: <span data-testid="approval-icon" />, id: 'approval-mode', title: 'Approval mode: Off', variant: 'action' },
+            {
+              icon: <span data-testid="approval-icon" />,
+              id: 'approval-mode',
+              title: 'Approval mode: Off',
+              variant: 'action'
+            },
             { icon: <span data-testid="terminal-icon" />, id: 'terminal', title: 'Show terminal', variant: 'action' }
           ]}
         />
@@ -319,6 +346,7 @@ describe('TitlebarControls', () => {
       'Codex usage unavailable',
       'New project',
       'Show terminal',
+      'New browser tab',
       'New session'
     ])
   })
@@ -368,7 +396,12 @@ describe('TitlebarControls', () => {
           onNewSession={vi.fn()}
           onOpenSettings={vi.fn()}
           statusbarItems={[
-            { icon: <span data-testid="approval-icon" />, id: 'approval-mode', title: 'Approval mode: Off', variant: 'action' },
+            {
+              icon: <span data-testid="approval-icon" />,
+              id: 'approval-mode',
+              title: 'Approval mode: Off',
+              variant: 'action'
+            },
             { icon: <span data-testid="terminal-icon" />, id: 'terminal', title: 'Show terminal', variant: 'action' }
           ]}
         />

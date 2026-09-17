@@ -1,5 +1,13 @@
 import { useStore } from '@nanostores/react'
-import { type ComponentProps, type MouseEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import {
+  type ComponentProps,
+  type MouseEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState
+} from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
@@ -35,6 +43,7 @@ import { toggleHud } from '@/store/hud'
 import { $keepAwake, $keepAwakeBusy, setKeepAwake } from '@/store/keep-awake'
 import { $sidebarOpen, toggleSidebarOpen } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
+import { openBrowserPreviewTab } from '@/store/preview'
 import {
   $activeGatewayProfile,
   $profileColors,
@@ -97,11 +106,21 @@ const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
 const GATEWAY_STATUSBAR_ID = 'gateway-health'
-const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set(['layout-surface', 'keep-awake', 'restart-backend', 'restart-gateway', 'layout', 'hud', 'haptics'])
+const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set([
+  'layout-surface',
+  'keep-awake',
+  'restart-backend',
+  'restart-gateway',
+  'layout',
+  'hud',
+  'haptics'
+])
 const WEBHOOKS_STATUSBAR_ID = 'webhooks'
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
-  return Boolean(item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu')
+  return Boolean(
+    item.to || item.href || item.onSelect || item.menuContent || item.menuItems?.length || item.variant === 'menu'
+  )
 }
 
 export function isPinnedTitlebarStatusbarItem(item: Pick<StatusbarItem, 'id'>): boolean {
@@ -171,7 +190,10 @@ function useModifierHeld(): boolean {
 
 function orderedProfiles(profiles: ProfileInfo[], order: string[]): ProfileInfo[] {
   const defaultProfile = profiles.find(profile => profile.is_default)
-  const namedProfiles = sortByProfileOrder(profiles.filter(profile => !profile.is_default), order)
+  const namedProfiles = sortByProfileOrder(
+    profiles.filter(profile => !profile.is_default),
+    order
+  )
 
   return defaultProfile ? [defaultProfile, ...namedProfiles] : namedProfiles
 }
@@ -230,7 +252,8 @@ function TitlebarProfileMenu() {
 
   const activeKey = normalizeProfileKey(gatewayProfile)
   const rows = orderedProfiles(profiles, order)
-  const activeProfile = rows.find(profile => normalizeProfileKey(profile.name) === activeKey) ?? rows.find(profile => profile.is_default)
+  const activeProfile =
+    rows.find(profile => normalizeProfileKey(profile.name) === activeKey) ?? rows.find(profile => profile.is_default)
   const activeName = profileDisplayName(activeProfile, activeKey)
   const activeColor = activeProfile?.is_default ? null : resolveProfileColor(activeName, colors)
   const triggerLabel = showAllProfiles ? p.allProfiles : p.switchToProfile(activeName)
@@ -448,6 +471,16 @@ export function TitlebarControls({
       }
     : null
 
+  const newBrowserTool: TitlebarTool = {
+    icon: <TitlebarIcon name="globe" />,
+    id: 'new-browser-tab',
+    label: 'New browser tab',
+    onSelect: () => {
+      triggerHaptic('open')
+      openBrowserPreviewTab()
+    }
+  }
+
   // Workspace pages live in the main pane but are global app destinations, so
   // keep their affordances in the app header instead of the sessions sidebar.
   const workspacePageTools: TitlebarTool[] = [
@@ -602,8 +635,12 @@ export function TitlebarControls({
   }
 
   const visibleWorkspacePageTools = workspacePageTools.filter(tool => !tool.hidden)
-  const pinnedWorkspacePageTools = visibleWorkspacePageTools.filter(tool => PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id))
-  const overflowWorkspacePageTools = visibleWorkspacePageTools.filter(tool => !PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id))
+  const pinnedWorkspacePageTools = visibleWorkspacePageTools.filter(tool =>
+    PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id)
+  )
+  const overflowWorkspacePageTools = visibleWorkspacePageTools.filter(
+    tool => !PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id)
+  )
   const visiblePaneTools = tools.filter(tool => !tool.hidden)
   const visibleLocalServiceTools = localServiceTools.filter(tool => !tool.hidden)
   const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
@@ -614,7 +651,11 @@ export function TitlebarControls({
     item =>
       !item.hidden &&
       item.id !== 'command-center' &&
-      (item.lockedVisible || item.id === 'approval-mode' || isPinnedTitlebarStatusbarItem(item) || !item.toggleLabel || !hiddenStatusbarIds.includes(item.id))
+      (item.lockedVisible ||
+        item.id === 'approval-mode' ||
+        isPinnedTitlebarStatusbarItem(item) ||
+        !item.toggleLabel ||
+        !hiddenStatusbarIds.includes(item.id))
   )
 
   const pinnedStatusbarItemsById = new Map(
@@ -687,9 +728,14 @@ export function TitlebarControls({
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
         <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-        {pinnedSystemTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
-        {pinnedWorkspacePageTools.map(tool => <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />)}
+        {pinnedSystemTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
+        {pinnedWorkspacePageTools.map(tool => (
+          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+        ))}
         {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
+        <TitlebarToolButton navigate={navigate} tool={newBrowserTool} />
         {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
       </div>
     </>
@@ -727,17 +773,15 @@ function TitlebarOverflowMenu({
   const close = () => setOpen(false)
   const webhooksItem = statusbarItems.find(item => item.id === WEBHOOKS_STATUSBAR_ID)
   const approvalItem = statusbarItems.find(item => item.id === 'approval-mode')
-  const mainStatusbarItems = statusbarItems.filter(item => item.id !== WEBHOOKS_STATUSBAR_ID && item.id !== 'approval-mode')
+  const mainStatusbarItems = statusbarItems.filter(
+    item => item.id !== WEBHOOKS_STATUSBAR_ID && item.id !== 'approval-mode'
+  )
   const cronTool = tools.find(tool => tool.id === 'cron')
   const utilityTools = tools.filter(tool => TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
   const mainTools = tools.filter(tool => !TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
   const viewTools = mainTools.filter(tool => tool.id !== 'cron' && tool.id !== 'settings')
   const settingsTool = mainTools.find(tool => tool.id === 'settings')
-  const hasViews =
-    mainStatusbarItems.length > 0 ||
-    Boolean(cronTool) ||
-    Boolean(webhooksItem) ||
-    viewTools.length > 0
+  const hasViews = mainStatusbarItems.length > 0 || Boolean(cronTool) || Boolean(webhooksItem) || viewTools.length > 0
   const hasMenuRows = Boolean(approvalItem) || hasViews || Boolean(settingsTool)
 
   if (statusbarItems.length === 0 && tools.length === 0) {
@@ -778,7 +822,9 @@ function TitlebarOverflowMenu({
             {hasMenuRows ? <DropdownMenuSeparator /> : null}
           </>
         ) : null}
-        {approvalItem ? <TitlebarOverflowStatusbarItem item={approvalItem} navigate={navigate} onClose={close} /> : null}
+        {approvalItem ? (
+          <TitlebarOverflowStatusbarItem item={approvalItem} navigate={navigate} onClose={close} />
+        ) : null}
         {hasViews ? (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
@@ -786,13 +832,20 @@ function TitlebarOverflowMenu({
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="min-w-56">
               {mainStatusbarItems.map(item => (
-                <TitlebarOverflowStatusbarItem item={item} key={`status:${item.id}`} navigate={navigate} onClose={close} />
+                <TitlebarOverflowStatusbarItem
+                  item={item}
+                  key={`status:${item.id}`}
+                  navigate={navigate}
+                  onClose={close}
+                />
               ))}
               {mainStatusbarItems.length > 0 && (Boolean(cronTool) || Boolean(webhooksItem) || viewTools.length > 0) ? (
                 <DropdownMenuSeparator />
               ) : null}
               {cronTool ? <TitlebarOverflowToolItem navigate={navigate} onClose={close} tool={cronTool} /> : null}
-              {webhooksItem ? <TitlebarOverflowStatusbarItem item={webhooksItem} navigate={navigate} onClose={close} /> : null}
+              {webhooksItem ? (
+                <TitlebarOverflowStatusbarItem item={webhooksItem} navigate={navigate} onClose={close} />
+              ) : null}
               {viewTools.map(tool => (
                 <TitlebarOverflowToolItem key={tool.id} navigate={navigate} onClose={close} tool={tool} />
               ))}
@@ -857,7 +910,10 @@ function TitlebarOverflowStatusbarItem({
   }
 
   return (
-    <DropdownMenuItem disabled={item.disabled} onSelect={event => run(Boolean((event as Event & { shiftKey?: boolean }).shiftKey))}>
+    <DropdownMenuItem
+      disabled={item.disabled}
+      onSelect={event => run(Boolean((event as Event & { shiftKey?: boolean }).shiftKey))}
+    >
       <MenuRow icon={item.icon} label={label} />
     </DropdownMenuItem>
   )
@@ -951,13 +1007,16 @@ function TitlebarStatusbarItemButton({
   }
 
   const tooltipLabel = statusbarTooltip(item)
-  const menuContent = typeof item.menuContent === 'function' ? item.menuContent(() => setMenuOpen(false)) : item.menuContent
+  const menuContent =
+    typeof item.menuContent === 'function' ? item.menuContent(() => setMenuOpen(false)) : item.menuContent
   const hasMenu = item.variant === 'menu' || Boolean(menuContent) || Boolean(item.menuItems?.length)
 
   const content = (
     <>
       {item.icon}
-      {!item.icon && item.label ? <span className="max-w-16 truncate text-[0.625rem] leading-none">{item.label}</span> : null}
+      {!item.icon && item.label ? (
+        <span className="max-w-16 truncate text-[0.625rem] leading-none">{item.label}</span>
+      ) : null}
     </>
   )
 

@@ -130,7 +130,7 @@ const watchPreviewTileMirror = paneMirror<PreviewTab>({
   minWidth: '22rem',
   title: previewTitle,
   tabLead: tabId => <PreviewTabLead tabId={tabId} />,
-  // Console + DevTools as bare strip glyphs after the last tab, where "+" sits.
+  // Console + DevTools as bare strip glyphs after the last tab.
   // Only a URL preview has a webview behind it, so a file/artifact tab gets none.
   stripTools: tabId => (targetFor(tabId)?.kind === 'url' ? previewStripTools(tabId) : []),
   render: tabId => <PreviewTilePane tabId={tabId} />,

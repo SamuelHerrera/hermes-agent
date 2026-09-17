@@ -4,7 +4,7 @@
  * These were titlebar tools (`setTitlebarToolGroup`): one global pair, far from
  * the thing they act on and ambiguous the moment two previews were open. They're
  * strip glyphs now, contributed as `PaneStripTool` DATA — the strip renders them
- * with `PaneStripGlyph`, the same button the "+" is, so there is no preview-owned
+ * with `PaneStripGlyph`, the same button family pane tabs use, so there is no preview-owned
  * styling to drift.
  *
  * The state has to outlive any one pane render and be addressable by tab id: the
@@ -17,7 +17,6 @@ import { invalidateStripTools } from '@/components/pane-shell/tree/store'
 import { Codicon } from '@/components/ui/codicon'
 import type { PaneStripTool } from '@/components/ui/pane-tab'
 import { translateNow } from '@/i18n'
-import { openBrowserPreviewTab } from '@/store/preview'
 
 import { createPreviewConsoleState, type PreviewConsoleState } from './preview-console-state'
 
@@ -79,12 +78,6 @@ export function previewStripTools(tabId: string): readonly PaneStripTool[] {
   const devTools = devToolsHandles.get(tabId)
 
   return [
-    {
-      icon: <Codicon name="add" size="0.8125rem" />,
-      id: 'preview-new-browser-tab',
-      label: 'New browser tab',
-      onSelect: () => openBrowserPreviewTab()
-    },
     {
       active: consoleOpen,
       icon: <Codicon name="terminal" size="0.8125rem" />,
