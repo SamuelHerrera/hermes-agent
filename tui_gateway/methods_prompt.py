@@ -1294,12 +1294,60 @@ def _(rid, params: dict) -> dict:
 
 
 @method("clarify.respond")
+@_profile_scoped
 def _(rid, params: dict) -> dict:
     # allow_expired=True: a clarify can time out server-side (its entry is popped
     # from _pending) while the card is still visible — common when a WebSocket
     # reconnect during the wait drops tool.complete. A late answer must resolve
     # gracefully instead of hitting the raw 4009 "no pending answer request".
-    return _respond(rid, params, "answer", allow_expired=True)
+    response = _respond(rid, params, "answer", allow_expired=True)
+    if response.get("result", {}).get("status") == "expired" and params.get("answer"):
+        from tools.question_inbox import QuestionInbox
+        if QuestionInbox().get(str(params.get("request_id") or "")):
+            return _methods["questions.respond"](rid, dict(params, question_id=params["request_id"]))
+    return response
+
+
+@method("questions.list")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    from tools.question_inbox import QuestionInbox
+    from tools.clarify_gateway import get_clarify_timeout
+    from hermes_cli.config import load_config
+
+    cfg = (load_config() or {}).get("agent") or {}
+    return _ok(rid, {"questions": QuestionInbox().list(
+        include_answered=params.get("include_answered") is True,
+        query=str(params.get("query") or "")[:1000],
+        offset=int(params.get("offset", 0)), limit=int(params.get("limit", 200))),
+        "settings": {"clarify_timeout": get_clarify_timeout(),
+                     "clarify_soft_timeout": cfg.get("clarify_soft_timeout", 120),
+                     "clarify_review_timeout": cfg.get("clarify_review_timeout", 60)}})
+
+
+@method("questions.settings")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    key, value = params.get("key"), params.get("value")
+    if key not in {"clarify_timeout", "clarify_soft_timeout", "clarify_review_timeout"}:
+        return _err(rid, 4002, "Unknown question setting")
+    if type(value) is not int or value < 0 or value > 31536000 or (key == "clarify_review_timeout" and value < 1):
+        return _err(rid, 4002, "Timeout must be a non-negative number of seconds; review budget must be positive")
+    _write_config_key("agent." + key, value)
+    # An explicit UI change must win over the legacy timeout alias.
+    if key == "clarify_timeout":
+        from hermes_cli.config import load_config
+        if (load_config().get("clarify") or {}).get("timeout") is not None:
+            _write_config_key("clarify.timeout", value)
+    return _ok(rid, {"key": key, "value": value})
+
+
+@method("questions.respond")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    import sys
+    from tui_gateway.questions import respond_question
+    return respond_question(sys.modules[__name__], rid, params)
 
 
 @method("terminal.read.respond")

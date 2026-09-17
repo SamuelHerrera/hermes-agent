@@ -14,12 +14,14 @@ export const SKILLS_ROUTE = '/skills'
 export const MESSAGING_ROUTE = '/messaging'
 export const WEBHOOKS_ROUTE = '/webhooks'
 export const ARTIFACTS_ROUTE = '/artifacts'
+export const QUESTIONS_ROUTE = '/questions'
 export const CRON_ROUTE = '/cron'
 export const PROFILES_ROUTE = '/profiles'
 export const AGENTS_ROUTE = '/agents'
 export const STARMAP_ROUTE = '/starmap'
 
 export type AppView =
+  | 'questions'
   | 'agents'
   | 'artifacts'
   | 'chat'
@@ -37,6 +39,7 @@ export type AppView =
   | 'webhooks'
 
 export type AppRouteId =
+  | 'questions'
   | 'agents'
   | 'artifacts'
   | 'cron'
@@ -61,6 +64,7 @@ export const APP_ROUTES = [
   { id: 'messaging', path: MESSAGING_ROUTE, view: 'messaging' },
   { id: 'webhooks', path: WEBHOOKS_ROUTE, view: 'webhooks' },
   { id: 'artifacts', path: ARTIFACTS_ROUTE, view: 'artifacts' },
+  { id: 'questions', path: QUESTIONS_ROUTE, view: 'questions' },
   { id: 'cron', path: CRON_ROUTE, view: 'cron' },
   { id: 'profiles', path: PROFILES_ROUTE, view: 'profiles' },
   { id: 'agents', path: AGENTS_ROUTE, view: 'agents' },
@@ -163,11 +167,7 @@ export interface SidebarNavChildrenProps {
 // Views that render as a full-screen modal card (OverlayView) over the shell.
 // While one is open the app's titlebar control clusters must hide so they don't
 // bleed over the overlay (they sit at a higher z-index than the overlay card).
-export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set([
-  'agents',
-  'profiles',
-  'starmap'
-])
+export const OVERLAY_VIEWS: ReadonlySet<AppView> = new Set(['agents', 'profiles', 'starmap'])
 
 export function isOverlayView(view: AppView): boolean {
   return OVERLAY_VIEWS.has(view)
@@ -329,7 +329,6 @@ export function navigateToWorkspacePage(navigate: NavigateLike, to: string, opti
     revealWorkspacePane()
   }
 }
-
 
 /**
  * User-facing page affordances should open as closeable layout tabs instead of

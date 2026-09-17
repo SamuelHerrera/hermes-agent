@@ -125,14 +125,12 @@ class TestClarifyPrimitive:
         assert b is not None and b.clarify_id == "idB"
 
     def test_clarify_timeout_config_default(self):
-        """get_clarify_timeout returns a positive int (default 3600)."""
+        """The default keeps unanswered questions alive."""
         from tools import clarify_gateway as cm
 
         timeout = cm.get_clarify_timeout()
-        # Default 3600s OR whatever is in the user's loaded config.
-        # Floor check: must be a positive int, not crashed.
         assert isinstance(timeout, int)
-        assert timeout > 0
+        assert timeout <= 0
 
 
 class TestGatewayTextIntercept:
@@ -211,12 +209,12 @@ class TestCoverageGaps:
 
 
     def test_get_clarify_timeout_exception_returns_default(self, monkeypatch):
-        """get_clarify_timeout returns 3600 when load_config raises."""
+        """Config read failures must not expire unanswered questions."""
         from tools import clarify_gateway as cm
 
         monkeypatch.setattr("hermes_cli.config.load_config",
                             lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-        assert cm.get_clarify_timeout() == 3600
+        assert cm.get_clarify_timeout() <= 0
 
 
     def test_get_notify_returns_none_when_not_registered(self):

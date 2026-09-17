@@ -24,6 +24,7 @@ import {
   cronJobIdFromRoute,
   isCronRoute,
   MESSAGING_ROUTE,
+  QUESTIONS_ROUTE,
   ROUTES_AREA,
   SETTINGS_ROUTE,
   SKILLS_ROUTE,
@@ -36,16 +37,22 @@ import { paneMirror } from './pane-mirror'
 const SkillsView = lazy(async () => ({ default: (await import('../skills')).SkillsView }))
 const MessagingView = lazy(async () => ({ default: (await import('../messaging')).MessagingView }))
 const ArtifactsView = lazy(async () => ({ default: (await import('../artifacts')).ArtifactsView }))
+const QuestionsView = lazy(async () => ({ default: (await import('../questions')).QuestionsView }))
 const CronView = lazy(async () => ({ default: (await import('../cron')).CronView }))
 const WebhooksView = lazy(async () => ({ default: (await import('../webhooks')).WebhooksView }))
 
 // Built-in page views + their pane titles/icons, keyed by route.
 const BUILTIN_PAGES: Record<string, { icon: string; render: () => ReactNode; title: string }> = {
   [ARTIFACTS_ROUTE]: { icon: 'files', render: () => <ArtifactsView />, title: 'Artifacts' },
+  [QUESTIONS_ROUTE]: { icon: 'question', render: () => <QuestionsView />, title: 'Questions' },
   [MESSAGING_ROUTE]: { icon: 'comment', render: () => <MessagingView />, title: 'Messaging' },
   [SETTINGS_ROUTE]: {
     icon: 'settings-gear',
-    render: () => <SettingsTabRoute><WiredPane part="settings" /></SettingsTabRoute>,
+    render: () => (
+      <SettingsTabRoute>
+        <WiredPane part="settings" />
+      </SettingsTabRoute>
+    ),
     title: 'Settings'
   },
   [SKILLS_ROUTE]: { icon: 'symbol-misc', render: () => <SkillsView />, title: 'Capabilities' },
@@ -77,10 +84,7 @@ function builtinPage(path: string): null | { icon: string; render: () => ReactNo
     return {
       icon: 'clockface',
       render: () => (
-        <CronView
-          initialJobId={jobId}
-          onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')}
-        />
+        <CronView initialJobId={jobId} onOpenSession={sessionId => openSession(sessionId, () => undefined, 'tab')} />
       ),
       title: cronTitle(path)
     }
@@ -121,7 +125,11 @@ function RouteTabLead({ path }: { path: string }) {
     return <BuiltinRouteTabLead path={path} />
   }
 
-  return contributedRoutes().find(r => r.path === path)?.tabLead?.() ?? null
+  return (
+    contributedRoutes()
+      .find(r => r.path === path)
+      ?.tabLead?.() ?? null
+  )
 }
 
 function RouteTilePane({ path }: { path: string }) {

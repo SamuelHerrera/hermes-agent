@@ -403,31 +403,25 @@ def resolve_clarify_timeout(config: dict) -> int:
 
     1. legacy top-level ``clarify.timeout`` if a user explicitly set it,
     2. else the canonical ``agent.clarify_timeout``,
-    3. else 3600 (1 hour).
+    3. else 0 (no expiry).
 
     ``<= 0`` is preserved verbatim and means *unlimited* to callers (never
     auto-skip while the user is still deciding); the waiting loops translate
-    that into a null deadline.  A non-numeric value falls back to 3600.
+    that into a null deadline. A non-numeric value falls back to no expiry.
     """
     raw = (config.get("clarify") or {}).get("timeout")
     if raw is None:
-        raw = (config.get("agent") or {}).get("clarify_timeout", 3600)
+        raw = (config.get("agent") or {}).get("clarify_timeout", 0)
     try:
         return int(raw)
     except (TypeError, ValueError):
-        return 3600
+        return 0
 
 
 def get_clarify_timeout() -> int:
     """Read the clarify response timeout (seconds) from config.
 
-    Defaults to 3600 (1 hour) — long enough that a user who steps away
-    (meeting, AFK, slow to read) still finds a live entry when they tap
-    the button, short enough that a genuinely abandoned prompt eventually
-    unblocks the agent thread instead of pinning the running-agent guard
-    forever.  The old 600s default evicted the entry mid-think, so a late
-    tap landed on a dead entry and the agent hung on ``running: clarify``
-    (#32762).
+    Defaults to 0: questions never expire while the user is deciding.
 
     Reads ``agent.clarify_timeout`` from config.yaml (see
     :func:`resolve_clarify_timeout` for the full resolution order).  Set to
@@ -438,7 +432,7 @@ def get_clarify_timeout() -> int:
         from hermes_cli.config import load_config
         return resolve_clarify_timeout(load_config() or {})
     except Exception:
-        return 3600
+        return 0
 
 
 # =========================================================================

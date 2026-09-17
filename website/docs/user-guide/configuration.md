@@ -2417,12 +2417,53 @@ The delegation provider uses the same credential resolution as CLI/gateway start
 
 ## Clarify
 
-Configure how long the gateway waits for a response to a clarifying question. The canonical key is `agent.clarify_timeout` (default `3600` seconds); a legacy top-level `clarify.timeout` is still honored if explicitly set:
+Questions no longer expire by default. `agent.clarify_timeout` defaults to `0`
+(unlimited); an explicitly configured legacy `clarify.timeout` still takes precedence.
+Existing positive timeout settings are preserved, not silently migrated.
 
 ```yaml
 agent:
-  clarify_timeout: 3600        # Seconds to wait for user clarification response (0 or less = unlimited)
+  clarify_timeout: 0           # Hard wait limit; 0 or less = unlimited
+  clarify_soft_timeout: 120    # Desktop/TUI: review or park after 2 minutes; 0 disables
+  clarify_review_timeout: 60   # Desktop/TUI: maximum reviewer wait, in seconds
 ```
+
+### Desktop question inbox and soft review
+
+Open **More app actions → Views → Questions** to browse the current backend/profile's
+questions, choose options (including multiple selections), enter a free-text answer,
+open the originating session, or edit the three timeout settings. Settings apply to
+new questions. Open questions and answer history are saved in the profile's
+`questions.db` and survive renderer/backend restarts. No existing transcript is
+rewritten, and historical questions are not backfilled.
+
+The soft timeout is separate from expiry. For a low-stakes question explicitly
+marked `requires_user: false`, a bounded, read-only reviewer receives the question,
+offered options, session reference and current request/history. It reads the profile's
+`memories/MEMORY.md` and `memories/USER.md` and queries its active Hindsight provider.
+It may select only an offered option, with exact supporting quotes from **both**
+sources. Missing, conflicting or insufficient evidence, an unavailable provider,
+invalid output or a reviewer timeout leaves the question open. Review happens once;
+there is no repeated background polling or unbounded secondary agent loop. The
+reviewer uses the auxiliary client; `auxiliary.clarify_review` can override its model.
+
+Questions default to `requires_user: true`. These are parked without automatic
+review. Approval, sudo/password and secret-capture prompts are separate mechanisms
+and are never auto-answered by this feature. An automatic answer is labeled as such,
+not attributed to the user, and is not consent for purchases, external sends,
+production changes or destructive operations.
+
+After a question is parked, the original agent can continue independent, reversible,
+already authorized work. It must not assume an unanswered prerequisite. If everything
+remaining depends on the answer, it ends the turn with a blocker rather than spinning.
+**Answer and continue** wakes a live waiter or resumes/queues a normal turn in the
+original session. If that session was deleted or cannot be resumed, the question
+remains open. If the answer saves but turn submission fails, the UI reports it and
+the user can open the session to continue manually.
+
+The durable inbox, review and continuation path currently belong to the Desktop/TUI
+JSON-RPC backend. CLI and messaging surfaces share the no-expiry default but do not
+yet use the durable inbox or secondary review.
 
 ## Context Files (SOUL.md, AGENTS.md)
 

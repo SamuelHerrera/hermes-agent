@@ -423,6 +423,21 @@ export function startMockServer(options: MockServerOptions = {}): Promise<MockSe
             message => typeof message?.content === 'string' && message.content.includes(CORRECTION_SWITCH_TRIGGER),
           )
 
+          if (userText.includes('E2E_DURABLE_QUESTIONS')) {
+            _scriptIndex++ // Tool call IDs must be unique across clarification turns.
+            const results = messages.filter(message => message.role === 'tool' && String(message.content).includes('question_id'))
+            const turn: ScriptedTurn = results.length >= 2
+              ? { text: 'Question inbox fixture completed independent work.' }
+              : { text: '', toolCalls: [{ name: 'clarify', args: {
+                question: results.length === 0 ? 'Which release needs your approval?' : 'Which export format do you prefer?',
+                choices: results.length === 0 ? ['Release A', 'Release B'] : ['CSV', 'JSON'],
+                requires_user: results.length === 0,
+              } }] }
+            if (stream) streamScriptedTurn(res, model, turn)
+            else nonStreamingScriptedTurn(res, model, turn)
+            return
+          }
+
           if (userText.includes('E2E_MCP_RELOAD_TOOL')) {
             const calls = messages.flatMap(message => message.tool_calls ?? [])
               .filter(call => call.function?.name === 'tool_call')

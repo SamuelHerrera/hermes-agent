@@ -15,6 +15,8 @@ import {
 
 import { requestComposerFocus, requestComposerInsert } from '@/app/chat/composer/focus'
 import { useSessionView } from '@/app/chat/session-view'
+import { questionCopy } from '@/app/questions/copy'
+import { QUESTIONS_ROUTE } from '@/app/routes'
 import { ToolFallback } from '@/components/assistant-ui/tool/fallback'
 import { WIDGET_SHELL_CLASS } from '@/components/chat/widget-shell'
 import { Button } from '@/components/ui/button'
@@ -35,6 +37,7 @@ import {
 } from '@/store/clarify'
 import { $gateway } from '@/store/gateway'
 import { notifyError } from '@/store/notifications'
+import { openRouteTile } from '@/store/route-tiles'
 
 import { selectMessageRunning } from './tool/fallback-model'
 import { parseMaybeObject } from './tool/fallback-model/format'
@@ -46,6 +49,8 @@ interface ClarifyArgs {
 }
 
 interface ClarifyResult {
+  status?: string
+  answeredBy?: string
   question?: string
   answer?: string
   error?: string
@@ -89,7 +94,11 @@ export function readClarifyResult(result: unknown): ClarifyResult {
 
   return {
     question: stringField(row, 'question'),
-    answer: stringField(row, 'user_response', 'answer'),
+    answer: Array.isArray(row.user_response)
+      ? row.user_response.join(', ')
+      : stringField(row, 'user_response', 'automatic_response', 'answer'),
+    status: stringField(row, 'status'),
+    answeredBy: stringField(row, 'answered_by'),
     error: stringField(row, 'error')
   }
 }
@@ -233,7 +242,7 @@ function ClarifyToolLive(props: ToolCallMessagePartProps) {
 
   const hasHydratedPendingRequest = Boolean(
     fromArgs.requestId ||
-      (request?.requestId && (!fromArgs.question || !request.question || fromArgs.question === request.question))
+    (request?.requestId && (!fromArgs.question || !request.question || fromArgs.question === request.question))
   )
 
   // Stopped mid-prompt with no live backend request — don't leave a dead
@@ -250,7 +259,7 @@ function ClarifyToolLive(props: ToolCallMessagePartProps) {
 }
 
 function ClarifyToolSettled({ args, result }: ToolCallMessagePartProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const copy = t.assistant.clarify
   const fromArgs = useMemo(() => readClarifyArgs(args), [args])
   const fromResult = useMemo(() => readClarifyResult(result), [result])
@@ -284,6 +293,14 @@ function ClarifyToolSettled({ args, result }: ToolCallMessagePartProps) {
           <span className="whitespace-pre-wrap font-medium leading-(--conversation-line-height)">{question}</span>
         </ClarifyLine>
       ) : null}
+      {fromResult.status === 'deferred' && (
+        <Button onClick={() => openRouteTile(QUESTIONS_ROUTE, 'center')} size="sm" variant="text">
+          {questionCopy[locale].deferred}
+        </Button>
+      )}
+      {fromResult.answeredBy === 'reviewer' && (
+        <p className="text-xs text-(--ui-text-tertiary)">{questionCopy[locale].automatic}</p>
+      )}
       {answerText ? (
         <ClarifyLine icon={CircleLetterA}>
           <p

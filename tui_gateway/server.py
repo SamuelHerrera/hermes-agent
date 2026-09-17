@@ -3511,6 +3511,10 @@ def _enable_gateway_prompts() -> None:
 
 
 def _block(event: str, sid: str, payload: dict, timeout: float | None = 300) -> str:
+    if event == "clarify.request":
+        import sys
+        from tui_gateway.questions import block_question
+        return block_question(sys.modules[__name__], sid, payload, timeout)
     rid = uuid.uuid4().hex[:8]
     ev = threading.Event()
     with _prompt_lock:
@@ -3563,14 +3567,14 @@ def _block(event: str, sid: str, payload: dict, timeout: float | None = 300) -> 
 def _clarify_timeout_seconds() -> float | None:
     """Clarify wait (seconds) for the TUI/desktop bridge, from the same
     canonical config the messaging gateway and CLI use. Falls back to the
-    historical 300s _block default if config can't be read. ``<= 0`` in config
+    no-expiry default if config can't be read. ``<= 0`` in config
     means unlimited and is returned as ``None`` (never auto-skip)."""
     try:
         from tools.clarify_gateway import get_clarify_timeout
         timeout = get_clarify_timeout()
         return timeout if timeout > 0 else None
     except Exception:
-        return 300
+        return None
 
 
 def _clear_pending(sid: str | None = None) -> None:
@@ -6175,7 +6179,7 @@ def _agent_cbs(sid: str) -> dict:
         "notice_clear_callback": lambda key: _emit(
             "notification.clear", sid, {"key": key}
         ),
-        "clarify_callback": lambda q, c, multi_select=False: _block(
+        "clarify_callback": lambda q, c, multi_select=False, requires_user=True: _block(
             "clarify.request",
             sid,
             # multi_select is a pass-through hint: renderers with checkbox
@@ -6184,9 +6188,9 @@ def _agent_cbs(sid: str) -> dict:
             # one-element list on the tool side). Only emitted when True so
             # single-select payloads keep the exact pre-multi-select shape.
             (
-                {"question": q, "choices": c, "multi_select": True}
-                if multi_select
-                else {"question": q, "choices": c}
+                {"question": q, "choices": c}
+                | ({"multi_select": True} if multi_select else {})
+                | ({"requires_user": False} if requires_user is False else {})
             ),
             timeout=_clarify_timeout_seconds(),
         ),
@@ -10961,7 +10965,17 @@ def _run_prompt_submit(
             agent._on_session_title = lambda t, _src, _k=_title_key: _emit(
                 "session.title", sid, {"session_id": _k, "title": t}
             )
-            result = agent.run_conversation(run_message, **run_kwargs)
+            # The persisted gateway history does not include this user's turn
+            # until run_conversation finishes. A clarification reviewer needs
+            # the current request too, especially on the very first turn.
+            session["clarify_context"] = history + [{"role": "user", "content": run_message}]
+            try:
+                result = agent.run_conversation(run_message, **run_kwargs)
+            finally:
+                session.pop("clarify_context", None)
+            from tui_gateway.questions import acknowledge_deliveries
+            if acknowledge_deliveries(session, run_message):
+                _emit("questions.changed", sid, {})
             if display_kind and isinstance(text, str):
                 db = getattr(agent, "_session_db", None)
                 current_session_id = getattr(agent, "session_id", None) or session.get("session_key")
@@ -11779,6 +11793,11 @@ def _respond(rid, params, key, *, allow_expired=False):
                     )
             if ev.is_set():
                 return _ok(rid, {"status": "already_resolved"})
+            if _pending_prompt_payloads.get(r, (None,))[0] == "clarify.request" and params.get(key):
+                from tools.question_inbox import QuestionInbox
+                inbox = QuestionInbox((response_session or {}).get("profile_home"))
+                if inbox.get(r) is not None and not inbox.answer(r, params[key], actor="user"):
+                    return _ok(rid, {"status": "already_resolved"})
             _answers[r] = params.get(key, "")
             ev.set()
     return _ok(rid, {"status": "ok"})

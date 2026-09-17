@@ -63,6 +63,7 @@ import { $connection } from '@/store/session'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
 import type { ProfileInfo } from '@/types/hermes'
 
+import { questionCopy } from '../questions/copy'
 import {
   appViewForPath,
   ARTIFACTS_ROUTE,
@@ -74,6 +75,7 @@ import {
   SKILLS_ROUTE
 } from '../routes'
 import type { SidebarNavContribution } from '../routes'
+import { QUESTIONS_ROUTE } from '../routes'
 
 import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
 import type { StatusbarItem } from './statusbar-controls'
@@ -505,6 +507,12 @@ export function TitlebarControls({
   // Workspace pages live in the main pane but are global app destinations, so
   // keep their affordances in the app header instead of the sessions sidebar.
   const workspacePageTools: TitlebarTool[] = [
+    {
+      icon: <TitlebarIcon name="question" />,
+      id: 'questions',
+      label: questionCopy[useI18n().locale].title,
+      onSelect: () => openRouteTile(QUESTIONS_ROUTE, 'center')
+    },
     ...(cronJobs.length > 0
       ? [
           {

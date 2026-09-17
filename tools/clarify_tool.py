@@ -97,7 +97,7 @@ def strip_recommended(text: str) -> str:
     return stripped
 
 
-def _invoke_callback(callback, question, choices, multi_select):
+def _invoke_callback(callback, question, choices, multi_select, requires_user=True):
     """Invoke the platform callback, passing multi_select if supported.
 
     Uses signature inspection (not a ``TypeError`` retry) to decide whether
@@ -108,10 +108,14 @@ def _invoke_callback(callback, question, choices, multi_select):
     import inspect
 
     accepts_multi = False
+    accepts_required = False
     try:
         sig = inspect.signature(callback)
         params = sig.parameters
         accepts_multi = "multi_select" in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+        accepts_required = "requires_user" in params or any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
         )
     except (TypeError, ValueError):
@@ -119,9 +123,12 @@ def _invoke_callback(callback, question, choices, multi_select):
         # be conservative and use the legacy 2-arg form.
         accepts_multi = False
 
+    kwargs = {}
     if accepts_multi:
-        return callback(question, choices, multi_select=multi_select)
-    return callback(question, choices)
+        kwargs["multi_select"] = multi_select
+    if accepts_required and requires_user is False:
+        kwargs["requires_user"] = False
+    return callback(question, choices, **kwargs)
 
 
 def _parse_multi_select_response(raw_response) -> List[str]:
@@ -155,6 +162,7 @@ def clarify_tool(
     choices: Optional[List[str]] = None,
     multi_select: bool = False,
     callback: Optional[Callable] = None,
+    requires_user: bool = True,
 ) -> str:
     """
     Ask the user a question, optionally with multiple-choice options.
@@ -208,9 +216,13 @@ def clarify_tool(
         choices = mark_recommended(choices)
 
     try:
-        raw_response = _invoke_callback(callback, question, choices, multi_select)
+        raw_response = _invoke_callback(callback, question, choices, multi_select, requires_user)
     except Exception as exc:
         return tool_error(f"Failed to get user input: {exc}")
+
+    # Never turn an automatic decision or a deferral into a user reply.
+    if isinstance(raw_response, dict):
+        return json.dumps(raw_response, ensure_ascii=False)
 
     if multi_select and choices is not None:
         user_response = [strip_recommended(r) for r in _parse_multi_select_response(raw_response)]
@@ -258,11 +270,21 @@ CLARIFY_SCHEMA = {
         "- A decision has meaningful trade-offs the user should weigh in on\n\n"
         "Do NOT use this tool for simple yes/no confirmation of dangerous "
         "commands (the terminal tool handles that). Prefer making a reasonable "
-        "default choice yourself when the decision is low-stakes."
+        "default choice yourself when the decision is low-stakes. "
+        "Use requires_user=false only for reversible preference questions within "
+        "existing authorization; a read-only reviewer may answer from corroborated "
+        "memory after a soft timeout. Hard questions default to requires_user=true. "
+        "If the result is deferred, the question stays in the inbox: do not repeat "
+        "it or guess the answer. Continue independent authorized work; stop only "
+        "the work that depends on the missing answer. Automatic answers are never user consent."
     ),
     "parameters": {
         "type": "object",
         "properties": {
+            "requires_user": {
+                "type": "boolean",
+                "description": "Default true. Set false only for low-stakes, reversible preferences. Never false for consent, permissions, spending, secrets, production changes, destructive operations or external sends.",
+            },
             "question": {
                 "type": "string",
                 "description": (
@@ -313,6 +335,7 @@ registry.register(
         question=args.get("question", ""),
         choices=args.get("choices"),
         multi_select=args.get("multi_select", False),
+        requires_user=args.get("requires_user", True),
         callback=kw.get("callback")),
     check_fn=check_clarify_requirements,
     emoji="❓",
