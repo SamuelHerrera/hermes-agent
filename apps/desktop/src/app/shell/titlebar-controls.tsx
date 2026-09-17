@@ -726,7 +726,8 @@ function TitlebarOverflowMenu({
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
   const webhooksItem = statusbarItems.find(item => item.id === WEBHOOKS_STATUSBAR_ID)
-  const mainStatusbarItems = webhooksItem ? statusbarItems.filter(item => item.id !== WEBHOOKS_STATUSBAR_ID) : statusbarItems
+  const approvalItem = statusbarItems.find(item => item.id === 'approval-mode')
+  const mainStatusbarItems = statusbarItems.filter(item => item.id !== WEBHOOKS_STATUSBAR_ID && item.id !== 'approval-mode')
   const cronTool = tools.find(tool => tool.id === 'cron')
   const utilityTools = tools.filter(tool => TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
   const mainTools = tools.filter(tool => !TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
@@ -737,7 +738,7 @@ function TitlebarOverflowMenu({
     Boolean(cronTool) ||
     Boolean(webhooksItem) ||
     viewTools.length > 0
-  const hasMenuRows = hasViews || Boolean(settingsTool)
+  const hasMenuRows = Boolean(approvalItem) || hasViews || Boolean(settingsTool)
 
   if (statusbarItems.length === 0 && tools.length === 0) {
     return null
@@ -777,6 +778,7 @@ function TitlebarOverflowMenu({
             {hasMenuRows ? <DropdownMenuSeparator /> : null}
           </>
         ) : null}
+        {approvalItem ? <TitlebarOverflowStatusbarItem item={approvalItem} navigate={navigate} onClose={close} /> : null}
         {hasViews ? (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

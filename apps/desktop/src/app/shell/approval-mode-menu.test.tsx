@@ -57,7 +57,7 @@ describe('approval mode statusbar item', () => {
     expect(await screen.findByRole('menuitemradio', { name: /manual/i })).toBeTruthy()
     expect(trigger.getAttribute('aria-haspopup')).toBe('menu')
     expect(screen.getByRole('menuitemradio', { name: /smart/i })).toBeTruthy()
-    expect(screen.getByRole('menuitemradio', { name: /off/i })).toBeTruthy()
+    expect(screen.getByRole('menuitemradio', { name: /^Yolo/ })).toBeTruthy()
   })
 
   it('writes the selected mode through the gateway and updates its shared trigger label', async () => {
@@ -79,7 +79,7 @@ describe('approval mode statusbar item', () => {
 
     render(<Harness requestGateway={vi.fn(() => response)} />)
 
-    const trigger = screen.getByRole('button', { name: /off/i })
+    const trigger = screen.getByRole('button', { name: /Yolo/i })
     expect(trigger.className.split(/\s+/)).not.toContain('bg-(--chrome-action-hover)')
     expect(screen.getByTestId('approval-strike-off').getAttribute('data-fill')).toBe('full')
 
@@ -102,5 +102,17 @@ describe('approval mode statusbar item', () => {
 
     expect(await screen.findByText('必要な場合にのみ確認します')).toBeTruthy()
     expect(screen.getByText('承認プロンプトなしで実行します')).toBeTruthy()
+  })
+
+  it('labels off mode Yolo while retaining the off gateway value', async () => {
+    const requestGateway = vi.fn(async (_method, params) => ({ value: params?.value ?? 'smart' }))
+    render(<Harness requestGateway={requestGateway} />)
+    fireEvent.pointerDown(screen.getByRole('button', { name: /smart/i }), { button: 0 })
+    fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Yolo/ }))
+
+    await waitFor(() => {
+      expect(requestGateway).toHaveBeenCalledWith('config.set', { key: 'approvals.mode', value: 'off' })
+      expect(screen.getByRole('button', { name: /Yolo/i })).toBeTruthy()
+    })
   })
 })

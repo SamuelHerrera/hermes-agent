@@ -2768,7 +2768,7 @@ export const zh: Translations = {
       manualDescription: '执行需要审批的操作前询问',
       smart: '智能',
       smartDescription: '自动评估操作，并在需要时询问',
-      off: '关闭',
+      off: 'Yolo',
       offDescription: '不显示审批提示，直接运行'
     },
     statusbar: {

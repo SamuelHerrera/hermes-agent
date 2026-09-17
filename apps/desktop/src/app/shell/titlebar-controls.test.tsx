@@ -254,7 +254,7 @@ describe('TitlebarControls', () => {
     fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
     fireEvent.click(more)
 
-    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Views', 'Settings'])
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Approvals', 'Views', 'Settings'])
     const controlsToolbar = screen.getByRole('toolbar', { name: 'More controls' })
     expect(within(controlsToolbar).getByRole('button', { name: 'Mute haptics' })).toBeTruthy()
     expect(within(controlsToolbar).getByRole('button', { name: 'Layout editor' })).toBeTruthy()
@@ -288,6 +288,7 @@ describe('TitlebarControls', () => {
     expect(labels.indexOf('Webhooks')).toBeLessThan(labels.indexOf('Capabilities'))
 
     const viewsMenu = screen.getByRole('menuitem', { name: 'Capabilities' }).closest('[role="menu"]')!
+    expect(within(viewsMenu as HTMLElement).queryByRole('menuitem', { name: 'Approvals' })).toBeNull()
     expect(within(viewsMenu as HTMLElement).queryByRole('menuitem', { name: 'Settings' })).toBeNull()
   })
 
