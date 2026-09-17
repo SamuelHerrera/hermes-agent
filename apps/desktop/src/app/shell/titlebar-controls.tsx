@@ -94,10 +94,26 @@ export interface TitlebarTool {
   hidden?: boolean
   href?: string
   icon: ReactNode
+  menuAlign?: 'center' | 'end' | 'start'
+  menuClassName?: string
+  // A render fn receives a `close()` to dismiss the popover from inside the content.
+  menuContent?: ((close: () => void) => ReactNode) | ReactNode
+  menuItems?: readonly TitlebarToolMenuItem[]
   onSelect?: (event?: MouseEvent) => void
   /** Keybind action id — when set, the tooltip shows the label + keybind hint. */
   actionId?: string
   title?: string
+  to?: string
+}
+
+export interface TitlebarToolMenuItem {
+  id: string
+  active?: boolean
+  className?: string
+  disabled?: boolean
+  icon?: ReactNode
+  label: string
+  onSelect?: () => void
   to?: string
 }
 
@@ -106,6 +122,7 @@ const PINNED_TITLEBAR_WORKSPACE_TOOL_IDS = new Set(['new-project'])
 const PINNED_TITLEBAR_SYSTEM_TOOL_IDS = new Set<string>()
 const PROJECT_WORKSPACE_STATUSBAR_ID = 'workspace-cwd'
 const GATEWAY_STATUSBAR_ID = 'gateway-health'
+
 const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set([
   'layout-surface',
   'keep-awake',
@@ -115,6 +132,7 @@ const TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS = new Set([
   'hud',
   'haptics'
 ])
+
 const WEBHOOKS_STATUSBAR_ID = 'webhooks'
 
 function isActionableTitlebarStatusbarItem(item: StatusbarItem): boolean {
@@ -190,6 +208,7 @@ function useModifierHeld(): boolean {
 
 function orderedProfiles(profiles: ProfileInfo[], order: string[]): ProfileInfo[] {
   const defaultProfile = profiles.find(profile => profile.is_default)
+
   const namedProfiles = sortByProfileOrder(
     profiles.filter(profile => !profile.is_default),
     order
@@ -252,8 +271,10 @@ function TitlebarProfileMenu() {
 
   const activeKey = normalizeProfileKey(gatewayProfile)
   const rows = orderedProfiles(profiles, order)
+
   const activeProfile =
     rows.find(profile => normalizeProfileKey(profile.name) === activeKey) ?? rows.find(profile => profile.is_default)
+
   const activeName = profileDisplayName(activeProfile, activeKey)
   const activeColor = activeProfile?.is_default ? null : resolveProfileColor(activeName, colors)
   const triggerLabel = showAllProfiles ? p.allProfiles : p.switchToProfile(activeName)
@@ -635,12 +656,15 @@ export function TitlebarControls({
   }
 
   const visibleWorkspacePageTools = workspacePageTools.filter(tool => !tool.hidden)
+
   const pinnedWorkspacePageTools = visibleWorkspacePageTools.filter(tool =>
     PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id)
   )
+
   const overflowWorkspacePageTools = visibleWorkspacePageTools.filter(
     tool => !PINNED_TITLEBAR_WORKSPACE_TOOL_IDS.has(tool.id)
   )
+
   const visiblePaneTools = tools.filter(tool => !tool.hidden)
   const visibleLocalServiceTools = localServiceTools.filter(tool => !tool.hidden)
   const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
@@ -773,9 +797,11 @@ function TitlebarOverflowMenu({
   const close = () => setOpen(false)
   const webhooksItem = statusbarItems.find(item => item.id === WEBHOOKS_STATUSBAR_ID)
   const approvalItem = statusbarItems.find(item => item.id === 'approval-mode')
+
   const mainStatusbarItems = statusbarItems.filter(
     item => item.id !== WEBHOOKS_STATUSBAR_ID && item.id !== 'approval-mode'
   )
+
   const cronTool = tools.find(tool => tool.id === 'cron')
   const utilityTools = tools.filter(tool => TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
   const mainTools = tools.filter(tool => !TITLEBAR_OVERFLOW_UTILITY_TOOL_IDS.has(tool.id))
@@ -964,6 +990,62 @@ function TitlebarOverflowToolItem({
   onClose: () => void
   tool: TitlebarTool
 }) {
+  const menuContent = typeof tool.menuContent === 'function' ? tool.menuContent(onClose) : tool.menuContent
+  const hasMenu = Boolean(menuContent) || Boolean(tool.menuItems?.length)
+
+  if (hasMenu) {
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger disabled={tool.disabled}>
+          <MenuRow icon={tool.icon} label={menuToolLabel(tool)} />
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className={tool.menuClassName}>
+          {menuContent}
+          {tool.menuItems?.map(entry =>
+            entry.active === undefined ? (
+              <DropdownMenuItem
+                disabled={entry.disabled}
+                key={entry.id}
+                onSelect={event => {
+                  event.preventDefault()
+
+                  if (entry.to) {
+                    navigate(entry.to)
+                  }
+
+                  entry.onSelect?.()
+                  onClose()
+                }}
+              >
+                {entry.icon}
+                <span className="truncate">{entry.label}</span>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuCheckboxItem
+                checked={entry.active}
+                disabled={entry.disabled}
+                key={entry.id}
+                onSelect={event => {
+                  event.preventDefault()
+
+                  if (entry.to) {
+                    navigate(entry.to)
+                  }
+
+                  entry.onSelect?.()
+                  onClose()
+                }}
+              >
+                <span className="inline-flex min-w-4 items-center justify-center">{entry.icon}</span>
+                <span className="truncate">{entry.label}</span>
+              </DropdownMenuCheckboxItem>
+            )
+          )}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    )
+  }
+
   return (
     <DropdownMenuItem
       disabled={tool.disabled}
@@ -1007,8 +1089,10 @@ function TitlebarStatusbarItemButton({
   }
 
   const tooltipLabel = statusbarTooltip(item)
+
   const menuContent =
     typeof item.menuContent === 'function' ? item.menuContent(() => setMenuOpen(false)) : item.menuContent
+
   const hasMenu = item.variant === 'menu' || Boolean(menuContent) || Boolean(item.menuItems?.length)
 
   const content = (
@@ -1116,6 +1200,7 @@ function TitlebarStatusbarItemButton({
 }
 
 function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof useNavigate>; tool: TitlebarTool }) {
+  const [menuOpen, setMenuOpen] = useState(false)
   // Titlebar actions never show an active background — state reads from the
   // icon itself (e.g. the mute/unmute glyph). aria-pressed still carries it
   // for a11y.
@@ -1126,6 +1211,11 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
   ) : (
     (tool.title ?? tool.label)
   )
+
+  const menuContent =
+    typeof tool.menuContent === 'function' ? tool.menuContent(() => setMenuOpen(false)) : tool.menuContent
+
+  const hasMenu = Boolean(menuContent) || Boolean(tool.menuItems?.length)
 
   if (tool.href) {
     return (
@@ -1142,6 +1232,79 @@ function TitlebarToolButton({ navigate, tool }: { navigate: ReturnType<typeof us
           </a>
         </Button>
       </Tip>
+    )
+  }
+
+  if (hasMenu) {
+    return (
+      <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
+        <Tip label={tooltipLabel}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={tool.label}
+              aria-pressed={tool.active ?? undefined}
+              className={className}
+              disabled={tool.disabled}
+              onClick={event => {
+                if (tool.to) {
+                  navigate(tool.to)
+                }
+
+                tool.onSelect?.(event)
+              }}
+              onPointerDown={event => event.stopPropagation()}
+              size="icon-titlebar"
+              type="button"
+              variant="ghost"
+            >
+              {tool.icon}
+            </Button>
+          </DropdownMenuTrigger>
+        </Tip>
+        <DropdownMenuContent align={tool.menuAlign ?? 'end'} className={tool.menuClassName}>
+          {menuContent}
+          {tool.menuItems?.map(entry =>
+            entry.active === undefined ? (
+              <DropdownMenuItem
+                disabled={entry.disabled}
+                key={entry.id}
+                onSelect={event => {
+                  event.preventDefault()
+
+                  if (entry.to) {
+                    navigate(entry.to)
+                  }
+
+                  entry.onSelect?.()
+                  setMenuOpen(false)
+                }}
+              >
+                {entry.icon}
+                <span className="truncate">{entry.label}</span>
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuCheckboxItem
+                checked={entry.active}
+                disabled={entry.disabled}
+                key={entry.id}
+                onSelect={event => {
+                  event.preventDefault()
+
+                  if (entry.to) {
+                    navigate(entry.to)
+                  }
+
+                  entry.onSelect?.()
+                  setMenuOpen(false)
+                }}
+              >
+                <span className="inline-flex min-w-4 items-center justify-center">{entry.icon}</span>
+                <span className="truncate">{entry.label}</span>
+              </DropdownMenuCheckboxItem>
+            )
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     )
   }
 

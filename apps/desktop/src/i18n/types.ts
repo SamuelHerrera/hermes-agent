@@ -2365,6 +2365,7 @@ export interface Translations {
       restartingMessage: string
       startRestartFailed: (message: string) => string
       restartFailed: string
+      browserTools: string
       hideConsole: string
       showConsole: string
       hideDevTools: string

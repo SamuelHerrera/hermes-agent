@@ -110,6 +110,54 @@ describe('TitlebarControls', () => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
+  it('supports submenu items on titlebar toolbar buttons', async () => {
+    const showConsole = vi.fn()
+    const openDevTools = vi.fn()
+
+    render(
+      <MemoryRouter>
+        <TitlebarControls
+          onNewSession={vi.fn()}
+          onOpenSettings={vi.fn()}
+          tools={[
+            {
+              icon: <span data-testid="browser-tools-icon" />,
+              id: 'preview-browser-tools',
+              label: 'Browser tools',
+              menuItems: [
+                {
+                  active: false,
+                  icon: <span className="codicon-output" />,
+                  id: 'preview-console',
+                  label: 'Show preview console',
+                  onSelect: showConsole
+                },
+                {
+                  active: false,
+                  icon: <span className="codicon-debug-alt" />,
+                  id: 'preview-devtools',
+                  label: 'Open preview DevTools',
+                  onSelect: openDevTools
+                }
+              ]
+            }
+          ]}
+        />
+      </MemoryRouter>
+    )
+
+    openToolbarMenu('Browser tools')
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show preview console' }))
+
+    expect(showConsole).toHaveBeenCalledOnce()
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+
+    openToolbarMenu('Browser tools')
+    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Open preview DevTools' }))
+
+    expect(openDevTools).toHaveBeenCalledOnce()
+  })
+
   it('toggles keep-awake from the dropdown instead of the app toolbar', async () => {
     render(
       <MemoryRouter>
@@ -119,9 +167,11 @@ describe('TitlebarControls', () => {
 
     expect(screen.queryByRole('button', { name: /Keep computer awake/ })).toBeNull()
     openAppMenu()
+
     const enable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', {
       name: 'Keep computer awake: Off'
     })
+
     expect(enable.getAttribute('aria-pressed')).toBe('false')
     expect(enable.querySelector('.codicon-unlock')).toBeTruthy()
 
@@ -130,9 +180,11 @@ describe('TitlebarControls', () => {
     expect($keepAwake.get()).toBe(true)
     await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
     openAppMenu()
+
     const disable = within(screen.getByRole('toolbar', { name: 'More controls' })).getByRole('button', {
       name: 'Keep computer awake: On'
     })
+
     expect(disable.getAttribute('aria-pressed')).toBe('true')
     expect(disable.querySelector('.codicon-lock')).toBeTruthy()
     fireEvent.click(disable)
@@ -430,4 +482,11 @@ function openAppMenu() {
   fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
   fireEvent.pointerUp(more, { button: 0, pointerType: 'mouse' })
   fireEvent.click(more)
+}
+
+function openToolbarMenu(name: string) {
+  const button = screen.getByRole('button', { name })
+  fireEvent.pointerDown(button, { button: 0, pointerType: 'mouse' })
+  fireEvent.pointerUp(button, { button: 0, pointerType: 'mouse' })
+  fireEvent.click(button)
 }

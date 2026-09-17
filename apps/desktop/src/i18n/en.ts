@@ -2780,6 +2780,7 @@ export const en: Translations = {
       restartingMessage: 'Hermes is working in the background. Watch the preview console for progress.',
       startRestartFailed: message => `Could not start server restart: ${message}`,
       restartFailed: 'Server restart failed',
+      browserTools: 'Browser tools',
       hideConsole: 'Hide preview console',
       showConsole: 'Show preview console',
       hideDevTools: 'Hide preview DevTools',
@@ -3038,7 +3039,8 @@ export const en: Translations = {
     sudoSendFailed: 'Could not send sudo password',
     secretSendFailed: 'Could not send secret',
     sudoTitle: 'Administrator password',
-    sudoDesc: 'Hermes needs your sudo password to run a privileged command. It is sent to the backend serving this session, which may be on another machine.',
+    sudoDesc:
+      'Hermes needs your sudo password to run a privileged command. It is sent to the backend serving this session, which may be on another machine.',
     sudoPlaceholder: 'sudo password',
     secretTitle: 'Secret required',
     secretDesc: 'Hermes needs a credential to continue.',

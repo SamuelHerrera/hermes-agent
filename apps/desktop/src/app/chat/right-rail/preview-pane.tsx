@@ -2,6 +2,8 @@ import { useStore } from '@nanostores/react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { setTitlebarToolGroup } from '@/app/contrib/panes'
+import { Codicon } from '@/components/ui/codicon'
 import { Tip } from '@/components/ui/tooltip'
 import { ContribBoundary, ContribRender } from '@/contrib/react/boundary'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -11,6 +13,7 @@ import { guardGuestPointers } from '@/lib/guest-pointer-guard'
 import { openPreviewTargetInBrowser, remoteHtmlPreviewDocument } from '@/lib/local-preview'
 import { rafCoalesce } from '@/lib/raf-coalesce'
 import { cn } from '@/lib/utils'
+import { $rightRailActiveTabId } from '@/store/layout'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $previewServerRestart,
@@ -31,7 +34,7 @@ import { type ConsoleEntry } from './preview-console-state'
 import { isPreviewRendererContribution, PREVIEW_RENDERERS_AREA } from './preview-contrib'
 import { LocalFilePreview, PreviewEmptyState } from './preview-file'
 import { registerPreviewPageReader } from './preview-reader'
-import { previewConsoleState, registerPreviewDevTools } from './preview-strip-tools'
+import { previewConsoleState } from './preview-strip-tools'
 
 type PreviewWebview = HTMLElement & {
   canGoBack?: () => boolean
@@ -177,10 +180,12 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const previewContentRef = useRef<HTMLDivElement | null>(null)
   const webviewRef = useRef<PreviewWebview | null>(null)
   const previewServerRestart = useStore($previewServerRestart)
+  const activePreviewTabId = useStore($rightRailActiveTabId)
   const consoleHeight = useStore(consoleState.$height)
   const consoleOpen = useStore(consoleState.$open)
   const [currentUrl, setCurrentUrl] = useState(target.url)
   const [addressValue, setAddressValue] = useState(target.url)
+  const [devtoolsAvailable, setDevtoolsAvailable] = useState(false)
   const [devtoolsOpen, setDevtoolsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<PreviewLoadErrorState | null>(null)
@@ -409,24 +414,74 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     webview.openDevTools()
   }, [])
 
-  // Publish the DevTools handle for THIS tab so the tab's own toggle can drive
-  // the webview (which only exists in here). Registered on every open/close
-  // change so the button's active state stays truthful.
+  // Publish the active browser tab's tooling to the app toolbar as one submenu.
+  // The native tab strip stays reserved for tabs/drag/reorder/close; console and
+  // DevTools are browser-toolbar actions for the selected preview tab.
   useEffect(() => {
-    if (!isWebPreview || !tabId) {
-      return
+    const groupId = tabId ? `preview-browser-tools:${tabId}` : 'preview-browser-tools:unknown'
+
+    if (!isWebPreview || !tabId || target.kind !== 'url' || activePreviewTabId !== tabId) {
+      setTitlebarToolGroup(groupId, [], 'right')
+
+      return () => setTitlebarToolGroup(groupId, [], 'right')
     }
 
     // Remote HTML renders in a sandboxed iframe, not a webview — there is no
-    // console and no DevTools to offer (same guard the titlebar tools had).
+    // console and no DevTools to offer.
     if (isRemoteHtml) {
-      return
+      setTitlebarToolGroup(groupId, [], 'right')
+
+      return () => setTitlebarToolGroup(groupId, [], 'right')
     }
 
-    registerPreviewDevTools(tabId, { open: devtoolsOpen, toggle: toggleDevTools })
+    setTitlebarToolGroup(
+      groupId,
+      [
+        {
+          icon: <Codicon name="tools" size="0.875rem" />,
+          id: 'preview-browser-tools',
+          label: copy.browserTools,
+          menuItems: [
+            {
+              active: consoleOpen,
+              icon: <Codicon name="output" size="0.8125rem" />,
+              id: 'preview-console',
+              label: consoleOpen ? copy.hideConsole : copy.showConsole,
+              onSelect: () => consoleState.setOpen(open => !open)
+            },
+            {
+              active: devtoolsOpen,
+              disabled: !devtoolsAvailable,
+              icon: <Codicon name="debug-alt" size="0.8125rem" />,
+              id: 'preview-devtools',
+              label: devtoolsOpen ? copy.hideDevTools : copy.openDevTools,
+              onSelect: toggleDevTools
+            }
+          ],
+          title: copy.browserTools
+        }
+      ],
+      'right'
+    )
 
-    return () => registerPreviewDevTools(tabId, null)
-  }, [devtoolsOpen, isRemoteHtml, isWebPreview, tabId, toggleDevTools])
+    return () => setTitlebarToolGroup(groupId, [], 'right')
+  }, [
+    activePreviewTabId,
+    consoleOpen,
+    consoleState,
+    copy.browserTools,
+    copy.hideConsole,
+    copy.hideDevTools,
+    copy.openDevTools,
+    copy.showConsole,
+    devtoolsAvailable,
+    devtoolsOpen,
+    isRemoteHtml,
+    isWebPreview,
+    tabId,
+    target.kind,
+    toggleDevTools
+  ])
 
   // Publish the PAGE reader for this tab (the read_preview tool): extract the
   // rendered page's title + visible text from the webview. innerText (not
@@ -648,6 +703,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     host.replaceChildren()
     webviewRef.current = null
+    setDevtoolsAvailable(false)
     setCurrentUrl(initialUrl)
     setAddressValue(initialUrl)
     setDevtoolsOpen(false)
@@ -758,8 +814,10 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     webview.addEventListener('page-title-updated', onTitle)
     host.appendChild(webview)
     webviewRef.current = webview
+    setDevtoolsAvailable(Boolean(webview.openDevTools))
 
     return () => {
+      setDevtoolsAvailable(false)
       webview.removeEventListener('console-message', onConsole)
       webview.removeEventListener('devtools-closed', onDevToolsClosed)
       webview.removeEventListener('devtools-opened', onDevToolsOpened)

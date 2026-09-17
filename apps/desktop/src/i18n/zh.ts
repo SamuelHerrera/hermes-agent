@@ -2957,6 +2957,7 @@ export const zh: Translations = {
       restartingMessage: 'Hermes 正在后台工作。可在预览控制台查看进度。',
       startRestartFailed: message => `无法启动服务器重启：${message}`,
       restartFailed: '服务器重启失败',
+      browserTools: '浏览器工具',
       hideConsole: '隐藏预览控制台',
       showConsole: '显示预览控制台',
       hideDevTools: '隐藏预览 DevTools',
