@@ -151,6 +151,14 @@ export interface BrokerClient extends ChromeBridgeRequestRouter {
 }
 
 /** Attach only using an explicitly issued client credential, never a host config. */
+function routeTimeoutMs(request: ChromeBridgeRequest, ordinary: number, margin: number): number {
+  if (request.method !== 'control' || request.arguments.action !== 'download') { return ordinary }
+  const requested = request.arguments.timeoutMs
+  const operation = typeof requested === 'number' && Number.isFinite(requested) ? Math.max(1000, Math.min(60_000, requested)) : 30_000
+
+  return Math.max(ordinary, operation + margin)
+}
+
 export async function connectBrokerClient(config: BrokerClientConfig): Promise<BrokerClient> {
   if (!isLocalBrokerSocketPath(config.socketPath)) { throw new BridgeBrokerError('INVALID_ARGUMENTS', 'shared broker endpoint must be local') }
   const socket = createConnection(config.socketPath)
@@ -243,7 +251,7 @@ export async function connectBrokerClient(config: BrokerClientConfig): Promise<B
           pending.delete(id)
           socket.write(`${JSON.stringify({ type: 'cancel', id })}\n`)
           item?.reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'shared broker request timed out'))
-        }, config.requestTimeoutMs ?? 10_000)
+        }, routeTimeoutMs(request, config.requestTimeoutMs ?? 10_000, 4000))
 
         const abort = (): void => {
           if (!pending.has(id)) { return }
@@ -404,7 +412,7 @@ export class ChromeBridgeBroker implements ChromeBridgeRequestRouter {
         retire()
         this.send(host.socket, { type: 'cancel', id, controllerId })
         item?.reject(new BridgeBrokerError('BRIDGE_TIMEOUT', 'native Chrome bridge request timed out'))
-      }, this.config.requestTimeoutMs ?? 10_000)
+      }, routeTimeoutMs(request, this.config.requestTimeoutMs ?? 10_000, 2000))
 
       const retire = (): void => {
         host.retired.add(id)

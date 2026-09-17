@@ -63,6 +63,7 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
       }
     }
   } else if (action === 'key') {
+
     element = document.activeElement
 
     for (let depth = 0; depth < 32 && element; depth++) {
@@ -153,7 +154,7 @@ export function inspectTarget(locator: Locator | null, action: string, payloads?
     control.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  return { x: point ? point.x + x - r.x : x + r.width / 2, y: point ? point.y + y - r.y : y + r.height / 2, boundingBox: { x, y, width: r.width, height: r.height }, sensitive, editable, fileInput, urls }
+  return { x: point ? point.x + x - r.x : x + r.width / 2, y: point ? point.y + y - r.y : y + r.height / 2, boundingBox: { x, y, width: r.width, height: r.height }, sensitive, editable, fileInput, urls, focused: document.hasFocus() }
 }
 
 export async function prepareChromeTarget(tabId: number, action: string, args: Record<string, unknown>): Promise<PreparedTarget> {
@@ -177,6 +178,14 @@ export async function prepareChromeTarget(tabId: number, action: string, args: R
   let target = results[0]?.result
 
   if (!target || !target.urls.every(isControllableHttpUrl)) { throw new DebuggerError('TARGET_URL_BLOCKED', 'The frame URL is not permitted.') }
+
+  if (action === 'key') {
+    // Tab-wide keyboard input must be authorized against its actual focus chain.
+    // Focus emulation also preserves background-tab keyboard support.
+    if (!target.focused) { throw new DebuggerError('FRAME_NOT_FOCUSED', 'The selected frame is not on the tab focus chain.') }
+
+    return target
+  }
 
   if (action !== 'screenshot' && action !== 'key') {
     const checked = await chrome.scripting.executeScript({ target: { tabId, frameIds: [frameId] }, func: inspectTarget, args: [located?.locator ?? null, action, null, target.urls, point] })

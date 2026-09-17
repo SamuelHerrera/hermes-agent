@@ -93,6 +93,20 @@ afterEach(async () => {
 })
 
 describe('authenticated local Chrome bridge broker', () => {
+  it('allows the advertised download deadline through both authenticated broker layers', async () => {
+    const { config } = await setupBroker({ clientTokens: { enrolled: 'c'.repeat(64) }, requestTimeoutMs: 20 })
+    const host = await connectHost(config)
+    await host.nextMessage()
+    const client = await connectBrokerClient({ socketPath: config.socketPath, clientId: 'enrolled', token: 'c'.repeat(64), version: 1, requestTimeoutMs: 20 })
+
+    try {
+      const result = client.route({ method: 'control', arguments: { action: 'download', timeoutMs: 1000 } }).catch(error => ({ error: error.code }))
+      const request = await host.nextMessage()
+      await new Promise(resolve => setTimeout(resolve, 60))
+      host.send({ type: 'response', id: request.id, result: { complete: true } })
+      await expect(result).resolves.toMatchObject({ complete: true })
+    } finally { await client.close(); host.socket.destroy() }
+  })
   it('attaches explicitly enrolled clients without replacing the host or leaking parallel responses', async () => {
     const clientToken = 'c'.repeat(64)
     const { broker, config } = await setupBroker({ clientTokens: { enrolled: clientToken } })

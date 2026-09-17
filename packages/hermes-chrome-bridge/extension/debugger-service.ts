@@ -84,6 +84,7 @@ export function createDebuggerService(deps: Dependencies) {
         await deps.attach(id)
         attached.add(id)
         await deps.send(id, 'Page.enable', {})
+        await deps.send(id, 'Emulation.setFocusEmulationEnabled', { enabled: true })
 
         if (stamp !== generation(id)) { await cancel(id); check() }
       }

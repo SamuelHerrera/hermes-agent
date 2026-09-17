@@ -252,6 +252,12 @@ try {
     const elementImage = await call('screenshot', { tabId: opened.tabId, target: '#smoke-button', format: 'png' })
     assert.ok(Buffer.from(elementImage.dataUrl.split(',')[1], 'base64').readUInt32BE(16) < 1000)
     evidence.checks.push(`${label}: full-page and element screenshots verified as image bytes`)
+    await publicPage.evaluate(() => { const input = globalThis.document.createElement('input'); input.type = 'password'; input.id = 'focus-trap'; globalThis.document.body.append(input); input.focus() })
+    await call('key', { tabId: opened.tabId, frameId: crossFrameId, key: 'x' }, 'FRAME_NOT_FOCUSED')
+    await call('key', { tabId: opened.tabId, key: 'x' }, 'SENSITIVE_FIELD')
+    assert.equal(await publicPage.locator('#focus-trap').inputValue(), '')
+    await publicPage.evaluate(() => globalThis.document.querySelector('#focus-trap').remove())
+    evidence.checks.push(`${label}: nonfocused frame cannot redirect keys into a password field`)
     pages.push({ page: publicPage, tabId: opened.tabId, connectionId: identity.connectionId })
     evidence.version = context.browser()?.version()
   }
