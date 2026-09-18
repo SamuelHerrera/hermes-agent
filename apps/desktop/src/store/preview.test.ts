@@ -8,6 +8,7 @@ import {
   $previewTabs,
   $previewTarget,
   beginPreviewServerRestart,
+  browserNavigationTarget,
   closePreviewForSource,
   closeRightRail,
   closeRightRailTab,
@@ -117,6 +118,33 @@ describe('preview store', () => {
     openPreview({ ...activeTarget, label: 'YouTube Music', url: 'https://music.youtube.com/' })
 
     expect($previewRevealRequest.get()).toBe(revealCount + 1)
+  })
+
+  it('persists browser tab navigation history and favicon metadata', () => {
+    openBrowserPreviewTab()
+
+    const activeId = $rightRailActiveTabId.get()!
+
+    updatePreviewTabTarget(activeId, target => browserNavigationTarget(target, 'https://example.com'))
+    updatePreviewTabTarget(activeId, target => browserNavigationTarget(target, 'https://example.com/docs'))
+    updatePreviewTabTarget(activeId, target =>
+      browserNavigationTarget(target, 'https://example.com/docs', {
+        faviconUrl: 'https://example.com/favicon.ico',
+        replaceHistory: true,
+        title: 'Docs'
+      })
+    )
+    updatePreviewTabTarget(activeId, target => browserNavigationTarget(target, 'https://example.com'))
+
+    const target = $previewTabs.get().find(tab => tab.id === activeId)?.target
+
+    expect(target).toMatchObject({
+      browserHistory: ['about:blank', 'https://example.com', 'https://example.com/docs'],
+      browserHistoryIndex: 1,
+      faviconUrl: 'https://example.com/favicon.ico',
+      label: 'Docs',
+      url: 'https://example.com'
+    })
   })
 
   it('re-fronts an existing tab instead of duplicating it, refreshing its target', () => {

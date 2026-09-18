@@ -3087,6 +3087,7 @@ def _ensure_session_db_row(session: dict) -> None:
     parent_session_id = session.get("parent_session_id") or None
     if parent_session_id:
         model_config["_branched_from"] = parent_session_id
+    persisted_cwd = _persisted_session_cwd(session)
     try:
         db.create_session(
             key,
@@ -3094,12 +3095,19 @@ def _ensure_session_db_row(session: dict) -> None:
             model=row_model,
             model_config=model_config or None,
             parent_session_id=parent_session_id,
-            cwd=_persisted_session_cwd(session),
+            cwd=persisted_cwd,
             # Self-describing rows: aggregators that merge multiple profile DBs
             # into one list can't rely on which file a row came from alone. NULL
             # means the launch/default profile (matches run_agent's convention).
             profile_name=Path(profile_home).name if profile_home else None,
         )
+        if persisted_cwd:
+            # ``create_session`` stamps the cwd on the first prompt, before the
+            # normal session-init branch/root enrichment path sees the row. Once
+            # the row already has a cwd, that later init path assumes enrichment
+            # already ran and skips it; kick the same non-blocking probe here so
+            # fresh desktop/TUI rows carry ``git_branch`` for sidebar metadata.
+            _persist_session_git_meta(session, persisted_cwd)
     except Exception as exc:
         # Disk-full is not a soft failure: if we swallow it here, prompt.submit
         # returns {"status":"streaming"} and the user's message vanishes with

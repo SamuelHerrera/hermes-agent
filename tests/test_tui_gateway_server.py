@@ -921,6 +921,50 @@ def test_default_session_cwd_prefers_launch_config(monkeypatch, tmp_path):
     assert server._default_session_cwd() == str(stale)
 
 
+def test_ensure_session_db_row_enriches_first_prompt_git_metadata(monkeypatch, tmp_path):
+    """The first desktop/TUI row insert must kick branch/root enrichment.
+
+    ``create_session`` is the first writer for a fresh submitted chat. If it
+    stores cwd but does not schedule git metadata capture, the later session-init
+    path sees that cwd and skips enrichment, leaving sidebar rows without their
+    branch label.
+    """
+    project = tmp_path / "repo"
+    project.mkdir()
+
+    class FakeDB:
+        def __init__(self):
+            self.calls = []
+
+        def create_session(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+
+    db = FakeDB()
+    persisted = []
+    monkeypatch.setattr(server, "_get_db", lambda: db)
+    monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
+    monkeypatch.setattr(
+        server,
+        "_persist_session_git_meta",
+        lambda session, cwd: persisted.append((session["session_key"], cwd)),
+    )
+
+    session = {
+        "created_at": 1,
+        "cwd": str(project),
+        "explicit_cwd": True,
+        "history": [],
+        "history_lock": threading.Lock(),
+        "session_key": "stored-branch-row",
+        "source": "desktop",
+    }
+
+    server._ensure_session_db_row(session)
+
+    assert db.calls[0][1]["cwd"] == str(project)
+    assert persisted == [("stored-branch-row", str(project))]
+
+
 def test_completion_cwd_explicit_cwd_wins_over_profile(monkeypatch, tmp_path):
     """An explicit client-provided cwd still beats the profile config."""
     explicit = tmp_path / "explicit"

@@ -16,6 +16,8 @@ import { cn } from '@/lib/utils'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $previewServerRestart,
+  $previewTabs,
+  browserNavigationTarget,
   failPreviewServerRestart,
   type PreviewTarget,
   updatePreviewTabTarget
@@ -173,6 +175,30 @@ function normalizeBrowserAddress(value: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`
 }
 
+function browserHistoryOffsetTarget(target: PreviewTarget, offset: -1 | 1): { index: number; url: string } | null {
+  if (target.kind !== 'url') {
+    return null
+  }
+
+  const history = target.browserHistory?.filter(item => typeof item === 'string' && item.trim()) ?? []
+
+  if (!history.length) {
+    return null
+  }
+
+  const index = Number.isInteger(target.browserHistoryIndex)
+    ? Math.min(Math.max(target.browserHistoryIndex!, 0), history.length - 1)
+    : Math.max(0, history.lastIndexOf(target.url))
+
+  const nextIndex = index + offset
+
+  if (nextIndex < 0 || nextIndex >= history.length) {
+    return null
+  }
+
+  return { index: nextIndex, url: history[nextIndex] }
+}
+
 function PreviewLoadError({
   consoleHeight = 0,
   error,
@@ -304,21 +330,15 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     (previewServerRestart.url === target.url || previewServerRestart.url === currentUrl)
 
   const persistBrowserLocation = useCallback(
-    (url: string, title?: string) => {
+    (
+      url: string,
+      options: { faviconUrl?: string; historyIndex?: number; replaceHistory?: boolean; title?: string } = {}
+    ) => {
       if (target.kind !== 'url' || !tabId) {
         return
       }
 
-      updatePreviewTabTarget(tabId, current =>
-        current.kind === 'url'
-          ? {
-              ...current,
-              label: title?.trim() || current.label || compactUrl(url),
-              source: current.browserTabKey ? url : current.source,
-              url
-            }
-          : current
-      )
+      updatePreviewTabTarget(tabId, current => browserNavigationTarget(current, url, options))
     },
     [tabId, target.kind]
   )
@@ -340,6 +360,43 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       }
     },
     [persistBrowserLocation]
+  )
+
+  const navigateBrowserHistory = useCallback(
+    (offset: -1 | 1) => {
+      const webview = webviewRef.current
+
+      if (offset < 0 && webview?.canGoBack?.()) {
+        webview.goBack?.()
+
+        return
+      }
+
+      if (offset > 0 && webview?.canGoForward?.()) {
+        webview.goForward?.()
+
+        return
+      }
+
+      const latestTarget = tabId ? $previewTabs.get().find(tab => tab.id === tabId)?.target : target
+      const next = latestTarget ? browserHistoryOffsetTarget(latestTarget, offset) : null
+
+      if (!next) {
+        return
+      }
+
+      setLoadError(null)
+      setCurrentUrl(next.url)
+      setAddressValue(next.url)
+      persistBrowserLocation(next.url, { historyIndex: next.index })
+
+      if (webview?.loadURL) {
+        webview.loadURL(next.url)
+      } else {
+        webview?.setAttribute('src', next.url)
+      }
+    },
+    [persistBrowserLocation, tabId, target]
   )
 
   const startConsoleResize = useCallback(
@@ -774,7 +831,17 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       const url = webview.getURL?.() || initialUrl
 
       if (title || url) {
-        persistBrowserLocation(url, title)
+        persistBrowserLocation(url, { replaceHistory: true, title })
+      }
+    }
+
+    const onFavicon = (event: Event) => {
+      const detail = event as Event & { favicons?: string[] }
+      const faviconUrl = detail.favicons?.find(Boolean)
+      const url = webview.getURL?.() || currentUrlRef.current || initialUrl
+
+      if (faviconUrl) {
+        persistBrowserLocation(url, { faviconUrl, replaceHistory: true })
       }
     }
 
@@ -819,6 +886,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     webview.addEventListener('did-navigate-in-page', onNavigate)
     webview.addEventListener('did-start-loading', onStart)
     webview.addEventListener('did-stop-loading', onStop)
+    webview.addEventListener('page-favicon-updated', onFavicon)
     webview.addEventListener('page-title-updated', onTitle)
     host.appendChild(webview)
     webviewRef.current = webview
@@ -834,6 +902,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       webview.removeEventListener('did-navigate-in-page', onNavigate)
       webview.removeEventListener('did-start-loading', onStart)
       webview.removeEventListener('did-stop-loading', onStop)
+      webview.removeEventListener('page-favicon-updated', onFavicon)
       webview.removeEventListener('page-title-updated', onTitle)
 
       if (cacheKey && !discardedPreviewWebviews.has(cacheKey)) {
@@ -868,7 +937,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
                 <button
                   aria-label="Back"
                   className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                  onClick={() => webviewRef.current?.goBack?.()}
+                  onClick={() => navigateBrowserHistory(-1)}
                   type="button"
                 >
                   ←
@@ -876,7 +945,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
                 <button
                   aria-label="Forward"
                   className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
-                  onClick={() => webviewRef.current?.goForward?.()}
+                  onClick={() => navigateBrowserHistory(1)}
                   type="button"
                 >
                   →

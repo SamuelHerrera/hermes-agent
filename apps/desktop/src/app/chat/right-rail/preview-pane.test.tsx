@@ -263,9 +263,11 @@ describe('PreviewPane console state', () => {
     })
 
     const webview = rendered.container.querySelector('webview')
+    const loadURL = vi.fn()
 
     expect(webview).toBeInstanceOf(HTMLElement)
     Object.defineProperty(webview, 'getURL', { configurable: true, value: () => 'https://www.youtube.com/' })
+    Object.defineProperty(webview, 'loadURL', { configurable: true, value: loadURL })
 
     act(() => {
       webview?.dispatchEvent(
@@ -291,6 +293,25 @@ describe('PreviewPane console state', () => {
     expect(rendered.container.querySelector('webview')).toBe(webview)
     expect($previewTabs.get()[0]?.target.label).toBe('YouTube')
     expect($previewTabs.get()[0]?.target.url).toBe('https://www.youtube.com/')
+
+    act(() => {
+      webview?.dispatchEvent(
+        Object.assign(new Event('page-favicon-updated'), {
+          favicons: ['https://www.youtube.com/favicon.ico']
+        })
+      )
+    })
+
+    expect($previewTabs.get()[0]?.target.faviconUrl).toBe('https://www.youtube.com/favicon.ico')
+
+    fireEvent.click(rendered.getByRole('button', { name: 'Back' }))
+
+    expect(loadURL).toHaveBeenCalledWith('https://accounts.google.com/')
+    expect($previewTabs.get()[0]?.target.browserHistory).toEqual([
+      'https://accounts.google.com/',
+      'https://www.youtube.com/'
+    ])
+    expect($previewTabs.get()[0]?.target.browserHistoryIndex).toBe(0)
   })
 
   it('renders authenticated remote HTML safely and honors source mode', async () => {

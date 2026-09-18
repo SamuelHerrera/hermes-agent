@@ -24,6 +24,14 @@ export interface PreviewTarget {
   /** Stable identity for user-created browser tabs. URL targets that carry this
    * key keep their native tab even as the page navigates to a different URL. */
   browserTabKey?: string
+  /** Best page-provided favicon URL for browser/URL tabs. Captured from the
+   * webview's page-favicon-updated event; never fetched by Hermes itself. */
+  faviconUrl?: string
+  /** Lightweight browser history for URL tabs so restored tabs can still move
+   * back/forward even though Electron does not expose a serializable native
+   * history stack. */
+  browserHistory?: string[]
+  browserHistoryIndex?: number
   byteSize?: number
   /** Inline image bytes (a `data:` URL) when the renderer already holds them —
    * e.g. a pasted/dropped screenshot whose only on-disk copy is a transient
@@ -69,6 +77,7 @@ const TABS_STORAGE_KEY = 'hermes.desktop.previewTabs.v2'
 /** Superseded by the tab list above; cleared so it can't leak forever. */
 const LEGACY_SESSION_REGISTRY_KEY = 'hermes.desktop.sessionPreviews.v1'
 let browserTabSequence = 0
+const MAX_BROWSER_HISTORY_ENTRIES = 50
 
 function isPreviewTarget(value: unknown): value is PreviewTarget {
   if (!value || typeof value !== 'object') {
@@ -196,6 +205,74 @@ export function previewTabId(target: PreviewTarget): RightRailTabId {
   return target.kind === 'url' ? `url:${target.browserTabKey || target.url}` : `${target.kind}:${target.url}`
 }
 
+interface BrowserNavigationUpdate {
+  faviconUrl?: string
+  historyIndex?: number
+  replaceHistory?: boolean
+  title?: string
+}
+
+function normalizedBrowserHistory(target: PreviewTarget): { history: string[]; index: number } {
+  const history = (target.browserHistory?.filter(item => typeof item === 'string' && item.trim()) ?? [])
+  const seeded = history.length ? history : [target.url]
+  const fallbackIndex = Math.max(0, seeded.lastIndexOf(target.url))
+
+  const index = Number.isInteger(target.browserHistoryIndex)
+    ? Math.min(Math.max(target.browserHistoryIndex!, 0), seeded.length - 1)
+    : fallbackIndex
+
+  return { history: seeded, index }
+}
+
+/** Return a URL target updated with browser-like per-tab navigation state. Page
+ * title/favicon changes use replaceHistory so passive metadata does not add a
+ * duplicate entry. Navigations infer back/forward movement when the destination
+ * matches a neighbouring entry; otherwise they append like a normal browser. */
+export function browserNavigationTarget(
+  target: PreviewTarget,
+  url: string,
+  { faviconUrl, historyIndex, replaceHistory = false, title }: BrowserNavigationUpdate = {}
+): PreviewTarget {
+  if (target.kind !== 'url') {
+    return target
+  }
+
+  const normalized = normalizedBrowserHistory(target)
+  let history = [...normalized.history]
+  let index = normalized.index
+
+  if (typeof historyIndex === 'number') {
+    index = Math.min(Math.max(historyIndex, 0), history.length - 1)
+  } else if (replaceHistory) {
+    history[index] = url
+  } else if (history[index] !== url) {
+    if (index > 0 && history[index - 1] === url) {
+      index -= 1
+    } else if (index < history.length - 1 && history[index + 1] === url) {
+      index += 1
+    } else {
+      history = [...history.slice(0, index + 1), url]
+      index = history.length - 1
+    }
+  }
+
+  if (history.length > MAX_BROWSER_HISTORY_ENTRIES) {
+    const overflow = history.length - MAX_BROWSER_HISTORY_ENTRIES
+    history = history.slice(overflow)
+    index = Math.max(0, index - overflow)
+  }
+
+  return {
+    ...target,
+    browserHistory: history,
+    browserHistoryIndex: index,
+    faviconUrl: faviconUrl ?? target.faviconUrl,
+    label: title?.trim() || target.label || url,
+    source: target.browserTabKey ? url : target.source,
+    url
+  }
+}
+
 function newBrowserTabKey(): string {
   browserTabSequence += 1
 
@@ -210,6 +287,8 @@ export function openBrowserPreviewTab(callerPaneId?: string) {
   openPreview(
     {
       browserTabKey,
+      browserHistory: ['about:blank'],
+      browserHistoryIndex: 0,
       kind: 'url',
       label: 'New tab',
       source: `browser-tab:${browserTabKey}`,

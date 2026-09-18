@@ -70,6 +70,8 @@ function previewPaneTitle(tabId: string): string {
 /** The tab's lead glyph — the same file/tool icon family the file tree and code
  *  fences resolve through, so a `.tsx` peek and its sidebar row agree. */
 function PreviewTabLead({ tabId }: { tabId: string }) {
+  useStore($previewTabs)
+
   const target = targetFor(tabId)
 
   if (!target) {
@@ -81,6 +83,17 @@ function PreviewTabLead({ tabId }: { tabId: string }) {
   }
 
   if (target.kind === 'url') {
+    if (target.faviconUrl) {
+      return (
+        <img
+          alt=""
+          className="size-[0.6875rem] shrink-0 rounded-[2px] opacity-90"
+          referrerPolicy="no-referrer"
+          src={target.faviconUrl}
+        />
+      )
+    }
+
     return <ToolIcon className="opacity-70" name="globe" size="0.6875rem" />
   }
 
