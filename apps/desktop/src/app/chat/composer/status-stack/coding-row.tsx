@@ -21,8 +21,8 @@ import { useI18n } from '@/i18n'
 import { displayPath } from '@/lib/display-path'
 import { openWorktreeDialog, registerRepoStatusCwd, repoStatusForCwd, repoWorktreesForCwd } from '@/store/coding-status'
 import { notifyError } from '@/store/notifications'
-import { $pullRequestsByBranch, branchPrKey, refreshPullRequests } from '@/store/pull-requests'
 import { $projectTree, projectIdForCwd, projectRootCwd } from '@/store/projects'
+import { $pullRequestsByBranch, branchPrKey, refreshPullRequests } from '@/store/pull-requests'
 
 import type { SidebarProjectTree } from '../../sidebar/projects/workspace-groups'
 
@@ -72,6 +72,7 @@ export function projectOptionsForComposer(projects: SidebarProjectTree[]): Proje
       path,
       rank: projectOptionRank(project)
     }
+
     const existing = byPath.get(key)
 
     // Consolidate duplicate explicit/auto or local/upstream entries that point
@@ -207,12 +208,15 @@ export const CodingStatusRow = memo(function CodingStatusRow({
     void openWorktreeDialog({ base, repoPath: resolvedRepoPath })
   }
 
+  // Git status arrives asynchronously. Keep hooks above the loading guard so
+  // pending/loaded transitions do not change this row's hook order.
+  const projectOptions = useMemo(() => projectOptionsForComposer(projectTree), [projectTree])
+
   if (!status) {
     return null
   }
 
   const branchLabel = status.detached ? s.detached : status.branch || s.noBranch
-  const projectOptions = useMemo(() => projectOptionsForComposer(projectTree), [projectTree])
   const activeProjectId = resolvedRepoPath ? projectIdForCwd(resolvedRepoPath, projectTree) : null
   // The kebab offers branching off the trunk and/or the current branch. The
   // worktree-add bases the new branch on `base` (a branch name; undefined =

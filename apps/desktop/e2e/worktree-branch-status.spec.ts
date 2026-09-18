@@ -121,6 +121,22 @@ test.afterAll(async () => {
   fixture = null
 })
 
+test('repo-backed composer survives cold Git status loading and renderer reloads', async ({}, testInfo) => {
+  const page = fixture!.page
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+
+  for (let reload = 0; reload < 3; reload++) {
+    await page.reload()
+    await expect(page.locator('.coding-status-bar')).toContainText('main', { timeout: 30_000 })
+    await expect(page.locator('[data-slot="composer-rich-input"]:visible')).toBeVisible()
+    await expect(page.getByText(/failed to render/)).toHaveCount(0)
+  }
+
+  expect(errors).toEqual([])
+  await page.screenshot({ path: testInfo.outputPath('composer-git-status-after-reloads.png') })
+})
+
 test('worktree dialog renders the base-branch picker over the dialog, not clipped by it', async () => {
   const page = fixture!.page
 

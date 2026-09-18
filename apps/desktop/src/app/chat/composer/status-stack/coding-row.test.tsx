@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { atom } from 'nanostores'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { HermesRepoStatus } from '@/global'
+import { repoStatusForCwd } from '@/store/coding-status'
 import { $notifications, clearNotifications } from '@/store/notifications'
 import { $projectTree } from '@/store/projects'
 
@@ -14,25 +16,63 @@ class ResizeObserverStub {
 globalThis.ResizeObserver = ResizeObserverStub
 Element.prototype.scrollIntoView = vi.fn()
 
-vi.mock('@/store/coding-status', () => ({
-  registerRepoStatusCwd: () => undefined,
-  repoStatusForCwd: () =>
-    atom({
-      added: 12,
-      ahead: 0,
-      behind: 0,
-      branch: 'bb/hitbox',
-      defaultBranch: 'main',
-      detached: false,
-      removed: 3,
-      untracked: 0
-    }),
-  repoWorktreesForCwd: () => atom([])
-}))
+vi.mock('@/store/coding-status', () => {
+  const status = atom<HermesRepoStatus | null>({
+    changed: 2,
+    conflicted: 0,
+    files: [],
+    staged: 0,
+    unstaged: 2,
+    added: 12,
+    ahead: 0,
+    behind: 0,
+    branch: 'bb/hitbox',
+    defaultBranch: 'main',
+    detached: false,
+    removed: 3,
+    untracked: 0
+  })
+
+  const worktrees = atom([])
+
+  return {
+    registerRepoStatusCwd: () => undefined,
+    repoStatusForCwd: () => status,
+    repoWorktreesForCwd: () => worktrees
+  }
+})
 
 const { CodingStatusRow, projectOptionsForComposer } = await import('./coding-row')
 
+const statusStore = repoStatusForCwd('/repo') as ReturnType<typeof atom<HermesRepoStatus | null>>
+const loadedStatus = statusStore.get()!
+
 describe('CodingStatusRow', () => {
+  beforeEach(() => {
+    statusStore.set(loadedStatus)
+  })
+
+  it('renders when an initially pending Git status resolves', () => {
+    statusStore.set(null)
+    const { container } = render(<CodingStatusRow repoPath="/repo" />)
+    expect(container.querySelector('.coding-status-bar')).toBeNull()
+
+    act(() => statusStore.set(loadedStatus))
+
+    expect(screen.getByText('bb/hitbox')).toBeTruthy()
+  })
+
+  it('hides and recovers when Git status becomes unavailable again', () => {
+    const { container } = render(<CodingStatusRow repoPath="/repo" />)
+    expect(screen.getByText('bb/hitbox')).toBeTruthy()
+
+    act(() => statusStore.set(null))
+    expect(container.querySelector('.coding-status-bar')).toBeNull()
+
+    act(() => statusStore.set(loadedStatus))
+    expect(screen.getByText('bb/hitbox')).toBeTruthy()
+  })
+
   afterEach(() => {
     cleanup()
     $projectTree.set([])
@@ -92,6 +132,7 @@ describe('CodingStatusRow', () => {
       { checkedOut: false, isDefault: false, isRemote: false, name: 'feature/ui' },
       { checkedOut: true, isDefault: false, isRemote: false, name: 'bb/hitbox', worktreePath: '/repo' }
     ])
+
     const onConvertBranch = vi.fn().mockResolvedValue(undefined)
 
     render(
