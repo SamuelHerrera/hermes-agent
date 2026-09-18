@@ -17,7 +17,13 @@ import { $activeTreeGroup, $layoutTree, revealTreePane } from '@/components/pane
 import { FileTypeIcon } from '@/components/ui/file-type-icon'
 import { ToolIcon } from '@/components/ui/tool-icon'
 import { $rightRailActiveTabId, type RightRailTabId, selectRightRailTab } from '@/store/layout'
-import { $previewTabs, closeRightRailTab, type PreviewTab, type PreviewTarget } from '@/store/preview'
+import {
+  $previewRevealRequest,
+  $previewTabs,
+  closeRightRailTab,
+  type PreviewTab,
+  type PreviewTarget
+} from '@/store/preview'
 
 import { paneMirror } from './pane-mirror'
 import { PreviewTilePane } from './right-rail/preview'
@@ -100,9 +106,11 @@ export function watchPreviewTiles(): void {
 
   // The reveal analog of session tiles (session-states calls revealTreePane on
   // open): `openPreview` selects the tab, and the TREE must front its pane —
-  // un-minimize, un-hide, activate in its zone. Both stores, because re-opening
-  // the already-active tab changes only `$previewTabs` (fresh tab object), while
-  // switching tabs changes only the active id.
+  // un-minimize, un-hide, activate in its zone. Selection changes cover normal
+  // tab switches; `$previewRevealRequest` covers explicitly re-opening the
+  // already-active tab. Do NOT reveal on every `$previewTabs` mutation: browser
+  // tabs persist live page titles there, and YouTube Music retitles on every
+  // song change while it may be sitting in the background.
   const reveal = () => {
     const tabId = $rightRailActiveTabId.get()
 
@@ -112,7 +120,7 @@ export function watchPreviewTiles(): void {
   }
 
   $rightRailActiveTabId.listen(reveal)
-  $previewTabs.listen(reveal)
+  $previewRevealRequest.listen(reveal)
 
   // And the reverse: clicking a preview TAB activates its pane in the TREE
   // only, so the store's selection must follow or `$previewTarget` (⌘L quote

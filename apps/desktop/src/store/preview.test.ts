@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { $rightRailActiveTabId } from './layout'
 import {
+  $previewRevealRequest,
   $previewServerRestart,
   $previewServerRestartStatus,
   $previewTabs,
@@ -96,6 +97,26 @@ describe('preview store', () => {
 
     expect($previewTabs.get().find(tab => tab.id === activeId)?.target.url).toBe('https://example.com')
     expect($rightRailActiveTabId.get()).toBe(activeId)
+  })
+
+  it('keeps passive browser title updates separate from explicit reveal requests', () => {
+    openBrowserPreviewTab()
+
+    const activeId = $rightRailActiveTabId.get()!
+    const activeTarget = $previewTabs.get().find(tab => tab.id === activeId)!.target
+    const revealCount = $previewRevealRequest.get()
+
+    updatePreviewTabTarget(activeId, target => ({
+      ...target,
+      label: 'YouTube Music — New song',
+      url: 'https://music.youtube.com/watch?v=next'
+    }))
+
+    expect($previewRevealRequest.get()).toBe(revealCount)
+
+    openPreview({ ...activeTarget, label: 'YouTube Music', url: 'https://music.youtube.com/' })
+
+    expect($previewRevealRequest.get()).toBe(revealCount + 1)
   })
 
   it('re-fronts an existing tab instead of duplicating it, refreshing its target', () => {

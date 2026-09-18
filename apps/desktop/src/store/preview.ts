@@ -185,6 +185,10 @@ export const $previewTarget = computed(
 export const $previewTabSources = computed($previewTabs, tabs => tabs.map(tab => tab.target.source))
 
 export const $previewReloadRequest = atom(0)
+/** Incremented when an explicit preview open should front its existing tile.
+ * Passive target updates (page titles, URL persistence) intentionally do not
+ * touch this, so background browser tabs can retitle without stealing focus. */
+export const $previewRevealRequest = atom(0)
 export const $previewServerRestart = atom<PreviewServerRestart | null>(null)
 export const $previewServerRestartStatus = computed($previewServerRestart, restart => restart?.status ?? 'idle')
 
@@ -238,6 +242,7 @@ export function openPreview(target: PreviewTarget, source: PreviewRecordSource =
   const id = previewTabId(resolved)
   const current = $previewTabs.get()
   const index = current.findIndex(tab => tab.id === id)
+  const alreadyActive = $rightRailActiveTabId.get() === id
 
   const tab: PreviewTab = {
     anchor: current[index]?.anchor ?? defaultOpenPaneAnchor(callerPaneId),
@@ -247,6 +252,10 @@ export function openPreview(target: PreviewTarget, source: PreviewRecordSource =
 
   $previewTabs.set(index === -1 ? [...current, tab] : current.map((item, i) => (i === index ? tab : item)))
   selectRightRailTab(id)
+
+  if (alreadyActive) {
+    $previewRevealRequest.set($previewRevealRequest.get() + 1)
+  }
 }
 
 export function updatePreviewTabTarget(tabId: string, update: (target: PreviewTarget) => PreviewTarget) {
