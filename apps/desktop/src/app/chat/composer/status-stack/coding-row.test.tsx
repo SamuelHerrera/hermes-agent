@@ -3,6 +3,16 @@ import { atom } from 'nanostores'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { $notifications, clearNotifications } from '@/store/notifications'
+import { $projectTree } from '@/store/projects'
+
+class ResizeObserverStub {
+  disconnect() {}
+  observe() {}
+  unobserve() {}
+}
+
+globalThis.ResizeObserver = ResizeObserverStub
+Element.prototype.scrollIntoView = vi.fn()
 
 vi.mock('@/store/coding-status', () => ({
   registerRepoStatusCwd: () => undefined,
@@ -25,6 +35,7 @@ const { CodingStatusRow } = await import('./coding-row')
 describe('CodingStatusRow', () => {
   afterEach(() => {
     cleanup()
+    $projectTree.set([])
   })
 
   it('keeps branch and diff context as labels without native review buttons', () => {
@@ -74,5 +85,51 @@ describe('CodingStatusRow', () => {
     // Confirmation is the button turning into a checkmark, not a notification.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Copied' })).toBeTruthy())
     expect($notifications.get()).toHaveLength(0)
+  })
+
+  it('opens an existing branch from the branch chip', async () => {
+    const onListBranches = vi.fn().mockResolvedValue([
+      { checkedOut: false, isDefault: false, isRemote: false, name: 'feature/ui' },
+      { checkedOut: true, isDefault: false, isRemote: false, name: 'bb/hitbox', worktreePath: '/repo' }
+    ])
+    const onConvertBranch = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <CodingStatusRow
+        onConvertBranch={onConvertBranch}
+        onListBranches={onListBranches}
+        onOpenWorktree={vi.fn()}
+        repoPath="/repo"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /bb\/hitbox/ }))
+
+    await waitFor(() => expect(onListBranches).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByText('feature/ui'))
+
+    expect(onConvertBranch).toHaveBeenCalledWith('feature/ui', undefined, false)
+  })
+
+  it('opens a new draft in the selected project from the cwd chip', async () => {
+    const onOpenWorktree = vi.fn()
+    $projectTree.set([
+      { color: null, icon: null, id: 'p_repo', label: 'Repo', path: '/repo', repos: [], sessionCount: 0 },
+      { color: null, icon: null, id: 'p_other', label: 'Other Project', path: '/other', repos: [], sessionCount: 0 }
+    ])
+
+    render(
+      <CodingStatusRow
+        onConvertBranch={vi.fn()}
+        onListBranches={vi.fn().mockResolvedValue([])}
+        onOpenWorktree={onOpenWorktree}
+        repoPath="/repo"
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /~?\/repo|\/repo/ }))
+    fireEvent.click(await screen.findByText('Other Project'))
+
+    expect(onOpenWorktree).toHaveBeenCalledWith('/other')
   })
 })

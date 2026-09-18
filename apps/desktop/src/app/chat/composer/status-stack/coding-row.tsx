@@ -1,5 +1,5 @@
 import { useStore } from '@nanostores/react'
-import { memo, useEffect } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { PrTag } from '@/app/chat/pr-tag'
 import { StatusRow } from '@/components/chat/status-row'
@@ -12,14 +12,17 @@ import {
 } from '@/components/ui/actions-menu'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { CopyButton } from '@/components/ui/copy-button'
 import { DiffCount } from '@/components/ui/diff-count'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { HermesGitBranch } from '@/global'
 import { useI18n } from '@/i18n'
 import { displayPath } from '@/lib/display-path'
 import { openWorktreeDialog, registerRepoStatusCwd, repoStatusForCwd, repoWorktreesForCwd } from '@/store/coding-status'
 import { notifyError } from '@/store/notifications'
 import { $pullRequestsByBranch, branchPrKey, refreshPullRequests } from '@/store/pull-requests'
+import { $projectTree, projectIdForCwd, projectRootCwd } from '@/store/projects'
 
 // Tiny uppercase section header, matching the composer "+" menu's labels.
 const MENU_SECTION = 'text-[0.625rem] font-semibold uppercase tracking-wider text-(--ui-text-tertiary)'
@@ -70,6 +73,11 @@ export const CodingStatusRow = memo(function CodingStatusRow({
   // which is blank in exactly the same case) and cost a wrong-tree rail.
   const status = useStore(repoStatusForCwd(resolvedRepoPath))
   const worktrees = useStore(repoWorktreesForCwd(resolvedRepoPath))
+  const projectTree = useStore($projectTree)
+  const [branchPickerOpen, setBranchPickerOpen] = useState(false)
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  const [branches, setBranches] = useState<HermesGitBranch[]>([])
+  const [branchesLoading, setBranchesLoading] = useState(false)
 
   // While mounted, keep this worktree in the coding-status refresh set so the
   // turn-settle / tool-complete / focus edges re-probe it too (tiles otherwise
@@ -89,6 +97,22 @@ export const CodingStatusRow = memo(function CodingStatusRow({
 
   const pr =
     useStore($pullRequestsByBranch)[resolvedRepoPath && prBranch ? branchPrKey(resolvedRepoPath, prBranch) : '']
+
+  const loadBranches = useCallback(async () => {
+    if (!onListBranches) {
+      return
+    }
+
+    setBranchesLoading(true)
+
+    try {
+      setBranches(await onListBranches())
+    } catch {
+      setBranches([])
+    } finally {
+      setBranchesLoading(false)
+    }
+  }, [onListBranches])
 
   const switchToBranch = async (branch: string) => {
     if (!onSwitchBranch) {
@@ -116,6 +140,22 @@ export const CodingStatusRow = memo(function CodingStatusRow({
   }
 
   const branchLabel = status.detached ? s.detached : status.branch || s.noBranch
+  const projectOptions = useMemo(() => {
+    const seen = new Set<string>()
+
+    return projectTree.flatMap(project => {
+      const path = projectRootCwd(project)
+
+      if (!path || seen.has(path)) {
+        return []
+      }
+
+      seen.add(path)
+
+      return [{ id: project.id, label: project.label, path }]
+    })
+  }, [projectTree])
+  const activeProjectId = resolvedRepoPath ? projectIdForCwd(resolvedRepoPath, projectTree) : null
   // The kebab offers branching off the trunk and/or the current branch. The
   // worktree-add bases the new branch on `base` (a branch name; undefined =
   // current HEAD). We dedupe so "on main" shows a single trunk entry, and fall
@@ -145,6 +185,19 @@ export const CodingStatusRow = memo(function CodingStatusRow({
   const otherWorktrees = onOpenWorktree
     ? worktrees.filter(w => w.path && !w.detached && w.branch && w.branch !== current)
     : []
+
+  const switchToExistingBranch = async (branch: HermesGitBranch) => {
+    if (!onConvertBranch) {
+      return
+    }
+
+    try {
+      await onConvertBranch(branch.name, branch.worktreePath, branch.isDefault)
+      setBranchPickerOpen(false)
+    } catch (err) {
+      notifyError(err, s.switchFailed(branch.name))
+    }
+  }
 
   const hasLineDelta = status.added > 0 || status.removed > 0
   // Untracked files carry no line delta vs HEAD, so surface them as a count when
@@ -220,12 +273,74 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                 (`showIcon={false}`), so the row reads glyph → #number → branch. */}
             {pr && <PrTag pr={pr} showIcon={false} />}
 
-            {/* Branch context stays visible without a review-pane action. */}
-            <span className="contents">
+            {/* Branch context doubles as the fast branch/worktree selector. */}
+            {onListBranches && onConvertBranch ? (
+              <Popover
+                onOpenChange={next => {
+                  if (next && branches.length === 0 && !branchesLoading) {
+                    void loadBranches()
+                  }
+
+                  setBranchPickerOpen(next)
+                }}
+                open={branchPickerOpen}
+              >
+                <PopoverTrigger asChild>
+                  <button
+                    className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-xs font-normal text-muted-foreground/92 transition hover:bg-(--chrome-action-hover) hover:text-foreground data-[state=open]:bg-(--chrome-action-hover) data-[state=open]:text-foreground"
+                    title={branchLabel}
+                    type="button"
+                  >
+                    <span className="min-w-0 truncate">{branchLabel}</span>
+                    <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="chevron-down" size="0.65rem" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-72 p-0" side="top" sideOffset={8}>
+                  <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
+                    <CommandInput autoFocus placeholder={`Search ${branchLabel} branches`} />
+                    <CommandList className="max-h-72">
+                      <CommandEmpty>{branchesLoading ? p.branchesLoading : p.noBranches}</CommandEmpty>
+                      <CommandGroup heading="Branches">
+                        {branches.map(branch => (
+                          <CommandItem
+                            key={branch.name}
+                            onSelect={() => void switchToExistingBranch(branch)}
+                            value={`${branch.name} ${branch.worktreePath ?? ''}`}
+                          >
+                            <Codicon
+                              className="shrink-0 text-(--ui-text-tertiary)"
+                              name={branch.isRemote ? 'repo' : 'git-branch'}
+                              size="0.8rem"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate">{branch.name}</div>
+                              {branch.worktreePath ? (
+                                <div className="truncate text-[0.65rem] text-(--ui-text-tertiary)">
+                                  {displayPath(branch.worktreePath)}
+                                </div>
+                              ) : null}
+                            </div>
+                            {branch.name === current && (
+                              <Codicon className="shrink-0 text-(--ui-accent)" name="check" size="0.8rem" />
+                            )}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                      <CommandGroup>
+                        <CommandItem onSelect={() => startBranch(undefined)} value="create checkout new branch worktree">
+                          <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="add" size="0.8rem" />
+                          <span>Create and checkout new branch…</span>
+                        </CommandItem>
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            ) : (
               <span className="min-w-0 truncate text-xs font-normal text-muted-foreground/92" title={branchLabel}>
                 {branchLabel}
               </span>
-            </span>
+            )}
 
             {/* Worktree path + copy — plain muted text, not a chip. Always visible
                 so the composer names both the branch and the folder it is running
@@ -237,12 +352,56 @@ export const CodingStatusRow = memo(function CodingStatusRow({
                 with the same inline checkmark as every other copy in the app. */}
             {resolvedRepoPath && (
               <div className="flex min-w-0 flex-1 items-center gap-0.5">
-                <span
-                  className="min-w-0 truncate font-mono text-[0.62rem] leading-4 text-muted-foreground/50"
-                  data-slot="coding-status-cwd"
-                >
-                  {displayPath(resolvedRepoPath)}
-                </span>
+                {projectOptions.length > 1 && onOpenWorktree ? (
+                  <Popover onOpenChange={setProjectPickerOpen} open={projectPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="min-w-0 truncate rounded-md px-1 py-0.5 font-mono text-[0.62rem] leading-4 text-muted-foreground/50 transition hover:bg-(--chrome-action-hover) hover:text-foreground data-[state=open]:bg-(--chrome-action-hover) data-[state=open]:text-foreground"
+                        data-slot="coding-status-cwd"
+                        title={resolvedRepoPath}
+                        type="button"
+                      >
+                        {displayPath(resolvedRepoPath)}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-72 p-0" side="top" sideOffset={8}>
+                      <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
+                        <CommandInput autoFocus placeholder="Search projects" />
+                        <CommandList className="max-h-72">
+                          <CommandEmpty>{p.worktreeProjectNone}</CommandEmpty>
+                          <CommandGroup>
+                            {projectOptions.map(option => (
+                              <CommandItem
+                                key={option.path}
+                                onSelect={() => {
+                                  onOpenWorktree(option.path)
+                                  setProjectPickerOpen(false)
+                                }}
+                                value={`${option.label} ${option.path}`}
+                              >
+                                <Codicon className="shrink-0 text-(--ui-text-tertiary)" name="root-folder" size="0.8rem" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate">{option.label}</div>
+                                  <div className="truncate text-[0.65rem] text-(--ui-text-tertiary)">{displayPath(option.path)}</div>
+                                </div>
+                                {option.id === activeProjectId && (
+                                  <Codicon className="shrink-0 text-(--ui-accent)" name="check" size="0.8rem" />
+                                )}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                ) : (
+                  <span
+                    className="min-w-0 truncate font-mono text-[0.62rem] leading-4 text-muted-foreground/50"
+                    data-slot="coding-status-cwd"
+                  >
+                    {displayPath(resolvedRepoPath)}
+                  </span>
+                )}
                 <CopyButton
                   appearance="icon"
                   buttonSize="icon-xs"
