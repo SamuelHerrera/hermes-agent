@@ -27,6 +27,7 @@ import {
 
 import { paneMirror } from './pane-mirror'
 import { PreviewTilePane } from './right-rail/preview'
+import { clearPreviewWebviewCache } from './right-rail/preview-pane'
 import { forgetPreviewStripTools } from './right-rail/preview-strip-tools'
 
 /** The target behind a tile id, or null once its tab is gone. */
@@ -161,6 +162,7 @@ const watchPreviewTileMirror = paneMirror<PreviewTab>({
   tabTitle: tabId => <PreviewTabTitle tabId={tabId} />,
   render: tabId => <PreviewTilePane tabId={tabId} />,
   close: tabId => {
+    clearPreviewWebviewCache(tabId)
     forgetPreviewStripTools(tabId)
     closeRightRailTab(tabId)
   }

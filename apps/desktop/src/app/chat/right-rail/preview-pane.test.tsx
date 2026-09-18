@@ -6,7 +6,7 @@ import { $previewTabs } from '@/store/preview'
 import { $connection } from '@/store/session'
 
 import { PREVIEW_RENDERERS_AREA } from './preview-contrib'
-import { PreviewPane } from './preview-pane'
+import { clearPreviewWebviewCache, PreviewPane } from './preview-pane'
 import { forgetPreviewStripTools, previewConsoleState } from './preview-strip-tools'
 
 function stubPdfObjectUrls() {
@@ -36,6 +36,7 @@ describe('PreviewPane console state', () => {
 
   afterEach(() => {
     cleanup()
+    clearPreviewWebviewCache()
     $connection.set(null)
     $previewTabs.set([])
     vi.unstubAllGlobals()
@@ -175,6 +176,45 @@ describe('PreviewPane console state', () => {
 
     expect(webview?.getAttribute('src')).toBe('https://example.com')
     expect(input.value).toBe('https://example.com')
+  })
+
+  it('parks and reattaches browser webviews across pane moves without resetting src', async () => {
+    const tabId = 'url:browser-move-test'
+
+    const target = {
+      browserTabKey: 'browser-move-test',
+      kind: 'url' as const,
+      label: 'YouTube Music',
+      source: 'browser-tab:browser-move-test',
+      url: 'https://music.youtube.com/'
+    }
+
+    let first!: ReturnType<typeof render>
+    await act(async () => {
+      first = render(<PreviewPane embedded tabId={tabId} target={target} />)
+    })
+
+    const webview = first.container.querySelector('webview') as HTMLElement & { getURL?: () => string }
+
+    expect(webview).toBeInstanceOf(HTMLElement)
+    Object.defineProperty(webview, 'getURL', { configurable: true, value: () => 'https://music.youtube.com/watch?v=playing' })
+    webview.setAttribute('data-player-state', 'still-playing')
+
+    first.unmount()
+
+    let second!: ReturnType<typeof render>
+    await act(async () => {
+      second = render(<PreviewPane embedded tabId={tabId} target={{ ...target, url: 'https://music.youtube.com/watch?v=playing' }} />)
+    })
+
+    const reattached = second.container.querySelector('webview')
+
+    expect(reattached).toBe(webview)
+    expect(reattached?.getAttribute('data-player-state')).toBe('still-playing')
+    expect(reattached?.getAttribute('src')).toBe('https://music.youtube.com/')
+    expect((second.getByLabelText('Web address') as HTMLInputElement).value).toBe(
+      'https://music.youtube.com/watch?v=playing'
+    )
   })
 
   it('keeps the existing webview mounted while browser pages navigate internally', async () => {

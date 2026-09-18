@@ -172,32 +172,6 @@ describe('ProjectOverviewRow', () => {
     expect(actionLabels).toEqual(['New session in Test D'])
   })
 
-  it('shows an unambiguous git branch at the left of the project metadata row', () => {
-    const { container } = render(
-      <ProjectOverviewRow
-        project={{
-          ...project,
-          repos: [
-            {
-              groups: [{ id: '/repo::branch::sam/feature/sidebar-counts', isMain: true, label: 'sam/feature/sidebar-counts', path: '/repo', sessions: [] }],
-              id: '/repo',
-              label: 'repo',
-              path: '/repo',
-              sessionCount: 0
-            }
-          ]
-        }}
-      />
-    )
-
-    const branch = screen.getByText('sidebar-counts')
-    const secondary = container.querySelector('[data-sidebar-group-secondary]')
-
-    expect(secondary?.firstElementChild?.contains(branch)).toBe(true)
-    expect(tipTrigger(branch)).toBeTruthy()
-    expect(branch.closest('[data-project-branch]')?.getAttribute('aria-label')).toBe('Branch sam/feature/sidebar-counts')
-  })
-
   it('shows compact running, non-running chat, and archive metrics without subagent or token totals', () => {
     act(() => $sidebarRowMeta.set(['tokens']))
 

@@ -115,52 +115,13 @@ function projectCounts(project: SidebarProjectTree) {
   }
 }
 
-function projectBranch(project: SidebarProjectTree): null | string {
-  if (project.isNoProject) {
-    return null
-  }
-
-  const branches = new Set<string>()
-
-  for (const repo of project.repos ?? []) {
-    for (const group of repo.groups) {
-      const branch = group.isMain || group.isHome ? group.label.trim() : ''
-
-      if (branch) {
-        branches.add(branch)
-      }
-    }
-  }
-
-  return branches.size === 1 ? [...branches][0] : null
-}
-
-function ProjectBranchMeta({ branch }: { branch: string }) {
-  const leaf = branch.split('/').filter(Boolean).at(-1) ?? branch
-
-  return (
-    <Tip label={branch} side="top">
-      <span
-        aria-label={`Branch ${branch}`}
-        className="flex min-w-0 items-center gap-1 truncate"
-        data-project-branch
-      >
-        <Codicon className="shrink-0" name="git-branch" size="0.75rem" />
-        <span className="min-w-0 truncate">{leaf}</span>
-      </span>
-    </Tip>
-  )
-}
-
 function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
   const { archivedCount, chatCount, runningCount } = projectCounts(project)
   const terminals = useProjectTerminals(project)
   const { t } = useI18n()
-  const branch = projectBranch(project)
 
   return (
     <span className="flex min-w-0 items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
-      {branch ? <ProjectBranchMeta branch={branch} /> : null}
       {runningCount > 0 && (
         <ProjectSummaryCount
           count={runningCount}

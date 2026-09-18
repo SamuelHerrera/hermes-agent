@@ -52,6 +52,57 @@ type PreviewWebview = HTMLElement & {
   stop?: () => void
 }
 
+interface ParkedPreviewWebview {
+  webview: PreviewWebview
+}
+
+const parkedPreviewWebviews = new Map<string, ParkedPreviewWebview>()
+const discardedPreviewWebviews = new Set<string>()
+let previewWebviewParkingLot: HTMLDivElement | null = null
+
+function previewWebviewCacheKey(
+  tabId: string | undefined,
+  targetKind: PreviewTarget['kind'],
+  isWebPreview: boolean,
+  isRemoteHtml: boolean
+) {
+  return isWebPreview && !isRemoteHtml && targetKind === 'url' && tabId ? tabId : null
+}
+
+function parkingLot(): HTMLDivElement | null {
+  if (typeof document === 'undefined') {
+    return null
+  }
+
+  if (!previewWebviewParkingLot) {
+    previewWebviewParkingLot = document.createElement('div')
+    previewWebviewParkingLot.setAttribute('data-preview-webview-parking-lot', '')
+    previewWebviewParkingLot.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;opacity:0;'
+    document.body.appendChild(previewWebviewParkingLot)
+  }
+
+  return previewWebviewParkingLot
+}
+
+export function clearPreviewWebviewCache(tabId?: string) {
+  if (!tabId) {
+    for (const { webview } of parkedPreviewWebviews.values()) {
+      webview.remove()
+    }
+
+    parkedPreviewWebviews.clear()
+    discardedPreviewWebviews.clear()
+    previewWebviewParkingLot?.remove()
+    previewWebviewParkingLot = null
+
+    return
+  }
+
+  discardedPreviewWebviews.add(tabId)
+  parkedPreviewWebviews.get(tabId)?.webview.remove()
+  parkedPreviewWebviews.delete(tabId)
+}
+
 interface PreviewPaneProps {
   embedded?: boolean
   onRestartServer?: (url: string, context?: string) => Promise<string>
@@ -628,7 +679,9 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       return
     }
 
-    const initialUrl = initialTargetUrlRef.current
+    const cacheKey = previewWebviewCacheKey(tabId, target.kind, isWebPreview, isRemoteHtml)
+    const parked = cacheKey ? parkedPreviewWebviews.get(cacheKey) : undefined
+    const initialUrl = parked?.webview.getURL?.() || initialTargetUrlRef.current
 
     host.replaceChildren()
     webviewRef.current = null
@@ -637,8 +690,12 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
     setAddressValue(initialUrl)
     setDevtoolsOpen(false)
     setLoadError(null)
-    consoleState.reset()
-    setLoading(true)
+
+    if (!parked) {
+      consoleState.reset()
+    }
+
+    setLoading(!parked)
 
     if (!isWebPreview || isRemoteHtml) {
       setLoading(false)
@@ -646,12 +703,21 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       return
     }
 
-    const webview = document.createElement('webview') as PreviewWebview
+    const webview = parked?.webview ?? (document.createElement('webview') as PreviewWebview)
+
+    if (parked && cacheKey) {
+      parkedPreviewWebviews.delete(cacheKey)
+      discardedPreviewWebviews.delete(cacheKey)
+    }
+
     webview.className = 'flex h-full w-full flex-1 bg-transparent'
     webview.setAttribute('allowpopups', '')
     webview.setAttribute('partition', 'persist:hermes-preview')
-    webview.setAttribute('src', initialUrl)
     webview.setAttribute('webpreferences', 'contextIsolation=yes,nodeIntegration=no,sandbox=yes')
+
+    if (!parked) {
+      webview.setAttribute('src', initialUrl)
+    }
 
     const onConsole = (event: Event) => {
       const detail = event as Event & {
@@ -757,9 +823,20 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       webview.removeEventListener('did-start-loading', onStart)
       webview.removeEventListener('did-stop-loading', onStop)
       webview.removeEventListener('page-title-updated', onTitle)
-      webview.remove()
+
+      if (cacheKey && !discardedPreviewWebviews.has(cacheKey)) {
+        parkingLot()?.appendChild(webview)
+        parkedPreviewWebviews.set(cacheKey, { webview })
+      } else {
+        webview.remove()
+
+        if (cacheKey) {
+          discardedPreviewWebviews.delete(cacheKey)
+          parkedPreviewWebviews.delete(cacheKey)
+        }
+      }
     }
-  }, [appendConsoleEntry, consoleState, copy, isRemoteHtml, isWebPreview, persistBrowserLocation])
+  }, [appendConsoleEntry, consoleState, copy, isRemoteHtml, isWebPreview, persistBrowserLocation, tabId, target.kind])
 
   return (
     <aside className="relative flex h-full w-full min-w-0 flex-col overflow-hidden bg-transparent text-muted-foreground">
