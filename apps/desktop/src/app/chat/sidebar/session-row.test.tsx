@@ -138,11 +138,10 @@ vi.mock('@/store/windows', async importOriginal => {
   }
 })
 
-// SessionActionsMenu open behavior is covered in session-actions-menu.test.tsx
+// Session context-menu behavior is covered in session-actions-menu.test.tsx
 // against the real component. Stub it here so this file stays focused on the
 // row chrome (handoff avatar tip, etc.).
 vi.mock('./session-actions-menu', () => ({
-  SessionActionsMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SessionContextMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
 
@@ -197,22 +196,18 @@ describe('SidebarSessionRow compact layout', () => {
     expect(container.querySelector('[data-session-project-dot]')).toBeTruthy()
   })
 
-  it('shows archive and session menu as visible second-row buttons without removing the context menu actions', () => {
+  it('shows archive as the only visible second-row action without removing the context menu actions', () => {
     const { container } = renderRow(makeSession({ title: 'Action row' }))
 
     const archive = screen.getByRole('button', { name: 'Archive' })
-    const menu = screen.getByRole('button', { name: 'Session actions' })
 
     const primaryLine = screen.getByText('Action row').closest('[data-session-row-primary]')
     const actionLine = container.querySelector('[data-session-row-secondary-actions]')
 
     expect(archive).toBeTruthy()
-    expect(menu).toBeTruthy()
-    expect(menu.className).not.toContain('text-transparent')
     expect(primaryLine?.contains(archive)).toBe(false)
-    expect(primaryLine?.contains(menu)).toBe(false)
     expect(actionLine?.contains(archive)).toBe(true)
-    expect(actionLine?.contains(menu)).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Session actions' })).toBeNull()
   })
 
   it('shows only the branch leaf on the metadata row and exposes the full branch through the tooltip trigger', () => {
@@ -341,7 +336,7 @@ describe('SidebarSessionRow running indicator', () => {
 })
 
 describe('SidebarSessionRow', () => {
-  it('keeps an aria-label on the kebab without wrapping it in a Tip', () => {
+  it('does not render a redundant kebab when the context menu owns row actions', () => {
     render(
       <SidebarSessionRow
         isPinned={false}
@@ -354,8 +349,7 @@ describe('SidebarSessionRow', () => {
       />
     )
 
-    const kebab = screen.getByRole('button', { name: 'Session actions' })
-    expect(tipTrigger(kebab)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Session actions' })).toBeNull()
   })
 
   it('keeps the disclosure on the primary row and puts the child-chat icon and count beside age metadata', () => {

@@ -1,6 +1,5 @@
 import { useStore } from '@nanostores/react'
 import type * as React from 'react'
-import { useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { StatusPulse } from '@/components/ui/status-pulse'
@@ -27,7 +26,7 @@ import { TerminalSidebarRows, useProjectTerminals } from '../terminal-rows'
 
 import { latestProjectSessions, PROJECT_OVERVIEW_SESSION_LIMIT, useWorkspaceNodeOpen } from './model'
 import { ProjectIconGlyph } from './project-appearance'
-import { ProjectContextMenu, ProjectMenu } from './project-menu'
+import { ProjectContextMenu } from './project-menu'
 import type { SidebarProjectTree } from './workspace-groups'
 import { StartWorkButton, WorkspaceAddButton } from './workspace-header'
 
@@ -116,13 +115,52 @@ function projectCounts(project: SidebarProjectTree) {
   }
 }
 
+function projectBranch(project: SidebarProjectTree): null | string {
+  if (project.isNoProject) {
+    return null
+  }
+
+  const branches = new Set<string>()
+
+  for (const repo of project.repos ?? []) {
+    for (const group of repo.groups) {
+      const branch = group.isMain || group.isHome ? group.label.trim() : ''
+
+      if (branch) {
+        branches.add(branch)
+      }
+    }
+  }
+
+  return branches.size === 1 ? [...branches][0] : null
+}
+
+function ProjectBranchMeta({ branch }: { branch: string }) {
+  const leaf = branch.split('/').filter(Boolean).at(-1) ?? branch
+
+  return (
+    <Tip label={branch} side="top">
+      <span
+        aria-label={`Branch ${branch}`}
+        className="flex min-w-0 items-center gap-1 truncate"
+        data-project-branch
+      >
+        <Codicon className="shrink-0" name="git-branch" size="0.75rem" />
+        <span className="min-w-0 truncate">{leaf}</span>
+      </span>
+    </Tip>
+  )
+}
+
 function ProjectSummaryMeta({ project }: { project: SidebarProjectTree }) {
   const { archivedCount, chatCount, runningCount } = projectCounts(project)
   const terminals = useProjectTerminals(project)
   const { t } = useI18n()
+  const branch = projectBranch(project)
 
   return (
-    <span className="flex items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
+    <span className="flex min-w-0 items-center gap-2 text-[0.625rem] leading-none text-(--ui-text-tertiary)">
+      {branch ? <ProjectBranchMeta branch={branch} /> : null}
       {runningCount > 0 && (
         <ProjectSummaryCount
           count={runningCount}
@@ -189,8 +227,7 @@ export function ProjectDetailHeaderRow({
     ? { ...project, ...homeProjectAppearanceForProfile(activeGatewayProfile, homeAppearances) }
     : project
 
-  const projectPath = project.path ?? project.repos.find(repo => repo.path)?.path ?? null
-  const rowRef = useRef<HTMLDivElement>(null)
+  const projectPath = project.path ?? project.repos?.find(repo => repo.path)?.path ?? null
 
   return (
     <div data-sessions-project={project.id} data-sessions-project-detail-header>
@@ -203,13 +240,11 @@ export function ProjectDetailHeaderRow({
               {onNewSession && (
                 <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(projectPath)} />
               )}
-              <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} scoped />
             </>
           }
           className="hover:bg-(--ui-control-hover-background) hover:text-foreground hover:transition-none"
           label={<SidebarRowLabel className="text-[0.8125rem] text-foreground">{project.label}</SidebarRowLabel>}
           lead={<SidebarRowLead className="size-4">{projectIcon(appearanceProject)}</SidebarRowLead>}
-          ref={rowRef}
           secondaryMeta={<ProjectSummaryMeta project={project} />}
         />
       </ProjectContextMenu>
@@ -242,9 +277,6 @@ export function ProjectOverviewRow({
     ? { ...project, ...homeProjectAppearanceForProfile(activeGatewayProfile, homeAppearances) }
     : project
 
-  // The appearance popover anchors here (the full row) so it opens flush with
-  // the sidebar's content edge regardless of which side the sidebar is on.
-  const rowRef = useRef<HTMLDivElement>(null)
   const fetched = previewSessions ?? []
 
   const preview = renderRows
@@ -281,7 +313,6 @@ export function ProjectOverviewRow({
           {onNewSession && (
             <WorkspaceAddButton label={s.newSessionIn(project.label)} onClick={() => onNewSession(project.path)} />
           )}
-          <ProjectMenu anchorRef={rowRef} isActive={isActive} project={appearanceProject} />
         </>
       }
       className={cn(
@@ -311,7 +342,6 @@ export function ProjectOverviewRow({
 
         dragHandleProps?.onPointerDown?.(event)
       }}
-      ref={rowRef}
       toggle={
         preview.length > 0 || terminals.length > 0
           ? { ariaLabel: s.projects.toggle(project.label, !open), onToggle: toggleOpen, open }

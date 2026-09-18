@@ -46,7 +46,7 @@ import {
   SidebarRowLeadGlyph,
   SidebarRowShell
 } from './chrome'
-import { SessionActionsMenu, SessionContextMenu } from './session-actions-menu'
+import { SessionContextMenu } from './session-actions-menu'
 import { SessionTerminalRows, useSessionTerminalChildren } from './terminal-rows'
 import { useProfilePrewarm } from './use-profile-prewarm'
 
@@ -368,9 +368,9 @@ function SidebarSessionRowImpl({
     </Tip>
   ) : null
 
-  // The action cluster is an explicit control row. Compact rows position it on
-  // the second line; cards keep only controls in their header while metadata
-  // sits beside the title on the card's second row.
+  // The action cluster is an explicit control row. The full action list lives
+  // in the row context menu; keep only the single-click archive affordance here
+  // so the sidebar does not expose a redundant kebab menu.
   const actionsNode = (
     <div
       className={cn('relative z-2 flex shrink-0 items-center justify-end gap-1', card && hasNestedChildren && 'mr-7')}
@@ -395,27 +395,6 @@ function SidebarSessionRowImpl({
           <Codicon name="archive" size="0.875rem" />
         </Button>
       ) : null}
-      <SessionActionsMenu
-        onArchive={onArchive}
-        onBranch={onBranch}
-        onDelete={onDelete}
-        onPin={onPin}
-        pinned={isPinned}
-        profile={session.profile}
-        sessionId={session.id}
-        title={title}
-      >
-        <Button
-          aria-label={r.sessionActions}
-          className="size-5 rounded-[4px] bg-transparent text-(--ui-text-tertiary) transition-colors duration-100 hover:bg-(--ui-control-active-background) hover:text-foreground focus-visible:bg-(--ui-control-active-background) focus-visible:text-foreground focus-visible:ring-0 data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground [&_svg]:size-3.5!"
-          onClick={event => event.stopPropagation()}
-          size="icon"
-          type="button"
-          variant="ghost"
-        >
-          <Codicon name="kebab-vertical" size="0.875rem" />
-        </Button>
-      </SessionActionsMenu>
     </div>
   )
 
@@ -587,7 +566,7 @@ function SidebarSessionRowImpl({
                       </OverflowTip>
                     </div>
                     <div
-                      className={cn('flex min-h-5 min-w-0 items-center pl-5 pr-12', branchStem && 'pl-8')}
+                      className={cn('flex min-h-5 min-w-0 items-center pl-5 pr-7', branchStem && 'pl-8')}
                       data-session-row-secondary
                     >
                       {metadataNode}

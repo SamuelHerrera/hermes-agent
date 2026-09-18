@@ -65,13 +65,11 @@ vi.mock('./model', () => ({
   useWorkspaceNodeOpen: () => [workspaceNodeOpen.value, vi.fn()]
 }))
 
-// ProjectMenu (the kebab) has its own dedicated test file — stub it here so
-// this file only exercises overview-row's own Tip usage (the disclosure
-// toggle) plus the WorkspaceAddButton wiring. ProjectContextMenu (the row's
-// right-click wrapper) is stubbed as a pass-through so the row still renders.
+// ProjectContextMenu (the row's right-click wrapper) is stubbed as a
+// pass-through so this file only exercises overview-row's own Tip usage (the
+// disclosure toggle) plus the WorkspaceAddButton wiring.
 vi.mock('./project-menu', () => ({
-  ProjectContextMenu: ({ children }: { children: ReactNode }) => children,
-  ProjectMenu: () => <button aria-label="Actions" type="button" />
+  ProjectContextMenu: ({ children }: { children: ReactNode }) => children
 }))
 
 const project = { id: 'p1', label: 'Test D' } as unknown as SidebarProjectTree
@@ -163,7 +161,7 @@ describe('ProjectOverviewRow', () => {
     expect(label.className).not.toContain('underline')
   })
 
-  it('keeps project actions visible in plus-then-menu order', () => {
+  it('keeps the project add action visible without a redundant actions menu', () => {
     const { container } = render(<ProjectOverviewRow onNewSession={vi.fn()} project={project} />)
     const secondary = container.querySelector('[data-sidebar-group-secondary]')
 
@@ -171,7 +169,33 @@ describe('ProjectOverviewRow', () => {
       button.getAttribute('aria-label')
     )
 
-    expect(actionLabels).toEqual(['New session in Test D', 'Actions'])
+    expect(actionLabels).toEqual(['New session in Test D'])
+  })
+
+  it('shows an unambiguous git branch at the left of the project metadata row', () => {
+    const { container } = render(
+      <ProjectOverviewRow
+        project={{
+          ...project,
+          repos: [
+            {
+              groups: [{ id: '/repo::branch::sam/feature/sidebar-counts', isMain: true, label: 'sam/feature/sidebar-counts', path: '/repo', sessions: [] }],
+              id: '/repo',
+              label: 'repo',
+              path: '/repo',
+              sessionCount: 0
+            }
+          ]
+        }}
+      />
+    )
+
+    const branch = screen.getByText('sidebar-counts')
+    const secondary = container.querySelector('[data-sidebar-group-secondary]')
+
+    expect(secondary?.firstElementChild?.contains(branch)).toBe(true)
+    expect(tipTrigger(branch)).toBeTruthy()
+    expect(branch.closest('[data-project-branch]')?.getAttribute('aria-label')).toBe('Branch sam/feature/sidebar-counts')
   })
 
   it('shows compact running, non-running chat, and archive metrics without subagent or token totals', () => {
@@ -330,7 +354,7 @@ describe('ProjectOverviewRow', () => {
     expect(secondary?.textContent).not.toContain('Arch')
   })
 
-  it('keeps detail header actions visible in worktree, new-session, menu order without show-projects', () => {
+  it('keeps detail header actions visible in worktree, new-session order without show-projects', () => {
     const { container } = render(
       <ProjectDetailHeaderRow onNewSession={vi.fn()} project={{ ...project, path: '/repo', sessionCount: 0 }} />
     )
@@ -341,7 +365,7 @@ describe('ProjectOverviewRow', () => {
       button.getAttribute('aria-label')
     )
 
-    expect(actionLabels).toEqual(['New worktree', 'New session in Test D', 'Actions'])
+    expect(actionLabels).toEqual(['New worktree', 'New session in Test D'])
     expect(container.querySelector('.codicon-list-unordered')).toBeNull()
   })
 })
