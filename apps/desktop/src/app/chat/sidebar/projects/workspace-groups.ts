@@ -179,7 +179,56 @@ const projectCountFields = (sessions: SessionInfo[], isRunning?: RunningPredicat
 }
 
 const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
-  project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))
+  project.repos.flatMap(repo => repo.groups.flatMap(group => sessionsWithGroupBranch(group)))
+
+const groupBranch = (group: SidebarSessionGroup): string =>
+  group.isMain || group.isHome ? group.label.trim() : ''
+
+export function sessionsWithGroupBranch(group: SidebarSessionGroup): SessionInfo[] {
+  const branch = groupBranch(group)
+
+  if (!branch) {
+    return group.sessions
+  }
+
+  let changed = false
+
+  const sessions = group.sessions.map(session => {
+    if (session.git_branch?.trim()) {
+      return session
+    }
+
+    changed = true
+
+    return { ...session, git_branch: branch }
+  })
+
+  return changed ? sessions : group.sessions
+}
+
+function sessionBranchesById(project: SidebarProjectTree): Map<string, string> {
+  const branches = new Map<string, string>()
+
+  for (const repo of project.repos) {
+    for (const group of repo.groups) {
+      const branch = groupBranch(group)
+
+      if (!branch) {
+        continue
+      }
+
+      for (const session of group.sessions) {
+        branches.set(session.id, session.git_branch?.trim() || branch)
+      }
+    }
+  }
+
+  return branches
+}
+
+function withSessionBranch(session: SessionInfo, branch: string | undefined): SessionInfo {
+  return branch && !session.git_branch?.trim() ? { ...session, git_branch: branch } : session
+}
 
 const sessionRemoved = (session: SessionInfo, removed: ReadonlySet<string>): boolean =>
   Boolean(removed.has(session.id) || (session._lineage_root_id && removed.has(session._lineage_root_id)))
@@ -658,7 +707,7 @@ export function overlayRepoLanes(
       }
     }
 
-    lane.sessions = upsertSession(lane.sessions, session)
+    lane.sessions = upsertSession(lane.sessions, withSessionBranch(session, groupBranch(lane)))
     changed = true
   }
 
@@ -959,7 +1008,11 @@ export function overlayLivePreviews(
 
   for (const node of projects) {
     const liveRows = byProject.get(node.id) ?? []
-    const base = (node.previewSessions ?? []).filter(session => !removed.has(session.id))
+    const branches = sessionBranchesById(node)
+
+    const base = (node.previewSessions ?? [])
+      .filter(session => !removed.has(session.id))
+      .map(session => withSessionBranch(session, branches.get(session.id)))
 
     if (!liveRows.length && !base.length) {
       continue

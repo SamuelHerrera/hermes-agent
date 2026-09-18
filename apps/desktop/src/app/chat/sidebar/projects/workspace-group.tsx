@@ -18,7 +18,7 @@ import { SidebarGroupRow, SidebarRowLead, SidebarRowLink, SidebarRowStack } from
 import { rankSessions } from '../order'
 
 import { PROJECT_PREVIEW_COUNT, useWorkspaceNodeOpen } from './model'
-import type { SidebarSessionGroup } from './workspace-groups'
+import { sessionsWithGroupBranch, type SidebarSessionGroup } from './workspace-groups'
 import {
   WorkspaceAddButton,
   WorkspaceContextMenu,
@@ -52,7 +52,7 @@ export function SidebarWorkspaceGroup({ group, renderRows, onNewSession, onRemov
   // A lane ranks by whatever the sort key says before rendering. Project detail
   // lanes render every loaded chat; profile groups keep a compact preview because
   // clicking the profile scopes the sidebar to that full profile.
-  const sessions = rankSessions(group.sessions, rankIds)
+  const sessions = rankSessions(sessionsWithGroupBranch(group), rankIds)
   const visibleSessions = isProfileGroup ? sessions.slice(0, PROJECT_PREVIEW_COUNT) : sessions
 
   // Leading glyph: a home mark for the repo's primary checkout (labeled by its

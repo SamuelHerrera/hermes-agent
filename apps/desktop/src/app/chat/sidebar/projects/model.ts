@@ -8,7 +8,7 @@ import { mapPool } from '@/lib/pool'
 import { $sidebarWorkspaceNodeOpen, toggleWorkspaceNodeCollapsed } from '@/store/layout'
 import { $worktreeRefreshToken } from '@/store/projects'
 
-import { sessionRecency, type SidebarProjectTree } from './workspace-groups'
+import { sessionRecency, sessionsWithGroupBranch, type SidebarProjectTree } from './workspace-groups'
 
 // Page size when revealing more already-loaded rows within a workspace group.
 export const SIDEBAR_GROUP_PAGE = 5
@@ -31,7 +31,7 @@ const pathListKey = (paths: string[]): string =>
 
 // Every session in a project, across its repos/worktrees (order-agnostic).
 const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
-  project.repos.flatMap(repo => repo.groups.flatMap(group => group.sessions))
+  project.repos.flatMap(repo => repo.groups.flatMap(group => sessionsWithGroupBranch(group)))
 
 export const projectTreeCwd = (project: SidebarProjectTree): null | string =>
   project.path || project.repos.find(repo => repo.path)?.path || null

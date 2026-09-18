@@ -92,4 +92,29 @@ describe('SidebarWorkspaceGroup', () => {
     expect(screen.getByText('s8')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Show .* more/ })).toBeNull()
   })
+
+  it('passes the lane branch through to chat rows when stored session metadata is empty', () => {
+    const rendered: Array<null | string | undefined> = []
+
+    const group: SidebarSessionGroup = {
+      id: '/repo::branch::sam/sidebar-branch-labels',
+      isMain: true,
+      label: 'sam/sidebar-branch-labels',
+      path: '/repo',
+      sessions: [session('s1')]
+    }
+
+    render(
+      <SidebarWorkspaceGroup
+        group={group}
+        renderRows={items => {
+          rendered.push(...items.map(item => item.git_branch))
+
+          return items.map(item => <div key={item.id}>{item.id}</div>)
+        }}
+      />
+    )
+
+    expect(rendered).toEqual(['sam/sidebar-branch-labels'])
+  })
 })

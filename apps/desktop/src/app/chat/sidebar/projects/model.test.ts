@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { orderProjectsByIds, sortProjectsForOverview } from './model'
+import { latestProjectSessions, orderProjectsByIds, sortProjectsForOverview } from './model'
 import { NO_PROJECT_ID, type SidebarProjectTree } from './workspace-groups'
 
 function makeProject(id: string, sessionCount: number): SidebarProjectTree {
@@ -74,5 +74,36 @@ describe('sortProjectsForOverview', () => {
     const projects = [makeProject('scanned', 0), active, home()]
 
     expect(ids(sortProjectsForOverview(projects, 'active'))).toEqual([NO_PROJECT_ID, 'active', 'scanned'])
+  })
+})
+
+
+describe('latestProjectSessions', () => {
+  it('copies a main lane branch onto rows missing stored git metadata', () => {
+    const sessions = latestProjectSessions(
+      {
+        ...makeProject('app', 1),
+        repos: [
+          {
+            groups: [
+              {
+                id: '/repos/app::branch::sam/sidebar-branch-labels',
+                isMain: true,
+                label: 'sam/sidebar-branch-labels',
+                path: '/repos/app',
+                sessions: [{ id: 's1', last_active: 2, started_at: 2 } as never]
+              }
+            ],
+            id: '/repos/app',
+            label: 'app',
+            path: '/repos/app',
+            sessionCount: 1
+          }
+        ]
+      },
+      5
+    )
+
+    expect(sessions[0]?.git_branch).toBe('sam/sidebar-branch-labels')
   })
 })

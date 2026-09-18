@@ -930,6 +930,28 @@ describe('overlayLivePreviews', () => {
     expect(previews['/www/app'].map(s => s.id)).toEqual(['fresh', 'old'])
   })
 
+  it('fills preview row branch metadata from its lane when the stored row is missing it', () => {
+    const row = makeSession('/www/app', { id: 'old', last_active: 1, started_at: 1 })
+
+    const project = projectNode({
+      id: '/www/app',
+      previewSessions: [row],
+      repos: [
+        {
+          groups: [lane({ id: '/www/app::branch::sam/sidebar-branch-labels', isMain: true, label: 'sam/sidebar-branch-labels', path: '/www/app', sessions: [row] })],
+          id: '/www/app',
+          label: 'app',
+          path: '/www/app',
+          sessionCount: 1
+        }
+      ]
+    })
+
+    const previews = overlayLivePreviews([project], [], [], 3)
+
+    expect(previews['/www/app'][0]?.git_branch).toBe('sam/sidebar-branch-labels')
+  })
+
   it('evicts a deleted session from a project preview (snapshot + live)', () => {
     const project = projectNode({
       id: '/www/app',
