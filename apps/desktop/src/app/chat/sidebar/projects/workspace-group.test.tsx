@@ -117,4 +117,29 @@ describe('SidebarWorkspaceGroup', () => {
 
     expect(rendered).toEqual(['sam/sidebar-branch-labels'])
   })
+
+  it('passes linked worktree lane labels through to chat rows', () => {
+    const rendered: Array<null | string | undefined> = []
+
+    const group: SidebarSessionGroup = {
+      id: '/repo/.worktrees/fix-loading',
+      isMain: false,
+      label: 'fix-loading',
+      path: '/repo/.worktrees/fix-loading',
+      sessions: [session('s1')]
+    }
+
+    render(
+      <SidebarWorkspaceGroup
+        group={group}
+        renderRows={items => {
+          rendered.push(...items.map(item => item.git_branch))
+
+          return items.map(item => <div key={item.id}>{item.id}</div>)
+        }}
+      />
+    )
+
+    expect(rendered).toEqual(['fix-loading'])
+  })
 })

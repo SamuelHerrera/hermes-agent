@@ -182,7 +182,9 @@ const projectSessions = (project: SidebarProjectTree): SessionInfo[] =>
   project.repos.flatMap(repo => repo.groups.flatMap(group => sessionsWithGroupBranch(group)))
 
 const groupBranch = (group: SidebarSessionGroup): string =>
-  group.isMain || group.isHome ? group.label.trim() : ''
+  group.isMain || group.isHome || (group.path && group.mode !== 'profile' && !group.isKanban)
+    ? group.label.trim()
+    : ''
 
 export function sessionsWithGroupBranch(group: SidebarSessionGroup): SessionInfo[] {
   const branch = groupBranch(group)

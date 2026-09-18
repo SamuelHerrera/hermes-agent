@@ -952,6 +952,28 @@ describe('overlayLivePreviews', () => {
     expect(previews['/www/app'][0]?.git_branch).toBe('sam/sidebar-branch-labels')
   })
 
+  it('fills preview row branch metadata from linked worktree lanes too', () => {
+    const row = makeSession('/www/app/.worktrees/fix-loading', { id: 'old', last_active: 1, started_at: 1 })
+
+    const project = projectNode({
+      id: '/www/app',
+      previewSessions: [row],
+      repos: [
+        {
+          groups: [lane({ id: '/www/app/.worktrees/fix-loading', isMain: false, label: 'fix-loading', path: '/www/app/.worktrees/fix-loading', sessions: [row] })],
+          id: '/www/app',
+          label: 'app',
+          path: '/www/app',
+          sessionCount: 1
+        }
+      ]
+    })
+
+    const previews = overlayLivePreviews([project], [], [], 3)
+
+    expect(previews['/www/app'][0]?.git_branch).toBe('fix-loading')
+  })
+
   it('evicts a deleted session from a project preview (snapshot + live)', () => {
     const project = projectNode({
       id: '/www/app',

@@ -195,9 +195,21 @@ describe('PreviewPane console state', () => {
     })
 
     const webview = first.container.querySelector('webview') as HTMLElement & { getURL?: () => string }
+    let urlReads = 0
 
     expect(webview).toBeInstanceOf(HTMLElement)
-    Object.defineProperty(webview, 'getURL', { configurable: true, value: () => 'https://music.youtube.com/watch?v=playing' })
+    Object.defineProperty(webview, 'getURL', {
+      configurable: true,
+      value: () => {
+        urlReads += 1
+
+        if (urlReads > 1) {
+          throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.')
+        }
+
+        return 'https://music.youtube.com/watch?v=playing'
+      }
+    })
     webview.setAttribute('data-player-state', 'still-playing')
 
     first.unmount()

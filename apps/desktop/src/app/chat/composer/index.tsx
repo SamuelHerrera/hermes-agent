@@ -1139,7 +1139,7 @@ export function ChatBar({
           }}
         />
       )}
-      <ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      <>
         {/* Dock column: owns the composer's POSITION and stacks, bottom-up,
             [micro actions] · [status stack] · [composer] · [underside].
             Anchored at the bottom, so in-flow children grow upward and still
@@ -1364,7 +1364,7 @@ export function ChatBar({
             <ContribSlot area={COMPOSER_AREAS.underside} />
           </div>
         </div>
-      </ComposerPrimitive.Unstable_TriggerPopoverRoot>
+      </>
 
       <UrlDialog
         inputRef={urlInputRef}

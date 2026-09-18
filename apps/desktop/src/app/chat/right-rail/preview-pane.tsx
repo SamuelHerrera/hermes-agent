@@ -53,6 +53,7 @@ type PreviewWebview = HTMLElement & {
 }
 
 interface ParkedPreviewWebview {
+  url: string
   webview: PreviewWebview
 }
 
@@ -82,6 +83,14 @@ function parkingLot(): HTMLDivElement | null {
   }
 
   return previewWebviewParkingLot
+}
+
+function safeWebviewUrl(webview: PreviewWebview, fallback: string): string {
+  try {
+    return webview.getURL?.() || fallback
+  } catch {
+    return fallback
+  }
 }
 
 export function clearPreviewWebviewCache(tabId?: string) {
@@ -233,6 +242,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const consoleHeight = useStore(consoleState.$height)
   const consoleOpen = useStore(consoleState.$open)
   const [currentUrl, setCurrentUrl] = useState(target.url)
+  const currentUrlRef = useRef(target.url)
   const [addressValue, setAddressValue] = useState(target.url)
   const [devtoolsAvailable, setDevtoolsAvailable] = useState(false)
   const [devtoolsOpen, setDevtoolsOpen] = useState(false)
@@ -283,6 +293,8 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   )
 
   const currentLabel = compactUrl(currentUrl)
+
+  currentUrlRef.current = currentUrl
 
   const previewLabel =
     target.label && target.label.replace(/\/$/, '') !== currentLabel.replace(/\/$/, '') ? target.label : currentLabel
@@ -681,7 +693,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     const cacheKey = previewWebviewCacheKey(tabId, target.kind, isWebPreview, isRemoteHtml)
     const parked = cacheKey ? parkedPreviewWebviews.get(cacheKey) : undefined
-    const initialUrl = parked?.webview.getURL?.() || initialTargetUrlRef.current
+    const initialUrl = parked?.url || initialTargetUrlRef.current
 
     host.replaceChildren()
     webviewRef.current = null
@@ -825,8 +837,10 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       webview.removeEventListener('page-title-updated', onTitle)
 
       if (cacheKey && !discardedPreviewWebviews.has(cacheKey)) {
+        const parkedUrl = safeWebviewUrl(webview, currentUrlRef.current)
+
         parkingLot()?.appendChild(webview)
-        parkedPreviewWebviews.set(cacheKey, { webview })
+        parkedPreviewWebviews.set(cacheKey, { url: parkedUrl, webview })
       } else {
         webview.remove()
 
