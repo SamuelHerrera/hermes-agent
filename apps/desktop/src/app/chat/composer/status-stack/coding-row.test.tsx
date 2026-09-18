@@ -30,7 +30,7 @@ vi.mock('@/store/coding-status', () => ({
   repoWorktreesForCwd: () => atom([])
 }))
 
-const { CodingStatusRow } = await import('./coding-row')
+const { CodingStatusRow, projectOptionsForComposer } = await import('./coding-row')
 
 describe('CodingStatusRow', () => {
   afterEach(() => {
@@ -131,5 +131,61 @@ describe('CodingStatusRow', () => {
     fireEvent.click(await screen.findByText('Other Project'))
 
     expect(onOpenWorktree).toHaveBeenCalledWith('/other')
+  })
+
+  it('lists all workspace projects ordered open, remembered, then discovered and deduped by path', () => {
+    const options = projectOptionsForComposer([
+      {
+        color: null,
+        icon: null,
+        id: 'auto-found',
+        isAuto: true,
+        label: 'Found only',
+        path: '/found',
+        repos: [],
+        sessionCount: 0
+      },
+      {
+        color: null,
+        icon: null,
+        id: 'remembered',
+        label: 'Remembered',
+        path: '/remembered',
+        repos: [],
+        sessionCount: 0
+      },
+      {
+        color: null,
+        icon: null,
+        id: 'auto-duplicate',
+        isAuto: true,
+        label: 'upstream',
+        path: '/same',
+        repos: [],
+        sessionCount: 0
+      },
+      {
+        color: null,
+        icon: null,
+        id: 'local-duplicate',
+        label: 'local',
+        path: '/same/',
+        repos: [],
+        sessionCount: 0
+      },
+      {
+        color: null,
+        icon: null,
+        id: 'open-project',
+        label: 'Open Project',
+        lastActive: 10,
+        path: '/open',
+        repos: [],
+        sessionCount: 2
+      }
+    ])
+
+    expect(options.map(option => option.label)).toEqual(['Open Project', 'local', 'Remembered', 'Found only'])
+    expect(options.map(option => option.path)).toEqual(['/open', '/same/', '/remembered', '/found'])
   })
 })

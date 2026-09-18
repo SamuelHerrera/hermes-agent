@@ -24,8 +24,80 @@ import { notifyError } from '@/store/notifications'
 import { $pullRequestsByBranch, branchPrKey, refreshPullRequests } from '@/store/pull-requests'
 import { $projectTree, projectIdForCwd, projectRootCwd } from '@/store/projects'
 
+import type { SidebarProjectTree } from '../../sidebar/projects/workspace-groups'
+
 // Tiny uppercase section header, matching the composer "+" menu's labels.
 const MENU_SECTION = 'text-[0.625rem] font-semibold uppercase tracking-wider text-(--ui-text-tertiary)'
+
+interface ProjectOption {
+  id: string
+  label: string
+  path: string
+  rank: number
+  lastActive: number
+  isAuto: boolean
+}
+
+const projectOptionPathKey = (path: string): string => path.replace(/[/\\]+$/, '')
+
+function projectOptionRank(project: SidebarProjectTree): number {
+  // 0 = open/has chats, 1 = remembered explicit project, 2 = auto-discovered.
+  if ((project.sessionCount ?? 0) > 0 || (project.previewSessions?.length ?? 0) > 0 || (project.runningSessionCount ?? 0) > 0) {
+    return 0
+  }
+
+  return project.isAuto ? 2 : 1
+}
+
+export function projectOptionsForComposer(projects: SidebarProjectTree[]): ProjectOption[] {
+  const byPath = new Map<string, ProjectOption>()
+
+  for (const project of projects) {
+    if (project.isNoProject) {
+      continue
+    }
+
+    const path = projectRootCwd(project)
+    const key = projectOptionPathKey(path)
+
+    if (!key) {
+      continue
+    }
+
+    const option: ProjectOption = {
+      id: project.id,
+      isAuto: Boolean(project.isAuto),
+      label: project.label,
+      lastActive: project.lastActive ?? 0,
+      path,
+      rank: projectOptionRank(project)
+    }
+    const existing = byPath.get(key)
+
+    // Consolidate duplicate explicit/auto or local/upstream entries that point
+    // at the same working root. Keep the most useful presentation: open beats
+    // remembered beats discovered; within a tier, explicit project labels beat
+    // auto rows, then recency/name settle ties.
+    if (
+      !existing ||
+      option.rank < existing.rank ||
+      (option.rank === existing.rank && !option.isAuto && existing.isAuto) ||
+      (option.rank === existing.rank && option.lastActive > existing.lastActive) ||
+      (option.rank === existing.rank &&
+        option.lastActive === existing.lastActive &&
+        option.label.localeCompare(existing.label, undefined, { sensitivity: 'base' }) < 0)
+    ) {
+      byPath.set(key, option)
+    }
+  }
+
+  return [...byPath.values()].sort(
+    (a, b) =>
+      a.rank - b.rank ||
+      b.lastActive - a.lastActive ||
+      a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })
+  )
+}
 
 interface CodingStatusRowProps {
   /** Branch the current draft off into a fresh worktree + session, based on
@@ -140,21 +212,7 @@ export const CodingStatusRow = memo(function CodingStatusRow({
   }
 
   const branchLabel = status.detached ? s.detached : status.branch || s.noBranch
-  const projectOptions = useMemo(() => {
-    const seen = new Set<string>()
-
-    return projectTree.flatMap(project => {
-      const path = projectRootCwd(project)
-
-      if (!path || seen.has(path)) {
-        return []
-      }
-
-      seen.add(path)
-
-      return [{ id: project.id, label: project.label, path }]
-    })
-  }, [projectTree])
+  const projectOptions = useMemo(() => projectOptionsForComposer(projectTree), [projectTree])
   const activeProjectId = resolvedRepoPath ? projectIdForCwd(resolvedRepoPath, projectTree) : null
   // The kebab offers branching off the trunk and/or the current branch. The
   // worktree-add bases the new branch on `base` (a branch name; undefined =
