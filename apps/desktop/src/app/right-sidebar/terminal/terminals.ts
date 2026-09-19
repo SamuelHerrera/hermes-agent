@@ -4,6 +4,7 @@ import { findGroupOfPane } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup, revealTreePane, setTreePaneHidden } from '@/components/pane-shell/tree/store'
 import type { HermesTerminalReference } from '@/global'
 import { readKey, writeKey } from '@/lib/storage'
+import { terminalApi } from '@/platform/terminal'
 import { $activeGatewayProfile, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
 import { $currentCwd } from '@/store/session'
 
@@ -411,7 +412,7 @@ export function forgetTerminalHandle(id: string, handle: string): void {
 
 export function closeTerminal(id: string): void {
   const entry = $terminals.get().find(term => term.id === id)
-  const api = typeof window === 'undefined' ? undefined : window.hermesDesktop?.terminal
+  const api = typeof window === 'undefined' ? undefined : terminalApi()
   if (!entry?.reference || !api?.terminate) {
     removeTerminalEntry(id)
     return

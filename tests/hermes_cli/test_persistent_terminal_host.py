@@ -50,6 +50,33 @@ def test_auth_rejected_before_host_lookup(monkeypatch):
         assert error.value.code == 4401
 
 
+def test_origin_rejected_before_host_lookup(monkeypatch):
+    monkeypatch.setattr(web_server.app.state, "public_auth_disabled", False, raising=False)
+    monkeypatch.setattr(web_server.app.state, "auth_required", False, raising=False)
+    monkeypatch.setattr(web_server.app.state, "bound_host", "127.0.0.1", raising=False)
+    with TestClient(web_server.app, client=("127.0.0.1", 50000)) as client:
+        with pytest.raises(WebSocketDisconnect) as error:
+            with client.websocket_connect(
+                "/api/persistent-terminal?token=" + web_server._SESSION_TOKEN,
+                headers={"origin": "https://attacker.example", "host": "127.0.0.1"},
+            ):
+                pass
+        assert error.value.code == 4403
+
+
+def test_invalid_profile_rejected_before_host_lookup(monkeypatch):
+    monkeypatch.setattr(web_server.app.state, "public_auth_disabled", False, raising=False)
+    monkeypatch.setattr(web_server.app.state, "auth_required", False, raising=False)
+    monkeypatch.setattr(web_server.app.state, "bound_host", None, raising=False)
+    with TestClient(web_server.app, client=("127.0.0.1", 50000)) as client:
+        with pytest.raises(WebSocketDisconnect) as error:
+            with client.websocket_connect(
+                "/api/persistent-terminal?token=" + web_server._SESSION_TOKEN + "&profile=../other"
+            ):
+                pass
+        assert error.value.code == 4400
+
+
 @pytest.mark.live_system_guard_bypass
 def test_disconnect_and_new_backend_client_preserve_process(host, tmp_path):
     url = "/api/persistent-terminal?token=" + web_server._SESSION_TOKEN

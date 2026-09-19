@@ -9,6 +9,7 @@ import type { CSSProperties } from 'react'
 import { writeClipboardText } from '@/components/ui/copy-button'
 import { markRightPanePerf } from '@/debug/right-pane-events'
 import { triggerHaptic } from '@/lib/haptics'
+import { terminalApi as resolveTerminalApi } from '@/platform/terminal'
 import { $previewTarget } from '@/store/preview'
 import { useTheme } from '@/themes/context'
 
@@ -484,7 +485,7 @@ export function useTerminalSession({
   const [shellName, setShellName] = useState('shell')
   const [runtime, setRuntime] = useState<typeof Terminal | null>(null)
   useEffect(() => {
-    if (!window.hermesDesktop?.terminal.persistent) { return }
+    if (!resolveTerminalApi()?.persistent) { return }
     void loadPersistentTerminalRuntime().then(value => setRuntime(() => value)).catch(() => setStatus('closed'))
   }, [])
 
@@ -559,7 +560,7 @@ export function useTerminalSession({
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
     const host = hostRef.current
-    const terminalApi = window.hermesDesktop?.terminal
+    const terminalApi = resolveTerminalApi()
     if (terminalApi?.persistent && !runtime) { return }
 
     if (!host || !terminalApi) {
@@ -1242,7 +1243,7 @@ export function useTerminalSession({
       }
 
       hasSessionActivityRef.current = true
-      void window.hermesDesktop?.terminal?.write(sessionId, `${command}\r`)
+      void resolveTerminalApi()?.write(sessionId, `${command}\r`)
       $terminalInjection.set(null)
       termRef.current?.focus()
     })
