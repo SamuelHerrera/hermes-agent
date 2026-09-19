@@ -67,6 +67,7 @@
 
         tui = full.hermesTui;
         web = full.hermesWeb;
+        desktop-web = full.hermesDesktopWeb;
         desktop = full.hermesDesktop;
 
         update-npm-lockfile = full.hermesNpmLib.updateNpmLockfile;

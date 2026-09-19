@@ -1,8 +1,9 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
-import path from 'path'
 import fs from 'fs'
+import path from 'path'
+
+import tailwindcss from '@tailwindcss/vite'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
 
 // `hgui` symlinks a worktree's node_modules to the main checkout. Vite realpaths
 // those before enforcing server.fs.allow, so codicon/font assets resolve outside
@@ -53,9 +54,16 @@ const emojibaseAssets = () => ({
   }) {
     server.middlewares.use('/emojibase', (req, res, next) => {
       const rel = (req.url ?? '').split('?')[0].replace(/^\/+/, '')
-      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) return next()
+
+      if (!emojibaseDir || !EMOJIBASE_PATH.test(rel)) {
+        return next()
+      }
+
       fs.readFile(path.join(emojibaseDir, rel), (err: unknown, buf: Buffer) => {
-        if (err) return next()
+        if (err) {
+          return next()
+        }
+
         res.setHeader('Content-Type', 'application/json')
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
         res.end(buf)
@@ -63,7 +71,10 @@ const emojibaseAssets = () => ({
     })
   },
   generateBundle(this: { emitFile: (asset: { type: 'asset'; fileName: string; source: Uint8Array }) => void }) {
-    if (!emojibaseDir) return
+    if (!emojibaseDir) {
+      return
+    }
+
     for (const rel of ['en/data.json', 'en/messages.json', 'en/shortcodes/emojibase.json']) {
       this.emitFile({
         type: 'asset',
@@ -76,9 +87,19 @@ const emojibaseAssets = () => ({
 
 const browserEntry = (mode: string) => ({
   name: 'hermes:browser-entry',
-  transformIndexHtml(html: string) {
-    if (mode !== 'browser') return html
-    return html.replace('/src/main.tsx', '/src/platform/browser-bootstrap.ts')
+  transformIndexHtml: {
+    order: 'pre' as const,
+    handler(html: string) {
+      if (mode !== 'browser') {
+        return html
+      }
+
+      if (!html.includes('/src/main.tsx')) {
+        throw new Error('Browser build could not locate the Electron renderer entry in index.html.')
+      }
+
+      return html.replace('/src/main.tsx', '/src/browser-main.ts')
+    }
   }
 })
 

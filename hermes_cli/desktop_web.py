@@ -15,6 +15,13 @@ DESKTOP_WEB_DIST = Path(__file__).parent / "desktop_web_dist"
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
+def resolve_desktop_web_dist() -> Path:
+    """Resolve source-checkout or packaged browser renderer assets."""
+
+    override = os.environ.get("HERMES_DESKTOP_WEB_DIST")
+    return Path(override) if override else DESKTOP_WEB_DIST
+
+
 class _ImmutableAssetFiles(StaticFiles):
     async def get_response(self, path: str, scope):
         if os.environ.get("HERMES_SERVE_HEADLESS") == "1":
@@ -38,6 +45,8 @@ def mount_desktop_spa(
     while gated deployments receive only the cookie-auth mode flag.
     """
 
+    dist_dir = resolve_desktop_web_dist()
+
     @application.get("/desktop/api/{full_path:path}")
     async def missing_desktop_api(full_path: str):
         return JSONResponse(
@@ -50,7 +59,7 @@ def mount_desktop_spa(
     # location; check_dir=False preserves headless/package import behavior.
     application.mount(
         "/desktop/assets",
-        _ImmutableAssetFiles(directory=DESKTOP_WEB_DIST / "assets", check_dir=False),
+        _ImmutableAssetFiles(directory=dist_dir / "assets", check_dir=False),
         name="desktop-assets",
     )
 
@@ -61,7 +70,9 @@ def mount_desktop_spa(
                 {"error": "Headless backend (hermes serve): Desktop web UI disabled"},
                 status_code=404,
             )
-        index_path = DESKTOP_WEB_DIST / "index.html"
+        # Resolve per request so tests and source-checkout tooling can redirect
+        # the generated bundle after the parent app has already been imported.
+        index_path = resolve_desktop_web_dist() / "index.html"
         try:
             html = index_path.read_text(encoding="utf-8")
         except OSError:

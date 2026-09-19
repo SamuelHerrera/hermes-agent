@@ -50,11 +50,3 @@ export async function bootstrapBrowserHost(
 
   return true
 }
-
-// The browser build rewrites index.html to this entry. Await installation and
-// capability discovery before importing main.tsx, whose first action resolves
-// the host and then mounts React. Electron's ordinary entry remains unchanged.
-if (import.meta.env.MODE === 'browser') {
-  await bootstrapBrowserHost(window)
-  await import('../main')
-}

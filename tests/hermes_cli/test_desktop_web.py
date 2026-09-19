@@ -4,6 +4,15 @@ from fastapi import FastAPI
 from starlette.testclient import TestClient
 
 
+def test_desktop_dist_honors_packaged_distribution_override(tmp_path, monkeypatch):
+    import hermes_cli.desktop_web as desktop_web
+
+    packaged_dist = tmp_path / "share" / "hermes-agent" / "desktop_web_dist"
+    monkeypatch.setenv("HERMES_DESKTOP_WEB_DIST", str(packaged_dist))
+
+    assert desktop_web.resolve_desktop_web_dist() == packaged_dist
+
+
 def _client(tmp_path, monkeypatch, *, gated=False):
     import hermes_cli.desktop_web as desktop_web
 
