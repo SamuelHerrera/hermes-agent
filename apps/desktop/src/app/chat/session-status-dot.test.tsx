@@ -157,6 +157,16 @@ describe('session tab attention treatment', () => {
     expect(attention.container.querySelector('.codicon-check')).toBeTruthy()
   })
 
+  it('keeps the open tab color when its project context disappears', () => {
+    const lead = render(<SessionTabLead fallbackColor="#5865f2" session={{ id: 's1' } as never} storedSessionId="s1" />)
+
+    expect((normalDot(lead.container) as HTMLElement | null)?.style.backgroundColor).toBe('rgb(88, 101, 242)')
+
+    lead.rerender(<SessionTabLead fallbackColor={null} session={{ id: 's1' } as never} storedSessionId="s1" />)
+
+    expect((normalDot(lead.container) as HTMLElement | null)?.style.backgroundColor).toBe('rgb(88, 101, 242)')
+  })
+
   it('renders needs-input attention as a trailing question icon', () => {
     publishSessionState('rt1', { ...createClientSessionState('s1'), busy: true, needsInput: true })
 
