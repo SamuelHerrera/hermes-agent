@@ -20,7 +20,7 @@ Connection lookup, WebSocket URL minting, and API requests remain profile-scoped
 
 Capabilities are presence declarations, not health checks.
 
-- Backend-owned features (`backendFiles`, `backendGit`, `backendLifecycle`) are absent in every static client preset, including Electron. They default closed until the connected server's capability manifest explicitly enables them.
+- Backend-owned features (`backendFiles`, `backendGit`, `backendLifecycle`, `persistentTerminal`) default closed until the connected server's capability manifest explicitly enables them. Electron's native preset retains its local persistent-terminal bridge.
 - Browser-owned features (`browserClipboard`, `browserMicrophone`, `browserNotifications`, `screenWakeLock`) come from browser feature detection.
 - Electron's static preset declares only the client and native shell surface supplied by its preload. Its native flags remain available independently of backend manifest enrichment.
 
@@ -33,7 +33,6 @@ The initial browser host does not claim Electron/OS integration:
 - `deepLinkProtocol`
 - `nativeDialogs`
 - `nativeWindows`
-- `persistentTerminal`
 - `revealHostPath`
 
 Renderer features must use these flags to disable or replace native-only affordances. Existing optional direct `window.hermesDesktop` calls may remain while they are migrated, but host-neutral boot, gateway routing, and backend API traffic must not depend on them.

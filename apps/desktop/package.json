@@ -25,6 +25,7 @@
     "start": "npm run build && electron .",
     "prebuild": "npm run clean",
     "build": "node scripts/assert-root-install.mjs && node scripts/write-build-stamp.mjs && vite build && node scripts/bundle-electron-main.mjs && node scripts/stage-native-deps.mjs && node scripts/stage-terminal-host.mjs && node scripts/stage-chrome-bridge.mjs",
+    "build:browser": "node scripts/assert-root-install.mjs && vite build --mode browser && node scripts/assert-browser-dist.mjs",
     "postbuild": "node scripts/assert-dist-built.mjs",
     "prebuilder": "node scripts/patch-electron-builder-mac-binary.mjs",
     "builder": "cross-env NODE_OPTIONS=--max-old-space-size=16384 node scripts/run-electron-builder.mjs",

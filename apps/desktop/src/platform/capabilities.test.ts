@@ -16,7 +16,8 @@ describe('host capability contract', () => {
       {
         backendFiles: true,
         backendGit: false,
-        backendLifecycle: true
+        backendLifecycle: true,
+        persistentTerminal: true
       },
       browserEnvironment
     )
@@ -31,7 +32,7 @@ describe('host capability contract', () => {
       deepLinkProtocol: false,
       nativeDialogs: false,
       nativeWindows: false,
-      persistentTerminal: false,
+      persistentTerminal: true,
       revealHostPath: false,
       screenWakeLock: true
     })

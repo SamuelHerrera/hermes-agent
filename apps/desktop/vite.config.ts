@@ -74,9 +74,17 @@ const emojibaseAssets = () => ({
   }
 })
 
-export default defineConfig(({ command }) => ({
+const browserEntry = (mode: string) => ({
+  name: 'hermes:browser-entry',
+  transformIndexHtml(html: string) {
+    if (mode !== 'browser') return html
+    return html.replace('/src/main.tsx', '/src/platform/browser-bootstrap.ts')
+  }
+})
+
+export default defineConfig(({ command, mode }) => ({
   base: './',
-  plugins: [react(), tailwindcss(), emojibaseAssets()],
+  plugins: [react(), tailwindcss(), emojibaseAssets(), browserEntry(mode)],
   css: {
     // Pin an explicit (empty) PostCSS config. Tailwind is handled entirely by
     // `@tailwindcss/vite`, so the renderer needs no PostCSS plugins — and
@@ -91,6 +99,7 @@ export default defineConfig(({ command }) => ({
     postcss: { plugins: [] }
   },
   build: {
+    outDir: mode === 'browser' ? '../../hermes_cli/desktop_web_dist' : 'dist',
     // The renderer intentionally ships FEW chunks (not one, not thousands):
     //   · `codeSplitting: false` (the old setup) inlines every `lazy()` /
     //     dynamic import into the entry, so heavyweight lazy-only deps

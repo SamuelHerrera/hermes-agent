@@ -331,8 +331,10 @@ app = FastAPI(title="Hermes Agent", version=__version__, lifespan=_lifespan)
 
 # Memory-provider OAuth connect routes live in the memory layer, not here.
 from hermes_cli.memory_oauth import router as _memory_oauth_router  # noqa: E402
+from hermes_cli.web_routers import capabilities as _capabilities_routes  # noqa: E402
 
 app.include_router(_memory_oauth_router)
+app.include_router(_capabilities_routes.router)
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
@@ -18038,6 +18040,13 @@ _mount_plugin_api_routes()
 from hermes_cli.dashboard_auth.routes import router as _dashboard_auth_router  # noqa: E402
 app.include_router(_dashboard_auth_router)
 
+from hermes_cli.desktop_web import mount_desktop_spa  # noqa: E402
+
+mount_desktop_spa(
+    app,
+    session_token=_SESSION_TOKEN,
+    normalise_prefix=_normalise_prefix,
+)
 mount_spa(app)
 
 

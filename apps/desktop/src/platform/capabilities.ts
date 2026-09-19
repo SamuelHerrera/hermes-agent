@@ -1,6 +1,9 @@
 import type { HostCapabilities } from './types'
 
-export type BackendCapabilityManifest = Pick<HostCapabilities, 'backendFiles' | 'backendGit' | 'backendLifecycle'>
+export type BackendCapabilityManifest = Pick<
+  HostCapabilities,
+  'backendFiles' | 'backendGit' | 'backendLifecycle' | 'persistentTerminal'
+>
 
 export interface BrowserCapabilityEnvironment {
   clipboard: boolean
@@ -34,7 +37,7 @@ export function browserHostCapabilities(
     deepLinkProtocol: false,
     nativeDialogs: false,
     nativeWindows: false,
-    persistentTerminal: false,
+    persistentTerminal: manifest.persistentTerminal === true,
     revealHostPath: false,
     screenWakeLock: environment.screenWakeLock
   }
