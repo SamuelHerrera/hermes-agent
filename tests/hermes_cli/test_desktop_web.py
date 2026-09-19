@@ -23,6 +23,8 @@ def _client(tmp_path, monkeypatch, *, gated=False):
         encoding="utf-8",
     )
     (dist / "assets" / "app-a1b2c3.js").write_text("window.desktopLoaded=true", encoding="utf-8")
+    (dist / "emojibase").mkdir()
+    (dist / "emojibase" / "data.json").write_text('{"emojis":[]}', encoding="utf-8")
     monkeypatch.setattr(desktop_web, "DESKTOP_WEB_DIST", dist)
 
     app = FastAPI()
@@ -71,6 +73,17 @@ def test_desktop_assets_are_immutable_and_api_misses_are_json(tmp_path, monkeypa
     assert missing_api.status_code == 404
     assert missing_api.headers["content-type"].startswith("application/json")
     assert missing_api.json() == {"detail": "No such API endpoint: /desktop/api/not-real"}
+
+
+def test_desktop_serves_generated_resources_outside_assets(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.get("/desktop/emojibase/data.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"emojis": []}
+    assert response.headers["cache-control"] == "public, max-age=3600"
 
 
 def test_headless_serve_never_serves_desktop_bundle(tmp_path, monkeypatch):

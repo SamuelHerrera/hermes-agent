@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { getApiRequestProfile } from '@/hermes'
 import { openExternalLink } from '@/lib/external-link'
+import { hostApi } from '@/platform/host-api'
 import { runGatewayRestart } from '@/store/system-actions'
 
 import { WhatsAppPairing } from './whatsapp-pairing'
@@ -48,7 +49,7 @@ export function WhatsAppManager({ onUnavailable }: { onUnavailable?: (unavailabl
 
   const request = useCallback(
     <T,>(method: 'GET' | 'PUT', body?: Partial<Settings>) =>
-      window.hermesDesktop.api<T>({
+      hostApi<T>({
         path: '/api/messaging/whatsapp/manage',
         method,
         body,

@@ -14,6 +14,7 @@ import { desktopGit } from '@/lib/desktop-git'
 import { isMissingRpcMethod } from '@/lib/gateway-rpc'
 import { isUnderPath } from '@/lib/path-compare'
 import { persistentAtom } from '@/lib/persisted'
+import { hostApi } from '@/platform/host-api'
 import { $gateway, activeGateway, ensureActiveGatewayOpen } from '@/store/gateway'
 import { setSidebarAgentsGrouped } from '@/store/layout'
 import { notify } from '@/store/notifications'
@@ -652,7 +653,7 @@ async function refreshProjectTreeAcrossProfiles(): Promise<void> {
   $projectTreeLoading.set(true)
 
   try {
-    const res = await window.hermesDesktop.api<ProjectTreePayload>({
+    const res = await hostApi<ProjectTreePayload>({
       path: `/api/profiles/projects/tree?preview_limit=${PROJECT_TREE_PREVIEW_LIMIT}&session_limit=${PROJECT_TREE_SESSION_LIMIT}`,
       timeoutMs: PROJECT_TREE_REQUEST_TIMEOUT_MS
     })

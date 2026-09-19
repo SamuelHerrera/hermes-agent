@@ -12,6 +12,7 @@ import {
   storedStringRecord
 } from '@/lib/storage'
 import { logUatEvent } from '@/lib/uat-diagnostics'
+import { hostApi } from '@/platform/host-api'
 import { invalidateCronModelImpactScopeState } from '@/store/cron-model-impact-scope'
 import { $gateway, ensureGatewayForProfile, openGatewayForProfile } from '@/store/gateway'
 import { setConnection } from '@/store/session'
@@ -112,7 +113,7 @@ interface ActiveProfileResponse {
 // Best-effort: failures (backend not up yet) leave the prior values intact.
 export async function refreshActiveProfile(): Promise<void> {
   try {
-    const res = await window.hermesDesktop.api<ActiveProfileResponse>({
+    const res = await hostApi<ActiveProfileResponse>({
       path: '/api/profiles/active',
       timeoutMs: STARTUP_REQUEST_TIMEOUT_MS
     })

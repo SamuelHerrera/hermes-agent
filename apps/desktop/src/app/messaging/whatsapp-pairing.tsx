@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ErrorBanner } from '@/components/ui/error-state'
 import { getApiRequestProfile } from '@/hermes'
+import { hostApi } from '@/platform/host-api'
 
 type Pairing = { pairing_id: string; status: string; qr_image?: string | null; error?: string | null }
 const terminal = new Set(['connected', 'error', 'expired', 'cancelled'])
@@ -25,7 +26,7 @@ export function WhatsAppPairing({ mode, onPaired }: { mode: string; onPaired: ()
 
   const request = useCallback(
     <T,>(path: string, method: 'POST' | 'GET' | 'DELETE') =>
-      window.hermesDesktop.api<T>({
+      hostApi<T>({
         path: `/api/messaging/whatsapp/onboarding/${path}`,
         method,
         ...(method === 'POST' ? { body: { mode } } : {}),

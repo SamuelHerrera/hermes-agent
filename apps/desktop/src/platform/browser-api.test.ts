@@ -58,6 +58,30 @@ describe('browser API transport', () => {
     })
   })
 
+  it('navigates to the prefixed login URL when an authenticated session expires', async () => {
+    const assign = vi.fn()
+
+    const api = createBrowserApi(
+      { authRequired: true, basePath: '/proxy', sessionToken: null },
+      {
+        assignLocation: assign,
+        fetch: vi.fn(async () =>
+          new Response(
+            JSON.stringify({ error: 'session_expired', detail: 'Unauthorized', login_url: '/proxy/login?next=%2Fapi%2Fsessions' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } }
+          )
+        )
+      }
+    )
+
+    await expect(api({ path: '/api/sessions' })).rejects.toMatchObject({
+      loginUrl: '/proxy/login?next=%2Fapi%2Fsessions',
+      status: 401
+    })
+    expect(assign).toHaveBeenCalledOnce()
+    expect(assign).toHaveBeenCalledWith('/proxy/login?next=%2Fapi%2Fsessions')
+  })
+
   it('aborts requests at the requested timeout', async () => {
     vi.useFakeTimers()
 

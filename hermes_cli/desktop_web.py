@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 DESKTOP_WEB_DIST = Path(__file__).parent / "desktop_web_dist"
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+RESOURCE_CACHE_CONTROL = "public, max-age=3600"
 
 
 def resolve_desktop_web_dist() -> Path:
@@ -70,9 +71,23 @@ def mount_desktop_spa(
                 {"error": "Headless backend (hermes serve): Desktop web UI disabled"},
                 status_code=404,
             )
+        dist_root = resolve_desktop_web_dist().resolve()
+        requested_file = (dist_root / full_path).resolve()
+
+        try:
+            requested_file.relative_to(dist_root)
+        except ValueError:
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+
+        if full_path and requested_file.is_file() and requested_file.name != "index.html":
+            return FileResponse(
+                requested_file,
+                headers={"Cache-Control": RESOURCE_CACHE_CONTROL},
+            )
+
         # Resolve per request so tests and source-checkout tooling can redirect
         # the generated bundle after the parent app has already been imported.
-        index_path = resolve_desktop_web_dist() / "index.html"
+        index_path = dist_root / "index.html"
         try:
             html = index_path.read_text(encoding="utf-8")
         except OSError:
