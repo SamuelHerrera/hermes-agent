@@ -11704,6 +11704,9 @@ def _resolve_gateway_attachment_path(raw: str) -> Path | None:
     return Path(resolved).resolve() if resolved is not None else None
 
 
+_FILE_ATTACHMENT_MAX_BYTES = 256 * 1024 * 1024
+
+
 def _decode_attachment_data_url(data_url: str) -> bytes:
     """Decode a ``data:<any-mime>;base64,<b64>`` payload to bytes.
 
@@ -11720,10 +11723,16 @@ def _decode_attachment_data_url(data_url: str) -> bytes:
     if m:
         cleaned = m.group(1)
     cleaned = _re.sub(r"\s+", "", cleaned)
+    max_encoded_bytes = ((_FILE_ATTACHMENT_MAX_BYTES + 2) // 3) * 4
+    if len(cleaned) > max_encoded_bytes:
+        raise ValueError("attachment payload too large")
     try:
-        return _base64.b64decode(cleaned, validate=True)
+        decoded = _base64.b64decode(cleaned, validate=True)
     except (ValueError, _binascii.Error) as exc:
         raise ValueError("invalid data_url payload") from exc
+    if len(decoded) > _FILE_ATTACHMENT_MAX_BYTES:
+        raise ValueError("attachment payload too large")
+    return decoded
 
 
 def _stage_session_file_attachment(
@@ -11749,7 +11758,10 @@ def _stage_session_file_attachment(
     """
     workspace = Path(_session_cwd(session)).resolve()
     resolved = _resolve_gateway_attachment_path(raw_path)
-    if resolved is not None:
+    if data_url:
+        payload = _decode_attachment_data_url(data_url)
+        filename = _sanitize_attachment_name(name or Path(str(raw_path or "")).name)
+    elif resolved is not None:
         try:
             resolved.relative_to(workspace)
             return resolved, False
@@ -11757,10 +11769,7 @@ def _stage_session_file_attachment(
             payload = resolved.read_bytes()
             filename = resolved.name
     else:
-        if not data_url:
-            raise ValueError("file not found on gateway and no data_url provided")
-        payload = _decode_attachment_data_url(data_url)
-        filename = _sanitize_attachment_name(name or Path(str(raw_path or "")).name)
+        raise ValueError("file not found on gateway and no data_url provided")
 
     upload_dir = _desktop_attachment_dir(session)
     target = _unique_attachment_path(upload_dir, _sanitize_attachment_name(filename))

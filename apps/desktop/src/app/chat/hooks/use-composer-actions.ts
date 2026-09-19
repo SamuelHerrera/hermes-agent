@@ -32,6 +32,9 @@ const BLOB_MIME_EXTENSION: Record<string, string> = {
   'image/x-icon': '.ico'
 }
 
+const BROWSER_FILE_MAX_BYTES = 256 * 1024 * 1024
+const BROWSER_IMAGE_MAX_BYTES = 25 * 1024 * 1024
+
 function blobExtension(blob: Blob): string {
   const mime = normalize(blob.type.split(';')[0])
 
@@ -352,16 +355,23 @@ export function useComposerActions({
         return false
       }
 
-      const uploadDataUrl = await blobDataUrl(file)
       const kind: ComposerAttachment['kind'] =
         file.type.startsWith('image/') || isImagePath(file.name) ? 'image' : 'file'
+
+      const maxBytes = kind === 'image' ? BROWSER_IMAGE_MAX_BYTES : BROWSER_FILE_MAX_BYTES
+
+      if (file.size > maxBytes) {
+        return false
+      }
+
+      const uploadDataUrl = await blobDataUrl(file)
 
       attachToMain({
         id: attachmentId(kind, file.name),
         kind,
         label: file.name,
         detail: file.name,
-        path: file.name,
+        path: '',
         ...(kind === 'image' ? { previewUrl: uploadDataUrl } : {}),
         uploadDataUrl
       })
@@ -420,6 +430,7 @@ export function useComposerActions({
     async (kind: 'file' | 'folder') => {
       if (kind === 'file' && !window.hermesDesktop) {
         const files = await selectBrowserFiles({ multiple: true, title: 'Add files as context' })
+
         for (const file of files) {
           await attachBrowserFile(file)
         }
@@ -570,6 +581,7 @@ export function useComposerActions({
         title: copy.attachImages,
         filters: [{ name: t.composer.images, extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff'] }]
       })
+
       for (const file of files) {
         await attachBrowserFile(file)
       }

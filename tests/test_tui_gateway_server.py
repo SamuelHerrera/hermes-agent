@@ -8899,6 +8899,48 @@ def test_file_attach_copies_gateway_visible_file_outside_workspace(monkeypatch, 
         server._sessions.pop("sid", None)
 
 
+def test_file_attach_prefers_uploaded_bytes_over_same_named_gateway_file(monkeypatch, tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "report.txt"
+    source.write_text("gateway copy", encoding="utf-8")
+    home = tmp_path / "home"
+    fake_cli = types.ModuleType("cli")
+    fake_cli._detect_file_drop = lambda raw: None
+    fake_cli._split_path_input = lambda raw: (raw, "")
+    fake_cli._resolve_attachment_path = lambda raw: source
+
+    server._sessions["sid"] = _session(cwd=str(workspace), profile_home=str(home))
+    monkeypatch.setitem(sys.modules, "cli", fake_cli)
+
+    try:
+        resp = server.handle_request(
+            {
+                "id": "1",
+                "method": "file.attach",
+                "params": {
+                    "session_id": "sid",
+                    "path": "report.txt",
+                    "name": "report.txt",
+                    "data_url": "data:text/plain;base64,YnJvd3NlciBjb3B5",
+                },
+            }
+        )
+
+        stored = home / "attachments" / "report.txt"
+        assert resp["result"]["uploaded"] is True
+        assert stored.read_text(encoding="utf-8") == "browser copy"
+    finally:
+        server._sessions.pop("sid", None)
+
+
+def test_file_attach_rejects_decoded_payload_over_cap(monkeypatch):
+    monkeypatch.setattr(server, "_FILE_ATTACHMENT_MAX_BYTES", 1)
+
+    with pytest.raises(ValueError, match="too large"):
+        server._decode_attachment_data_url("data:application/octet-stream;base64,YWI=")
+
+
 def test_file_attach_uses_in_workspace_file_without_copying(monkeypatch, tmp_path):
     """Local case: file already inside the workspace → ref it directly, no copy."""
     workspace = tmp_path / "workspace"

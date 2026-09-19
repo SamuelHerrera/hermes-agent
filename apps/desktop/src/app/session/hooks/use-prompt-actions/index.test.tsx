@@ -4557,7 +4557,7 @@ describe('uploadComposerAttachment browser bytes', () => {
         id: 'file:report.txt',
         kind: 'file',
         label: 'report.txt',
-        path: 'report.txt',
+        path: '',
         uploadDataUrl: 'data:text/plain;base64,cmVwb3J0'
       },
       { remote: true, requestGateway, sessionId: RUNTIME_SESSION_ID }
@@ -4566,9 +4566,22 @@ describe('uploadComposerAttachment browser bytes', () => {
     expect(requestGateway).toHaveBeenCalledWith('file.attach', {
       data_url: 'data:text/plain;base64,cmVwb3J0',
       name: 'report.txt',
-      path: 'report.txt',
+      path: '',
       session_id: RUNTIME_SESSION_ID
     })
+
+    const attached = await uploadComposerAttachment(
+      {
+        id: 'file:report.txt',
+        kind: 'file',
+        label: 'report.txt',
+        path: '',
+        uploadDataUrl: 'data:text/plain;base64,cmVwb3J0'
+      },
+      { remote: true, requestGateway, sessionId: RUNTIME_SESSION_ID }
+    )
+
+    expect(attached).not.toHaveProperty('uploadDataUrl')
   })
 })
 

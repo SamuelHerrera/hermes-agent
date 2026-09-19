@@ -343,17 +343,45 @@ describe('useComposerActions native image drops', () => {
       expect.objectContaining({
         kind: 'file',
         label: 'report.txt',
-        path: 'report.txt',
+        path: '',
         uploadDataUrl: 'data:text/plain;base64,YnJvd3NlciByZXBvcnQ='
       })
     )
     expect(window.hermesDesktop).toBeUndefined()
   })
 
+  it('rejects oversized browser files before reading them into renderer memory', async () => {
+    Reflect.deleteProperty(window, 'hermesDesktop')
+    const add = vi.fn<(attachment: ComposerAttachment) => void>()
+    const read = vi.spyOn(FileReader.prototype, 'readAsDataURL')
+    const file = new File([], 'huge.bin', { type: 'application/octet-stream' })
+
+    Object.defineProperty(file, 'size', { value: 256 * 1024 * 1024 + 1 })
+
+    const { result } = renderHook(() =>
+      useComposerActions({
+        activeSessionId: null,
+        currentCwd: '/srv/project',
+        requestGateway: vi.fn(),
+        scope: { add, remove: vi.fn(() => null), target: 'browser-composer', update: vi.fn(() => true) }
+      })
+    )
+
+    let attached = true
+    await act(async () => {
+      attached = await result.current.attachDroppedItems([{ file, path: '' }])
+    })
+
+    expect(attached).toBe(false)
+    expect(read).not.toHaveBeenCalled()
+    expect(add).not.toHaveBeenCalled()
+  })
+
   it('attaches browser image blobs directly as bytes without saveImageBuffer', async () => {
     Reflect.deleteProperty(window, 'hermesDesktop')
     const add = vi.fn<(attachment: ComposerAttachment) => void>()
     const image = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+
     const { result } = renderHook(() =>
       useComposerActions({
         activeSessionId: null,
@@ -372,7 +400,7 @@ describe('useComposerActions native image drops', () => {
     expect(add).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: 'image',
-        path: 'pasted-image.png',
+        path: '',
         previewUrl: 'data:image/png;base64,AQID',
         uploadDataUrl: 'data:image/png;base64,AQID'
       })

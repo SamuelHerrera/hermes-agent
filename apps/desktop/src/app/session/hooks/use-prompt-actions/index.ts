@@ -156,6 +156,10 @@ export async function uploadComposerAttachment(
   }
 
   const stageForSession = async (liveSessionId: string): Promise<ComposerAttachment> => {
+    const stagedAttachment = { ...attachment }
+
+    delete stagedAttachment.uploadDataUrl
+
     if (attachment.kind === 'image') {
       const result = imagePayload
         ? await requestGateway<ImageAttachResponse>('image.attach_bytes', {
@@ -175,7 +179,7 @@ export async function uploadComposerAttachment(
       const attachedPath = result.path || path
 
       return {
-        ...attachment,
+        ...stagedAttachment,
         attachedSessionId: liveSessionId,
         label: attachedPath ? pathLabel(attachedPath) : attachment.label,
         path: attachedPath,
@@ -195,7 +199,7 @@ export async function uploadComposerAttachment(
     }
 
     return {
-      ...attachment,
+      ...stagedAttachment,
       attachedSessionId: liveSessionId,
       refText: result.ref_text,
       uploadState: undefined
