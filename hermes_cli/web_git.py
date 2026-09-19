@@ -29,6 +29,11 @@ _UNTRACKED_SCAN_CAP = 500
 _COMMIT_CONTEXT_DIFF_MAX_CHARS = 120_000
 _COMMIT_CONTEXT_UNTRACKED_MAX = 80
 _TRUNK_BRANCHES = ("main", "master")
+_REPO_SCAN_MAX_DEPTH = 8
+_REPO_SCAN_JUNK = {"Applications", "Library", "node_modules", "site-packages", "vendor", "venv"}
+_PR_COMMENT_URL_RE = re.compile(
+    r"^https://github\.com/([^/\s]+)/([^/\s]+)/pull/(\d+)(?:/[^#\s]*)?#(discussion_r|issuecomment-)(\d+)$"
+)
 
 
 def _git(cwd: str, args: list[str], *, timeout: int = _GIT_TIMEOUT) -> tuple[int, str, str]:
@@ -551,6 +556,79 @@ def review_pr_list(cwd: str, branches: list[str], numbers: list[int] = None) -> 
             if pr and pr.get("headRefName"):
                 prs.append(_pr_payload(pr))
     return {"ghReady": True, "prs": prs}
+
+
+def review_fetch_pr_comment(cwd: str, url: str) -> dict | None:
+    """Resolve a validated GitHub PR comment URL through the authenticated gh CLI."""
+    match = _PR_COMMENT_URL_RE.fullmatch(str(url or "").strip())
+    if not match or not _is_dir(cwd):
+        return None
+    owner, repo, pr_number, marker, comment_id = match.groups()
+    kind = "review" if marker == "discussion_r" else "issue"
+    endpoint = (
+        f"repos/{owner}/{repo}/pulls/comments/{comment_id}"
+        if kind == "review"
+        else f"repos/{owner}/{repo}/issues/comments/{comment_id}"
+    )
+    ok, out = _gh(cwd, ["api", endpoint])
+    if not ok:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    return {
+        "author": str((data.get("user") or {}).get("login") or ""),
+        "body": str(data.get("body") or ""),
+        "diffHunk": str(data.get("diff_hunk") or "") if kind == "review" else "",
+        "kind": kind,
+        "line": data.get("line", data.get("original_line")),
+        "path": str(data.get("path") or "") if kind == "review" else "",
+        "prNumber": int(pr_number),
+        "startLine": data.get("start_line", data.get("original_start_line")),
+        "url": str(data.get("html_url") or url),
+    }
+
+
+def scan_repos(roots: list[str], options: dict | None = None) -> list[dict]:
+    """Bounded backend-local repository discovery for the browser adapter."""
+    options = options or {}
+    if options.get("enabled") is False:
+        return []
+    raw_depth = options.get("maxDepth")
+    try:
+        max_depth = 3 if raw_depth is None else max(0, min(int(raw_depth), _REPO_SCAN_MAX_DEPTH))
+    except (TypeError, ValueError):
+        max_depth = 3
+    exclusions = [Path(path).resolve(strict=False) for path in options.get("excludePaths") or []]
+    search_roots = list(dict.fromkeys(str(Path(path).resolve(strict=False)) for path in roots if path))
+    found: dict[str, dict] = {}
+
+    def excluded(path: Path) -> bool:
+        return any(path == parent or parent in path.parents for parent in exclusions)
+
+    for raw_root in search_roots:
+        root = Path(raw_root)
+        if excluded(root):
+            continue
+        for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+            path = Path(current).resolve(strict=False)
+            try:
+                depth = len(path.relative_to(root).parts)
+            except ValueError:
+                dirs[:] = []
+                continue
+            dirs[:] = [name for name in dirs if not name.startswith(".") and name not in _REPO_SCAN_JUNK]
+            if excluded(path) or depth > max_depth:
+                dirs[:] = []
+                continue
+            if ".git" in dirs or ".git" in files:
+                git_marker = path / ".git"
+                if git_marker.is_file() or (git_marker / "HEAD").is_file():
+                    key = os.path.normcase(str(path))
+                    found[key] = {"root": str(path), "label": path.name or str(path)}
+                dirs[:] = []
+    return list(found.values())
 
 
 def review_create_pr(cwd: str) -> dict:

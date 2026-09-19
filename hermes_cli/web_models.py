@@ -250,6 +250,18 @@ class GitPrListBody(BaseModel):
     numbers: List[int] = []
 
 
+class GitPrCommentBody(BaseModel):
+    path: str
+    url: str
+
+
+class GitScanBody(BaseModel):
+    roots: List[str] = []
+    enabled: bool = True
+    maxDepth: Optional[int] = None
+    excludePaths: List[str] = []
+
+
 class SessionPrScanBody(BaseModel):
     ids: List[str] = []
 

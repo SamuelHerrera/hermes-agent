@@ -103,3 +103,57 @@ def test_git_endpoints_require_auth(repo):
 
     assert unauth.get("/api/git/status", params={"path": str(repo)}).status_code == 401
     assert unauth.post("/api/git/review/stage", json={"path": str(repo)}).status_code == 401
+    assert unauth.post("/api/git/scan", json={"roots": [str(repo)]}).status_code == 401
+    assert unauth.post(
+        "/api/git/review/pr-comment",
+        json={"path": str(repo), "url": "https://github.com/o/r/pull/1#issuecomment-2"},
+    ).status_code == 401
+
+
+def test_scan_route_hardens_all_paths_and_reuses_web_git(client, repo, tmp_path, monkeypatch):
+    excluded = tmp_path / "excluded"
+    excluded.mkdir()
+    seen = {}
+
+    def fake_scan(roots, options):
+        seen.update(roots=roots, options=options)
+        return [{"root": roots[0], "label": "repo"}]
+
+    monkeypatch.setattr(web_server._web_git, "scan_repos", fake_scan)
+    response = client.post(
+        "/api/git/scan",
+        json={
+            "roots": [str(repo)],
+            "enabled": True,
+            "maxDepth": 2,
+            "excludePaths": [str(excluded)],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"repos": [{"root": str(repo), "label": "repo"}]}
+    assert seen == {
+        "roots": [str(repo)],
+        "options": {"enabled": True, "maxDepth": 2, "excludePaths": [str(excluded)]},
+    }
+
+
+def test_pr_comment_route_uses_hardened_repo_path(client, repo, monkeypatch):
+    seen = {}
+
+    def fake_fetch(path, url):
+        seen.update(path=path, url=url)
+        return {"author": "sam", "url": url}
+
+    monkeypatch.setattr(web_server._web_git, "review_fetch_pr_comment", fake_fetch)
+    url = "https://github.com/o/r/pull/1#issuecomment-2"
+    response = client.post("/api/git/review/pr-comment", json={"path": str(repo), "url": url})
+
+    assert response.status_code == 200
+    assert response.json() == {"comment": {"author": "sam", "url": url}}
+    assert seen == {"path": str(repo), "url": url}
+
+
+def test_git_route_rejects_non_local_file_url(client):
+    response = client.post("/api/git/scan", json={"roots": ["file://attacker/etc"]})
+    assert response.status_code == 400

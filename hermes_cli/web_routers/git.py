@@ -16,7 +16,9 @@ from hermes_cli.web_models import (
     GitPathBody,
     GitFileBody,
     GitCommitBody,
+    GitPrCommentBody,
     GitPrListBody,
+    GitScanBody,
     GitWorktreeAddBody,
     GitWorktreeRemoveBody,
     GitBranchSwitchBody,
@@ -85,6 +87,19 @@ async def git_ship_info_route(path: str):
 @router.post("/api/git/review/pr-list")
 async def git_pr_list_route(body: GitPrListBody):
     return await _git_op(_web_git.review_pr_list, _git_path(body.path), body.branches, body.numbers)
+
+
+@router.post("/api/git/review/pr-comment")
+async def git_pr_comment_route(body: GitPrCommentBody):
+    return {"comment": await _git_op(_web_git.review_fetch_pr_comment, _git_path(body.path), body.url)}
+
+
+@router.post("/api/git/scan")
+async def git_scan_route(body: GitScanBody):
+    roots = [_git_path(path) for path in body.roots]
+    exclusions = [_git_path(path) for path in body.excludePaths]
+    options = {"enabled": body.enabled, "maxDepth": body.maxDepth, "excludePaths": exclusions}
+    return {"repos": await _git_op(_web_git.scan_repos, roots, options)}
 
 
 @router.post("/api/git/review/stage")
