@@ -222,6 +222,15 @@ class FsWriteText(BaseModel):
     content: str
 
 
+class FsRename(BaseModel):
+    path: str
+    newName: str
+
+
+class FsPath(BaseModel):
+    path: str
+
+
 # --- from web_server.py (originally lines 2826-2856) ---
 
 class GitPathBody(BaseModel):

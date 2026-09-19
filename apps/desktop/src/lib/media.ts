@@ -1,5 +1,6 @@
 import { readDesktopFileDataUrl } from '@/lib/desktop-fs'
 import { capitalize } from '@/lib/text'
+import { tryResolveHost } from '@/platform/host'
 import { $connection } from '@/store/session'
 
 export type MediaKind = 'audio' | 'image' | 'video' | 'file'
@@ -71,7 +72,7 @@ export async function resolveMediaDisplaySrc(path: string): Promise<string> {
     return path
   }
 
-  if (window.hermesDesktop && isRemoteGateway()) {
+  if (tryResolveHost()?.kind === 'browser' || (window.hermesDesktop && isRemoteGateway())) {
     return gatewayMediaDataUrl(path)
   }
 
@@ -89,6 +90,10 @@ export async function resolveMediaDisplaySrc(path: string): Promise<string> {
 export async function resolveMediaPlaybackSrc(path: string): Promise<string> {
   if (isInlineMediaSrc(path)) {
     return path
+  }
+
+  if (tryResolveHost()?.kind === 'browser') {
+    return resolveMediaDisplaySrc(path)
   }
 
   if (window.hermesDesktop && ['audio', 'video'].includes(mediaKind(path))) {

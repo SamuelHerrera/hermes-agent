@@ -4,6 +4,8 @@ import type {
   HermesReadFileTextResult,
   HermesSelectPathsOptions
 } from '@/global'
+import { tryResolveHost } from '@/platform/host'
+import { hostApi } from '@/platform/host-api'
 import { $connection } from '@/store/session'
 
 export interface DesktopFsRemotePicker {
@@ -34,7 +36,11 @@ export function desktopFsCacheKey(connection: HermesConnection | null = $connect
 }
 
 export function isDesktopFsRemoteMode() {
-  return $connection.get()?.mode === 'remote'
+  return tryResolveHost()?.kind === 'browser' || $connection.get()?.mode === 'remote'
+}
+
+function isBrowserHost() {
+  return tryResolveHost()?.kind === 'browser'
 }
 
 // Active profile for FS/git REST calls. Without it the Electron api bridge
@@ -74,7 +80,7 @@ function pathToFileUrl(path: string): string {
 }
 
 function remoteFsApi<T>(path: string, body?: Record<string, unknown>): Promise<T> {
-  return bridge().api<T>(
+  return hostApi<T>(
     body ? { body, method: 'POST', path, profile: desktopFsProfile() } : { path, profile: desktopFsProfile() }
   )
 }
@@ -100,9 +106,9 @@ export async function readDesktopFileText(path: string): Promise<HermesReadFileT
 // hardening, parent-must-exist, size cap) so the editor behaves identically in
 // both modes. Stale-on-disk detection is the caller's job (re-read before save).
 export async function writeDesktopFileText(path: string, content: string): Promise<{ path: string }> {
-  const desktop = bridge()
-
   if (!isDesktopFsRemoteMode()) {
+    const desktop = bridge()
+
     if (!desktop.writeTextFile) {
       throw new Error('Saving is not available')
     }
@@ -126,9 +132,9 @@ export async function readDesktopFileDataUrl(path: string): Promise<string> {
 }
 
 export async function desktopGitRoot(path: string): Promise<string | null> {
-  const desktop = bridge()
-
   if (!isDesktopFsRemoteMode()) {
+    const desktop = bridge()
+
     return desktop.gitRoot ? desktop.gitRoot(path) : null
   }
 
@@ -158,8 +164,14 @@ export async function openDesktopPath(path: string): Promise<void> {
   await bridge().openExternal(pathToFileUrl(path))
 }
 
-// Rename a file/folder in place; returns the new absolute path. Local only.
+// Rename a file/folder in place on the host that owns the active workspace.
 export async function renameDesktopPath(path: string, newName: string): Promise<string> {
+  if (isDesktopFsRemoteMode()) {
+    const result = await remoteFsApi<{ path: string }>('/api/fs/rename', { newName, path })
+
+    return result.path
+  }
+
   const desktop = bridge()
 
   if (!desktop.renamePath) {
@@ -171,8 +183,14 @@ export async function renameDesktopPath(path: string, newName: string): Promise<
   return result.path
 }
 
-// Move a file/folder to the OS trash (recoverable). Local only.
+// Move a file/folder to the owning host's OS trash (recoverable).
 export async function trashDesktopPath(path: string): Promise<void> {
+  if (isDesktopFsRemoteMode()) {
+    await remoteFsApi('/api/fs/trash', { path })
+
+    return
+  }
+
   const desktop = bridge()
 
   if (!desktop.trashPath) {
@@ -203,14 +221,20 @@ export async function desktopFileDiff(repoRoot: string, filePath: string): Promi
 }
 
 export async function selectDesktopPaths(options?: HermesSelectPathsOptions): Promise<string[]> {
-  const desktop = bridge()
+  if (isBrowserHost()) {
+    if (!options?.directories) {
+      throw new Error('Browser file selection cannot provide backend filesystem paths')
+    }
+
+    return remotePicker ? remotePicker.selectPaths({ ...options, multiple: false }) : []
+  }
 
   if (!isDesktopFsRemoteMode()) {
-    return desktop.selectPaths(options)
+    return bridge().selectPaths(options)
   }
 
   if (!options?.directories) {
-    return desktop.selectPaths(options)
+    return bridge().selectPaths(options)
   }
 
   return remotePicker ? remotePicker.selectPaths({ ...options, multiple: false }) : []

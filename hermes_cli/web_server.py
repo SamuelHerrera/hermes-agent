@@ -1390,6 +1390,8 @@ from hermes_cli.web_models import (  # noqa: F401
     _MoaReferenceControls,
     MoaPresetPayload,
     MoaConfigPayload,
+    FsPath,
+    FsRename,
     FsWriteText,
     GitPathBody,
     GitFileBody,
@@ -1931,6 +1933,65 @@ def _fs_regular_file(path: Path) -> tuple[Path, os.stat_result]:
     if not stat.S_ISREG(st.st_mode):
         raise HTTPException(status_code=400, detail="Only regular files can be read")
     return target, st
+
+
+def _fs_rename_sync(source: Path, new_name: str) -> Path:
+    name = str(new_name or "").strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("Invalid rename")
+    if source.parent == source:
+        raise ValueError("Cannot rename the filesystem root")
+    if not source.exists():
+        raise FileNotFoundError
+
+    destination = source.parent / name
+    if destination == source:
+        return destination
+    if destination.exists():
+        raise FileExistsError(f'"{name}" already exists')
+
+    source.rename(destination)
+    return destination
+
+
+def _fs_trash_sync(target: Path) -> None:
+    """Move a path to the host OS trash without permanently deleting it."""
+    if sys.platform == "darwin":
+        executable = shutil.which("osascript")
+        command = [
+            executable or "",
+            "-e",
+            'on run argv\ntell application "Finder" to delete POSIX file (item 1 of argv)\nend run',
+            str(target),
+        ]
+    elif sys.platform == "win32":
+        executable = shutil.which("powershell.exe") or shutil.which("powershell")
+        command = [
+            executable or "",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "Add-Type -AssemblyName Microsoft.VisualBasic; $p=$args[0]; "
+                "if (Test-Path -LiteralPath $p -PathType Container) {"
+                "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($p,'OnlyErrorDialogs','SendToRecycleBin')"
+                "} else {"
+                "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs','SendToRecycleBin')"
+                "}"
+            ),
+            str(target),
+        ]
+    else:
+        executable = shutil.which("gio")
+        command = [executable or "", "trash", str(target)]
+
+    if not executable:
+        raise NotImplementedError("Trash is not available on this host")
+
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or completed.stdout.strip() or "Trash operation failed"
+        raise RuntimeError(detail)
 
 
 def _fs_find_git_root(start: Path) -> str | None:
@@ -2665,6 +2726,42 @@ async def fs_write_text(payload: FsWriteText):
         raise HTTPException(status_code=500, detail=f"Could not write file: {exc}")
 
     return {"ok": True, "path": str(target), "byteSize": len(text.encode("utf-8"))}
+
+
+@app.post("/api/fs/rename")
+async def fs_rename(payload: FsRename):
+    source = _fs_path(payload.path)
+    try:
+        destination = await asyncio.to_thread(_fs_rename_sync, source, payload.newName)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc) or "Invalid rename")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Path not found")
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc) or "Destination already exists")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Path is not writable")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not rename path: {exc}")
+    return {"ok": True, "path": str(destination)}
+
+
+@app.post("/api/fs/trash")
+async def fs_trash(payload: FsPath):
+    target = _fs_path(payload.path)
+    if target.parent == target:
+        raise HTTPException(status_code=400, detail="Cannot trash the filesystem root")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    try:
+        await asyncio.to_thread(_fs_trash_sync, target)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc))
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Path is not writable")
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not trash path: {exc}")
+    return {"ok": True, "path": str(target)}
 
 
 @app.get("/api/fs/read-data-url")

@@ -2,6 +2,8 @@
 // downloadGatewayMediaFile drives an <a download> click, so these need a DOM.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 import { $connection } from '@/store/session'
 
 import {
@@ -14,6 +16,8 @@ import {
   resolveMediaDisplaySrc,
   resolveMediaPlaybackSrc
 } from './media'
+
+afterEach(() => resetHostForTests())
 
 describe('isRemoteGateway', () => {
   afterEach(() => {
@@ -137,6 +141,24 @@ describe('resolveMediaDisplaySrc', () => {
       'data:image/png;base64,bG9jYWw='
     )
     expect(readFileDataUrl).toHaveBeenCalledWith('/Users/me/project/a b.png')
+  })
+
+  it('reads browser-host file paths through the installed host without window.hermesDesktop', async () => {
+    installHost({
+      kind: 'browser',
+      capabilities: {} as HermesHost['capabilities'],
+      api: api as HermesHost['api'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn()
+    })
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'local', profile: 'browser-work' } as never)
+
+    await expect(resolveMediaDisplaySrc('/srv/project/a.png')).resolves.toBe('data:image/png;base64,ZHVtbXk=')
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/fs/read-data-url?path=%2Fsrv%2Fproject%2Fa.png',
+      profile: 'browser-work'
+    })
   })
 })
 

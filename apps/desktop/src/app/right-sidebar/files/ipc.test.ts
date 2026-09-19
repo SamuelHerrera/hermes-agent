@@ -5,6 +5,8 @@ import { Buffer } from 'node:buffer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { HermesReadDirEntry, HermesReadDirResult } from '@/global'
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 
 import { readProjectDir } from './ipc'
 
@@ -59,12 +61,30 @@ describe('readProjectDir', () => {
 
   afterEach(() => {
     delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
+    resetHostForTests()
   })
 
   it('returns no-bridge when the desktop bridge is unavailable', async () => {
     delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
 
     await expect(readProjectDir('/repo')).resolves.toEqual({ entries: [], error: 'no-bridge' })
+  })
+
+  it('reads through an installed browser host when no Electron bridge exists', async () => {
+    delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
+    const api = vi.fn(async () => ({ entries: [{ name: 'src', path: '/repo/src', isDirectory: true }] }))
+    installHost({
+      kind: 'browser',
+      capabilities: {} as HermesHost['capabilities'],
+      api: api as HermesHost['api'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn()
+    })
+
+    await expect(readProjectDir('/repo')).resolves.toEqual({
+      entries: [{ name: 'src', path: '/repo/src', isDirectory: true }]
+    })
+    expect(api).toHaveBeenCalledWith({ path: '/api/fs/list?path=%2Frepo' })
   })
 
   it('preserves ignored entries and Windows-style paths', async () => {

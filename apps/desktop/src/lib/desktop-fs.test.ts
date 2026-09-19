@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 import { $connection } from '@/store/session'
 
 import {
@@ -10,8 +12,11 @@ import {
   readDesktopDir,
   readDesktopFileDataUrl,
   readDesktopFileText,
+  renameDesktopPath,
   selectDesktopPaths,
-  setDesktopFsRemotePicker
+  setDesktopFsRemotePicker,
+  trashDesktopPath,
+  writeDesktopFileText
 } from './desktop-fs'
 
 const readDir = vi.fn(async () => ({ entries: [{ name: 'local', path: '/local', isDirectory: true }] }))
@@ -19,6 +24,9 @@ const readFileText = vi.fn(async () => ({ path: '/local/file.txt', text: 'local'
 const readFileDataUrl = vi.fn(async () => 'data:text/plain;base64,bG9jYWw=')
 const gitRoot = vi.fn(async () => '/local')
 const selectPaths = vi.fn(async () => ['/local'])
+const writeTextFile = vi.fn(async (path: string) => ({ path }))
+const renamePath = vi.fn(async (_path: string, newName: string) => ({ path: `/local/${newName}` }))
+const trashPath = vi.fn(async () => true)
 
 const api = vi.fn(async ({ path }: { path: string }) => {
   if (path.startsWith('/api/fs/list?')) {
@@ -56,7 +64,10 @@ function stubBridge() {
       readDir,
       readFileDataUrl,
       readFileText,
-      selectPaths
+      renamePath,
+      selectPaths,
+      trashPath,
+      writeTextFile
     }
   })
 }
@@ -72,6 +83,7 @@ describe('desktop filesystem facade', () => {
     vi.clearAllMocks()
     $connection.set(null)
     setDesktopFsRemotePicker(null)
+    resetHostForTests()
   })
 
   it('uses local Electron filesystem methods in local mode', async () => {
@@ -83,12 +95,18 @@ describe('desktop filesystem facade', () => {
     await expect(readDesktopFileText('/work/file.txt')).resolves.toMatchObject({ text: 'local' })
     await expect(readDesktopFileDataUrl('/work/file.txt')).resolves.toBe('data:text/plain;base64,bG9jYWw=')
     await expect(desktopGitRoot('/work')).resolves.toBe('/local')
+    await expect(writeDesktopFileText('/work/file.txt', 'next')).resolves.toEqual({ path: '/work/file.txt' })
+    await expect(renameDesktopPath('/work/file.txt', 'renamed.txt')).resolves.toBe('/local/renamed.txt')
+    await expect(trashDesktopPath('/work/renamed.txt')).resolves.toBeUndefined()
     await expect(selectDesktopPaths({ directories: true })).resolves.toEqual(['/local'])
 
     expect(readDir).toHaveBeenCalledWith('/work')
     expect(readFileText).toHaveBeenCalledWith('/work/file.txt')
     expect(readFileDataUrl).toHaveBeenCalledWith('/work/file.txt')
     expect(gitRoot).toHaveBeenCalledWith('/work')
+    expect(writeTextFile).toHaveBeenCalledWith('/work/file.txt', 'next')
+    expect(renamePath).toHaveBeenCalledWith('/work/file.txt', 'renamed.txt')
+    expect(trashPath).toHaveBeenCalledWith('/work/renamed.txt')
     expect(selectPaths).toHaveBeenCalledWith({ directories: true })
     expect(api).not.toHaveBeenCalled()
   })
@@ -111,6 +129,98 @@ describe('desktop filesystem facade', () => {
     expect(readFileText).not.toHaveBeenCalled()
     expect(readFileDataUrl).not.toHaveBeenCalled()
     expect(gitRoot).not.toHaveBeenCalled()
+  })
+
+  it('routes browser file operations through the installed host without an Electron bridge', async () => {
+    const browserApi = vi.fn(async <T>({ path }: { path: string }): Promise<T> => {
+      if (path.startsWith('/api/fs/list?')) {
+        return { entries: [] } as T
+      }
+
+      if (path.startsWith('/api/fs/read-text?')) {
+        return { path: '/srv/a.txt', text: 'browser', byteSize: 7 } as T
+      }
+
+      if (path.startsWith('/api/fs/read-data-url?')) {
+        return { dataUrl: 'data:text/plain;base64,eA==' } as T
+      }
+
+      if (path.startsWith('/api/fs/git-root?')) {
+        return { root: '/srv' } as T
+      }
+
+      if (path === '/api/fs/default-cwd') {
+        return { cwd: '/srv', branch: 'main' } as T
+      }
+
+      if (path === '/api/fs/write-text') {
+        return { path: '/srv/a.txt' } as T
+      }
+
+      if (path === '/api/fs/rename') {
+        return { path: '/srv/b.txt' } as T
+      }
+
+      if (path === '/api/fs/trash') {
+        return { ok: true } as T
+      }
+
+      throw new Error(`unexpected path ${path}`)
+    })
+
+    installHost({
+      kind: 'browser',
+      capabilities: {} as HermesHost['capabilities'],
+      api: browserApi as HermesHost['api'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn()
+    })
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'local', profile: 'browser-profile' } as never)
+
+    await expect(readDesktopDir('/srv')).resolves.toEqual({ entries: [] })
+    await expect(readDesktopFileText('/srv/a.txt')).resolves.toMatchObject({ text: 'browser' })
+    await expect(readDesktopFileDataUrl('/srv/a.txt')).resolves.toBe('data:text/plain;base64,eA==')
+    await expect(desktopGitRoot('/srv/a.txt')).resolves.toBe('/srv')
+    await expect(desktopDefaultCwd()).resolves.toEqual({ cwd: '/srv', branch: 'main' })
+    await expect(writeDesktopFileText('/srv/a.txt', 'next')).resolves.toEqual({ path: '/srv/a.txt' })
+    await expect(renameDesktopPath('/srv/a.txt', 'b.txt')).resolves.toBe('/srv/b.txt')
+    await expect(trashDesktopPath('/srv/b.txt')).resolves.toBeUndefined()
+
+    expect(browserApi).toHaveBeenCalledWith({ path: '/api/fs/list?path=%2Fsrv', profile: 'browser-profile' })
+    expect(browserApi).toHaveBeenCalledWith({
+      body: { content: 'next', path: '/srv/a.txt' },
+      method: 'POST',
+      path: '/api/fs/write-text',
+      profile: 'browser-profile'
+    })
+    expect(browserApi).toHaveBeenCalledWith({
+      body: { newName: 'b.txt', path: '/srv/a.txt' },
+      method: 'POST',
+      path: '/api/fs/rename',
+      profile: 'browser-profile'
+    })
+    expect(browserApi).toHaveBeenCalledWith({
+      body: { path: '/srv/b.txt' },
+      method: 'POST',
+      path: '/api/fs/trash',
+      profile: 'browser-profile'
+    })
+  })
+
+  it('fails clearly instead of fabricating a path for browser File objects', async () => {
+    installHost({
+      kind: 'browser',
+      capabilities: {} as HermesHost['capabilities'],
+      api: vi.fn() as HermesHost['api'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn()
+    })
+    vi.stubGlobal('window', {})
+
+    await expect(selectDesktopPaths({ directories: false })).rejects.toThrow(
+      'Browser file selection cannot provide backend filesystem paths'
+    )
   })
 
   it('targets the active profile backend so a remote profile never reads local disk', async () => {
