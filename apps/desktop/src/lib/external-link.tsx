@@ -2,6 +2,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ArrowUpRight } from '@/lib/icons'
+import { browserClientApis } from '@/platform/browser-client'
 
 import { resolveBrandIcon } from './brand-icon'
 import { cn } from './utils'
@@ -196,9 +197,12 @@ export function useLinkTitle(url?: null | string): string {
 }
 
 export function openExternalLink(href: string): void {
-  if (href) {
-    void window.hermesDesktop?.openExternal?.(href)
+  if (!href) return
+  if (window.hermesDesktop?.openExternal) {
+    void window.hermesDesktop.openExternal(href)
+    return
   }
+  browserClientApis().openExternal(href)
 }
 
 interface ExternalLinkProps extends Omit<ComponentProps<'a'>, 'href' | 'target'> {

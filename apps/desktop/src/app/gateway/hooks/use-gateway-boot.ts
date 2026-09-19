@@ -6,6 +6,7 @@ import { HermesGateway } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { desktopDefaultCwd } from '@/lib/desktop-fs'
 import { reconnectBackoffDelayMs } from '@/lib/reconnect-backoff'
+import { browserClientApis } from '@/platform/browser-client'
 import { resolveHost } from '@/platform/host'
 import type { HermesHost } from '@/platform/types'
 import {
@@ -466,16 +467,9 @@ export function useGatewayBoot({
     const offPowerResume = desktop?.onPowerResume?.(() => reconnectNow())
     const offConnectionApplied = desktop?.onConnectionApplied?.(() => void softSwitch())
 
-    const onOnline = () => reconnectNow()
-
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        reconnectNow()
-      }
-    }
-
-    window.addEventListener('online', onOnline)
-    document.addEventListener('visibilitychange', onVisible)
+    const offReconnectSignals = browserClientApis().onReconnect(state => {
+      if (state.online && state.visible) reconnectNow()
+    })
 
     // Keep live pool backends alive while this window is open (the main process
     // can't observe the direct renderer↔backend WS). No-op for the primary.
@@ -670,8 +664,7 @@ export function useGatewayBoot({
       offWorking()
       offAttention()
       offActiveProfile()
-      window.removeEventListener('online', onOnline)
-      document.removeEventListener('visibilitychange', onVisible)
+      offReconnectSignals()
       offPowerResume?.()
       offConnectionApplied?.()
       offState()

@@ -8,6 +8,7 @@ import { useI18n } from '@/i18n'
 import { triggerHaptic } from '@/lib/haptics'
 import { Check, Copy, X } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { browserClientApis } from '@/platform/browser-client'
 
 type CopyPayload = string | (() => Promise<string> | string)
 type CopyButtonAppearance = 'button' | 'icon' | 'inline' | 'menu-item' | 'context-menu-item' | 'tool-row'
@@ -25,13 +26,7 @@ export async function writeClipboardText(text: string) {
     return
   }
 
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-
-    return
-  }
-
-  throw new Error('Clipboard API is unavailable')
+  await browserClientApis().clipboard.write(text)
 }
 
 export interface CopyButtonProps {

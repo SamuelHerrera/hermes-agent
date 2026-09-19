@@ -1,6 +1,7 @@
 import { atom } from 'nanostores'
 
 import { persistString, storedString } from '@/lib/storage'
+import { browserClientApis } from '@/platform/browser-client'
 
 import { $gateway } from './gateway'
 import { withinNativeNotifyBaseline } from './notify-baseline'
@@ -197,15 +198,24 @@ export function dispatchNativeNotification(input: NativeNotificationInput): void
     return
   }
 
-  void window.hermesDesktop?.notify({
-    actions: input.actions,
+  const nativeNotify = window.hermesDesktop?.notify
+  if (nativeNotify) {
+    void nativeNotify({
+      actions: input.actions,
+      body: input.body,
+      kind: input.kind,
+      requestId: input.requestId,
+      sessionId: input.sessionId ?? undefined,
+      silent: input.silent,
+      tag: input.tag,
+      title: input.title
+    })
+    return
+  }
+  browserClientApis().notifications.show(input.title, {
     body: input.body,
-    kind: input.kind,
-    requestId: input.requestId,
-    sessionId: input.sessionId ?? undefined,
     silent: input.silent,
-    tag: input.tag,
-    title: input.title
+    tag: input.tag ?? (input.sessionId ? `${input.kind}:${input.sessionId}` : input.kind)
   })
 }
 
@@ -265,7 +275,14 @@ export async function sendTestNativeNotification(title: string, body: string): P
   const bridge = window.hermesDesktop
 
   if (!bridge?.notify) {
-    return false
+    try {
+      const browser = browserClientApis()
+      const permission = await browser.notifications.permission()
+      const granted = permission === 'granted' || (permission === 'prompt' && await browser.notifications.requestPermission() === 'granted')
+      return granted && browser.notifications.show(title, { body })
+    } catch {
+      return false
+    }
   }
 
   try {

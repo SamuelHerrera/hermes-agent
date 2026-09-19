@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { browserClientApis } from '@/platform/browser-client'
+
 type BrowserAudioContext = typeof AudioContext
 
 export interface MicRecorderOptions {
@@ -184,7 +186,7 @@ export function useMicRecorder(copy: MicRecorderErrorCopy): {
     let stream: MediaStream
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
+      stream = await browserClientApis().microphone({
         audio: { echoCancellation: true, noiseSuppression: true }
       })
     } catch (error) {
