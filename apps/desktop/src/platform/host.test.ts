@@ -22,6 +22,7 @@ afterEach(() => {
 describe('resolveHost', () => {
   it('prefers an explicitly installed browser host over the Electron preload', () => {
     const installed = browserHost()
+
     ;(window as { hermesDesktop?: unknown }).hermesDesktop = {
       getConnection: vi.fn(),
       getGatewayWsUrl: vi.fn(),
@@ -36,7 +37,9 @@ describe('resolveHost', () => {
   it('wraps the Electron preload while preserving profile-scoped routing', async () => {
     const getConnection = vi.fn(async (profile?: null | string) => ({ profile }))
     const getGatewayWsUrl = vi.fn(async (profile?: null | string) => `wss://gateway.invalid/${profile}`)
+
     const api = vi.fn(async (request: unknown) => request)
+
     ;(window as { hermesDesktop?: unknown }).hermesDesktop = { getConnection, getGatewayWsUrl, api }
 
     const host = resolveHost()

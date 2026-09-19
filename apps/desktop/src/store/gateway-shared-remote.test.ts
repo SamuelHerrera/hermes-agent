@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { HermesConnection } from '@/global'
+import { browserHostCapabilities } from '@/platform/capabilities'
+import type { HermesHost } from '@/platform/types'
+
 // The global-remote share (backend routing case 3): every profile is served
 // by the PRIMARY backend over one host, and getConnection() explicitly tags
 // the shared descriptor with `sharedPrimary`. Dialing a second WebSocket at it
@@ -28,10 +32,26 @@ vi.mock('@/hermes', () => ({
 vi.mock('@/store/session', () => ({ setGatewayState: vi.fn() }))
 vi.mock('@/store/notify-baseline', () => ({ markNativeNotifyBaseline: vi.fn() }))
 
-const { $gateway, backgroundGatewayForProfile, configureGatewayRegistry, ensureGatewayForProfile, setPrimaryGateway } = await import('./gateway')
+const { HermesGateway } = await import('@/hermes')
 const { installHost, resetHostForTests } = await import('@/platform/host')
 
-type DesktopStub = { getConnection: (profile?: null | string) => Promise<any> }
+const { $gateway, backgroundGatewayForProfile, configureGatewayRegistry, ensureGatewayForProfile, setPrimaryGateway } =
+  await import('./gateway')
+
+type DesktopStub = Pick<HermesHost, 'getConnection'>
+
+function makeConnection(overrides: Partial<HermesConnection> = {}): HermesConnection {
+  return {
+    baseUrl: 'http://127.0.0.1:4242',
+    isFullscreen: false,
+    logs: [],
+    nativeOverlayWidth: 0,
+    token: 't',
+    windowButtonPosition: null,
+    wsUrl: 'ws://127.0.0.1:4242/api/ws?token=t',
+    ...overrides
+  }
+}
 
 function installDesktop(stub: DesktopStub): void {
   ;(window as unknown as { hermesDesktop: unknown }).hermesDesktop = {
@@ -41,27 +61,30 @@ function installDesktop(stub: DesktopStub): void {
   }
 }
 
-function installBrowserHost(stub: DesktopStub): void {
-  installHost({
+function installBrowserHost(stub: DesktopStub): HermesHost {
+  const host: HermesHost = {
     ...stub,
-    kind: 'browser',
-    capabilities: {} as never,
-    getGatewayWsUrl: vi.fn(),
-    api: vi.fn()
-  } as never)
+    api: vi.fn(),
+    capabilities: browserHostCapabilities(),
+    getGatewayWsUrl: vi.fn(async profile => `wss://gateway.invalid/${profile}`),
+    kind: 'browser'
+  }
+
+  installHost(host)
+
+  return host
 }
 
-function makePrimary(): { connectionState: string } {
-  // Only connectionState is consulted by setActive/isOpen for these paths.
-  return { connectionState: 'open' }
+function makePrimary() {
+  const gateway = new HermesGateway()
+  Object.defineProperty(gateway, 'connectionState', { value: 'open' })
+
+  return gateway
 }
 
 beforeEach(() => {
   resetHostForTests()
-  configureGatewayRegistry({
-    onEvent: vi.fn(),
-    primaryProfile: 'default'
-  } as never)
+  configureGatewayRegistry({ onEvent: vi.fn() })
 })
 
 afterEach(() => {
@@ -73,10 +96,10 @@ afterEach(() => {
 describe('ensureGatewayForProfile under a shared global remote', () => {
   it('scopes a background request without changing the foreground socket', async () => {
     const primary = makePrimary()
-    setPrimaryGateway(primary as never, 'default')
+    setPrimaryGateway(primary, 'default')
     const foreground = $gateway.get()
     installBrowserHost({
-      getConnection: vi.fn(async () => ({ port: 4242, profile: 'background', sharedPrimary: true, token: 't' }))
+      getConnection: vi.fn(async () => makeConnection({ profile: 'background', sharedPrimary: true }))
     })
 
     const route = await backgroundGatewayForProfile('background')
@@ -89,10 +112,18 @@ describe('ensureGatewayForProfile under a shared global remote', () => {
 
   it('fails closed rather than sending a background request to the primary on a dial failure', async () => {
     const primary = makePrimary()
-    setPrimaryGateway(primary as never, 'default')
+    setPrimaryGateway(primary, 'default')
     const foreground = $gateway.get()
     installDesktop({
-      getConnection: vi.fn(async () => ({ authMode: 'token', baseUrl: 'https://isolated.invalid', mode: 'remote', profile: 'unreachable', wsUrl: 'wss://isolated.invalid/api/ws' }))
+      getConnection: vi.fn(async () =>
+        makeConnection({
+          authMode: 'token',
+          baseUrl: 'https://isolated.invalid',
+          mode: 'remote',
+          profile: 'unreachable',
+          wsUrl: 'wss://isolated.invalid/api/ws'
+        })
+      )
     })
 
     await expect(backgroundGatewayForProfile('unreachable')).rejects.toThrow()
@@ -101,11 +132,11 @@ describe('ensureGatewayForProfile under a shared global remote', () => {
 
   it('activates the primary socket for an explicitly shared-primary descriptor', async () => {
     const primary = makePrimary()
-    setPrimaryGateway(primary as never, 'default')
+    setPrimaryGateway(primary, 'default')
     installDesktop({
       // Shared descriptor: primary connection tagged with the profile scope
       // AND the explicit sharedPrimary marker.
-      getConnection: vi.fn(async () => ({ port: 4242, profile: 'venture', sharedPrimary: true, token: 't' }))
+      getConnection: vi.fn(async () => makeConnection({ profile: 'venture', sharedPrimary: true }))
     })
 
     await ensureGatewayForProfile('venture')
@@ -114,30 +145,32 @@ describe('ensureGatewayForProfile under a shared global remote', () => {
     expect($gateway.get()).toBe(primary)
   })
 
-  it('dials the exact WebSocket URL for a pooled profile descriptor that carries profile', async () => {
+  it('mints a secondary WebSocket URL for the requested profile rather than the descriptor profile', async () => {
     const primary = makePrimary()
-    const remoteWsUrl = 'wss://remote.invalid/api/ws?token=fake-test-token'
 
-    setPrimaryGateway(primary as never, 'default')
-    installDesktop({
-      // Pooled descriptor: carries `profile` for WS URL minting but is NOT
-      // shared-primary (no marker) — it must dial its own socket, not reuse
-      // the primary. This is the local named / own-remote profile case.
-      getConnection: vi.fn(async () => ({
-        authMode: 'token',
-        baseUrl: 'https://remote.invalid',
-        mode: 'remote',
-        profile: 'worker',
-        token: 'fake-test-token',
-        wsUrl: remoteWsUrl
-      }))
+    setPrimaryGateway(primary, 'default')
+
+    const host = installBrowserHost({
+      // A stale or older adapter may omit or mismatch this metadata. The
+      // requested route remains authoritative for URL minting.
+      getConnection: vi.fn(async () =>
+        makeConnection({
+          authMode: 'token',
+          baseUrl: 'https://remote.invalid',
+          mode: 'remote',
+          profile: 'wrong-profile',
+          token: 'fake-test-token',
+          wsUrl: 'wss://remote.invalid/api/ws?token=fake-test-token'
+        })
+      )
     })
+
     gatewayMocks.connect.mockResolvedValueOnce(undefined)
 
     await ensureGatewayForProfile('worker')
 
     expect(gatewayMocks.connect).toHaveBeenCalledOnce()
-    expect(gatewayMocks.connect).toHaveBeenCalledWith(remoteWsUrl)
+    expect(host.getGatewayWsUrl).toHaveBeenCalledWith('worker')
     expect($gateway.get()).not.toBe(primary)
   })
 })

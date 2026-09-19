@@ -1,6 +1,7 @@
+import type { HermesDesktopBridge } from '@/global'
+
 import { electronHostCapabilities } from './capabilities'
 import type { HermesHost } from './types'
-import type { HermesDesktopBridge } from '@/global'
 
 type ElectronHostBridge = Pick<HermesDesktopBridge, 'api' | 'getConnection' | 'getGatewayWsUrl'>
 

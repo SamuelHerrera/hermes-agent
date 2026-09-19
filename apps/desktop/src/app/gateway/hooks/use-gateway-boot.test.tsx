@@ -1,9 +1,12 @@
 import { act, cleanup, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { HermesConnection } from '@/global'
+import { browserHostCapabilities } from '@/platform/capabilities'
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 import { $desktopBoot } from '@/store/boot'
 import { $currentCwd, $gatewayState } from '@/store/session'
-import { installHost, resetHostForTests } from '@/platform/host'
 
 import { takeGatewaySurvivor } from './gateway-hmr-survivor'
 import { useGatewayBoot } from './use-gateway-boot'
@@ -77,15 +80,21 @@ class FakeWebSocket {
   }
 }
 
-function fakeDesktop() {
-  const conn = {
+function makeConnection(profile?: string): HermesConnection {
+  return {
     authMode: 'token' as const,
     baseUrl: 'https://vps.example.com',
-    profile: 'default',
+    isFullscreen: false,
+    logs: [],
+    nativeOverlayWidth: 0,
+    profile,
     token: 't',
+    windowButtonPosition: null,
     wsUrl: 'wss://vps.example.com/api/ws?token=t'
   }
+}
 
+function fakeDesktop(conn: HermesConnection = makeConnection('default')) {
   return {
     getConnection: vi.fn(async () => conn),
     getGatewayWsUrl: vi.fn(async () => conn.wsUrl),
@@ -183,6 +192,7 @@ afterEach(() => {
   ;(globalThis as { WebSocket: unknown }).WebSocket = originalWebSocket
   delete (window as { hermesDesktop?: unknown }).hermesDesktop
   resetHostForTests()
+  window.history.replaceState({}, '', '/')
   window.localStorage.removeItem('hermes.desktop.workspace-cwd')
   $currentCwd.set('')
 })
@@ -205,21 +215,50 @@ async function advanceBackoff() {
 
 describe('useGatewayBoot remote reconnect loop (real hook, fake socket)', () => {
   it('boots from an installed browser host and mints a fresh profile-scoped WebSocket URL', async () => {
-    const host = fakeDesktop()
-    installHost({
+    window.history.replaceState({}, '', '/?profile=research')
+    const host = fakeDesktop(makeConnection('wrong-profile'))
+
+    const browserHost: HermesHost = {
       ...host,
       kind: 'browser',
-      capabilities: {} as never,
+      capabilities: browserHostCapabilities(),
       api: vi.fn()
-    } as never)
+    }
+
+    installHost(browserHost)
     delete (window as { hermesDesktop?: unknown }).hermesDesktop
 
     render(<Harness />)
     await flushAsync()
 
     expect($gatewayState.get()).toBe('open')
-    expect(host.getConnection).toHaveBeenCalledWith(undefined)
-    expect(host.getGatewayWsUrl).toHaveBeenCalledWith('default')
+    expect(host.getConnection).toHaveBeenCalledWith('research')
+    expect(host.getGatewayWsUrl).toHaveBeenCalledWith('research')
+  })
+
+  it('preserves the active profile when reconnecting a descriptor without a profile', async () => {
+    window.history.replaceState({}, '', '/?profile=research')
+    const host = fakeDesktop(makeConnection())
+
+    const browserHost: HermesHost = {
+      ...host,
+      api: vi.fn(),
+      capabilities: browserHostCapabilities(),
+      kind: 'browser'
+    }
+
+    installHost(browserHost)
+    delete (window as { hermesDesktop?: unknown }).hermesDesktop
+    render(<Harness />)
+    await flushAsync()
+    host.getConnection.mockClear()
+    host.getGatewayWsUrl.mockClear()
+
+    act(() => FakeWebSocket.instances[0].drop())
+    await advanceBackoff()
+
+    expect(host.getConnection).toHaveBeenCalledWith('research')
+    expect(host.getGatewayWsUrl).toHaveBeenCalledWith('research')
   })
 
   it('INITIAL boot against a dead VPS: getConnection hangs (waitForHermes) → app sits in the connecting combo, then fails', async () => {
@@ -269,6 +308,25 @@ describe('useGatewayBoot remote reconnect loop (real hook, fake socket)', () => 
     expect(beforeConnectionSwitch).toHaveBeenCalledTimes(1)
     await flushAsync()
     expect($gatewayState.get()).toBe('open')
+  })
+
+  it('preserves a pinned profile when a soft switch returns a mismatched descriptor', async () => {
+    window.history.replaceState({}, '', '/?profile=research')
+
+    const desktop = fakeDesktop(makeConnection('wrong-profile'))
+
+    ;(window as { hermesDesktop?: unknown }).hermesDesktop = desktop
+
+    render(<Harness />)
+    await flushAsync()
+    desktop.getConnection.mockClear()
+    desktop.getGatewayWsUrl.mockClear()
+
+    act(() => connectionApplied?.())
+    await flushAsync()
+
+    expect(desktop.getConnection).toHaveBeenCalledWith('research')
+    expect(desktop.getGatewayWsUrl).toHaveBeenCalledWith('research')
   })
 
   it('a remote that drops post-boot keeps looping with NO boot.error (the dead-end CONNECTING combo)', async () => {

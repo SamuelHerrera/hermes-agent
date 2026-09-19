@@ -1,9 +1,6 @@
 import type { HostCapabilities } from './types'
 
-export type BackendCapabilityManifest = Pick<
-  HostCapabilities,
-  'backendFiles' | 'backendGit' | 'backendLifecycle'
->
+export type BackendCapabilityManifest = Pick<HostCapabilities, 'backendFiles' | 'backendGit' | 'backendLifecycle'>
 
 export interface BrowserCapabilityEnvironment {
   clipboard: boolean
@@ -44,9 +41,9 @@ export function browserHostCapabilities(
 }
 
 export const electronHostCapabilities: Readonly<HostCapabilities> = Object.freeze({
-  backendFiles: true,
-  backendGit: true,
-  backendLifecycle: true,
+  backendFiles: false,
+  backendGit: false,
+  backendLifecycle: false,
   browserClipboard: true,
   browserMicrophone: true,
   browserNotifications: true,

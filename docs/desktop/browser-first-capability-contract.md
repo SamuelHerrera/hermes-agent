@@ -20,9 +20,9 @@ Connection lookup, WebSocket URL minting, and API requests remain profile-scoped
 
 Capabilities are presence declarations, not health checks.
 
-- Backend-owned features (`backendFiles`, `backendGit`, `backendLifecycle`) come from the connected server's capability manifest and default to absent when omitted.
+- Backend-owned features (`backendFiles`, `backendGit`, `backendLifecycle`) are absent in every static client preset, including Electron. They default closed until the connected server's capability manifest explicitly enables them.
 - Browser-owned features (`browserClipboard`, `browserMicrophone`, `browserNotifications`, `screenWakeLock`) come from browser feature detection.
-- Electron declares the native surface supplied by its preload.
+- Electron's static preset declares only the client and native shell surface supplied by its preload. Its native flags remain available independently of backend manifest enrichment.
 
 An available operation may still reject because of authorization, connectivity, user denial, or another runtime failure. Such a rejection does not mutate the capability to absent. Conversely, an absent capability is not represented by attempting an operation and interpreting its failure.
 

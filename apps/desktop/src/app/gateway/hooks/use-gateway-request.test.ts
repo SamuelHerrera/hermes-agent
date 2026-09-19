@@ -1,15 +1,21 @@
 import { act, renderHook } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesGateway } from '@/hermes'
+import type { HermesConnection } from '@/global'
+import { HermesGateway } from '@/hermes'
 import { $gateway } from '@/store/gateway'
+import { $activeGatewayProfile } from '@/store/profile'
+import { $gatewayState } from '@/store/session'
 
 import { useGatewayRequest } from './use-gateway-request'
 
-const fakeGateway = { connectionState: 'open' } as unknown as HermesGateway
+const fakeGateway = new HermesGateway()
 
 afterEach(() => {
   $gateway.set(null)
+  $activeGatewayProfile.set('default')
+  $gatewayState.set('idle')
+  delete (window as { hermesDesktop?: unknown }).hermesDesktop
 })
 
 describe('useGatewayRequest', () => {
@@ -35,5 +41,44 @@ describe('useGatewayRequest', () => {
     act(() => $gateway.set(fakeGateway))
 
     expect(result.current.gateway).toBe(fakeGateway)
+  })
+
+  it('mints a reconnect URL for the active profile when the descriptor disagrees', async () => {
+    const connection: HermesConnection = {
+      authMode: 'token',
+      baseUrl: 'https://gateway.invalid',
+      isFullscreen: false,
+      logs: [],
+      nativeOverlayWidth: 0,
+      profile: 'wrong-profile',
+      token: 't',
+      windowButtonPosition: null,
+      wsUrl: 'wss://gateway.invalid/api/ws?token=t'
+    }
+
+    const getConnection = vi.fn(async () => connection)
+    const getGatewayWsUrl = vi.fn(async (profile?: null | string) => `wss://gateway.invalid/${profile}`)
+
+    const gateway = new HermesGateway()
+
+    vi.spyOn(gateway, 'connect').mockResolvedValue(undefined)
+    vi.spyOn(gateway, 'request').mockRejectedValueOnce(new Error('not connected')).mockResolvedValueOnce('recovered')
+
+    ;(window as { hermesDesktop?: unknown }).hermesDesktop = { getConnection, getGatewayWsUrl }
+    act(() => {
+      $activeGatewayProfile.set('worker')
+      $gatewayState.set('closed')
+      $gateway.set(gateway)
+    })
+    const { result } = renderHook(() => useGatewayRequest())
+    let recovered: unknown
+
+    await act(async () => {
+      recovered = await result.current.requestGateway('session.list')
+    })
+
+    expect(recovered).toBe('recovered')
+    expect(getConnection).toHaveBeenCalledWith('worker')
+    expect(getGatewayWsUrl).toHaveBeenCalledWith('worker')
   })
 })

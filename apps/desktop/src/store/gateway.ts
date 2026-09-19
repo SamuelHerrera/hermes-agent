@@ -144,7 +144,7 @@ export async function backgroundGatewayForProfile(profile: string): Promise<{
   params: { profile?: string }
 }> {
   const key = normKey(profile)
-  const shared = key !== g.primaryProfile && await sharedPrimaryRoute(key)
+  const shared = key !== g.primaryProfile && (await sharedPrimaryRoute(key))
 
   if (key !== g.primaryProfile && !shared) {
     await openGatewayForProfile(key)
@@ -196,7 +196,7 @@ function clearTimer(entry: Secondary): void {
 async function openSecondary(entry: Secondary): Promise<void> {
   const host = resolveHost()
   const conn = await host.getConnection(entry.profile)
-  const wsUrl = await resolveGatewayWsUrl(host, conn)
+  const wsUrl = await resolveGatewayWsUrl(host, { ...conn, profile: entry.profile })
   await entry.gateway.connect(wsUrl)
   void window.hermesDesktop?.touchBackend?.(entry.profile).catch(() => undefined)
 }

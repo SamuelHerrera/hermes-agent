@@ -37,7 +37,11 @@ describe('host capability contract', () => {
     })
   })
 
-  it('keeps Electron native capabilities distinct from browser capabilities', () => {
+  it('keeps static Electron capabilities client-owned and fails closed for backend features', () => {
+    expect(electronHostCapabilities.backendFiles).toBe(false)
+    expect(electronHostCapabilities.backendGit).toBe(false)
+    expect(electronHostCapabilities.backendLifecycle).toBe(false)
+    expect(electronHostCapabilities.deepLinkProtocol).toBe(true)
     expect(electronHostCapabilities.nativeDialogs).toBe(true)
     expect(electronHostCapabilities.nativeWindows).toBe(true)
     expect(electronHostCapabilities.persistentTerminal).toBe(true)
@@ -52,6 +56,7 @@ describe('host capability contract', () => {
 
   it('does not turn an available capability into an absent one when an operation fails', async () => {
     const failure = new Error('backend unavailable')
+
     const host: HermesHost = {
       kind: 'browser',
       capabilities: browserHostCapabilities({ backendFiles: true }, browserEnvironment),

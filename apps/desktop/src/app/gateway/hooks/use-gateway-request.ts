@@ -73,7 +73,8 @@ export function useGatewayRequest() {
         // Reconnect to whichever profile the gateway is currently routed to (not
         // always the primary), so a sleep/wake reconnect keeps the user on the
         // profile they were chatting in.
-        const conn = await desktop.getConnection($activeGatewayProfile.get())
+        const requestedProfile = $activeGatewayProfile.get()
+        const conn = await desktop.getConnection(requestedProfile)
         connectionRef.current = conn
         setConnection(conn)
         // Re-mint the WS URL before reconnecting. OAuth tickets are single-use
@@ -82,7 +83,7 @@ export function useGatewayRequest() {
         // auth rejection becomes a reauth error; transport failures remain
         // retryable. Stash only the former so requestGateway can show the
         // actionable "sign in again" message.
-        const wsUrl = await resolveGatewayWsUrl(desktop, conn)
+        const wsUrl = await resolveGatewayWsUrl(desktop, { ...conn, profile: requestedProfile })
         await existing.connect(wsUrl)
 
         return existing

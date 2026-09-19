@@ -67,9 +67,7 @@ function logBoot(message: string, details?: Record<string, unknown>) {
 interface GatewayBootOptions {
   beforeConnectionSwitch: () => void
   handleGatewayEvent: (event: RpcEvent) => void
-  onConnectionReady: (
-    connection: Awaited<ReturnType<HermesHost['getConnection']>> | null
-  ) => void
+  onConnectionReady: (connection: Awaited<ReturnType<HermesHost['getConnection']>> | null) => void
   onGatewayReady: (gateway: HermesGateway | null) => void
   refreshHermesConfig: () => Promise<void>
   refreshSessions: () => Promise<void>
@@ -120,7 +118,6 @@ export function useGatewayBoot({
       callbacksRef.current.onConnectionReady(next)
       setConnection(next)
     }
-
 
     // --- Reconnect-after-sleep machinery -------------------------------------
     // macOS sleep silently drops the renderer's WebSocket. The backend Python
@@ -176,7 +173,8 @@ export function useGatewayBoot({
         // "Starting Hermes…". The probe is a no-op for a healthy or local backend.
         await desktop?.revalidateConnection?.().catch(() => undefined)
 
-        const conn = await host.getConnection($activeGatewayProfile.get())
+        const requestedProfile = $activeGatewayProfile.get()
+        const conn = await host.getConnection(requestedProfile)
 
         if (cancelled) {
           return
@@ -191,7 +189,7 @@ export function useGatewayBoot({
         // explicit auth rejection asks for sign-in; transport failures stay in
         // this reconnect loop. For local/token gateways the URL carries a
         // long-lived token and the re-mint is a cheap no-op.
-        const wsUrl = await resolveGatewayWsUrl(host, conn)
+        const wsUrl = await resolveGatewayWsUrl(host, { ...conn, profile: requestedProfile })
         await gateway.connect(wsUrl)
         logBoot('reconnect opened gateway', { profile: $activeGatewayProfile.get() })
 
@@ -331,14 +329,16 @@ export function useGatewayBoot({
 
         // Same override rule as boot(): a profile-pinned helper window stays
         // on its pinned profile's backend across a soft switch.
-        const conn = await host.getConnection(windowProfileOverride() ?? undefined)
+        const requestedProfile = windowProfileOverride() ?? undefined
+        const conn = await host.getConnection(requestedProfile)
 
         if (cancelled) {
           return
         }
 
         publish(conn)
-        const wsUrl = await resolveGatewayWsUrl(host, conn)
+        const connectionForMint = requestedProfile ? { ...conn, profile: requestedProfile } : conn
+        const wsUrl = await resolveGatewayWsUrl(host, connectionForMint)
         await gateway.connect(wsUrl)
 
         if (cancelled) {
@@ -368,27 +368,28 @@ export function useGatewayBoot({
       }
     }
 
-    const offBootProgress = desktop?.onBootProgress(payload => {
-      // Soft switch / post-boot startHermes re-emits progress — ignore so the
-      // cold-boot CONNECTING overlay stays down. Errors still surface.
-      if ($gatewaySwitching.get() || bootCompleted) {
-        logBoot('late boot progress received', {
-          phase: payload.phase,
-          progress: payload.progress,
-          running: payload.running,
-          ignored: !payload.error
-        })
+    const offBootProgress =
+      desktop?.onBootProgress(payload => {
+        // Soft switch / post-boot startHermes re-emits progress — ignore so the
+        // cold-boot CONNECTING overlay stays down. Errors still surface.
+        if ($gatewaySwitching.get() || bootCompleted) {
+          logBoot('late boot progress received', {
+            phase: payload.phase,
+            progress: payload.progress,
+            running: payload.running,
+            ignored: !payload.error
+          })
 
-        if (payload.error) {
-          applyDesktopBootProgress(payload)
+          if (payload.error) {
+            applyDesktopBootProgress(payload)
+          }
+
+          return
         }
 
-        return
-      }
-
-      applyDesktopBootProgress(payload)
-      logBoot('boot progress applied', { phase: payload.phase, progress: payload.progress, running: payload.running })
-    }) ?? (() => undefined)
+        applyDesktopBootProgress(payload)
+        logBoot('boot progress applied', { phase: payload.phase, progress: payload.progress, running: payload.running })
+      }) ?? (() => undefined)
 
     void desktop
       ?.getBootProgress()
@@ -512,22 +513,23 @@ export function useGatewayBoot({
       }
     })
 
-    const offExit = desktop?.onBackendExit(() => {
-      if ($gatewaySwitching.get()) {
-        return
-      }
+    const offExit =
+      desktop?.onBackendExit(() => {
+        if ($gatewaySwitching.get()) {
+          return
+        }
 
-      if ($desktopBoot.get().running || $desktopBoot.get().visible) {
-        failDesktopBoot(translateNow('boot.errors.backgroundExitedDuringStartup'))
-      }
+        if ($desktopBoot.get().running || $desktopBoot.get().visible) {
+          failDesktopBoot(translateNow('boot.errors.backgroundExitedDuringStartup'))
+        }
 
-      notify({
-        kind: 'error',
-        title: translateNow('boot.errors.backendStopped'),
-        message: translateNow('boot.errors.backgroundExited'),
-        durationMs: 0
-      })
-    }) ?? (() => undefined)
+        notify({
+          kind: 'error',
+          title: translateNow('boot.errors.backendStopped'),
+          message: translateNow('boot.errors.backgroundExited'),
+          durationMs: 0
+        })
+      }) ?? (() => undefined)
 
     async function boot() {
       try {
@@ -535,7 +537,8 @@ export function useGatewayBoot({
         // A profile-pinned helper window (the HUD) dials its target profile's
         // backend directly — ensureBackend spawns/reuses it from the pool.
         // Everything else keeps dialing the primary.
-        const conn = await host.getConnection(windowProfileOverride() ?? undefined)
+        const requestedProfile = windowProfileOverride() ?? undefined
+        const conn = await host.getConnection(requestedProfile)
 
         if (cancelled) {
           return
@@ -566,7 +569,8 @@ export function useGatewayBoot({
         // conn.wsUrl is stale; resolveGatewayWsUrl() re-mints it rather than
         // connecting with a dead ticket. Auth rejection asks for sign-in;
         // connectivity failures remain retryable.
-        const wsUrl = await resolveGatewayWsUrl(host, conn)
+        const connectionForMint = requestedProfile ? { ...conn, profile: requestedProfile } : conn
+        const wsUrl = await resolveGatewayWsUrl(host, connectionForMint)
         await gateway.connect(wsUrl)
 
         if (cancelled) {

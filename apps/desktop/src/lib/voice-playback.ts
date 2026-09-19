@@ -111,7 +111,9 @@ async function resolveSpeakStreamUrl(): Promise<null | string> {
     // ACTIVE profile's backend, then swap the gateway endpoint for the PCM
     // one — auth is shared across WS routes.
     const profile = getApiRequestProfile()
-    const wsUrl = await resolveGatewayWsUrl(desktop, await desktop.getConnection(profile))
+    const conn = await desktop.getConnection(profile)
+    const connectionForMint = profile ? { ...conn, profile } : conn
+    const wsUrl = await resolveGatewayWsUrl(desktop, connectionForMint)
     const url = new URL(wsUrl)
 
     if (!url.pathname.endsWith('/api/ws')) {
