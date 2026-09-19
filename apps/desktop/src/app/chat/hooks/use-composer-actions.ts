@@ -5,7 +5,7 @@ import { droppedFileInlineRef } from '@/app/chat/composer/inline-refs'
 import { formatRefValue } from '@/components/assistant-ui/directive-text'
 import { useI18n } from '@/i18n'
 import { attachmentId, contextPath, pathLabel } from '@/lib/chat-runtime'
-import { readDesktopFileDataUrl, selectDesktopPaths } from '@/lib/desktop-fs'
+import { readDesktopFileDataUrl, selectBrowserFiles, selectDesktopPaths } from '@/lib/desktop-fs'
 import { desktopGit } from '@/lib/desktop-git'
 import { normalize } from '@/lib/text'
 import {
@@ -36,6 +36,17 @@ function blobExtension(blob: Blob): string {
   const mime = normalize(blob.type.split(';')[0])
 
   return BLOB_MIME_EXTENSION[mime] || '.png'
+}
+
+function blobDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('Could not read selected file')), {
+      once: true
+    })
+    reader.addEventListener('load', () => resolve(typeof reader.result === 'string' ? reader.result : ''), { once: true })
+    reader.readAsDataURL(blob)
+  })
 }
 
 export function isImagePath(filePath: string): boolean {
@@ -335,6 +346,31 @@ export function useComposerActions({
     [attachToMain]
   )
 
+  const attachBrowserFile = useCallback(
+    async (file: File) => {
+      if (!file.size) {
+        return false
+      }
+
+      const uploadDataUrl = await blobDataUrl(file)
+      const kind: ComposerAttachment['kind'] =
+        file.type.startsWith('image/') || isImagePath(file.name) ? 'image' : 'file'
+
+      attachToMain({
+        id: attachmentId(kind, file.name),
+        kind,
+        label: file.name,
+        detail: file.name,
+        path: file.name,
+        ...(kind === 'image' ? { previewUrl: uploadDataUrl } : {}),
+        uploadDataUrl
+      })
+
+      return true
+    },
+    [attachToMain]
+  )
+
   // A pasted GitHub PR-comment deep link → structured `review` attachment.
   // Optimistic: the card lands immediately with the URL as its ref, then the
   // background gh resolve fills in author/anchor (label + detail). If gh can't
@@ -382,6 +418,15 @@ export function useComposerActions({
 
   const pickContextPaths = useCallback(
     async (kind: 'file' | 'folder') => {
+      if (kind === 'file' && !window.hermesDesktop) {
+        const files = await selectBrowserFiles({ multiple: true, title: 'Add files as context' })
+        for (const file of files) {
+          await attachBrowserFile(file)
+        }
+
+        return
+      }
+
       const paths = await selectDesktopPaths({
         title: kind === 'file' ? 'Add files as context' : 'Add folders as context',
         defaultPath: currentCwd || undefined,
@@ -405,7 +450,7 @@ export function useComposerActions({
         })
       }
     },
-    [attachToMain, currentCwd]
+    [attachBrowserFile, attachToMain, currentCwd]
   )
 
   const insertContextPathInlineRef = useCallback(
@@ -493,6 +538,10 @@ export function useComposerActions({
         return false
       }
 
+      if (!window.hermesDesktop) {
+        return attachBrowserFile(new File([blob], `pasted-image${blobExtension(blob)}`, { type: blob.type || 'image/png' }))
+      }
+
       try {
         const buffer = await blob.arrayBuffer()
         const data = new Uint8Array(buffer)
@@ -511,10 +560,23 @@ export function useComposerActions({
         return false
       }
     },
-    [attachImagePath, copy.imageAttach, copy.imageAttachFailed, copy.imageWriteFailed]
+    [attachBrowserFile, attachImagePath, copy.imageAttach, copy.imageAttachFailed, copy.imageWriteFailed]
   )
 
   const pickImages = useCallback(async () => {
+    if (!window.hermesDesktop) {
+      const files = await selectBrowserFiles({
+        multiple: true,
+        title: copy.attachImages,
+        filters: [{ name: t.composer.images, extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff'] }]
+      })
+      for (const file of files) {
+        await attachBrowserFile(file)
+      }
+
+      return
+    }
+
     const paths = await selectDesktopPaths({
       title: copy.attachImages,
       defaultPath: currentCwd || undefined,
@@ -533,7 +595,7 @@ export function useComposerActions({
     for (const path of paths) {
       await attachImagePath(path)
     }
-  }, [attachImagePath, copy.attachImages, currentCwd, t.composer.images])
+  }, [attachBrowserFile, attachImagePath, copy.attachImages, currentCwd, t.composer.images])
 
   const pasteClipboardImage = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -643,6 +705,18 @@ export function useComposerActions({
         const filePath = knownPath || fallbackPath || ''
         const isImage = file.type.startsWith('image/') || isImagePath(file.name) || (filePath && isImagePath(filePath))
 
+        if (!window.hermesDesktop) {
+          if (await attachBrowserFile(file)) {
+            attached = true
+
+            continue
+          }
+
+          lastFailure = `Could not attach ${file.name || 'file'}`
+
+          continue
+        }
+
         if (isImage) {
           // Finder may expose a dropped screenshot through a short-lived
           // TemporaryItems/NSIRD_screencaptureui path even when the visible
@@ -677,7 +751,7 @@ export function useComposerActions({
 
       return attached
     },
-    [attachContextFilePath, attachContextFolderPath, attachImageBlob, attachImagePath, copy.dropFiles]
+    [attachBrowserFile, attachContextFilePath, attachContextFolderPath, attachImageBlob, attachImagePath, copy.dropFiles]
   )
 
   const removeAttachment = useCallback(

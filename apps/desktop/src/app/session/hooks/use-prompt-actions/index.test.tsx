@@ -4545,6 +4545,33 @@ describe('uploadComposerAttachment preview reuse', () => {
   })
 })
 
+describe('uploadComposerAttachment browser bytes', () => {
+  it('sends a browser file data URL through file.attach without reading a desktop path', async () => {
+    const requestGateway = vi.fn(async () => ({
+      attached: true,
+      ref_text: '@file:.hermes/desktop-attachments/report.txt'
+    }) as never)
+
+    await uploadComposerAttachment(
+      {
+        id: 'file:report.txt',
+        kind: 'file',
+        label: 'report.txt',
+        path: 'report.txt',
+        uploadDataUrl: 'data:text/plain;base64,cmVwb3J0'
+      },
+      { remote: true, requestGateway, sessionId: RUNTIME_SESSION_ID }
+    )
+
+    expect(requestGateway).toHaveBeenCalledWith('file.attach', {
+      data_url: 'data:text/plain;base64,cmVwb3J0',
+      name: 'report.txt',
+      path: 'report.txt',
+      session_id: RUNTIME_SESSION_ID
+    })
+  })
+})
+
 // The actions bag is a STABLE ref that wiring.tsx mutates in place
 // (Object.assign), and the pane surfaces are memoized on that stable ref — so a
 // surface does NOT re-render when the active session changes and its props keep

@@ -105,12 +105,37 @@ describe('browser API transport', () => {
     await request
   })
 
-  it('rejects absolute URLs and native multipart uploads', async () => {
+  it('sends upload bytes as authenticated multipart form data', async () => {
+    const fetcher = vi.fn(async (_input: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ attachment: { name: 'diagram.png' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    )
+    const api = createBrowserApi(config, { fetch: fetcher })
+    const bytes = new TextEncoder().encode('browser bytes').buffer
+
+    await api({
+      path: '/api/plugins/kanban/tasks/task-1/attachments',
+      method: 'POST',
+      upload: { filename: 'diagram.png', contentType: 'image/png', bytes }
+    })
+
+    const [, init] = fetcher.mock.calls[0]
+    const form = init!.body as FormData
+    const file = form.get('file') as File
+
+    expect(form).toBeInstanceOf(FormData)
+    expect(file.name).toBe('diagram.png')
+    expect(file.type).toBe('image/png')
+    expect(await file.text()).toBe('browser bytes')
+    expect(new Headers(init!.headers).has('Content-Type')).toBe(false)
+    expect(new Headers(init!.headers).get('X-Hermes-Session-Token')).toBe('ephemeral')
+  })
+
+  it('rejects absolute URLs', async () => {
     const api = createBrowserApi(config, { fetch: vi.fn() })
 
     await expect(api({ path: 'https://evil.invalid/api' })).rejects.toThrow(/relative \/api/)
-    await expect(
-      api({ path: '/api/files', upload: { filename: 'x', bytes: new ArrayBuffer(0) } })
-    ).rejects.toThrow(/upload/i)
   })
 })

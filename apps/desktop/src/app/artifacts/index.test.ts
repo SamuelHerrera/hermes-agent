@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 import { $connection } from '@/store/session'
 import type { SessionInfo, SessionMessage } from '@/types/hermes'
 
@@ -29,6 +31,7 @@ describe('collectArtifactsForSession', () => {
     vi.unstubAllGlobals()
     vi.clearAllMocks()
     $connection.set(null)
+    resetHostForTests()
   })
 
   it('indexes plain https links from assistant text', () => {
@@ -86,6 +89,25 @@ describe('collectArtifactsForSession', () => {
 
     expect(api).toHaveBeenCalledWith({
       path: '/api/fs/read-data-url?path=%2FUsers%2Fme%2F.hermes%2Fskills%2Fwork-esab%2Freferences%2Fimages%2Fmanual-step03.jpeg'
+    })
+  })
+
+  it('resolves browser image thumbnails through the installed host without preload', async () => {
+    const api = vi.fn(async () => ({ dataUrl: 'data:image/png;base64,Ynl0ZXM=' }))
+    installHost({
+      kind: 'browser',
+      capabilities: {} as HermesHost['capabilities'],
+      api: api as HermesHost['api'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn()
+    })
+    vi.stubGlobal('window', {})
+    $connection.set({ mode: 'remote', profile: 'browser-profile' } as never)
+
+    await expect(artifactImageSrc('/srv/render.png')).resolves.toBe('data:image/png;base64,Ynl0ZXM=')
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/fs/read-data-url?path=%2Fsrv%2Frender.png',
+      profile: 'browser-profile'
     })
   })
 })

@@ -11,6 +11,9 @@ export interface ComposerAttachment {
   refText?: string
   previewUrl?: string
   path?: string
+  /** Browser-selected file bytes. Browser File objects have no honest absolute
+   * path, so submit forwards this data URL through image/file.attach instead. */
+  uploadDataUrl?: string
   attachedSessionId?: string
   /** Set while the file/image bytes are being staged into the session
    * workspace (remote upload or local stage), and 'error' if that failed.

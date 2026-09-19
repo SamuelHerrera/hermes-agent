@@ -318,4 +318,64 @@ describe('useComposerActions native image drops', () => {
       })
     )
   })
+
+  it('keeps browser drop bytes on the attachment without inventing an absolute path', async () => {
+    const file = new File(['browser report'], 'report.txt', { type: 'text/plain' })
+    const add = vi.fn<(attachment: ComposerAttachment) => void>()
+    Reflect.deleteProperty(window, 'hermesDesktop')
+
+    const { result } = renderHook(() =>
+      useComposerActions({
+        activeSessionId: null,
+        currentCwd: '/srv/project',
+        requestGateway: vi.fn(),
+        scope: { add, remove: vi.fn(() => null), target: 'browser-composer', update: vi.fn(() => true) }
+      })
+    )
+
+    let attached = false
+    await act(async () => {
+      attached = await result.current.attachDroppedItems([{ file, path: '' }])
+    })
+
+    expect(attached).toBe(true)
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'file',
+        label: 'report.txt',
+        path: 'report.txt',
+        uploadDataUrl: 'data:text/plain;base64,YnJvd3NlciByZXBvcnQ='
+      })
+    )
+    expect(window.hermesDesktop).toBeUndefined()
+  })
+
+  it('attaches browser image blobs directly as bytes without saveImageBuffer', async () => {
+    Reflect.deleteProperty(window, 'hermesDesktop')
+    const add = vi.fn<(attachment: ComposerAttachment) => void>()
+    const image = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+    const { result } = renderHook(() =>
+      useComposerActions({
+        activeSessionId: null,
+        currentCwd: '/srv/project',
+        requestGateway: vi.fn(),
+        scope: { add, remove: vi.fn(() => null), target: 'browser-composer', update: vi.fn(() => true) }
+      })
+    )
+
+    let attached = false
+    await act(async () => {
+      attached = await result.current.attachImageBlob(image)
+    })
+
+    expect(attached).toBe(true)
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'image',
+        path: 'pasted-image.png',
+        previewUrl: 'data:image/png;base64,AQID',
+        uploadDataUrl: 'data:image/png;base64,AQID'
+      })
+    )
+  })
 })

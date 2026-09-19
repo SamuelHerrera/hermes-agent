@@ -10,7 +10,7 @@ import type { I18nContextValue } from '@/i18n'
 import { extractEmbeddedImages } from '@/lib/embedded-images'
 import { openExternalLink } from '@/lib/external-link'
 import { triggerHaptic } from '@/lib/haptics'
-import { gatewayMediaDataUrl, isRemoteGateway } from '@/lib/media'
+import { resolveMediaDisplaySrc } from '@/lib/media'
 import { useSessionLinkTitle } from '@/lib/session-link-title'
 import { parseSessionRefValue, sessionRefFallbackLabel } from '@/lib/session-refs'
 import { cn } from '@/lib/utils'
@@ -396,6 +396,10 @@ export const DirectiveText: TextMessagePartComponent = ({ text }: TextMessagePar
   <DirectiveContent text={text ?? ''} />
 )
 
+export function resolveDirectiveImageSrc(path: string): Promise<string> {
+  return resolveMediaDisplaySrc(path)
+}
+
 /** Image refs render as a thumbnail rather than a chip — matches how persisted
  * messages render after the backend embeds the data URL, so the UX is stable
  * across initial send and refresh. */
@@ -411,12 +415,7 @@ const DirectiveImage: FC<{ id: string; label: string }> = ({ id, label }) => {
 
     let alive = true
 
-    // Remote gateway: the image lives on the gateway's disk, not ours — fetch
-    // it over the authenticated API. Local: read it straight off this disk.
-    const load =
-      window.hermesDesktop && isRemoteGateway() ? gatewayMediaDataUrl(id) : window.hermesDesktop?.readFileDataUrl(id)
-
-    void Promise.resolve(load)
+    void resolveDirectiveImageSrc(id)
       .then(url => alive && url && setSrc(url))
       .catch(() => alive && setFailed(true))
 

@@ -7,7 +7,7 @@ import { ImageActionButton, ImageLightbox } from '@/components/chat/zoomable-ima
 import { useImageDownload } from '@/hooks/use-image-download'
 import { useI18n } from '@/i18n'
 import { generatedImageFromResult } from '@/lib/generated-images'
-import { filePathFromMediaPath, gatewayMediaDataUrl, isRemoteGateway, mediaExternalUrl, mediaName } from '@/lib/media'
+import { mediaExternalUrl, mediaName, resolveMediaDisplaySrc } from '@/lib/media'
 import { cn } from '@/lib/utils'
 
 // Aspect hint from the tool args sizes the frame *before* the image loads, so
@@ -32,20 +32,8 @@ function isInlineSrc(path: string): boolean {
   return /^(?:https?|data):/i.test(path)
 }
 
-async function resolveImageSrc(path: string): Promise<string> {
-  if (isInlineSrc(path)) {
-    return path
-  }
-
-  if (window.hermesDesktop && isRemoteGateway()) {
-    return gatewayMediaDataUrl(path)
-  }
-
-  if (!window.hermesDesktop?.readFileDataUrl) {
-    return mediaExternalUrl(path)
-  }
-
-  return window.hermesDesktop.readFileDataUrl(filePathFromMediaPath(path))
+export async function resolveGeneratedImageSrc(path: string): Promise<string> {
+  return resolveMediaDisplaySrc(path)
 }
 
 export const GeneratedImage: FC<{ aspectRatio?: string; result?: unknown }> = ({ aspectRatio, result }) => {
@@ -78,7 +66,7 @@ export const GeneratedImage: FC<{ aspectRatio?: string; result?: unknown }> = ({
       return
     }
 
-    void resolveImageSrc(image)
+    void resolveGeneratedImageSrc(image)
       .then(resolved => !cancelled && setSrc(resolved))
       .catch(() => !cancelled && setFailed(true))
 

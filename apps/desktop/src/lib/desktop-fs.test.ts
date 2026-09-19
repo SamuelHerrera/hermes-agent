@@ -13,6 +13,7 @@ import {
   readDesktopFileDataUrl,
   readDesktopFileText,
   renameDesktopPath,
+  selectBrowserFiles,
   selectDesktopPaths,
   setDesktopFsRemotePicker,
   trashDesktopPath,
@@ -208,7 +209,7 @@ describe('desktop filesystem facade', () => {
     })
   })
 
-  it('fails clearly instead of fabricating a path for browser File objects', async () => {
+  it('fails browser git file diffs closed until the browser git scope ships', async () => {
     installHost({
       kind: 'browser',
       capabilities: {} as HermesHost['capabilities'],
@@ -218,9 +219,18 @@ describe('desktop filesystem facade', () => {
     })
     vi.stubGlobal('window', {})
 
-    await expect(selectDesktopPaths({ directories: false })).rejects.toThrow(
-      'Browser file selection cannot provide backend filesystem paths'
-    )
+    await expect(desktopFileDiff('/repo', 'src/a.ts')).rejects.toThrow(/not available in the browser/i)
+  })
+
+  it('returns browser-selected File objects without fabricating filesystem paths', async () => {
+    const selected = new File(['bytes'], 'notes.txt', { type: 'text/plain' })
+    const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
+      Object.defineProperty(this, 'files', { configurable: true, value: [selected] })
+      this.dispatchEvent(new Event('change'))
+    })
+
+    await expect(selectBrowserFiles({ filters: [{ name: 'Text', extensions: ['txt'] }] })).resolves.toEqual([selected])
+    expect(click).toHaveBeenCalledOnce()
   })
 
   it('targets the active profile backend so a remote profile never reads local disk', async () => {

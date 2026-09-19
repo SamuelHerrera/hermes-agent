@@ -142,9 +142,9 @@ export async function uploadComposerAttachment(
   if (uploadBytes) {
     try {
       if (attachment.kind === 'image') {
-        imagePayload = await readImageForRemoteAttach(path, attachment.previewUrl)
+        imagePayload = await readImageForRemoteAttach(path, attachment.uploadDataUrl ?? attachment.previewUrl)
       } else {
-        fileDataUrl = await readFileDataUrlForAttach(path)
+        fileDataUrl = attachment.uploadDataUrl ?? (await readFileDataUrlForAttach(path))
       }
     } catch (err) {
       throw friendlyRemoteAttachError(err, label)

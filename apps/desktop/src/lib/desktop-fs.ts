@@ -207,6 +207,10 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 // Working-tree-vs-HEAD diff for one file. Empty when unchanged / not a repo.
 // Remote gateway → backend git (/api/git/file-diff); local → Electron git.
 export async function desktopFileDiff(repoRoot: string, filePath: string): Promise<string> {
+  if (isBrowserHost()) {
+    throw new Error('Git file diffs are not available in the browser yet')
+  }
+
   if (isDesktopFsRemoteMode()) {
     const result = await remoteFsApi<{ diff: string }>(
       `/api/git/file-diff?path=${encodeURIComponent(repoRoot)}&file=${encodeURIComponent(filePath)}`
@@ -218,6 +222,29 @@ export async function desktopFileDiff(repoRoot: string, filePath: string): Promi
   const git = bridge().git
 
   return git?.fileDiff ? git.fileDiff(repoRoot, filePath) : ''
+}
+
+/** Open the browser's native file chooser and return the actual File handles.
+ * Browser files intentionally have no filesystem path; callers must retain or
+ * upload their bytes instead of inventing a local/backend path. */
+export function selectBrowserFiles(options: HermesSelectPathsOptions = {}): Promise<File[]> {
+  if (options.directories) {
+    return Promise.resolve([])
+  }
+
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = options.multiple !== false
+
+    const extensions = options.filters?.flatMap(filter => filter.extensions) ?? []
+    if (extensions.length) {
+      input.accept = extensions.map(extension => `.${extension.replace(/^\./, '')}`).join(',')
+    }
+
+    input.addEventListener('change', () => resolve(Array.from(input.files ?? [])), { once: true })
+    input.click()
+  })
 }
 
 export async function selectDesktopPaths(options?: HermesSelectPathsOptions): Promise<string[]> {

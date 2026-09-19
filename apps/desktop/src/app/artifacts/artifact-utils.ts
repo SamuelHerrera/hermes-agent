@@ -1,5 +1,4 @@
-import { readDesktopFileDataUrl } from '@/lib/desktop-fs'
-import { filePathFromMediaPath, isRemoteGateway, mediaExternalUrl } from '@/lib/media'
+import { mediaExternalUrl, resolveMediaDisplaySrc } from '@/lib/media'
 import type { SessionInfo, SessionMessage } from '@/types/hermes'
 
 export type ArtifactKind = 'image' | 'file' | 'link'
@@ -115,11 +114,7 @@ export async function artifactImageSrc(value: string, href = artifactHref(value)
     return href
   }
 
-  if (typeof window !== 'undefined' && window.hermesDesktop && isRemoteGateway()) {
-    return readDesktopFileDataUrl(filePathFromMediaPath(value))
-  }
-
-  return href
+  return resolveMediaDisplaySrc(value).catch(() => href)
 }
 
 function artifactLabel(value: string): string {

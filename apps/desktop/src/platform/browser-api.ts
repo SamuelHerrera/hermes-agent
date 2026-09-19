@@ -77,10 +77,6 @@ export function createBrowserApi(config: BrowserBootstrapConfig, dependencies: B
   const assignLocation = dependencies.assignLocation ?? (url => window.location.assign(url))
 
   return async function browserApi<T>(request: HermesApiRequest): Promise<T> {
-    if (request.upload) {
-      throw new Error('Browser host multipart upload transport is not available.')
-    }
-
     const target = scopedPath(config.basePath, request.path, request.profile)
 
     const controller = new AbortController()
@@ -90,12 +86,26 @@ export function createBrowserApi(config: BrowserBootstrapConfig, dependencies: B
 
     if (config.sessionToken) {headers.set('X-Hermes-Session-Token', config.sessionToken)}
 
-    if (request.body !== undefined) {headers.set('Content-Type', 'application/json')}
+    if (request.body !== undefined && !request.upload) {headers.set('Content-Type', 'application/json')}
+
+    let body: BodyInit | undefined
+
+    if (request.upload) {
+      const form = new FormData()
+      form.append(
+        'file',
+        new Blob([request.upload.bytes], { type: request.upload.contentType || 'application/octet-stream' }),
+        request.upload.filename || 'file'
+      )
+      body = form
+    } else if (request.body !== undefined) {
+      body = JSON.stringify(request.body)
+    }
 
     try {
       const response = await fetcher(target, {
         method: request.method ?? 'GET',
-        body: request.body === undefined ? undefined : JSON.stringify(request.body),
+        body,
         credentials: 'include',
         headers,
         signal: controller.signal
