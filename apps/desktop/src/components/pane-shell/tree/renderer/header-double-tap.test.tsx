@@ -106,13 +106,13 @@ describe('pane tab/header double tap', () => {
     expect(container.querySelector('[data-zone-tabstrip="grp-page"]')).toBeTruthy()
   })
 
-  it('keeps the strip but hides the workspace chip for the close-all placeholder', () => {
+  it('hides the strip and workspace chip for the close-all placeholder', () => {
     $workspaceEmptyPlaceholder.set(true)
     const node = group(['workspace'], { active: 'workspace', id: 'grp-empty' })
     declareDefaultTree(node)
     const { container } = render(<TreeGroup node={node} />)
 
-    expect(container.querySelector('[data-zone-tabstrip="grp-empty"]')).toBeTruthy()
+    expect(container.querySelector('[data-zone-tabstrip="grp-empty"]')).toBeNull()
     expect(container.querySelector('[data-tree-tab="workspace"]')).toBeNull()
   })
 

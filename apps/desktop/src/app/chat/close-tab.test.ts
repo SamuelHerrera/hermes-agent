@@ -9,7 +9,8 @@ const nextSessionTileForWorkspace = vi.fn<() => null | string>(() => null)
 const closeSessionTile = vi.fn()
 const requestEmptyWorkspace = vi.fn()
 
-vi.mock('@/components/pane-shell/tree/store', () => ({
+vi.mock('@/components/pane-shell/tree/store', async importOriginal => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   closeFocusedSessionTab: () => closeFocusedSessionTab(),
   closeFocusedToolTab: () => closeFocusedToolTab(),
   hideLoneTreeTab: (paneId: string) => hideLoneTreeTab(paneId),

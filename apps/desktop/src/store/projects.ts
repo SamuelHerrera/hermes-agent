@@ -416,13 +416,47 @@ export function projectIdForCwd(cwd: string, projects = $projectTree.get()): nul
   return best
 }
 
+function explicitProjectColorForCwd(cwd: string, projects = $projects.get()): null | string {
+  const path = cwd.trim()
+
+  if (!path) {
+    return null
+  }
+
+  let color: null | string = null
+  let bestLen = -1
+
+  for (const project of projects) {
+    if (project.archived || !project.color) {
+      continue
+    }
+
+    for (const folder of project.folders) {
+      const folderPath = folder.path.trim()
+
+      if (folderPath && isUnderPath(folderPath, path) && folderPath.length > bestLen) {
+        bestLen = folderPath.length
+        color = project.color
+      }
+    }
+  }
+
+  return color
+}
+
 /** The current project tint for a workspace path. Draft session tabs have a
  * cwd before they have a listed session row, so they resolve through the same
- * live project-tree membership used by the sidebar instead of painting grey. */
-export function projectColorForCwd(cwd: string, projects = $projectTree.get()): null | string {
+ * live project-tree membership used by the sidebar instead of painting grey.
+ * If the project is currently closed/unhydrated, fall back to the saved project
+ * definitions so a session link can still tint from its fetched cwd. */
+export function projectColorForCwd(
+  cwd: string,
+  projects = $projectTree.get(),
+  explicitProjects = $projects.get()
+): null | string {
   const projectId = projectIdForCwd(cwd, projects)
 
-  return projectId ? (projects.find(project => project.id === projectId)?.color ?? null) : null
+  return projectId ? (projects.find(project => project.id === projectId)?.color ?? null) : explicitProjectColorForCwd(cwd, explicitProjects)
 }
 
 // The display NAME of the explicit, named project owning `cwd` (longest path

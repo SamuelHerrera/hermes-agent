@@ -8,6 +8,7 @@ import { $currentCwd, $selectedStoredSessionId, $sessions, applyConfiguredDefaul
 
 import {
   $activeProjectId,
+  $projects,
   $projectScope,
   $projectsRpcAvailable,
   $projectTree,
@@ -198,6 +199,61 @@ describe('resolveNewSessionCwd', () => {
     // Focused session has no workspace → fall through to configured default,
     // not the stale $currentCwd from an earlier chat.
     expect(resolveNewSessionCwd()).toBe('/home/user/configured')
+  })
+})
+
+describe('projectColorForCwd', () => {
+  beforeEach(() => {
+    $projectTree.set([])
+    $projects.set([])
+  })
+
+  afterEach(() => {
+    $projectTree.set([])
+    $projects.set([])
+  })
+
+  it('falls back to saved project folders when the project tree is closed', () => {
+    $projects.set([
+      {
+        archived: false,
+        board_slug: null,
+        color: '#4a9eff',
+        created_at: 0,
+        description: null,
+        folders: [{ added_at: 0, path: '/work/app', project_id: 'p_app' }],
+        icon: null,
+        id: 'p_app',
+        name: 'App',
+        primary_path: '/work/app',
+        slug: 'app'
+      } as never
+    ])
+
+    expect(projectColorForCwd('/work/app/packages/desktop')).toBe('#4a9eff')
+  })
+
+  it('prefers the hydrated project tree color over saved-folder fallback', () => {
+    $projects.set([
+      {
+        archived: false,
+        board_slug: null,
+        color: '#4a9eff',
+        created_at: 0,
+        description: null,
+        folders: [{ added_at: 0, path: '/work/app', project_id: 'p_app' }],
+        icon: null,
+        id: 'p_app',
+        name: 'App',
+        primary_path: '/work/app',
+        slug: 'app'
+      } as never
+    ])
+    $projectTree.set([
+      { color: '#ff00aa', id: 'p_app', label: 'App', path: '/work/app', repos: [], sessionCount: 0 }
+    ] as SidebarProjectTree[])
+
+    expect(projectColorForCwd('/work/app')).toBe('#ff00aa')
   })
 })
 
