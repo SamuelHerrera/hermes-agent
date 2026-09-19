@@ -25,8 +25,12 @@ import { RootTooltipProvider } from './components/ui/tooltip'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
 import { queryClient } from './lib/query-client'
+import { resolveHost } from './platform/host'
 import { ThemeProvider } from './themes/context'
 
+// Browser entry points install their host before loading this module; Electron
+// resolves the preload bridge here. Fail before React mounts if neither exists.
+resolveHost()
 installClipboardShim()
 
 // The perf probe ships in dev, and in a production build ONLY when explicitly

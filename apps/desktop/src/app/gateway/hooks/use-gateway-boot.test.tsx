@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { $desktopBoot } from '@/store/boot'
 import { $currentCwd, $gatewayState } from '@/store/session'
+import { installHost, resetHostForTests } from '@/platform/host'
 
 import { takeGatewaySurvivor } from './gateway-hmr-survivor'
 import { useGatewayBoot } from './use-gateway-boot'
@@ -132,6 +133,7 @@ function Harness({
 const originalWebSocket = globalThis.WebSocket
 
 beforeEach(() => {
+  resetHostForTests()
   // Drop any parked gateway left by a prior file/case (globalThis slot).
   const leftover = takeGatewaySurvivor()
 
@@ -180,6 +182,7 @@ afterEach(() => {
   vi.useRealTimers()
   ;(globalThis as { WebSocket: unknown }).WebSocket = originalWebSocket
   delete (window as { hermesDesktop?: unknown }).hermesDesktop
+  resetHostForTests()
   window.localStorage.removeItem('hermes.desktop.workspace-cwd')
   $currentCwd.set('')
 })
@@ -201,6 +204,24 @@ async function advanceBackoff() {
 }
 
 describe('useGatewayBoot remote reconnect loop (real hook, fake socket)', () => {
+  it('boots from an installed browser host and mints a fresh profile-scoped WebSocket URL', async () => {
+    const host = fakeDesktop()
+    installHost({
+      ...host,
+      kind: 'browser',
+      capabilities: {} as never,
+      api: vi.fn()
+    } as never)
+    delete (window as { hermesDesktop?: unknown }).hermesDesktop
+
+    render(<Harness />)
+    await flushAsync()
+
+    expect($gatewayState.get()).toBe('open')
+    expect(host.getConnection).toHaveBeenCalledWith(undefined)
+    expect(host.getGatewayWsUrl).toHaveBeenCalledWith('default')
+  })
+
   it('INITIAL boot against a dead VPS: getConnection hangs (waitForHermes) → app sits in the connecting combo, then fails', async () => {
     // The report's actual path: a fresh launch pointed at an unreachable VPS.
     // startHermes()'s remote branch awaits waitForHermes() for 45s before it

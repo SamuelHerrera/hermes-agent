@@ -3,6 +3,7 @@ import { atom } from 'nanostores'
 
 import { HermesGateway } from '@/hermes'
 import { reconnectBackoffDelayMs } from '@/lib/reconnect-backoff'
+import { resolveHost } from '@/platform/host'
 import { markNativeNotifyBaseline } from '@/store/notify-baseline'
 import { setGatewayState } from '@/store/session'
 
@@ -193,16 +194,11 @@ function clearTimer(entry: Secondary): void {
 }
 
 async function openSecondary(entry: Secondary): Promise<void> {
-  const desktop = window.hermesDesktop
-
-  if (!desktop) {
-    return
-  }
-
-  const conn = await desktop.getConnection(entry.profile)
-  const wsUrl = await resolveGatewayWsUrl(desktop, conn)
+  const host = resolveHost()
+  const conn = await host.getConnection(entry.profile)
+  const wsUrl = await resolveGatewayWsUrl(host, conn)
   await entry.gateway.connect(wsUrl)
-  void desktop.touchBackend?.(entry.profile).catch(() => undefined)
+  void window.hermesDesktop?.touchBackend?.(entry.profile).catch(() => undefined)
 }
 
 function scheduleReconnect(entry: Secondary): void {
@@ -282,14 +278,8 @@ function createSecondary(profile: string): Secondary {
 // poisons the active gateway with "not connected" even though the primary is
 // open right next to it.
 async function sharedPrimaryRoute(profile: string): Promise<boolean> {
-  const desktop = window.hermesDesktop
-
-  if (!desktop) {
-    return false
-  }
-
   try {
-    const conn = await desktop.getConnection(profile)
+    const conn = await resolveHost().getConnection(profile)
 
     return Boolean(conn && typeof conn === 'object' && (conn as { sharedPrimary?: boolean }).sharedPrimary === true)
   } catch {

@@ -1143,3 +1143,6 @@ export interface BackendExit {
   code: number | null
   signal: string | null
 }
+
+/** Electron preload surface retained for compatibility while host-neutral code uses HermesHost. */
+export type HermesDesktopBridge = Window['hermesDesktop']

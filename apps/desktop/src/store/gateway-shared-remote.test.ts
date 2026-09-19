@@ -29,11 +29,26 @@ vi.mock('@/store/session', () => ({ setGatewayState: vi.fn() }))
 vi.mock('@/store/notify-baseline', () => ({ markNativeNotifyBaseline: vi.fn() }))
 
 const { $gateway, backgroundGatewayForProfile, configureGatewayRegistry, ensureGatewayForProfile, setPrimaryGateway } = await import('./gateway')
+const { installHost, resetHostForTests } = await import('@/platform/host')
 
-type DesktopStub = { getConnection: ReturnType<typeof vi.fn> }
+type DesktopStub = { getConnection: (profile?: null | string) => Promise<any> }
 
 function installDesktop(stub: DesktopStub): void {
-  ;(window as unknown as { hermesDesktop: unknown }).hermesDesktop = stub
+  ;(window as unknown as { hermesDesktop: unknown }).hermesDesktop = {
+    ...stub,
+    getGatewayWsUrl: vi.fn(async (profile?: null | string) => (await stub.getConnection(profile)).wsUrl),
+    api: vi.fn()
+  }
+}
+
+function installBrowserHost(stub: DesktopStub): void {
+  installHost({
+    ...stub,
+    kind: 'browser',
+    capabilities: {} as never,
+    getGatewayWsUrl: vi.fn(),
+    api: vi.fn()
+  } as never)
 }
 
 function makePrimary(): { connectionState: string } {
@@ -42,6 +57,7 @@ function makePrimary(): { connectionState: string } {
 }
 
 beforeEach(() => {
+  resetHostForTests()
   configureGatewayRegistry({
     onEvent: vi.fn(),
     primaryProfile: 'default'
@@ -50,6 +66,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  resetHostForTests()
   delete (window as unknown as { hermesDesktop?: unknown }).hermesDesktop
 })
 
@@ -58,7 +75,7 @@ describe('ensureGatewayForProfile under a shared global remote', () => {
     const primary = makePrimary()
     setPrimaryGateway(primary as never, 'default')
     const foreground = $gateway.get()
-    installDesktop({
+    installBrowserHost({
       getConnection: vi.fn(async () => ({ port: 4242, profile: 'background', sharedPrimary: true, token: 't' }))
     })
 
