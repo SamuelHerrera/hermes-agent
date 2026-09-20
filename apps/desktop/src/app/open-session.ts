@@ -33,6 +33,11 @@ export type OpenSessionIntent = 'in-place' | 'preview' | 'stack' | 'tab' | 'wind
 
 export type OpenSessionNavigate = (to: string, options?: { replace?: boolean }) => void
 
+export interface OpenSessionOptions {
+  /** Workspace path for tab opens whose stored row may not be hydrated yet. */
+  workspaceCwd?: null | string
+}
+
 /**
  * Is the main tab holding a conversation worth preserving?
  *
@@ -93,7 +98,8 @@ export function openSessionIntentFromModifiers(
 export function openSession(
   storedSessionId: string,
   navigate: OpenSessionNavigate,
-  intent: OpenSessionIntent = 'in-place'
+  intent: OpenSessionIntent = 'in-place',
+  options: OpenSessionOptions = {}
 ): void {
   if (!storedSessionId) {
     return
@@ -151,7 +157,9 @@ export function openSession(
       return
     }
 
-    openSessionTile(storedSessionId, 'center')
+    const workspaceCwd = options.workspaceCwd?.trim()
+
+    openSessionTile(storedSessionId, 'center', undefined, undefined, workspaceCwd ? { workspaceCwd } : undefined)
 
     return
   }

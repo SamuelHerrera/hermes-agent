@@ -175,7 +175,7 @@ async function installTerminalIpc(open: () => Promise<unknown>) {
     crypto: { randomUUID: () => 'session-A' },
     terminalShellCommand: () => ({ command: 'shell', args: [], name: 'shell' }),
     safeTerminalCwd: () => '/home',
-    openRemoteTerminal: open,
+    openRemoteTerminalWithCwdFallback: open,
     createTerminalDelivery: new Function(
       ts.transpile(deliverySource.replace('export ', '')) + '; return createTerminalDelivery'
     )(),

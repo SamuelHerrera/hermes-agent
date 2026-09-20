@@ -180,8 +180,14 @@ describe('openSession', () => {
   it('tab opens a stacked session tile when not on screen', () => {
     focusOpenSession.mockReturnValue(null)
     openSession('s1', navigate, 'tab')
-    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, undefined)
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('tab carries a known workspace cwd for project-color fallback', () => {
+    focusOpenSession.mockReturnValue(null)
+    openSession('s1', navigate, 'tab', { workspaceCwd: ' /repo/project ' })
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, { workspaceCwd: '/repo/project' })
   })
 
   it('stack focuses a session that is already on screen', () => {
@@ -196,7 +202,7 @@ describe('openSession', () => {
     $selectedStoredSessionId.set('s0')
     focusOpenSession.mockReturnValue(null)
     openSession('s1', navigate, 'stack')
-    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, undefined)
     expect(navigate).not.toHaveBeenCalled()
   })
 
@@ -223,7 +229,7 @@ describe('openSession', () => {
     $activeSessionId.set('runtime-a')
     focusOpenSession.mockReturnValue(null)
     openSession('s1', navigate, 'stack')
-    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, undefined)
   })
 
   it('stack loads into main when it holds only a blank draft', () => {
@@ -244,7 +250,7 @@ describe('openSession', () => {
     focusOpenSession.mockReturnValue(null)
     openSession('s1', navigate, 'window')
     expect(openSessionInNewWindow).not.toHaveBeenCalled()
-    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center')
+    expect(openSessionTile).toHaveBeenCalledWith('s1', 'center', undefined, undefined, undefined)
   })
 
   it('no-ops on an empty id', () => {

@@ -71,7 +71,7 @@ it('keeps the caller captured before an async open even after focus moves', asyn
   const anchor = tree.defaultOpenPaneAnchor('caller')
   tree.noteActiveTreeGroup(groupOf('workspace').id)
   preview.openPreview({ kind: 'url', label: 'Example', source: 'https://example.com', url: 'https://example.com' }, 'tool-result', anchor)
-  expect(groupOf('preview-tile:url:browser').id).toBe(groupOf('caller').id)
+  expect(groupOf(`preview-tile:${preview.$previewTabs.get()[0].id}`).id).toBe(groupOf('caller').id)
 })
 
 it('opens files in the file browser caller panel without another split', async () => {
@@ -104,7 +104,7 @@ it('keeps an existing preview where the user explicitly moved it', async () => {
   const { tree, preview, groupOf } = await setup()
   const target = { kind: 'url' as const, label: 'Example', source: 'https://example.com', url: 'https://example.com' }
   preview.openPreview(target)
-  const pane = 'preview-tile:url:browser'
+  const pane = `preview-tile:${preview.$previewTabs.get()[0].id}`
   tree.moveTreePane(pane, { groupId: groupOf('workspace').id, pos: 'right' })
   const placedGroup = groupOf(pane).id
   tree.noteActiveTreeGroup(groupOf('caller').id)

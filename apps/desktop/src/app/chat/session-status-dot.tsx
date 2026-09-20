@@ -1,4 +1,5 @@
 import { useStore } from '@nanostores/react'
+import { useRef } from 'react'
 
 import { Codicon } from '@/components/ui/codicon'
 import { useStatusPulseRef } from '@/components/ui/status-pulse'
@@ -235,10 +236,17 @@ export function SessionProjectDot({
 }: SessionProjectDotProps) {
   const { t } = useI18n()
   const r = t.sidebar.row
+  const lastColorRef = useRef<null | string>(null)
 
   useStore($sessionColorById)
 
-  const color = sessionColorFor(session) ?? fallbackColor ?? null
+  const resolvedColor = sessionColorFor(session) ?? fallbackColor ?? null
+
+  if (resolvedColor) {
+    lastColorRef.current = resolvedColor
+  }
+
+  const color = resolvedColor ?? lastColorRef.current
 
   const dotState = useStoreSelector($sessionDotStateById, states =>
     storedSessionId ? (states[storedSessionId] ?? 'idle') : 'idle'

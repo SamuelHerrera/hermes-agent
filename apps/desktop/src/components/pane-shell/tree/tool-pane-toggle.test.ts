@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { $terminalTakeover, setTerminalTakeover } from '@/app/right-sidebar/store'
 import { registry } from '@/contrib/registry'
 
-import { allPaneIds, group, split } from './model'
+import { allPaneIds, findGroupOfPane, group, split } from './model'
 import {
   $dismissedPanes,
   $hiddenTreePanes,
@@ -191,7 +191,7 @@ describe('collapsing the active terminal in a shared group with the workspace', 
   const focusActive = () => {
     const tree = $layoutTree.get()
 
-    return tree?.type === 'group' ? tree.active : undefined
+    return tree ? (findGroupOfPane(tree, 'terminal') ?? findGroupOfPane(tree, 'workspace'))?.active : undefined
   }
 
   it('⌃` / the rail toggle lands on workspace, not review', () => {

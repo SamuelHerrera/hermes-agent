@@ -453,15 +453,32 @@ const DirectiveImage: FC<{ id: string; label: string }> = ({ id, label }) => {
  *  from under the chat you're reading). Lazy-imports so the composer's rich
  *  editor can pull this module in without booting the profile/REST stack. */
 export function openSessionRef(value: string) {
-  const { sessionId } = parseSessionRefValue(value)
+  const { profile, sessionId } = parseSessionRefValue(value)
 
   if (!sessionId) {
     return
   }
 
   triggerHaptic('selection')
-  // navigate is unused for the `tab` intent (focus-or-tile only).
+  // navigate is unused for the `tab` intent (focus-or-tile only). The link
+  // target's row may be outside hydrated recents/project-tree data, so fetch its
+  // cwd in parallel and patch the tab once known; that gives closed-project
+  // sessions the same project-color fallback as freshly created workspace tabs.
   void import('@/app/open-session').then(({ openSession }) => openSession(sessionId, () => undefined, 'tab'))
+  void import('@/hermes')
+    .then(({ getSession }) => getSession(sessionId, profile ?? null))
+    .then(row => {
+      const cwd = row?.cwd?.trim()
+
+      if (!cwd) {
+        return
+      }
+
+      return import('@/store/session-states').then(({ patchSessionTile }) => {
+        patchSessionTile(sessionId, { workspaceCwd: cwd })
+      })
+    })
+    .catch(() => undefined)
 }
 
 /** What activating a directive of a given kind does. The single source of truth

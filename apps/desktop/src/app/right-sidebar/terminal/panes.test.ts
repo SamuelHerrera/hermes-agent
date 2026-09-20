@@ -43,9 +43,9 @@ describe('individual terminal panes', () => {
     const panes = () => s.model.allPaneIds(s.tree.$layoutTree.get()!)
 
     expect(panes()).toContain(s.terminalPaneId(local))
-    expect(panes()).not.toContain(s.terminalPaneId(remote))
+    expect(s.registry.getArea('panes').some(pane => pane.id === s.terminalPaneId(remote))).toBe(false)
     $activeGatewayProfile.set('hp-remote')
-    expect(panes()).not.toContain(s.terminalPaneId(local))
+    expect(s.registry.getArea('panes').some(pane => pane.id === s.terminalPaneId(local))).toBe(false)
     expect(panes()).toEqual(expect.arrayContaining([s.terminalPaneId(remote), s.terminalPaneId(agent)]))
     expect(s.$terminals.get()).toBe(entries)
     expect(s.$activeTerminalId.get()).toBe(remote)
@@ -53,7 +53,7 @@ describe('individual terminal panes', () => {
     expect(s.$activeTerminalId.get()).toBe(agent)
 
     $activeGatewayProfile.set('empty-profile')
-    expect(panes()).toEqual(['workspace'])
+    expect(s.registry.getArea('panes').some(pane => pane.id.startsWith('terminal-instance:'))).toBe(false)
     expect(s.$activeTerminalId.get()).toBeNull()
     $showAllProfiles.set(true)
     expect(panes()).toEqual(
@@ -64,7 +64,12 @@ describe('individual terminal panes', () => {
     expect(s.$terminals.get()).toBe(entries)
     $showAllProfiles.set(false)
     $activeGatewayProfile.set('default')
-    expect(panes()).toEqual(['workspace', s.terminalPaneId(local), s.terminalPaneId(closed)])
+    expect(
+      s.registry
+        .getArea('panes')
+        .map(pane => pane.id)
+        .filter(id => id.startsWith('terminal-instance:'))
+    ).toEqual([s.terminalPaneId(local), s.terminalPaneId(closed)])
     expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(closed))).toBe(true)
   })
 
@@ -80,7 +85,7 @@ describe('individual terminal panes', () => {
     expect(s.$activeTerminalId.get()).toBe(remote)
     s.selectTerminal(local)
     expect(s.$activeTerminalId.get()).toBe(remote)
-    expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(local))
+    expect(s.registry.getArea('panes').some(pane => pane.id === s.terminalPaneId(local))).toBe(false)
     s.closeTerminal(remote)
     expect(s.$activeTerminalId.get()).toBeNull()
     expect(s.$terminals.get().map(term => term.id)).toEqual([local])
@@ -202,7 +207,7 @@ describe('individual terminal panes', () => {
     s.ensureAgentTerminal('proc-closed', 'Build', { ownerSessionId: 'chat', cwd: '/repo' })
     expect(s.$terminals.get()).toHaveLength(1)
     expect(s.$terminals.get()[0]).toMatchObject({ hidden: true, ownerSessionId: 'chat' })
-    expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).not.toContain(s.terminalPaneId(id))
+    expect(s.registry.getArea('panes').some(pane => pane.id === s.terminalPaneId(id))).toBe(false)
     s.openAgentTerminal('proc-closed', 'Build')
     expect(s.model.allPaneIds(s.tree.$layoutTree.get()!)).toContain(s.terminalPaneId(id))
     expect(s.tree.$hiddenTreePanes.get().has(s.terminalPaneId(id))).toBe(false)
