@@ -12,6 +12,7 @@ import { atom } from 'nanostores'
 
 import { persistBoolean, storedBoolean } from '@/lib/storage'
 import { browserClientApis } from '@/platform/browser-client'
+import { tryResolveHost } from '@/platform/host'
 import { notifyError } from '@/store/notifications'
 
 const KEY = 'hermes.desktop.keepAwake.v1'
@@ -53,6 +54,12 @@ export async function setKeepAwake(on: boolean): Promise<void> {
   commitKeepAwake(on)
 
   if (!apply) {
+    const host = tryResolveHost()
+    if (!host) return
+    if (!host.capabilities.screenWakeLock) {
+      commitKeepAwake(previous)
+      return
+    }
     $keepAwakeBusy.set(true)
     try {
       await browserClientApis().wakeLock.set(on)

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { installHost, resetHostForTests } from '@/platform/host'
+
 import { canOpenNewWindow, canOpenSessionWindow, openNewWindow, openSessionInNewWindow } from './windows'
 
 const desktopWindow = window as unknown as { hermesDesktop?: Window['hermesDesktop'] }
@@ -26,6 +28,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
+  resetHostForTests()
   if (initialHermesDesktop) {
     desktopWindow.hermesDesktop = initialHermesDesktop
   } else {
@@ -46,6 +50,21 @@ describe('canOpenSessionWindow', () => {
 
   it('is true when the bridge exposes openSessionWindow', () => {
     installBridge(vi.fn().mockResolvedValue({ ok: true }))
+    expect(canOpenSessionWindow()).toBe(true)
+  })
+
+  it('is true for an installed browser host even without native windows', () => {
+    installHost({
+      api: vi.fn(),
+      capabilities: {
+        backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
+        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, nativeDialogs: false,
+        nativeWindows: false, persistentTerminal: true, revealHostPath: false, screenWakeLock: true
+      },
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn(),
+      kind: 'browser'
+    })
     expect(canOpenSessionWindow()).toBe(true)
   })
 })
@@ -77,6 +96,26 @@ describe('openSessionInNewWindow', () => {
 
     expect(open).toHaveBeenCalledWith('s1', undefined)
     expect(notifyError).not.toHaveBeenCalled()
+  })
+
+  it('opens the backend-owned browser route with opener isolation', async () => {
+    delete desktopWindow.hermesDesktop
+    installHost({
+      api: vi.fn(),
+      capabilities: {
+        backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
+        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, nativeDialogs: false,
+        nativeWindows: false, persistentTerminal: true, revealHostPath: false, screenWakeLock: true
+      },
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn(),
+      kind: 'browser'
+    })
+    const opened = { opener: {} }
+    const spy = vi.spyOn(window, 'open').mockReturnValue(opened as Window)
+    await openSessionInNewWindow('s/1')
+    expect(spy).toHaveBeenCalledWith('/desktop/session/s%2F1', '_blank', 'noopener,noreferrer')
+    expect(opened.opener).toBeNull()
   })
 
   it('forwards the watch flag for spectator (subagent) windows', async () => {

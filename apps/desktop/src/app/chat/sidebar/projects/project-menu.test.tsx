@@ -210,7 +210,7 @@ describe('ProjectMenu', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Appearance' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: 'Reveal in file manager' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: 'Reveal in file manager' })).toBeNull()
     expect(screen.getByRole('menuitem', { name: 'Reveal in filetree' })).toBeTruthy()
     expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull()
     expect(screen.queryByRole('menuitem', { name: 'Add folder' })).toBeNull()

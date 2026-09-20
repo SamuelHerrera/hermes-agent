@@ -1,3 +1,5 @@
+import { tryResolveHost } from '@/platform/host'
+
 import { notifyError } from './notifications'
 
 // Window flag set by the Electron main process when it opens a standalone
@@ -102,19 +104,23 @@ export function windowProfileOverride(): null | string {
 // True when running inside the Electron desktop shell (the preload bridge is
 // present). The "open in new window" affordance is desktop-only.
 export function canOpenSessionWindow(): boolean {
-  return typeof window !== 'undefined' && typeof window.hermesDesktop?.openSessionWindow === 'function'
+  if (typeof window === 'undefined') return false
+  const host = tryResolveHost()
+  return host?.kind === 'browser' || (host?.capabilities.nativeWindows === true && typeof window.hermesDesktop?.openSessionWindow === 'function')
 }
 
 // True when the shell can open a full peer app window (⌘⇧N / "New Window").
 export function canOpenNewWindow(): boolean {
-  return typeof window !== 'undefined' && typeof window.hermesDesktop?.openWindow === 'function'
+  const host = tryResolveHost()
+  return host?.capabilities.nativeWindows === true && typeof window.hermesDesktop?.openWindow === 'function'
 }
 
 // True when the shell can hand a session to the user's own terminal emulator.
 // Desktop-only, and a REMOTE connection is excluded by the caller: the terminal
 // we'd open is on this machine, but the session lives on the remote host.
 export function canOpenSessionInTerminal(): boolean {
-  return typeof window !== 'undefined' && typeof window.hermesDesktop?.openSessionInTerminal === 'function'
+  const host = tryResolveHost()
+  return host?.capabilities.nativeWindows === true && typeof window.hermesDesktop?.openSessionInTerminal === 'function'
 }
 
 type WindowOpenResult = { ok: boolean; error?: string } | undefined
@@ -138,6 +144,14 @@ async function runWindowOpen(call: () => Promise<WindowOpenResult>, failMessage:
 // `watch: true` opens a spectator window (lazy resume, live-mirror stream).
 export async function openSessionInNewWindow(sessionId: string, opts?: { watch?: boolean }): Promise<void> {
   if (!sessionId || !canOpenSessionWindow()) {
+    return
+  }
+
+  const host = tryResolveHost()
+  if (host?.kind === 'browser') {
+    const query = opts?.watch ? '?watch=1' : ''
+    const opened = window.open(`/desktop/session/${encodeURIComponent(sessionId)}${query}`, '_blank', 'noopener,noreferrer')
+    if (opened) opened.opener = null
     return
   }
 

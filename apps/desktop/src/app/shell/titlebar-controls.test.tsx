@@ -314,6 +314,7 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
+      'Notifications',
       'Codex usage unavailable',
       'New project',
       'Show terminal',
@@ -332,7 +333,7 @@ describe('TitlebarControls', () => {
     const controlsToolbar = screen.getByRole('toolbar', { name: 'More controls' })
     expect(within(controlsToolbar).getByRole('button', { name: 'Mute haptics' })).toBeTruthy()
     expect(within(controlsToolbar).getByRole('button', { name: 'Layout editor' })).toBeTruthy()
-    expect(within(controlsToolbar).getByRole('button', { name: 'HUD mode' })).toBeTruthy()
+    expect(within(controlsToolbar).queryByRole('button', { name: 'HUD mode' })).toBeNull()
     fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Views' }), { key: 'ArrowRight' })
 
     expect(screen.queryByRole('menuitem', { name: 'Command Center' })).toBeNull()
@@ -395,6 +396,7 @@ describe('TitlebarControls', () => {
       'Hide sidebar',
       'More app actions',
       'Profiles',
+      'Notifications',
       'Codex usage unavailable',
       'New project',
       'Show terminal',

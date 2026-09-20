@@ -13,6 +13,7 @@ import { translateNow, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
 import { IS_MAC } from '@/lib/keybinds/combo'
 import { cn } from '@/lib/utils'
+import { hostSupports } from '@/platform/host'
 import {
   $fileActionDialog,
   beginInlineRename,
@@ -56,9 +57,11 @@ interface FileEntryContextMenuProps {
 export function FileEntryContextMenu({ children, isDirectory, name, path, relativeTo }: FileEntryContextMenuProps) {
   const { t } = useI18n()
   const m = t.fileMenu
-  // Reveal / rename / delete need the local filesystem; hide them on a remote
-  // backend (copy-path still works everywhere).
+  // Reveal is native-host-only. Rename/delete are still useful through a
+  // browser backend's authenticated filesystem API.
   const localFs = !isDesktopFsRemoteMode()
+  const canReveal = hostSupports('revealHostPath')
+  const canMutate = localFs || hostSupports('backendFiles')
   const target: FileActionTarget = { isDirectory, name, path }
   const revealLabel = pickRevealLabel(m.revealFinder, m.revealExplorer, m.revealFileManager)
 
@@ -68,7 +71,7 @@ export function FileEntryContextMenu({ children, isDirectory, name, path, relati
       {/* Don't restore focus to the row on close: "Rename" mounts an autofocused
           inline input, and the default focus-return would blur it immediately. */}
       <ContextMenuContent onCloseAutoFocus={event => event.preventDefault()}>
-        {localFs && (
+        {canReveal && (
           <>
             <ContextMenuItem onSelect={() => void revealFile(path)}>{revealLabel}</ContextMenuItem>
             <ContextMenuSeparator />
@@ -80,7 +83,7 @@ export function FileEntryContextMenu({ children, isDirectory, name, path, relati
             {m.copyRelativePath}
           </ContextMenuItem>
         )}
-        {localFs && (
+        {canMutate && (
           <>
             <ContextMenuSeparator />
             <ContextMenuItem onSelect={() => beginInlineRename(path)}>{m.rename}</ContextMenuItem>

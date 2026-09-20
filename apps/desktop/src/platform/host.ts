@@ -19,6 +19,10 @@ export function tryResolveHost(): HermesHost | null {
   return null
 }
 
+export function hostSupports(capability: keyof HermesHost['capabilities']): boolean {
+  return tryResolveHost()?.capabilities[capability] === true
+}
+
 export function resolveHost(): HermesHost {
   const host = tryResolveHost()
 

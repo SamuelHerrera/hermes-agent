@@ -25,6 +25,7 @@ import { $petOverlayActive, initPetOverlayBridge, popOutPet, restorePetOverlay }
 import { $gatewayState } from '@/store/session'
 import { isSecondaryWindow } from '@/store/windows'
 import { useTheme } from '@/themes/context'
+import { hostSupports } from '@/platform/host'
 
 import { PetSprite, roamWalkRow } from './pet-sprite'
 import { usePetRoam } from './use-pet-roam'
@@ -102,7 +103,8 @@ export function FloatingPet() {
   const info = useStore($petInfo)
   const changeEventsAvailable = useStore($changeEventsAvailable)
   const petChange = useStore($petChange)
-  const overlayActive = useStore($petOverlayActive)
+  const nativePetPopout = hostSupports('nativeWindows')
+  const overlayActive = useStore($petOverlayActive) && nativePetPopout
   const roamEnabled = useStore($petRoam)
   const atRest = useStore($petAtRest)
   const roamDir = useStore($petRoamDir)
@@ -246,12 +248,12 @@ export function FloatingPet() {
   // pop-out overlay belongs to it (main.ts positions it against the main
   // window and routes control messages back to it).
   useEffect(() => {
-    if (isSecondaryWindow()) {
+    if (isSecondaryWindow() || !nativePetPopout) {
       return
     }
 
     return initPetOverlayBridge()
-  }, [])
+  }, [nativePetPopout])
 
   // Returning to the app (by any route, not just the mail icon) clears the pet's
   // "new message" hint — you've seen it now.
@@ -271,13 +273,13 @@ export function FloatingPet() {
   const restoredRef = useRef(false)
   // eslint-disable-next-line no-restricted-syntax -- legitimate non-atom ref write (see eslint rule comment)
   useEffect(() => {
-    if (isSecondaryWindow() || restoredRef.current || !active) {
+    if (isSecondaryWindow() || !nativePetPopout || restoredRef.current || !active) {
       return
     }
 
     restoredRef.current = true
     restorePetOverlay()
-  }, [active])
+  }, [active, nativePetPopout])
 
   // Never strand or crop the pet: re-clamp (and persist) whenever the viewport
   // shrinks or the pet's own size changes (wheel/slider). `clamp` carries the
@@ -315,7 +317,7 @@ export function FloatingPet() {
     // leave the window and stays visible while Hermes is minimized) instead of
     // starting an in-window drag. Primary window only — the overlay is anchored
     // to it.
-    if (e.shiftKey && !isSecondaryWindow()) {
+    if (e.shiftKey && nativePetPopout && !isSecondaryWindow()) {
       popOutPet({ height: rect.height, width: rect.width, x: rect.left, y: rect.top })
 
       return
@@ -324,7 +326,7 @@ export function FloatingPet() {
     dragRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, x: rect.left, y: rect.top }
     el.setPointerCapture(e.pointerId)
     el.style.cursor = 'grabbing'
-  }, [])
+  }, [nativePetPopout])
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {

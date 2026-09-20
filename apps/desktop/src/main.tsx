@@ -33,6 +33,13 @@ import { ThemeProvider } from './themes/context'
 resolveHost()
 installClipboardShim()
 
+// A browser pop-out uses a backend-owned, refresh-safe URL. HashRouter still
+// owns renderer routing, so translate that entry path before React mounts.
+const browserSessionEntry = window.location.pathname.match(/^\/desktop\/session\/([^/]+)$/)
+if (browserSessionEntry && !window.location.hash) {
+  window.location.hash = `#/session/${browserSessionEntry[1]}`
+}
+
 // The perf probe ships in dev, and in a production build ONLY when explicitly
 // opted in (VITE_PERF_PROBE=1) — this lets the perf harness measure a real,
 // minified production renderer for representative absolute numbers. Normal

@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { useI18n } from '@/i18n'
+import { hostSupports } from '@/platform/host'
 import { $panesFlipped, dismissAutoProject, revealFileInTree } from '@/store/layout'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import {
@@ -149,13 +150,15 @@ function useProjectActions({
       label: t.keybinds.actions['view.newTerminal'],
       onSelect: () => openProjectTerminal(project, homePath)
     },
-    {
-      disabled: !actionPath,
-      icon: 'folder-opened',
-      key: 'reveal',
-      label: p.reveal,
-      onSelect: () => void revealPath(actionPath)
-    },
+    ...(hostSupports('revealHostPath')
+      ? [{
+          disabled: !actionPath,
+          icon: 'folder-opened',
+          key: 'reveal',
+          label: p.reveal,
+          onSelect: () => void revealPath(actionPath)
+        }]
+      : []),
     {
       disabled: !actionPath,
       icon: 'list-tree',
