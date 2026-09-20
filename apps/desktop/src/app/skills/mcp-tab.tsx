@@ -1703,7 +1703,6 @@ function McpRow({
         </span>
       </button>
       <ServerIconActions
-        className="opacity-0 transition-opacity focus-within:opacity-100 group-hover/row:opacity-100"
         onProbe={onProbe}
         onRemove={onRemove}
         probing={status === 'probing'}

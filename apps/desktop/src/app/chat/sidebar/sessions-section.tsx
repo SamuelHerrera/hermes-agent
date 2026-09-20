@@ -126,7 +126,7 @@ function SidebarSectionHeader({
           {labelBody}
           {inlineCaret && (
             <DisclosureCaret
-              className="text-(--ui-text-tertiary) opacity-0 transition group-hover/section-label:opacity-100"
+              className="text-(--ui-text-tertiary)"
               open={open}
             />
           )}

@@ -132,7 +132,7 @@ export function ArtifactCard({ code, detection, streaming = false }: ArtifactCar
         </span>
       </span>
       {!streaming && (
-        <span className="shrink-0 text-[length:var(--conversation-tool-font-size)] font-medium text-muted-foreground opacity-0 transition-opacity group-hover/artifact:opacity-100">
+        <span className="shrink-0 text-[length:var(--conversation-tool-font-size)] font-medium text-muted-foreground">
           {copy.open}
         </span>
       )}

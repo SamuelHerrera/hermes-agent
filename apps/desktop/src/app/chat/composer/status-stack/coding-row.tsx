@@ -477,10 +477,7 @@ export const CodingStatusRow = memo(function CodingStatusRow({
               </div>
             )}
 
-            {/* Branch actions kebab — same pattern as the session/worktree rows.
-                ALWAYS laid out; only its opacity flips on hover/focus/open, so
-                revealing it never reflows the row (no layout shift). pointer-events
-                follow opacity so the invisible trigger isn't clickable at rest. */}
+            {/* Branch actions kebab stays visible like other Desktop row menus. */}
             {onBranchOff && (
               <ActionsMenu
                 align="end"
@@ -492,7 +489,7 @@ export const CodingStatusRow = memo(function CodingStatusRow({
               >
                 <Button
                   aria-label={s.newBranch}
-                  className="pointer-events-none size-4 shrink-0 text-muted-foreground/60 opacity-0 transition hover:text-foreground group-hover/status-row:pointer-events-auto group-hover/status-row:opacity-100 group-focus-within/status-row:pointer-events-auto group-focus-within/status-row:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:opacity-100"
+                  className="size-4 shrink-0 text-muted-foreground/60 transition-colors hover:text-foreground data-[state=open]:text-foreground"
                   size="icon-xs"
                   variant="ghost"
                 >

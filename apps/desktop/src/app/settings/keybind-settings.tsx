@@ -181,7 +181,7 @@ function CategoryHeader({ label, onToggle, open }: { label: string; onToggle: ()
         {label}
       </span>
       <DisclosureCaret
-        className="text-(--ui-text-tertiary) opacity-0 transition group-hover/kbd-cat:opacity-100"
+        className="text-(--ui-text-tertiary)"
         open={open}
         size="0.6875rem"
       />
@@ -243,7 +243,7 @@ function KeybindRow({ action }: { action: KeybindActionMeta }) {
         <Tip label={k.reset}>
           <button
             aria-label={k.reset}
-            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/70 opacity-0 transition-all hover:bg-(--ui-control-active-background) hover:text-foreground group-hover:opacity-100"
+            className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-(--ui-control-active-background) hover:text-foreground"
             onClick={() => resetBinding(action.id)}
             type="button"
           >

@@ -681,7 +681,7 @@ function Column({
         <Tip label={columnHelp(k, column.name)}>
           <button
             aria-label={k.collapse(label)}
-            className="grid size-5 place-items-center rounded text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100 group-hover/col:opacity-100"
+            className="grid size-5 place-items-center rounded text-(--ui-text-tertiary) transition-colors hover:bg-(--chrome-action-hover) hover:text-foreground"
             onClick={onToggle}
             type="button"
           >
@@ -726,13 +726,11 @@ function Column({
                 timeDisplay={timeDisplay}
               />
             ))}
-        {/* Jira-style lane add — dashed, faded in on lane hover. Opacity (not
-            display) so it always holds its slot and never thrashes layout.
-            Locked lanes get none: you can't create into a system state. */}
+        {/* Jira-style lane add. Locked lanes get none: you can't create into a system state. */}
         {!locked && (
           <button
             aria-label={k.newTaskIn(label)}
-            className="flex shrink-0 items-center justify-center rounded-md border border-dashed border-(--ui-stroke-secondary) py-1.5 text-(--ui-text-tertiary) opacity-0 transition-[opacity,color,border-color] group-hover/col:opacity-100 hover:border-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground focus-visible:opacity-100"
+            className="flex shrink-0 items-center justify-center rounded-md border border-dashed border-(--ui-stroke-secondary) py-1.5 text-(--ui-text-tertiary) transition-[color,border-color] hover:border-(--ui-text-quaternary) hover:bg-(--chrome-action-hover) hover:text-foreground"
             onClick={() => onAdd(column.name)}
             type="button"
           >

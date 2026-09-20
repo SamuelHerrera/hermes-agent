@@ -12,8 +12,9 @@ interface StatusRowProps {
    *  (e.g. ⌘/Ctrl-click). Trailing-slot buttons should `stopPropagation` so
    *  they don't also fire it. */
   onActivate?: (event: KeyboardEvent | MouseEvent) => void
-  /** Right-aligned actions. Revealed on row hover/focus unless `trailingVisible`. */
+  /** Right-aligned actions. Always visible; hover only emphasizes them. */
   trailing?: ReactNode
+  /** @deprecated Actions are always visible across Desktop menus and rows. */
   trailingVisible?: boolean
   /** Forwarded to the row's root — lets a wrapper (e.g. a context-menu trigger
    *  using `asChild`) attach `ref` / `onContextMenu` to the real DOM node. */
@@ -24,7 +25,7 @@ interface StatusRowProps {
 /**
  * Shared row chrome for everything in the composer status stack — status items
  * (subagents, background) AND queued prompts. Fixed height, a leading glyph
- * slot, flexible content, and a trailing actions slot that reveals on hover.
+ * slot, flexible content, and an always-visible trailing actions slot.
  * Hover background matches the session sidebar. Consumers fill the three slots;
  * they never re-implement the row container.
  */
@@ -36,7 +37,7 @@ export function StatusRow({
   onContextMenu,
   ref,
   trailing,
-  trailingVisible = false
+  trailingVisible: _trailingVisible = false
 }: StatusRowProps) {
   return (
     <div
@@ -65,12 +66,7 @@ export function StatusRow({
       {leading !== undefined && <span className="flex size-3.5 shrink-0 items-center justify-center">{leading}</span>}
       <div className="flex min-w-0 flex-1 items-center gap-2">{children}</div>
       {trailing && (
-        <div
-          className={cn(
-            'flex shrink-0 items-center gap-0.5',
-            !trailingVisible && 'opacity-0 group-hover/status-row:opacity-100 group-focus-within/status-row:opacity-100'
-          )}
-        >
+        <div className="flex shrink-0 items-center gap-0.5" data-action-visibility="always">
           {trailing}
         </div>
       )}

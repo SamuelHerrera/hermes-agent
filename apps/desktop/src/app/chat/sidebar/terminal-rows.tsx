@@ -94,7 +94,7 @@ function TerminalSidebarRow({ terminal, branchStem }: { terminal: TerminalEntry;
           <Codicon name="trash" size="0.75rem" />
         </Button>
       }
-      actionsClassName="opacity-0 group-hover/terminal:opacity-100 group-focus-within/terminal:opacity-100"
+      actionsClassName="opacity-100"
       className={cn('group/terminal row-hover relative', selected && 'bg-(--ui-row-active-background)')}
       data-sidebar-terminal={terminal.id}
     >

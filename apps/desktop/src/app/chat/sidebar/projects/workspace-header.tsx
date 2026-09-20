@@ -219,7 +219,7 @@ export function WorkspaceHeader({
         <SidebarRowLead>{icon}</SidebarRowLead>
         <LaneLabel label={label} title={title ? `${label}\n${title}` : label} />
         <DisclosureCaret
-          className="shrink-0 text-(--ui-text-tertiary) opacity-0 transition group-hover/workspace:opacity-100"
+          className="shrink-0 text-(--ui-text-tertiary)"
           open={open}
         />
       </button>

@@ -145,7 +145,7 @@ export function SidebarCronJobsSection({
         >
           <SidebarPanelLabel>{label}</SidebarPanelLabel>
           <DisclosureCaret
-            className="text-(--ui-text-tertiary) opacity-0 transition group-hover/section-label:opacity-100"
+            className="text-(--ui-text-tertiary)"
             open={open}
           />
         </button>
@@ -282,20 +282,17 @@ function CronJobSidebarRow({
                 {label}
               </span>
               <DisclosureCaret
-                className={cn(
-                  'shrink-0 text-(--ui-text-tertiary) transition',
-                  expanded ? 'opacity-100' : 'opacity-0 group-hover/cron:opacity-100'
-                )}
+                className="shrink-0 text-(--ui-text-tertiary) transition"
                 open={expanded}
               />
             </button>
           </Tip>
-          {/* Trailing cluster: countdown by default, quick actions on hover. */}
+          {/* Keep status and quick actions visible; hover only emphasizes buttons. */}
           <div className="flex items-center gap-0.5 justify-self-end pr-1">
-            <span className="text-[0.6875rem] text-(--ui-text-tertiary) tabular-nums group-hover/cron:hidden">
+            <span className="text-[0.6875rem] text-(--ui-text-tertiary) tabular-nums">
               {meta}
             </span>
-            <div className="hidden items-center gap-0.5 group-hover/cron:flex">
+            <div className="flex items-center gap-0.5" data-action-visibility="always">
               <Tip label={c.triggerNow}>
                 <button
                   aria-label={c.triggerNow}

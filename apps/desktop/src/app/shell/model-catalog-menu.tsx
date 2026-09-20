@@ -374,7 +374,7 @@ export function ModelCatalogMenu({
                     <HighlightMatches query={search} text={group.provider.name} />
                   </span>
                   <DisclosureCaret
-                    className="shrink-0 text-(--ui-text-tertiary) opacity-0 transition group-hover/label:opacity-100"
+                    className="shrink-0 text-(--ui-text-tertiary)"
                     open={!collapsed}
                     size="0.625rem"
                   />

@@ -99,6 +99,9 @@ describe('ComposerStatusStack goal indicator', () => {
     vi.spyOn($gateway, 'get').mockReturnValue({ request } as unknown as ReturnType<typeof $gateway.get>)
 
     renderStack()
+    expect(
+      screen.getByRole('button', { name: 'Pause' }).closest('[data-action-visibility]')?.getAttribute('data-action-visibility')
+    ).toBe('always')
     fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
 
     await waitFor(() => expect($goalsBySession.get()[SID]?.status).toBe('paused'))

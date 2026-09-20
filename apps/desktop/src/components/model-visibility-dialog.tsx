@@ -130,7 +130,7 @@ export function ModelVisibilityDialog({
                         <HighlightMatches query={search} text={provider.name} />
                       </span>
                       <DisclosureCaret
-                        className="shrink-0 opacity-0 transition group-hover/label:opacity-100"
+                        className="shrink-0"
                         open={!collapsed}
                         size="0.625rem"
                       />

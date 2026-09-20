@@ -622,7 +622,7 @@ const LocationCell = memo(function LocationCell({ artifact }: { artifact: Artifa
       <CopyButton
         appearance="icon"
         buttonSize="icon-xs"
-        className="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/location:opacity-100"
+        className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
         iconClassName="size-3.5"
         label={copyLabel}
         text={artifact.value}

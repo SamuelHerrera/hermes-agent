@@ -23,6 +23,7 @@ describe('PanelRowMenu', () => {
     const trigger = screen.getByRole('button', { name: 'Actions' })
 
     expect(trigger.closest('[data-slot="tooltip-trigger"]')).toBeNull()
+    expect(trigger.dataset.actionVisibility).toBe('always')
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))

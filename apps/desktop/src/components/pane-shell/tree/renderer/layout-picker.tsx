@@ -94,9 +94,8 @@ function PresetCard({ preset }: { preset: Contribution }) {
       {isUserPreset(preset.id) && (
         <button
           aria-label={t.zones.deletePreset(preset.title ?? preset.id)}
-          // Hover-reveal (opacity, not display) — stays laid out + clickable,
-          // appears on card hover or keyboard focus.
-          className="absolute right-1 top-1 z-10 grid size-5 place-items-center rounded-md bg-(--ui-bg-elevated) text-(--ui-text-tertiary) opacity-0 transition-opacity hover:bg-(--ui-control-hover-background) hover:text-foreground focus-visible:opacity-100 group-hover/preset:opacity-100"
+          // Keep destructive preset actions visible; hover only emphasizes them.
+          className="absolute right-1 top-1 z-10 grid size-5 place-items-center rounded-md bg-(--ui-bg-elevated) text-(--ui-text-tertiary) transition-colors hover:bg-(--ui-control-hover-background) hover:text-foreground"
           onClick={() => deleteUserPreset(preset.id)}
           onPointerDown={e => e.stopPropagation()}
           type="button"

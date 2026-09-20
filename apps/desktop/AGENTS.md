@@ -27,6 +27,11 @@ native power arrives through a deliberate capability, not a general escape hatch
 Agent behavior lives behind the gateway, never reimplemented in React. When a
 change blurs a seam, that is the smell — fix the seam, don't widen it.
 
+Primary actions in menus, navigation rows, status rows, cards, and settings
+remain visible at rest. Hover and focus may emphasize an action, but must not be
+required to discover that it exists. Contextual overlays on content (for example
+image zoom controls or resize handles) may still reveal on interaction.
+
 Shared renderer code must resolve `HermesHost` and its explicit capabilities.
 Browser code must never fall back to Electron IPC when a backend capability is
 missing or a transport fails. Browser-owned permission APIs stay client-side;
