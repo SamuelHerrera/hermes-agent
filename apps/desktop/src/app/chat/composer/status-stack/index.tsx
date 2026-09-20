@@ -23,7 +23,8 @@ import {
   type StatusGroup,
   stopBackgroundProcess
 } from '@/store/composer-status'
-import { refreshSessionGoal } from '@/store/goals'
+import { controlSessionGoal, type GoalControlAction, refreshSessionGoal } from '@/store/goals'
+import { notifyError } from '@/store/notifications'
 import { $previewStatusBySession, dismissPreviewArtifact } from '@/store/preview-status'
 import { $threadScrollByKey, threadScrollStateFor } from '@/store/thread-scroll'
 import { openSessionInNewWindow } from '@/store/windows'
@@ -70,6 +71,8 @@ const groupLabel = (group: StatusGroup, s: Translations['statusStack']) => {
 }
 
 interface ComposerStatusStackProps {
+  /** Put the current goal back into the composer as an editable /goal command. */
+  onEditGoal?: (title: string) => void
   /** The queue, built by the composer (it owns the queue's callbacks). Rendered
    *  as the last group so it stays fused to the composer like before. */
   queue: ReactNode
@@ -82,7 +85,7 @@ interface ComposerStatusStackProps {
  * every session-scoped status — subagents, background tasks, queue — grouped by
  * type and separated by light dividers. Collapses to nothing when empty.
  */
-export function ComposerStatusStack({ queue, sessionId, threadScrollKey = null }: ComposerStatusStackProps) {
+export function ComposerStatusStack({ onEditGoal, queue, sessionId, threadScrollKey = null }: ComposerStatusStackProps) {
   const { t } = useI18n()
   const navigate = useNavigate()
   // Subscribe to THIS session's slice only. Both maps churn on other
@@ -93,10 +96,12 @@ export function ComposerStatusStack({ queue, sessionId, threadScrollKey = null }
   // items actually changed.
   const items = useSessionSlice($statusItemsBySession, sessionId)
   const previews = useSessionSlice($previewStatusBySession, sessionId)
+
   const scrolledUp = useStoreSelector(
     $threadScrollByKey,
     states => threadScrollStateFor(states, threadScrollKey).scrolledUp
   )
+
   const billing = useStore($billingBlock)
 
   const groups = useMemo(() => groupStatusItems(items), [items])
@@ -130,6 +135,14 @@ export function ComposerStatusStack({ queue, sessionId, threadScrollKey = null }
 
   const openSubagent = (item: ComposerStatusItem) =>
     item.sessionId ? void openSessionInNewWindow(item.sessionId, { watch: true }) : openAgents()
+
+  const controlGoal = (action: GoalControlAction) => {
+    if (!sessionId) {
+      return
+    }
+
+    void controlSessionGoal(sessionId, action).catch(err => notifyError(err, 'Could not update goal'))
+  }
 
   // Preview links live as child rows of the background group — a localhost dev
   // server and its preview are the same thing — so they no longer float as an
@@ -183,6 +196,8 @@ export function ComposerStatusStack({ queue, sessionId, threadScrollKey = null }
               item={item}
               key={item.id}
               onDismiss={sessionId ? id => dismissBackgroundProcess(sessionId, id) : undefined}
+              onEditGoal={item.type === 'goal' ? onEditGoal : undefined}
+              onGoalAction={item.type === 'goal' ? controlGoal : undefined}
               onOpen={() => openSubagent(item)}
               onStop={sessionId ? id => void stopBackgroundProcess(sessionId, id) : undefined}
             />

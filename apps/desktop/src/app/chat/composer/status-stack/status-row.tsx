@@ -11,6 +11,7 @@ import { capitalize } from '@/lib/text'
 import type { TodoStatus } from '@/lib/todos'
 import { cn } from '@/lib/utils'
 import type { ComposerStatusItem } from '@/store/composer-status'
+import type { GoalControlAction } from '@/store/goals'
 
 const toolLabel = (name: string) => name.split('_').filter(Boolean).map(capitalize).join(' ') || name
 
@@ -85,6 +86,10 @@ interface StatusItemRowProps {
   onOpen?: () => void
   /** Cancel a running background task. */
   onStop?: (id: string) => void
+  /** Load the standing goal into the composer for revision. */
+  onEditGoal?: (title: string) => void
+  /** Mutate the durable standing goal through the backend. */
+  onGoalAction?: (action: GoalControlAction) => void
 }
 
 /**
@@ -92,7 +97,14 @@ interface StatusItemRowProps {
  * Memoised + keyed by id so parent re-renders never remount it (the spinner
  * keeps ticking instead of resetting).
  */
-export const StatusItemRow = memo(function StatusItemRow({ item, onDismiss, onOpen, onStop }: StatusItemRowProps) {
+export const StatusItemRow = memo(function StatusItemRow({
+  item,
+  onDismiss,
+  onEditGoal,
+  onGoalAction,
+  onOpen,
+  onStop
+}: StatusItemRowProps) {
   const { t } = useI18n()
   const s = t.statusStack
   const failed = item.state === 'failed'
@@ -107,6 +119,10 @@ export const StatusItemRow = memo(function StatusItemRow({ item, onDismiss, onOp
 
   const canOpen = item.type === 'subagent' && !!onOpen
 
+  const goalToggle = item.goalStatus === 'paused'
+    ? { action: 'resume' as const, icon: 'play', label: s.resume }
+    : { action: 'pause' as const, icon: 'debug-pause', label: s.pause }
+
   // Background rows link to their read-only terminal tab; subagents open their session.
   const onActivate =
     item.type === 'background' ? () => openAgentTerminal(item.id, item.title) : canOpen ? onOpen : undefined
@@ -117,7 +133,46 @@ export const StatusItemRow = memo(function StatusItemRow({ item, onDismiss, onOp
         leading={leadingGlyph(item, s)}
         onActivate={onActivate}
         trailing={
-          action ? (
+          item.type === 'goal' && item.goalStatus !== 'done' ? (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <Tip label={goalToggle.label}>
+                <Button
+                  aria-label={goalToggle.label}
+                  className="size-5 rounded-md text-muted-foreground/60 hover:text-foreground/90"
+                  onClick={() => onGoalAction?.(goalToggle.action)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Codicon name={goalToggle.icon} size="0.75rem" />
+                </Button>
+              </Tip>
+              <Tip label={s.edit}>
+                <Button
+                  aria-label={s.edit}
+                  className="size-5 rounded-md text-muted-foreground/60 hover:text-foreground/90"
+                  onClick={() => onEditGoal?.(item.title)}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Codicon name="edit" size="0.75rem" />
+                </Button>
+              </Tip>
+              <Tip label={s.stop}>
+                <Button
+                  aria-label={s.stop}
+                  className="size-5 rounded-md text-muted-foreground/60 hover:text-destructive/90"
+                  onClick={() => onGoalAction?.('clear')}
+                  size="icon-xs"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Codicon name="debug-stop" size="0.75rem" />
+                </Button>
+              </Tip>
+            </div>
+          ) : action ? (
             <Tip label={action.label}>
               <Button
                 aria-label={action.label}

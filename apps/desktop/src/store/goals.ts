@@ -3,6 +3,7 @@ import { atom } from 'nanostores'
 import { $gateway } from './gateway'
 
 export type GoalStatus = 'active' | 'done' | 'paused' | 'waiting'
+export type GoalControlAction = 'clear' | 'pause' | 'resume'
 
 export interface SessionGoal {
   detail?: string
@@ -180,4 +181,24 @@ export async function refreshSessionGoal(sid: string): Promise<void> {
   } catch {
     // Best-effort: older gateways or detached sessions simply won't hydrate it.
   }
+}
+
+export async function controlSessionGoal(sid: string, action: GoalControlAction): Promise<void> {
+  const gateway = $gateway.get()
+
+  if (!sid || !gateway) {
+    throw new Error('Hermes gateway is not connected')
+  }
+
+  const result = await gateway.request<{ output?: string }>('command.dispatch', {
+    name: 'goal', arg: action, session_id: sid
+  })
+
+  const output = result?.output ?? ''
+
+  if (!output) {
+    throw new Error(`Goal ${action} returned no status`)
+  }
+
+  applyGoalStatusText(sid, output)
 }

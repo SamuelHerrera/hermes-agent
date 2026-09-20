@@ -1,8 +1,9 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { I18nProvider } from '@/i18n'
+import { $gateway } from '@/store/gateway'
 import { $goalsBySession, type SessionGoal } from '@/store/goals'
 
 import { ComposerStatusStack } from './index'
@@ -25,11 +26,11 @@ const goal = (status: SessionGoal['status'], title = 'ship the feature', detail?
   updatedAt: Date.now()
 })
 
-function renderStack(sessionId: null | string = SID) {
+function renderStack(sessionId: null | string = SID, onEditGoal?: (title: string) => void) {
   return render(
     <MemoryRouter>
       <I18nProvider configClient={null} initialLocale="en">
-        <ComposerStatusStack queue={null} sessionId={sessionId} />
+        <ComposerStatusStack onEditGoal={onEditGoal} queue={null} sessionId={sessionId} />
       </I18nProvider>
     </MemoryRouter>
   )
@@ -42,6 +43,7 @@ describe('ComposerStatusStack goal indicator', () => {
 
   afterEach(() => {
     cleanup()
+    vi.restoreAllMocks()
     $goalsBySession.set({})
   })
 
@@ -83,5 +85,50 @@ describe('ComposerStatusStack goal indicator', () => {
     const view = renderStack()
 
     expect(view.container.firstChild).toBeNull()
+  })
+
+  it('pauses and resumes the goal from its row controls', async () => {
+    $goalsBySession.set({ [SID]: goal('active') })
+
+    const request = vi.fn().mockImplementation((_method, params) =>
+      Promise.resolve({
+        output: params.arg === 'pause' ? '⏸ Goal paused: ship the feature' : '▶ Goal resumed: ship the feature'
+      })
+    )
+
+    vi.spyOn($gateway, 'get').mockReturnValue({ request } as unknown as ReturnType<typeof $gateway.get>)
+
+    renderStack()
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+
+    await waitFor(() => expect($goalsBySession.get()[SID]?.status).toBe('paused'))
+    expect(request).toHaveBeenCalledWith('command.dispatch', { name: 'goal', arg: 'pause', session_id: SID })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+
+    await waitFor(() => expect($goalsBySession.get()[SID]?.status).toBe('active'))
+    expect(request).toHaveBeenCalledWith('command.dispatch', { name: 'goal', arg: 'resume', session_id: SID })
+  })
+
+  it('clears the goal from its stop control', async () => {
+    $goalsBySession.set({ [SID]: goal('paused') })
+    const request = vi.fn().mockResolvedValue({ output: '✓ Goal cleared.' })
+    vi.spyOn($gateway, 'get').mockReturnValue({ request } as unknown as ReturnType<typeof $gateway.get>)
+
+    renderStack()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+
+    await waitFor(() => expect($goalsBySession.get()[SID]).toBeUndefined())
+    expect(request).toHaveBeenCalledWith('command.dispatch', { name: 'goal', arg: 'clear', session_id: SID })
+  })
+
+  it('loads the current goal into the composer for editing', () => {
+    $goalsBySession.set({ [SID]: goal('paused') })
+    const onEditGoal = vi.fn()
+
+    renderStack(SID, onEditGoal)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+
+    expect(onEditGoal).toHaveBeenCalledWith('ship the feature')
   })
 })
