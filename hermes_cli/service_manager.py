@@ -219,6 +219,10 @@ class SystemdServiceManager(_RegistrationUnsupportedMixin):
         systemd_stop()
 
     def restart(self, name: str) -> None:
+        if name == "ai.hermes.serve":
+            import subprocess
+            subprocess.run(["systemctl", "--user", "restart", "ai.hermes.serve.service"], check=True)
+            return
         from hermes_cli.gateway import systemd_restart
         systemd_restart()
 
@@ -242,6 +246,14 @@ class LaunchdServiceManager(_RegistrationUnsupportedMixin):
         launchd_stop()
 
     def restart(self, name: str) -> None:
+        if name == "ai.hermes.serve":
+            import os
+            import subprocess
+            subprocess.run(
+                ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/ai.hermes.serve"],
+                check=True,
+            )
+            return
         from hermes_cli.gateway import launchd_restart
         launchd_restart()
 
@@ -289,6 +301,11 @@ class WindowsServiceManager(_RegistrationUnsupportedMixin):
         gateway_windows.stop()
 
     def restart(self, name: str) -> None:
+        if name == "ai.hermes.serve":
+            import subprocess
+            subprocess.run(["schtasks", "/End", "/TN", name], check=False)
+            subprocess.run(["schtasks", "/Run", "/TN", name], check=True)
+            return
         from hermes_cli import gateway_windows
         gateway_windows.restart()
 

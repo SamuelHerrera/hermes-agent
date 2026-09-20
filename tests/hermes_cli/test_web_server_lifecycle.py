@@ -25,9 +25,7 @@ def _client():
 def test_lifecycle_status_is_read_only_and_advertises_authority(monkeypatch):
     manager = FakeManager()
     monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: manager)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_backend_service", "hermes-dashboard", raising=False)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_allow_backend_restart", True, raising=False)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_allow_uninstall", False, raising=False)
+    monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: True)
 
     response = _client().get("/api/lifecycle")
 
@@ -37,15 +35,25 @@ def test_lifecycle_status_is_read_only_and_advertises_authority(monkeypatch):
     assert body["authority"] == {"externally_managed": True, "kind": "systemd"}
     assert body["actions"]["gateway-restart"]["supported"] is True
     assert body["actions"]["backend-restart"]["supported"] is True
-    assert body["actions"]["uninstall"]["supported"] is False
+    assert body["actions"]["uninstall"]["supported"] is True
     assert manager.calls == []
+
+
+def test_lifecycle_derives_production_authority_without_app_state_knobs(monkeypatch):
+    manager = FakeManager()
+    monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: manager)
+    monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: True)
+
+    status = web_server._lifecycle_status()
+
+    assert status["authority"] == {"externally_managed": True, "kind": "systemd"}
+    assert status["actions"]["backend-restart"]["supported"] is True
 
 
 def test_backend_restart_uses_fixed_server_authority_not_request_paths(monkeypatch):
     manager = FakeManager()
     monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: manager)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_backend_service", "hermes-dashboard", raising=False)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_allow_backend_restart", True, raising=False)
+    monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: True)
 
     response = _client().post(
         "/api/lifecycle/action",
@@ -54,14 +62,13 @@ def test_backend_restart_uses_fixed_server_authority_not_request_paths(monkeypat
 
     assert response.status_code == 200
     assert response.json()["relaunch"] is False
-    assert manager.calls == [("restart", "hermes-dashboard")]
+    assert manager.calls == [("restart", "ai.hermes.serve")]
 
 
 def test_uninstall_requires_advertisement_and_exact_confirmation(monkeypatch):
     manager = FakeManager()
     monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: manager)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_backend_service", "hermes-dashboard", raising=False)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_allow_uninstall", True, raising=False)
+    monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: True)
     client = _client()
 
     denied = client.post("/api/lifecycle/action", json={"action": "uninstall"})
@@ -73,12 +80,12 @@ def test_uninstall_requires_advertisement_and_exact_confirmation(monkeypatch):
         json={"action": "uninstall", "confirmation": "UNINSTALL"},
     )
     assert accepted.status_code == 200
-    assert manager.calls == [("uninstall", "hermes-dashboard")]
+    assert manager.calls == [("uninstall", "ai.hermes.serve")]
 
 
 def test_lifecycle_fails_closed_without_external_manager(monkeypatch):
     monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: None)
-    monkeypatch.setattr(web_server.app.state, "lifecycle_backend_service", None, raising=False)
+    monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: False)
     client = _client()
 
     status = client.get("/api/lifecycle").json()

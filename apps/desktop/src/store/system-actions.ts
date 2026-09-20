@@ -2,6 +2,8 @@ import { atom } from 'nanostores'
 
 import { getActionStatus, restartGateway } from '@/hermes'
 import { translateNow } from '@/i18n'
+import { runBrowserLifecycleAction } from '@/platform/browser-lifecycle'
+import { tryResolveHost } from '@/platform/host'
 import { notifyError } from '@/store/notifications'
 import type { ActionResponse } from '@/types/hermes'
 
@@ -39,7 +41,10 @@ export async function runGatewayRestart(): Promise<void> {
   $gatewayRestarting.set(true)
 
   try {
-    await awaitAction(await restartGateway())
+    const host = tryResolveHost()
+
+    if (host?.kind === 'browser') {await runBrowserLifecycleAction('gateway-restart')}
+    else {await awaitAction(await restartGateway())}
   } catch (err) {
     notifyError(err, translateNow('commandCenter.gatewayRestartFailed'))
   } finally {

@@ -11,11 +11,13 @@ const capabilities = {
   browserMicrophone: false,
   browserNotifications: false,
   deepLinkProtocol: false,
+  globalHotkeys: false,
   nativeDialogs: false,
   nativeWindows: false,
   persistentTerminal: false,
   revealHostPath: false,
-  screenWakeLock: false
+  screenWakeLock: false,
+  windowBelow: false
 }
 
 describe('terminal host adapter', () => {

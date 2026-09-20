@@ -58,8 +58,9 @@ describe('canOpenSessionWindow', () => {
       api: vi.fn(),
       capabilities: {
         backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
-        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, nativeDialogs: false,
-        nativeWindows: false, persistentTerminal: true, revealHostPath: false, screenWakeLock: true
+        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, globalHotkeys: false,
+        nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
+        screenWakeLock: true, windowBelow: false
       },
       getConnection: vi.fn(),
       getGatewayWsUrl: vi.fn(),
@@ -104,8 +105,9 @@ describe('openSessionInNewWindow', () => {
       api: vi.fn(),
       capabilities: {
         backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
-        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, nativeDialogs: false,
-        nativeWindows: false, persistentTerminal: true, revealHostPath: false, screenWakeLock: true
+        browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, globalHotkeys: false,
+        nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
+        screenWakeLock: true, windowBelow: false
       },
       getConnection: vi.fn(),
       getGatewayWsUrl: vi.fn(),

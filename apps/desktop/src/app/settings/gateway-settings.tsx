@@ -25,6 +25,8 @@ import {
 import { coerceRemoteUrlScheme } from '@/lib/remote-url'
 import { selectableCardClass } from '@/lib/selectable-card'
 import { cn } from '@/lib/utils'
+import { createBrowserLifecycle, type LifecycleStatus } from '@/platform/browser-lifecycle'
+import { tryResolveHost } from '@/platform/host'
 import { notify, notifyError, readableError } from '@/store/notifications'
 import { $profiles, refreshActiveProfile } from '@/store/profile'
 
@@ -178,6 +180,7 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   const contextSeq = useRef(0)
   const [connectedCloudUrl, setConnectedCloudUrl] = useState('')
   const [localServices, setLocalServices] = useState<LocalServicesStatus | null>(null)
+  const [browserLifecycleStatus, setBrowserLifecycleStatus] = useState<LifecycleStatus | null>(null)
   const [localServiceBusy, setLocalServiceBusy] = useState<LocalServiceAction | null>(null)
 
   const acceptSavedConfig = (config: GatewaySettingsState) => {
@@ -226,19 +229,42 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
     void refreshActiveProfile()
   }, [])
 
-  const showLocalServices = !embedded && scope === null && state.mode === 'local' && Boolean(window.hermesDesktop?.localServices)
-  const localBackendInstalled = localServices?.service.ok === true
+  const host = tryResolveHost()
+
+  const browserLifecycle = useMemo(
+    () => host?.kind === 'browser' && host.capabilities.backendLifecycle ? createBrowserLifecycle(host) : null,
+    [host]
+  )
+
+  const showLocalServices = !embedded && scope === null && (
+    (state.mode === 'local' && Boolean(window.hermesDesktop?.localServices)) || Boolean(browserLifecycle)
+  )
+
+  const localBackendInstalled = browserLifecycleStatus
+    ? browserLifecycleStatus.authority.externally_managed
+    : localServices?.service.ok === true
 
   const localBackendRunning =
     localBackendInstalled &&
-    /(?:state\s*=\s*running|Active:\s+active\s+\(running\)|Status:\s+Running)/i.test(localServices.service.stdout || '')
+    /(?:state\s*=\s*running|Active:\s+active\s+\(running\)|Status:\s+Running)/i.test(localServices?.service.stdout || '')
 
   useEffect(() => {
     let cancelled = false
     const desktop = window.hermesDesktop?.localServices
 
+    if (browserLifecycle) {
+      void browserLifecycle.status().then(status => {
+        if (!cancelled) {setBrowserLifecycleStatus(status)}
+      }).catch(() => {
+        if (!cancelled) {setBrowserLifecycleStatus(null)}
+      })
+
+      return () => void (cancelled = true)
+    }
+
     if (!showLocalServices || !desktop?.status) {
       setLocalServices(null)
+
       return () => void (cancelled = true)
     }
 
@@ -256,16 +282,36 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
       })
 
     return () => void (cancelled = true)
-  }, [showLocalServices])
+  }, [showLocalServices, browserLifecycle])
 
   const runLocalServiceAction = async (action: LocalServiceAction) => {
     const desktop = window.hermesDesktop?.localServices
+
+    if (browserLifecycle && action !== 'install-backend') {
+      setLocalServiceBusy(action)
+
+      try {
+        const lifecycleAction = action === 'restart-backend' ? 'backend-restart' : 'gateway-restart'
+        const completed = await browserLifecycle.runAndReconnect(lifecycleAction)
+        notify({ kind: 'success', title: g.localServicesUpdatedTitle, message: completed.message })
+        setBrowserLifecycleStatus(await browserLifecycle.status())
+      } catch (err) {
+        notifyError(err, g.localServicesFailed)
+      } finally {
+        setLocalServiceBusy(null)
+      }
+
+      return
+    }
+
     if (!desktop) {
       notify({ kind: 'warning', title: g.localServicesUnavailableTitle, message: g.localServicesUnavailableDesc })
+
       return
     }
 
     setLocalServiceBusy(action)
+
     try {
       const result =
         action === 'install-backend'
@@ -279,6 +325,7 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
       }
 
       notify({ kind: 'success', title: g.localServicesUpdatedTitle, message: result.message })
+
       if (desktop.status) {
         setLocalServices(await desktop.status())
       }
@@ -1142,7 +1189,10 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
             {showLocalServices ? (
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 <Button
-                  disabled={localServiceBusy !== null}
+                  disabled={
+                    localServiceBusy !== null ||
+                    browserLifecycleStatus?.actions['backend-restart'].supported === false
+                  }
                   onClick={() => void runLocalServiceAction('restart-backend')}
                   size="sm"
                   variant="outline"
@@ -1151,7 +1201,10 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
                   {g.restartBackend}
                 </Button>
                 <Button
-                  disabled={localServiceBusy !== null}
+                  disabled={
+                    localServiceBusy !== null ||
+                    browserLifecycleStatus?.actions['gateway-restart'].supported === false
+                  }
                   onClick={() => void runLocalServiceAction('restart-gateway')}
                   size="sm"
                   variant="outline"
@@ -1243,10 +1296,12 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
         <div className="mb-5 grid gap-1 rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-quinary) p-3">
           <ListRow
             action={
-              localBackendInstalled ? (
+              localBackendInstalled || browserLifecycle ? (
                 <Pill tone="primary">
                   <Check className="size-3" />
-                  {localBackendRunning ? g.alwaysOnBackendInstalledRunning : g.alwaysOnBackendInstalled}
+                  {localBackendRunning || browserLifecycleStatus?.authority.externally_managed
+                    ? g.alwaysOnBackendInstalledRunning
+                    : g.alwaysOnBackendInstalled}
                 </Pill>
               ) : (
                 <Button
@@ -1261,7 +1316,7 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
               )
             }
             description={g.localServicesDesc(
-              localServices?.descriptor.manager || g.localServicesUnknownManager,
+              browserLifecycleStatus?.authority.kind || localServices?.descriptor.manager || g.localServicesUnknownManager,
               localServices?.descriptor.serviceName || 'ai.hermes.serve'
             )}
             title={g.localServicesTitle}

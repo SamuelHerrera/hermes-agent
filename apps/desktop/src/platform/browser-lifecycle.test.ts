@@ -21,7 +21,8 @@ const capabilities = {
   persistentTerminal: true,
   revealHostPath: false,
   screenWakeLock: true,
-  systemAppearance: true
+  systemAppearance: true,
+  windowBelow: false
 }
 
 function host(api: HermesHost['api']): HermesHost {
@@ -33,6 +34,7 @@ describe('browser lifecycle adapter', () => {
     const api = vi.fn()
       .mockResolvedValueOnce({ version: 1, authority: { externally_managed: false, kind: 'none' }, actions: {} })
       .mockResolvedValueOnce({ ok: true, action: 'gateway-restart', relaunch: false })
+
     const lifecycle = createBrowserLifecycle(host(api))
 
     await lifecycle.status()
@@ -59,6 +61,7 @@ describe('browser lifecycle adapter', () => {
     const api = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))
       .mockResolvedValueOnce({ version: 1, authority: { externally_managed: true, kind: 'systemd' }, actions: {} })
+
     const lifecycle = createBrowserLifecycle(host(api), { delay: async () => {}, attempts: 2 })
 
     const status = await lifecycle.waitUntilAvailable()

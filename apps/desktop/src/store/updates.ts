@@ -16,6 +16,8 @@ import type {
 import { checkHermesUpdate, getActionStatus, updateHermes } from '@/hermes'
 import { translateNow } from '@/i18n'
 import { persistString, storedString } from '@/lib/storage'
+import { runBrowserLifecycleAction } from '@/platform/browser-lifecycle'
+import { tryResolveHost } from '@/platform/host'
 import { dismissNotification, notify } from '@/store/notifications'
 import { $connection } from '@/store/session'
 import type { BackendUpdateCheckResponse } from '@/types/hermes'
@@ -58,6 +60,7 @@ export const $backendUpdateChecking = atom<boolean>(false)
 // accidentally replace the customized fork with the official upstream flow.
 const RUNNING_VITEST = import.meta.env?.MODE === 'test'
 export const UPDATE_UI_DISABLED_FOR_LOCAL_FORK = !RUNNING_VITEST
+
 const FORK_UPDATE_DISABLED_MESSAGE =
   'Updates are disabled for this local fork build. Rebuild and redeploy from fork main manually.'
 
@@ -634,6 +637,17 @@ async function runBackendUpdate(): Promise<DesktopUpdateApplyResult> {
   })
 
   try {
+    if (tryResolveHost()?.kind === 'browser') {
+      $backendUpdateApply.set({
+        ...$backendUpdateApply.get(),
+        stage: 'restart',
+        message: translateNow('updates.applyStatus.restarting')
+      })
+      await runBrowserLifecycleAction('update')
+
+      return finishBackendApply(true)
+    }
+
     const previousStatus = $backendUpdateStatus.get()
     const requestedTargetSha = previousStatus?.commits?.at(0)?.sha
 

@@ -4181,21 +4181,47 @@ def _lifecycle_service_manager():
         return None
 
 
+_DESKTOP_BACKEND_SERVICE = "ai.hermes.serve"
+
+
+def _desktop_backend_service_installed(kind: str) -> bool:
+    """Detect the fixed Desktop backend installed by desktop-service-control.
+
+    This is read-only production discovery. It deliberately accepts neither a
+    caller-provided service name nor a path.
+    """
+    home = Path.home()
+    if kind == "launchd":
+        return (home / "Library" / "LaunchAgents" / f"{_DESKTOP_BACKEND_SERVICE}.plist").is_file()
+    if kind == "systemd":
+        return (home / ".config" / "systemd" / "user" / f"{_DESKTOP_BACKEND_SERVICE}.service").is_file()
+    if kind == "windows":
+        try:
+            probe = subprocess.run(
+                ["schtasks", "/Query", "/TN", _DESKTOP_BACKEND_SERVICE],
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+            return probe.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            return False
+    return False
+
+
 def _lifecycle_status() -> dict[str, Any]:
     manager = _lifecycle_service_manager()
-    service = getattr(app.state, "lifecycle_backend_service", None)
+    kind = str(getattr(manager, "kind", "none")) if manager is not None else "none"
+    service = _DESKTOP_BACKEND_SERVICE if _desktop_backend_service_installed(kind) else None
     externally_managed = bool(manager is not None and service)
     allow_restart = bool(
         externally_managed
-        and getattr(app.state, "lifecycle_allow_backend_restart", False)
         and callable(getattr(manager, "restart", None))
     )
     allow_uninstall = bool(
         externally_managed
-        and getattr(app.state, "lifecycle_allow_uninstall", False)
         and callable(getattr(manager, "uninstall", None))
     )
-    kind = str(getattr(manager, "kind", "none")) if manager is not None else "none"
     return {
         "version": 1,
         "authority": {"externally_managed": externally_managed, "kind": kind},
@@ -4251,7 +4277,8 @@ async def run_lifecycle_action(request: Request):
         raise HTTPException(status_code=400, detail="Exact uninstall confirmation required")
 
     manager = _lifecycle_service_manager()
-    service = getattr(app.state, "lifecycle_backend_service", None)
+    kind = str(getattr(manager, "kind", "none")) if manager is not None else "none"
+    service = _DESKTOP_BACKEND_SERVICE if _desktop_backend_service_installed(kind) else None
     if manager is None or not service:
         raise HTTPException(status_code=409, detail="Lifecycle authority was lost")
     if action == "backend-restart":

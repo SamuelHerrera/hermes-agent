@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { HermesHost } from './types'
 import { createBrowserTerminal } from './browser-terminal'
+import type { HermesHost } from './types'
 
 class FakeSocket {
   static instances: FakeSocket[] = []
@@ -23,6 +23,7 @@ class FakeSocket {
     const frame = JSON.parse(raw)
     this.sent.push(frame)
     const terminalId = frame.params.terminalId ?? 'terminal-1'
+
     const result: Record<string, unknown> = {
       create: { epoch: 'epoch-1', terminalId },
       attach: { identity: { scope: 'profile/work', epoch: 'epoch-1', terminalId, owner: 'lease-1' }, pid: 42, snapshot: { seq: 3 } },
@@ -32,6 +33,7 @@ class FakeSocket {
       detach: true,
       terminate: true
     }
+
     queueMicrotask(() => this.emit('message', { data: JSON.stringify({ id: frame.id, result: result[frame.method] }) }))
   }
 
@@ -41,7 +43,7 @@ class FakeSocket {
   }
 
   emit(type: string, event: any) {
-    for (const listener of this.listeners.get(type) ?? []) listener(event)
+    for (const listener of this.listeners.get(type) ?? []) {listener(event)}
   }
 }
 
@@ -56,14 +58,20 @@ function host(): HermesHost {
       browserMicrophone: true,
       browserNotifications: true,
       deepLinkProtocol: false,
+      globalHotkeys: false,
       nativeDialogs: false,
       nativeWindows: false,
       persistentTerminal: true,
       revealHostPath: false,
-      screenWakeLock: true
+      screenWakeLock: true,
+      windowBelow: false
     },
     api: vi.fn(),
-    getConnection: vi.fn(),
+    getConnection: vi.fn(async profile => ({
+      baseUrl: 'https://backend-b.test/prefix',
+      mode: 'remote',
+      profile
+    }) as any),
     getGatewayWsUrl: vi.fn(async profile => `wss://backend-b.test/prefix/api/ws?profile=${profile}&ticket=fresh`)
   }
 }
@@ -79,7 +87,13 @@ describe('browser persistent terminal transport', () => {
     const api = createBrowserTerminal(host())
     const first = await api.start({ requestId: 'tab-1', profile: 'work', cols: 80, rows: 24, cwd: '/srv' })
 
-    expect(first.reference).toEqual({ scope: 'profile/work', epoch: 'epoch-1', terminalId: 'terminal-1' })
+    expect(first.reference).toEqual({
+      backendIdentity: 'remote\u0000\u0000https://backend-b.test/prefix',
+      profile: 'work',
+      scope: 'profile/work',
+      epoch: 'epoch-1',
+      terminalId: 'terminal-1'
+    })
     expect(FakeSocket.instances[0].url).toBe('wss://backend-b.test/prefix/api/persistent-terminal?profile=work&ticket=fresh')
     await api.write(first.id, 'echo hi\r')
     await api.resize(first.id, { cols: 100, rows: 40 })
@@ -92,6 +106,20 @@ describe('browser persistent terminal transport', () => {
     expect(FakeSocket.instances[1].sent.find(frame => frame.method === 'attach')?.params.terminalId).toBe('terminal-1')
   })
 
+  it('refuses a persisted terminal after a backend connection switch instead of retargeting it', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    const current = host()
+    const api = createBrowserTerminal(current)
+    const first = await api.start({ requestId: 'tab-1', profile: 'work' })
+    await api.dispose(first.id)
+    vi.mocked(current.getConnection).mockResolvedValue({
+      baseUrl: 'https://backend-c.test/prefix', mode: 'remote', profile: 'work'
+    } as any)
+
+    await expect(api.start({ requestId: 'tab-1', profile: 'work', reference: first.reference })).rejects.toThrow('HOST_LOST')
+    expect(FakeSocket.instances).toHaveLength(1)
+  })
+
   it('preserves one-writer ownership for write and terminate and exposes process exit through read', async () => {
     vi.stubGlobal('WebSocket', FakeSocket)
     const api = createBrowserTerminal(host())
@@ -101,7 +129,11 @@ describe('browser persistent terminal transport', () => {
     await api.write(session.id, 'x')
     expect(socket.sent.find(frame => frame.method === 'input')?.params.owner).toBe('lease-1')
     await api.terminate!(session.id)
-    expect(socket.sent.find(frame => frame.method === 'terminate')?.params).toEqual(session.reference)
+    expect(socket.sent.find(frame => frame.method === 'terminate')?.params).toEqual({
+      scope: session.reference?.scope,
+      epoch: session.reference?.epoch,
+      terminalId: session.reference?.terminalId
+    })
   })
 
   it('fails closed when the capability is absent or the versioned handshake is unsupported', async () => {

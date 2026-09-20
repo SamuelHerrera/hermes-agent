@@ -469,8 +469,11 @@ export interface DesktopMarketplaceThemeResult {
 }
 
 export interface HermesTerminalReference {
+  /** Stable, non-secret backend identity used to reject cross-connection reuse. */
+  backendIdentity?: string
   scope: string
   epoch: string
+  profile?: string
   terminalId: string
 }
 

@@ -7,11 +7,16 @@ import { Codicon } from '@/components/ui/codicon'
 import { type Translations, useI18n } from '@/i18n'
 import { CheckCircle2, ExternalLink, Loader2, RefreshCw } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { tryResolveHost } from '@/platform/host'
 import {
+  $backendUpdateApply,
+  $backendUpdateChecking,
+  $backendUpdateStatus,
   $desktopVersion,
   $updateApply,
   $updateChecking,
   $updateStatus,
+  checkBackendUpdates,
   checkUpdates,
   openUpdatesWindow,
   refreshDesktopVersion,
@@ -50,9 +55,16 @@ export function AboutSettings() {
   const { t } = useI18n()
   const a = t.settings.about
   const version = useStore($desktopVersion)
-  const status = useStore($updateStatus)
-  const apply = useStore($updateApply)
-  const checking = useStore($updateChecking)
+  const browserHost = tryResolveHost()?.kind === 'browser'
+  const clientStatus = useStore($updateStatus)
+  const backendStatus = useStore($backendUpdateStatus)
+  const clientApply = useStore($updateApply)
+  const backendApply = useStore($backendUpdateApply)
+  const clientChecking = useStore($updateChecking)
+  const backendChecking = useStore($backendUpdateChecking)
+  const status = browserHost ? backendStatus : clientStatus
+  const apply = browserHost ? backendApply : clientApply
+  const checking = browserHost ? backendChecking : clientChecking
   const [justChecked, setJustChecked] = useState(false)
 
   // The version atom is loaded once at app boot, which makes About show a
@@ -72,7 +84,7 @@ export function AboutSettings() {
 
   const handleCheck = async () => {
     setJustChecked(false)
-    const next = await checkUpdates()
+    const next = await (browserHost ? checkBackendUpdates() : checkUpdates())
     setJustChecked(Boolean(next))
   }
 

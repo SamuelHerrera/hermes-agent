@@ -25,11 +25,13 @@ const capabilities = {
   browserMicrophone: true,
   browserNotifications: true,
   deepLinkProtocol: false,
+  globalHotkeys: false,
   nativeDialogs: false,
   nativeWindows: false,
   persistentTerminal: false,
   revealHostPath: false,
-  screenWakeLock: true
+  screenWakeLock: true,
+  windowBelow: false
 }
 
 function browserHost(): HermesHost {

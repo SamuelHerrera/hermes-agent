@@ -27,6 +27,8 @@ import { exportSession } from '@/lib/session-export'
 import { fmtDateTime } from '@/lib/time'
 import { useStoreSelector } from '@/lib/use-session-slice'
 import { cn } from '@/lib/utils'
+import { runBrowserLifecycleAction } from '@/platform/browser-lifecycle'
+import { tryResolveHost } from '@/platform/host'
 import { upsertDesktopActionTask } from '@/store/activity'
 import { $pinnedSessionIds, pinSession, unpinSession } from '@/store/layout'
 import { $sessions, sessionPinId } from '@/store/session'
@@ -286,6 +288,20 @@ export function CommandCenterView({
       setSystemError('')
 
       try {
+        if (tryResolveHost()?.kind === 'browser') {
+          const action = kind === 'restart' ? 'gateway-restart' : 'update'
+          const completed = await runBrowserLifecycleAction(action)
+          setSystemAction({
+            exit_code: 0,
+            lines: [completed.message],
+            name: action,
+            pid: null,
+            running: false
+          })
+
+          return
+        }
+
         const started = kind === 'restart' ? await restartGateway() : await updateHermes()
         let nextStatus: ActionStatusResponse | null = null
 

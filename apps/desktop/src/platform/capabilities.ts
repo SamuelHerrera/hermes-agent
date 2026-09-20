@@ -35,11 +35,13 @@ export function browserHostCapabilities(
     browserMicrophone: environment.microphone,
     browserNotifications: environment.notifications,
     deepLinkProtocol: false,
+    globalHotkeys: false,
     nativeDialogs: false,
     nativeWindows: false,
     persistentTerminal: manifest.persistentTerminal === true,
     revealHostPath: false,
-    screenWakeLock: environment.screenWakeLock
+    screenWakeLock: environment.screenWakeLock,
+    windowBelow: false
   }
 }
 
@@ -51,9 +53,11 @@ export const electronHostCapabilities: Readonly<HostCapabilities> = Object.freez
   browserMicrophone: true,
   browserNotifications: true,
   deepLinkProtocol: true,
+  globalHotkeys: true,
   nativeDialogs: true,
   nativeWindows: true,
   persistentTerminal: true,
   revealHostPath: true,
-  screenWakeLock: true
+  screenWakeLock: true,
+  windowBelow: true
 })

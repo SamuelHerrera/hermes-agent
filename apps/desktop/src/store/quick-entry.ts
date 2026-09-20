@@ -61,7 +61,7 @@ function applyStatus(status: QuickEntryStatus | undefined): void {
 
 /** True when the shell exposes the Quick Entry capability (desktop only). */
 export function canUseQuickEntry(): boolean {
-  return hostSupports('nativeWindows') && typeof window.hermesDesktop?.quickEntry?.getSettings === 'function'
+  return hostSupports('globalHotkeys') && typeof window.hermesDesktop?.quickEntry?.getSettings === 'function'
 }
 
 /** Read the live registration state into the store (Settings mount). */

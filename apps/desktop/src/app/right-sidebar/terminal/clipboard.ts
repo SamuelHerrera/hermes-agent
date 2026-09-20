@@ -14,6 +14,32 @@
 
 export type TerminalClipboardIntent = 'copy' | 'paste' | null
 
+interface TerminalClipboardReader {
+  hostKind: 'browser' | 'electron'
+  browserClipboard?: Pick<Clipboard, 'readText'>
+  electronRead?: () => Promise<string>
+}
+
+/** Browser paste uses navigator.clipboard; Electron retains its focus-proof
+ * native IPC reader. Missing or denied clipboard access rejects explicitly. */
+export async function readTerminalClipboardText(reader?: TerminalClipboardReader): Promise<string> {
+  const source = reader ?? {
+    hostKind: window.hermesDesktop ? 'electron' as const : 'browser' as const,
+    browserClipboard: navigator.clipboard,
+    electronRead: window.hermesDesktop?.readClipboard
+  }
+
+  if (source.hostKind === 'electron') {
+    if (!source.electronRead) {throw new Error('Native clipboard read is unavailable.')}
+
+    return source.electronRead()
+  }
+
+  if (!source.browserClipboard?.readText) {throw new Error('Browser clipboard read is unavailable.')}
+
+  return source.browserClipboard.readText()
+}
+
 export function terminalClipboardIntent(
   event: KeyboardEvent,
   { hasSelection, isMac }: { hasSelection: boolean; isMac: boolean }

@@ -12,11 +12,13 @@ export interface HostCapabilities {
   browserMicrophone: boolean
   browserNotifications: boolean
   deepLinkProtocol: boolean
+  globalHotkeys: boolean
   nativeDialogs: boolean
   nativeWindows: boolean
   persistentTerminal: boolean
   revealHostPath: boolean
   screenWakeLock: boolean
+  windowBelow: boolean
 }
 
 export interface HermesHost {

@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { mirrorSelection, terminalClipboardIntent } from './clipboard'
+import { mirrorSelection, readTerminalClipboardText, terminalClipboardIntent } from './clipboard'
 
 afterEach(() => {
   window.getSelection()?.removeAllRanges()
@@ -10,7 +10,24 @@ afterEach(() => {
 const key = (init: Partial<KeyboardEvent> & { key: string }) =>
   ({ altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, type: 'keydown', ...init }) as KeyboardEvent
 
-describe('terminalClipboardIntent', () => {
+describe('terminal clipboard shortcuts', () => {
+  it('reads terminal paste from the browser clipboard when no Electron bridge exists', async () => {
+    const readText = vi.fn(async () => 'browser paste')
+
+    const text = await readTerminalClipboardText({
+      hostKind: 'browser',
+      browserClipboard: { readText },
+      electronRead: undefined
+    })
+
+    expect(text).toBe('browser paste')
+    expect(readText).toHaveBeenCalledOnce()
+  })
+
+  it('preserves the Electron native clipboard path', async () => {
+    const electronRead = vi.fn(async () => 'native paste')
+    expect(await readTerminalClipboardText({ hostKind: 'electron', electronRead })).toBe('native paste')
+  })
   it('never claims a bare Ctrl+C with nothing selected, on either platform', () => {
     for (const isMac of [true, false]) {
       expect(terminalClipboardIntent(key({ ctrlKey: true, key: 'c' }), { hasSelection: false, isMac })).toBeNull()

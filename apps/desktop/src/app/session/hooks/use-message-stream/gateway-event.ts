@@ -18,6 +18,7 @@ import { triggerHaptic } from '@/lib/haptics'
 import { modelOptionsQueryKey } from '@/lib/model-options'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { invalidateSlashCompletions } from '@/lib/slash-completion-cache'
+import { hostSupports } from '@/platform/host'
 import { type AgentNoticePayload, clearAgentNotice, nativeNoticeInput, showAgentNotice } from '@/store/agent-notices'
 import { reconcileApprovalModeForProfile } from '@/store/approval-mode'
 import { billingCtaLabel, clearBillingBlock, runBillingRecovery, setBillingBlock } from '@/store/billing-block'
@@ -1177,7 +1178,7 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
         const requestId = typeof payload?.request_id === 'string' ? payload.request_id : ''
 
         if (requestId) {
-          const read = window.hermesDesktop?.readWindowBelow
+          const read = hostSupports('windowBelow') ? window.hermesDesktop?.readWindowBelow : undefined
 
           const answer = (result: unknown) =>
             $gateway.get()?.request('window.read.respond', {

@@ -17,7 +17,7 @@ import { $terminalInjection } from '../store'
 
 import { observeActiveTerminalResize } from './active-resize'
 import { makeTerminalReader, registerTerminalReader } from './buffer'
-import { mirrorSelection, terminalClipboardIntent } from './clipboard'
+import { mirrorSelection, readTerminalClipboardText, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
 import { hydrateTerminalState, loadPersistentTerminalRuntime, onTerminalData } from './persistent-runtime'
 import { watchTerminalProcess } from './process-title'
@@ -912,11 +912,15 @@ export function useTerminalSession({
         return false
       }
       void (async () => {
-        const text = (await window.hermesDesktop?.readClipboard?.()) ?? ''
+        try {
+          const text = await readTerminalClipboardText()
 
-        if (text) {
-          hasSessionActivityRef.current = true
-          term.paste(text)
+          if (text) {
+            hasSessionActivityRef.current = true
+            term.paste(text)
+          }
+        } catch (error) {
+          console.warn('Terminal paste could not read the clipboard.', error)
         }
       })()
 

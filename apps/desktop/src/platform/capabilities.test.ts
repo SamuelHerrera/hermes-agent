@@ -30,11 +30,13 @@ describe('host capability contract', () => {
       browserMicrophone: true,
       browserNotifications: false,
       deepLinkProtocol: false,
+      globalHotkeys: false,
       nativeDialogs: false,
       nativeWindows: false,
       persistentTerminal: true,
       revealHostPath: false,
-      screenWakeLock: true
+      screenWakeLock: true,
+      windowBelow: false
     })
   })
 
@@ -43,10 +45,12 @@ describe('host capability contract', () => {
     expect(electronHostCapabilities.backendGit).toBe(false)
     expect(electronHostCapabilities.backendLifecycle).toBe(false)
     expect(electronHostCapabilities.deepLinkProtocol).toBe(true)
+    expect(electronHostCapabilities.globalHotkeys).toBe(true)
     expect(electronHostCapabilities.nativeDialogs).toBe(true)
     expect(electronHostCapabilities.nativeWindows).toBe(true)
     expect(electronHostCapabilities.persistentTerminal).toBe(true)
     expect(electronHostCapabilities.revealHostPath).toBe(true)
+    expect(electronHostCapabilities.windowBelow).toBe(true)
 
     const browser = browserHostCapabilities({}, browserEnvironment)
     expect(browser.nativeDialogs).toBe(false)

@@ -28,11 +28,13 @@ describe('host API transport', () => {
         browserMicrophone: true,
         browserNotifications: true,
         deepLinkProtocol: false,
+        globalHotkeys: false,
         nativeDialogs: false,
         nativeWindows: false,
         persistentTerminal: false,
         revealHostPath: false,
-        screenWakeLock: true
+        screenWakeLock: true,
+        windowBelow: false
       },
       api,
       getConnection: vi.fn(),
