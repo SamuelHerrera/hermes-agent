@@ -170,6 +170,44 @@ def _compression_failure():
     }
 
 
+def test_interrupted_turn_pauses_active_goal(server, turn_env, monkeypatch):
+    from hermes_cli.goals import GoalManager
+
+    session_key = "goal-user-interrupted"
+    GoalManager(session_key).set("finish the current task")
+    judged = []
+
+    monkeypatch.setattr(
+        GoalManager,
+        "evaluate_after_turn",
+        lambda self, response, **kwargs: judged.append(response),
+    )
+    agent = types.SimpleNamespace(
+        session_id=session_key,
+        run_conversation=lambda message, **kwargs: {
+            "final_response": "Operation interrupted: waiting for model response",
+            "interrupted": True,
+        },
+        clear_interrupt=lambda: None,
+    )
+    session = _turn_session(agent, session_key)
+
+    server._run_prompt_submit("rid", "sid", session, "initial work")
+
+    state = GoalManager(session_key).state
+    assert state.status == "paused"
+    assert state.paused_reason == "user-interrupted"
+    assert judged == []
+    notices = [
+        payload["text"]
+        for event, _sid, payload in turn_env
+        if event == "status.update" and payload.get("kind") == "goal"
+    ]
+    assert notices == [
+        "⏸ Goal paused — turn was interrupted. Use /goal resume to continue, or /goal clear to stop."
+    ]
+
+
 # ── command.dispatch /goal ────────────────────────────────────────────
 
 

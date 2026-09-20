@@ -11204,6 +11204,39 @@ def _run_prompt_submit(
             compression_exhausted = bool(
                 isinstance(result, dict) and result.get("compression_exhausted")
             )
+
+            # A user interrupt means "stop this work", not "immediately start
+            # the next goal turn".  The classic CLI pauses the durable goal on
+            # Ctrl+C; keep the Desktop/TUI gateway on the same contract and
+            # publish the transition so its composer status does not retain a
+            # stale running spinner after the session itself has gone idle.
+            if status == "interrupted":
+                try:
+                    from hermes_cli.goals import GoalManager
+
+                    sid_key = session.get("session_key") or ""
+                    if sid_key:
+                        goal_mgr = GoalManager(session_id=sid_key)
+                        if goal_mgr.is_active():
+                            goal_mgr.pause(reason="user-interrupted")
+                            _emit(
+                                "status.update",
+                                sid,
+                                {
+                                    "kind": "goal",
+                                    "text": (
+                                        "⏸ Goal paused — turn was interrupted. "
+                                        "Use /goal resume to continue, or /goal clear to stop."
+                                    ),
+                                },
+                            )
+                except Exception as _goal_interrupt_exc:
+                    print(
+                        f"[tui_gateway] goal pause-on-interrupt failed: "
+                        f"{type(_goal_interrupt_exc).__name__}: {_goal_interrupt_exc}",
+                        file=sys.stderr,
+                    )
+
             try:
                 recovery_prompt, recovery_notice = _plan_goal_compression_recovery(
                     session,
