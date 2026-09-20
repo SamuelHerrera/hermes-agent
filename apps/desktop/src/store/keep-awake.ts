@@ -55,7 +55,9 @@ export async function setKeepAwake(on: boolean): Promise<void> {
 
   if (!apply) {
     const host = tryResolveHost()
-    if (!host) return
+    if (!host) {
+      return
+    }
     if (!host.capabilities.screenWakeLock) {
       commitKeepAwake(previous)
       return

@@ -8,7 +8,9 @@ type GitBridge = NonNullable<NonNullable<Window['hermesDesktop']>['git']>
 /** Git always belongs to the selected backend host. Browser hosts never fall
  * back to a preload bridge that happens to exist on the browser machine. */
 export function desktopGit(): GitBridge | undefined {
-  if (typeof window === 'undefined') return undefined
+  if (typeof window === 'undefined') {
+    return undefined
+  }
 
   const host = tryResolveHost()
   if (host?.kind === 'browser') {

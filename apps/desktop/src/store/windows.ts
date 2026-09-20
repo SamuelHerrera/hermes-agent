@@ -104,7 +104,9 @@ export function windowProfileOverride(): null | string {
 // True when running inside the Electron desktop shell (the preload bridge is
 // present). The "open in new window" affordance is desktop-only.
 export function canOpenSessionWindow(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof window === 'undefined') {
+    return false
+  }
   const host = tryResolveHost()
   return host?.kind === 'browser' || (host?.capabilities.nativeWindows === true && typeof window.hermesDesktop?.openSessionWindow === 'function')
 }
@@ -151,7 +153,9 @@ export async function openSessionInNewWindow(sessionId: string, opts?: { watch?:
   if (host?.kind === 'browser') {
     const query = opts?.watch ? '?watch=1' : ''
     const opened = window.open(`/desktop/session/${encodeURIComponent(sessionId)}${query}`, '_blank', 'noopener,noreferrer')
-    if (opened) opened.opener = null
+    if (opened) {
+      opened.opener = null
+    }
     return
   }
 

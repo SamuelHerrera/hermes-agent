@@ -55,17 +55,25 @@ function BrowserUninstallSection() {
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
-    if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) return
+    if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) {
+      return
+    }
     let alive = true
     void createBrowserLifecycle(host).status().then(status => {
-      if (alive) setAdvertisement(status.actions.uninstall)
+      if (alive) {
+        setAdvertisement(status.actions.uninstall)
+      }
     }).catch(error => {
-      if (alive) setMessage(error instanceof Error ? error.message : String(error))
+      if (alive) {
+        setMessage(error instanceof Error ? error.message : String(error))
+      }
     })
     return () => { alive = false }
   }, [host])
 
-  if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) return null
+  if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) {
+    return null
+  }
   const guidance = advertisement?.guidance ?? message ?? 'Checking backend lifecycle authority…'
 
   const uninstall = async () => {

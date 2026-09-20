@@ -197,7 +197,9 @@ export function useLinkTitle(url?: null | string): string {
 }
 
 export function openExternalLink(href: string): void {
-  if (!href) return
+  if (!href) {
+    return
+  }
   if (window.hermesDesktop?.openExternal) {
     void window.hermesDesktop.openExternal(href)
     return

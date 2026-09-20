@@ -17,7 +17,9 @@ type Profile = () => string | undefined
 function query(params: Record<string, boolean | null | string | undefined>): string {
   const value = new URLSearchParams()
   for (const [key, item] of Object.entries(params)) {
-    if (item !== null && item !== undefined) value.set(key, String(item))
+    if (item !== null && item !== undefined) {
+      value.set(key, String(item))
+    }
   }
   return value.toString()
 }

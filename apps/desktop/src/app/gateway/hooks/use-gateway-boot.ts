@@ -468,7 +468,9 @@ export function useGatewayBoot({
     const offConnectionApplied = desktop?.onConnectionApplied?.(() => void softSwitch())
 
     const offReconnectSignals = browserClientApis().onReconnect(state => {
-      if (state.online && state.visible) reconnectNow()
+      if (state.online && state.visible) {
+        reconnectNow()
+      }
     })
 
     // Keep live pool backends alive while this window is open (the main process

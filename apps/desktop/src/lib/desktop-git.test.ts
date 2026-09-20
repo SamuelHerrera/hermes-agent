@@ -7,13 +7,27 @@ import { $connection } from '@/store/session'
 import { desktopGit } from './desktop-git'
 
 const api = vi.fn(async ({ path }: { path: string }) => {
-  if (path.startsWith('/api/git/worktrees')) return { worktrees: [{ path: '/srv/r' }] }
-  if (path.startsWith('/api/git/branches')) return { branches: [{ name: 'main' }] }
-  if (path.startsWith('/api/git/base-branches')) return { branches: [{ name: 'origin/main' }] }
-  if (path.startsWith('/api/git/file-diff') || path.startsWith('/api/git/review/diff')) return { diff: 'diff' }
-  if (path.startsWith('/api/git/review/rev-parse')) return { sha: 'abc' }
-  if (path.startsWith('/api/git/scan')) return { repos: [{ root: '/srv/r', label: 'r' }] }
-  if (path.startsWith('/api/git/review/pr-comment')) return { comment: { author: 'sam' } }
+  if (path.startsWith('/api/git/worktrees')) {
+    return { worktrees: [{ path: '/srv/r' }] }
+  }
+  if (path.startsWith('/api/git/branches')) {
+    return { branches: [{ name: 'main' }] }
+  }
+  if (path.startsWith('/api/git/base-branches')) {
+    return { branches: [{ name: 'origin/main' }] }
+  }
+  if (path.startsWith('/api/git/file-diff') || path.startsWith('/api/git/review/diff')) {
+    return { diff: 'diff' }
+  }
+  if (path.startsWith('/api/git/review/rev-parse')) {
+    return { sha: 'abc' }
+  }
+  if (path.startsWith('/api/git/scan')) {
+    return { repos: [{ root: '/srv/r', label: 'r' }] }
+  }
+  if (path.startsWith('/api/git/review/pr-comment')) {
+    return { comment: { author: 'sam' } }
+  }
   return { ok: true }
 })
 
