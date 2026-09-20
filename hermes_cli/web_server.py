@@ -4218,10 +4218,10 @@ def _lifecycle_status() -> dict[str, Any]:
         externally_managed
         and callable(getattr(manager, "restart", None))
     )
-    allow_uninstall = bool(
-        externally_managed
-        and callable(getattr(manager, "uninstall", None))
-    )
+    # No production service manager currently exposes a fixed-service
+    # uninstall operation. Keep this action visible but unavailable rather
+    # than advertising a test-only path.
+    allow_uninstall = False
     return {
         "version": 1,
         "authority": {"externally_managed": externally_managed, "kind": kind},
@@ -4273,9 +4273,6 @@ async def run_lifecycle_action(request: Request):
     if action == "update":
         result = await update_hermes()
         return {**result, "relaunch": False}
-    if action == "uninstall" and (body or {}).get("confirmation") != "UNINSTALL":
-        raise HTTPException(status_code=400, detail="Exact uninstall confirmation required")
-
     manager = _lifecycle_service_manager()
     kind = str(getattr(manager, "kind", "none")) if manager is not None else "none"
     service = _DESKTOP_BACKEND_SERVICE if _desktop_backend_service_installed(kind) else None
@@ -4283,8 +4280,6 @@ async def run_lifecycle_action(request: Request):
         raise HTTPException(status_code=409, detail="Lifecycle authority was lost")
     if action == "backend-restart":
         manager.restart(service)
-    elif action == "uninstall":
-        manager.uninstall(service)
     return {"ok": True, "action": action, "relaunch": False}
 
 

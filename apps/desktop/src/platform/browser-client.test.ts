@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createBrowserClientApis, BrowserCapabilityError } from './browser-client'
+import { createBrowserClientApis } from './browser-client'
+import type { BrowserCapabilityError } from './browser-client'
 
 function globals(overrides: Record<string, unknown> = {}) {
   const opened = { opener: {} as unknown }
@@ -79,6 +80,25 @@ describe('browser-local client APIs', () => {
     expect(request).toHaveBeenCalledTimes(2)
     await api.wakeLock.set(false)
     expect(second.release).toHaveBeenCalled()
+  })
+
+  it('releases a wake lock that resolves after the user disables it', async () => {
+    let resolveRequest!: (sentinel: WakeLockSentinel) => void
+    const sentinel = { addEventListener: vi.fn(), release: vi.fn(async () => undefined), released: false }
+    const request = vi.fn(() => new Promise<WakeLockSentinel>(resolve => { resolveRequest = resolve }))
+    const { documentLike, windowLike } = globals()
+    const api = createBrowserClientApis({
+      document: documentLike,
+      navigator: { wakeLock: { request } } as unknown as Navigator,
+      window: windowLike
+    })
+
+    const enabling = api.wakeLock.set(true)
+    await api.wakeLock.set(false)
+    resolveRequest(sentinel as unknown as WakeLockSentinel)
+
+    await expect(enabling).resolves.toBe(false)
+    expect(sentinel.release).toHaveBeenCalledOnce()
   })
 
   it('only opens validated web links with noopener,noreferrer and exposes reconnect signals', () => {

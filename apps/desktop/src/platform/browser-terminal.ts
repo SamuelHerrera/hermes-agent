@@ -26,9 +26,13 @@ function terminalUrl(wsUrl: string): string {
 }
 
 function resultUrl(value: Awaited<ReturnType<HermesHost['getGatewayWsUrl']>>): string {
-  if (typeof value === 'string') {return value}
+  if (typeof value === 'string') {
+    return value
+  }
 
-  if (value.ok) {return value.wsUrl}
+  if (value.ok) {
+    return value.wsUrl
+  }
   throw new Error(value.error || 'Persistent terminal authentication failed.')
 }
 
@@ -46,6 +50,11 @@ async function connect(host: HermesHost, profile: string | undefined): Promise<{
     const handshakeTimer = setTimeout(() => fail(new Error('Persistent terminal handshake timed out.')), 15_000)
 
     const fail = (error: Error) => {
+      const handshakeComplete = settled
+
+      if (!settled) {
+        settled = true
+      }
       clearTimeout(handshakeTimer)
 
       for (const waiter of pending.values()) {
@@ -55,16 +64,26 @@ async function connect(host: HermesHost, profile: string | undefined): Promise<{
 
       pending.clear()
 
-      if (!settled) {reject(error)}
+      if (!handshakeComplete) {
+        if (socket.readyState === 0 || socket.readyState === 1) {
+          socket.close()
+        }
+
+        reject(error)
+      }
     }
 
     const client = {
       epoch: '',
       request(method: string, params: unknown): Promise<any> {
         return new Promise((resolveRequest, rejectRequest) => {
-          if (socket.readyState !== 1) {return rejectRequest(new Error('DISCONNECTED'))}
+          if (socket.readyState !== 1) {
+            return rejectRequest(new Error('DISCONNECTED'))
+          }
 
-          if (pending.size >= 128) {return rejectRequest(new Error('REQUEST_LIMIT'))}
+          if (pending.size >= 128) {
+            return rejectRequest(new Error('REQUEST_LIMIT'))
+          }
           const id = ++counter
 
           const timer = setTimeout(() => {
@@ -91,6 +110,10 @@ async function connect(host: HermesHost, profile: string | undefined): Promise<{
       }
 
       if (frame.type === 'ready') {
+        if (settled) {
+          return
+        }
+
         if (frame.protocol !== 2 || typeof frame.scope !== 'string' || typeof frame.epoch !== 'string') {
           fail(new Error('Persistent terminal protocol is unsupported.'))
           socket.close()
@@ -98,24 +121,27 @@ async function connect(host: HermesHost, profile: string | undefined): Promise<{
           return
         }
 
-        if (!settled) {
-          settled = true
-          clearTimeout(handshakeTimer)
-          client.epoch = frame.epoch
-          resolve({ client, socket, scope: frame.scope })
-        }
+        settled = true
+        clearTimeout(handshakeTimer)
+        client.epoch = frame.epoch
+        resolve({ client, socket, scope: frame.scope })
 
         return
       }
 
       const waiter = pending.get(frame.id)
 
-      if (!waiter) {return}
+      if (!waiter) {
+        return
+      }
       pending.delete(frame.id)
       clearTimeout(waiter.timer)
 
-      if (frame.error) {waiter.reject(new Error(String(frame.error)))}
-      else {waiter.resolve(frame.result)}
+      if (frame.error) {
+        waiter.reject(new Error(String(frame.error)))
+      } else {
+        waiter.resolve(frame.result)
+      }
     })
     socket.addEventListener('close', () => fail(new Error('Persistent terminal disconnected; the shell was not restarted.')))
     socket.addEventListener('error', () => fail(new Error('Persistent terminal connection failed; the shell was not restarted.')))
@@ -123,7 +149,9 @@ async function connect(host: HermesHost, profile: string | undefined): Promise<{
 }
 
 export function createBrowserTerminal(host: HermesHost): TerminalApi {
-  if (!host.capabilities.persistentTerminal) {throw new Error('Persistent terminal is unsupported by this backend.')}
+  if (!host.capabilities.persistentTerminal) {
+    throw new Error('Persistent terminal is unsupported by this backend.')
+  }
   const handles = new Map<string, LiveHandle>()
   let nextHandle = 0
 

@@ -36,7 +36,9 @@ interface BrowserGlobals {
 }
 
 function capabilityError(error: unknown, fallback: BrowserCapabilityErrorCode): BrowserCapabilityError {
-  if (error instanceof BrowserCapabilityError) return error
+  if (error instanceof BrowserCapabilityError) {
+    return error
+  }
   const name = error instanceof DOMException ? error.name : ''
   if (name === 'NotAllowedError' || name === 'SecurityError') {
     return new BrowserCapabilityError('denied', 'The browser denied this capability.', error)
@@ -77,17 +79,31 @@ export function createBrowserClientApis(globals: BrowserGlobals = {
 }): BrowserClientApis {
   let wakeLock: WakeLockSentinel | null = null
   let wakeLockDesired = false
+  let wakeLockGeneration = 0
 
   const acquireWakeLock = async (): Promise<boolean> => {
+    const generation = wakeLockGeneration
+
     requireSecure(globals)
     if (!globals.navigator.wakeLock?.request) {
       throw new BrowserCapabilityError('unavailable', 'Screen wake lock is unavailable.')
     }
     try {
       const sentinel = await globals.navigator.wakeLock.request('screen')
+
+      if (!wakeLockDesired || generation !== wakeLockGeneration) {
+        if (!sentinel.released) {
+          await sentinel.release()
+        }
+
+        return false
+      }
+
       wakeLock = sentinel
       sentinel.addEventListener('release', () => {
-        if (wakeLock === sentinel) wakeLock = null
+        if (wakeLock === sentinel) {
+          wakeLock = null
+        }
       })
       return true
     } catch (error) {
@@ -143,7 +159,9 @@ export function createBrowserClientApis(globals: BrowserGlobals = {
       },
       async requestPermission() {
         requireSecure(globals)
-        if (!globals.Notification?.requestPermission) return 'unavailable'
+        if (!globals.Notification?.requestPermission) {
+          return 'unavailable'
+        }
         try {
           return notificationState(await globals.Notification.requestPermission())
         } catch (error) {
@@ -151,7 +169,9 @@ export function createBrowserClientApis(globals: BrowserGlobals = {
         }
       },
       show(title, options) {
-        if (!globals.Notification || globals.Notification.permission !== 'granted') return false
+        if (!globals.Notification || globals.Notification.permission !== 'granted') {
+          return false
+        }
         try {
           new globals.Notification(title, options)
           return true
@@ -163,21 +183,30 @@ export function createBrowserClientApis(globals: BrowserGlobals = {
     wakeLock: {
       async set(on) {
         wakeLockDesired = on
+        wakeLockGeneration += 1
         if (!on) {
           const active = wakeLock
           wakeLock = null
-          if (active && !active.released) await active.release()
+          if (active && !active.released) {
+            await active.release()
+          }
           return false
         }
-        if (globals.document.visibilityState !== 'visible') return false
+        if (globals.document.visibilityState !== 'visible') {
+          return false
+        }
         return acquireWakeLock()
       }
     },
     openExternal(value) {
       const url = validatedExternalUrl(value)
-      if (!url) return false
+      if (!url) {
+        return false
+      }
       const opened = globals.window.open(url, '_blank', 'noopener,noreferrer')
-      if (opened) opened.opener = null
+      if (opened) {
+        opened.opener = null
+      }
       return Boolean(opened)
     },
     onReconnect(callback) {

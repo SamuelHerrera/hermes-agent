@@ -1,3 +1,4 @@
+import { BrowserApiError } from './browser-api'
 import { tryResolveHost } from './host'
 import type { HermesHost } from './types'
 
@@ -48,13 +49,20 @@ export function createBrowserLifecycle(
     async runAndReconnect(action: Exclude<LifecycleAction, 'uninstall'>) {
       const advertised = (await status()).actions[action]
 
-      if (!advertised.supported) {throw new Error(advertised.guidance)}
+      if (!advertised.supported) {
+        throw new Error(advertised.guidance)
+      }
       let result: LifecycleResult | null = null
 
       try {
         result = await this.run(action)
       } catch (error) {
-        if (action === 'gateway-restart') {throw error}
+        const expectedDisconnect = error instanceof BrowserApiError &&
+          (error.code === 'network' || error.code === 'timeout')
+
+        if (action === 'gateway-restart' || !expectedDisconnect) {
+          throw error
+        }
       }
 
       const delay = options.delay ?? (milliseconds => new Promise(resolve => window.setTimeout(resolve, milliseconds)))
@@ -80,7 +88,9 @@ export function createBrowserLifecycle(
         } catch (error) {
           lastError = error
 
-          if (attempt + 1 < attempts) {await delay(1_000)}
+          if (attempt + 1 < attempts) {
+            await delay(1_000)
+          }
         }
       }
 

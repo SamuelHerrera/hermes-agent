@@ -7,10 +7,23 @@ let cached: { host: object; api: TerminalApi } | null = null
 
 export function terminalApi(): TerminalApi | undefined {
   const host = tryResolveHost()
-  if (!host) return undefined
-  if (host.kind === 'electron') return window.hermesDesktop?.terminal
-  if (!host.capabilities.persistentTerminal) return undefined
-  if (cached?.host !== host) cached = { host, api: createBrowserTerminal(host) }
+
+  if (!host) {
+    return undefined
+  }
+
+  if (host.kind === 'electron') {
+    return window.hermesDesktop?.terminal
+  }
+
+  if (!host.capabilities.persistentTerminal) {
+    return undefined
+  }
+
+  if (cached?.host !== host) {
+    cached = { host, api: createBrowserTerminal(host) }
+  }
+
   return cached.api
 }
 

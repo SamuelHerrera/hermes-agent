@@ -6,13 +6,16 @@ import type { HermesHost } from './types'
 class FakeSocket {
   static instances: FakeSocket[] = []
   static protocol = 2
+  static sendReady = true
   readyState = 1
   sent: any[] = []
   listeners = new Map<string, Array<(event: any) => void>>()
 
   constructor(readonly url: string) {
     FakeSocket.instances.push(this)
-    queueMicrotask(() => this.emit('message', { data: JSON.stringify({ type: 'ready', protocol: (this.constructor as typeof FakeSocket).protocol, scope: 'profile/work', epoch: 'epoch-1' }) }))
+    if ((this.constructor as typeof FakeSocket).sendReady) {
+      queueMicrotask(() => this.emit('message', { data: JSON.stringify({ type: 'ready', protocol: (this.constructor as typeof FakeSocket).protocol, scope: 'profile/work', epoch: 'epoch-1' }) }))
+    }
   }
 
   addEventListener(type: string, listener: (event: any) => void) {
@@ -146,5 +149,21 @@ describe('browser persistent terminal transport', () => {
 
     const api = createBrowserTerminal(host())
     await expect(api.start({ requestId: 'tab-1', profile: 'work' })).rejects.toThrow('protocol')
+  })
+
+  it('closes a socket that never completes the versioned handshake', async () => {
+    vi.useFakeTimers()
+    class StalledSocket extends FakeSocket {
+      static sendReady = false
+    }
+    vi.stubGlobal('WebSocket', StalledSocket)
+
+    const pending = createBrowserTerminal(host()).start({ requestId: 'tab-1', profile: 'work' })
+    const rejected = expect(pending).rejects.toThrow('handshake timed out')
+    await vi.advanceTimersByTimeAsync(15_000)
+
+    await rejected
+    expect(FakeSocket.instances[0].readyState).toBe(3)
+    vi.useRealTimers()
   })
 })

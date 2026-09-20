@@ -70,6 +70,21 @@ describe('browser lifecycle adapter', () => {
     expect(status.version).toBe(1)
   })
 
+  it('does not report an HTTP action failure as a successful reconnect', async () => {
+    const api = vi.fn()
+      .mockResolvedValueOnce({
+        version: 1,
+        authority: { externally_managed: true, kind: 'launchd' },
+        actions: { 'backend-restart': { supported: true, guidance: '' } }
+      })
+      .mockRejectedValueOnce(Object.assign(new Error('500: restart failed'), { code: 'http' }))
+
+    const lifecycle = createBrowserLifecycle(host(api), { delay: async () => {}, attempts: 1 })
+
+    await expect(lifecycle.runAndReconnect('backend-restart')).rejects.toThrow('restart failed')
+    expect(api).toHaveBeenCalledTimes(2)
+  })
+
   it('fails closed when backend lifecycle was not advertised', async () => {
     const unsupported = host(vi.fn())
     unsupported.capabilities = { ...capabilities, backendLifecycle: false }

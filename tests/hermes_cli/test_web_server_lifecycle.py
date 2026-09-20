@@ -12,9 +12,6 @@ class FakeManager:
     def restart(self, name):
         self.calls.append(("restart", name))
 
-    def uninstall(self, name):
-        self.calls.append(("uninstall", name))
-
 
 def _client():
     client = TestClient(web_server.app)
@@ -35,7 +32,7 @@ def test_lifecycle_status_is_read_only_and_advertises_authority(monkeypatch):
     assert body["authority"] == {"externally_managed": True, "kind": "systemd"}
     assert body["actions"]["gateway-restart"]["supported"] is True
     assert body["actions"]["backend-restart"]["supported"] is True
-    assert body["actions"]["uninstall"]["supported"] is True
+    assert body["actions"]["uninstall"]["supported"] is False
     assert manager.calls == []
 
 
@@ -65,22 +62,18 @@ def test_backend_restart_uses_fixed_server_authority_not_request_paths(monkeypat
     assert manager.calls == [("restart", "ai.hermes.serve")]
 
 
-def test_uninstall_requires_advertisement_and_exact_confirmation(monkeypatch):
+def test_uninstall_is_not_advertised_without_a_production_manager_operation(monkeypatch):
     manager = FakeManager()
     monkeypatch.setattr(web_server, "_lifecycle_service_manager", lambda: manager)
     monkeypatch.setattr(web_server, "_desktop_backend_service_installed", lambda kind: True)
     client = _client()
 
-    denied = client.post("/api/lifecycle/action", json={"action": "uninstall"})
-    assert denied.status_code == 400
-    assert manager.calls == []
-
-    accepted = client.post(
+    response = client.post(
         "/api/lifecycle/action",
         json={"action": "uninstall", "confirmation": "UNINSTALL"},
     )
-    assert accepted.status_code == 200
-    assert manager.calls == [("uninstall", "ai.hermes.serve")]
+    assert response.status_code == 409
+    assert manager.calls == []
 
 
 def test_lifecycle_fails_closed_without_external_manager(monkeypatch):
