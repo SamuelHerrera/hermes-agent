@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import type { DesktopUninstallMode, DesktopUninstallSummary } from '@/global'
 import { AlertTriangle, Loader2, Trash2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
+import { createBrowserLifecycle, type LifecycleActionAdvertisement } from '@/platform/browser-lifecycle'
+import { tryResolveHost } from '@/platform/host'
 
 import { SectionHeading } from './primitives'
 
@@ -44,6 +46,69 @@ const OPTIONS: ModeOption[] = [
     needsAgent: true
   }
 ]
+
+function BrowserUninstallSection() {
+  const host = tryResolveHost()
+  const [advertisement, setAdvertisement] = useState<LifecycleActionAdvertisement | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [message, setMessage] = useState<string | null>(null)
+  const [running, setRunning] = useState(false)
+
+  useEffect(() => {
+    if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) return
+    let alive = true
+    void createBrowserLifecycle(host).status().then(status => {
+      if (alive) setAdvertisement(status.actions.uninstall)
+    }).catch(error => {
+      if (alive) setMessage(error instanceof Error ? error.message : String(error))
+    })
+    return () => { alive = false }
+  }, [host])
+
+  if (host?.kind !== 'browser' || !host.capabilities.backendLifecycle) return null
+  const guidance = advertisement?.guidance ?? message ?? 'Checking backend lifecycle authority…'
+
+  const uninstall = async () => {
+    setRunning(true)
+    setMessage(null)
+    try {
+      const result = await createBrowserLifecycle(host).run('uninstall', 'UNINSTALL')
+      setMessage(result.ok
+        ? 'Uninstall was accepted by the backend. This browser tab was not relaunched.'
+        : 'The backend did not accept uninstall.')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunning(false)
+      setConfirming(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto mt-8 w-full max-w-2xl">
+      <SectionHeading icon={AlertTriangle} title="Danger zone" />
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+        <p className="text-sm font-medium">Backend uninstall</p>
+        <p className="mt-1 text-xs text-muted-foreground">{guidance}</p>
+        {message && advertisement?.supported && <p className="mt-2 text-xs">{message}</p>}
+        {advertisement?.supported && (
+          <div className="mt-3 flex gap-2">
+            {confirming ? (
+              <>
+                <Button disabled={running} onClick={() => void uninstall()} size="sm" variant="destructive">
+                  {running ? 'Uninstalling…' : 'Confirm UNINSTALL'}
+                </Button>
+                <Button disabled={running} onClick={() => setConfirming(false)} size="sm" variant="text">Cancel</Button>
+              </>
+            ) : (
+              <Button onClick={() => setConfirming(true)} size="sm" variant="destructive">Uninstall backend</Button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function UninstallSection() {
   const [summary, setSummary] = useState<DesktopUninstallSummary | null>(null)
@@ -86,7 +151,7 @@ export function UninstallSection() {
   const bridge = window.hermesDesktop?.uninstall
 
   if (!bridge) {
-    return null
+    return <BrowserUninstallSection />
   }
 
   // Gate the agent-removing options on whether an agent is actually present.

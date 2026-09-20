@@ -4171,6 +4171,96 @@ def _restart_gateway_after_webhook_enable(profile: Optional[str] = None) -> dict
     }
 
 
+def _lifecycle_service_manager():
+    """Resolve the canonical service-manager seam, failing closed."""
+    try:
+        from hermes_cli.service_manager import get_service_manager
+
+        return get_service_manager()
+    except (RuntimeError, OSError):
+        return None
+
+
+def _lifecycle_status() -> dict[str, Any]:
+    manager = _lifecycle_service_manager()
+    service = getattr(app.state, "lifecycle_backend_service", None)
+    externally_managed = bool(manager is not None and service)
+    allow_restart = bool(
+        externally_managed
+        and getattr(app.state, "lifecycle_allow_backend_restart", False)
+        and callable(getattr(manager, "restart", None))
+    )
+    allow_uninstall = bool(
+        externally_managed
+        and getattr(app.state, "lifecycle_allow_uninstall", False)
+        and callable(getattr(manager, "uninstall", None))
+    )
+    kind = str(getattr(manager, "kind", "none")) if manager is not None else "none"
+    return {
+        "version": 1,
+        "authority": {"externally_managed": externally_managed, "kind": kind},
+        "actions": {
+            "gateway-restart": {
+                "supported": True,
+                "guidance": "Run `hermes gateway restart` from the backend host if the dashboard is unavailable.",
+            },
+            "update": {
+                "supported": not _dashboard_local_update_managed_externally(),
+                "guidance": "Run `hermes update` on the backend host when browser updates are unavailable.",
+            },
+            "backend-restart": {
+                "supported": allow_restart,
+                "guidance": "Restart the externally managed Hermes dashboard service on the backend host; `hermes serve` is foreground-only.",
+            },
+            "uninstall": {
+                "supported": allow_uninstall,
+                "confirmation": "UNINSTALL" if allow_uninstall else None,
+                "guidance": "Run the Hermes uninstall command on the backend host; a browser tab cannot uninstall itself.",
+            },
+        },
+    }
+
+
+@app.get("/api/lifecycle")
+async def get_lifecycle_status():
+    """Read lifecycle authority and advertised actions without side effects."""
+    return _lifecycle_status()
+
+
+@app.post("/api/lifecycle/action")
+async def run_lifecycle_action(request: Request):
+    """Run one fixed lifecycle action; no command or service comes from input."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = str((body or {}).get("action", ""))
+    status = _lifecycle_status()
+    advertised = status["actions"].get(action)
+    if advertised is None:
+        raise HTTPException(status_code=400, detail="Unknown lifecycle action")
+    if not advertised["supported"]:
+        raise HTTPException(status_code=409, detail=advertised["guidance"])
+    if action == "gateway-restart":
+        result = await restart_gateway()
+        return {**result, "relaunch": False}
+    if action == "update":
+        result = await update_hermes()
+        return {**result, "relaunch": False}
+    if action == "uninstall" and (body or {}).get("confirmation") != "UNINSTALL":
+        raise HTTPException(status_code=400, detail="Exact uninstall confirmation required")
+
+    manager = _lifecycle_service_manager()
+    service = getattr(app.state, "lifecycle_backend_service", None)
+    if manager is None or not service:
+        raise HTTPException(status_code=409, detail="Lifecycle authority was lost")
+    if action == "backend-restart":
+        manager.restart(service)
+    elif action == "uninstall":
+        manager.uninstall(service)
+    return {"ok": True, "action": action, "relaunch": False}
+
+
 @app.post("/api/gateway/restart")
 async def restart_gateway(profile: Optional[str] = None):
     """Kick off a ``hermes gateway restart`` in the background."""
