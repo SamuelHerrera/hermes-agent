@@ -10,11 +10,14 @@ wrong — but never break an invariant to make a change easier.
 
 ## What this app is
 
-Desktop is its own native chat surface. It is not the browser dashboard and it
-does not embed the TUI. Three parties, each authoritative for one thing:
+Desktop is a shared chat-first renderer hosted either by Electron or by the
+authenticated `/desktop/` browser route. It is not the dashboard's embedded
+TUI. Three parties, each authoritative for one thing:
 
-- **Electron** owns the machine: process lifecycle, native filesystem/git/
-  windows, install/update, and a narrow, typed capability bridge.
+- **The connected backend** owns privileged workspace files, Git, persistent
+  terminals, and advertised lifecycle actions.
+- **Electron** adds native windows, global shortcuts, overlays, deep links,
+  and a narrow, typed compatibility bridge.
 - **The renderer** owns the experience: navigation, presentation, and ephemeral
   interaction state.
 - **The agent backend** owns the work: sessions, tools, model calls, streaming.
@@ -23,6 +26,11 @@ Keep the seams clean. The renderer never reaches for Node or Electron directly;
 native power arrives through a deliberate capability, not a general escape hatch.
 Agent behavior lives behind the gateway, never reimplemented in React. When a
 change blurs a seam, that is the smell — fix the seam, don't widen it.
+
+Shared renderer code must resolve `HermesHost` and its explicit capabilities.
+Browser code must never fall back to Electron IPC when a backend capability is
+missing or a transport fails. Browser-owned permission APIs stay client-side;
+backend-owned operations fail closed unless authenticated and advertised.
 
 ## Decide state by authority
 

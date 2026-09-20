@@ -31,12 +31,32 @@ An available operation may still reject because of authorization, connectivity, 
 The initial browser host does not claim Electron/OS integration:
 
 - `deepLinkProtocol`
+- `globalHotkeys`
 - `nativeDialogs`
 - `nativeWindows`
 - `revealHostPath`
+- `windowBelow`
 
 Renderer features must use these flags to disable or replace native-only affordances. Existing optional direct `window.hermesDesktop` calls may remain while they are migrated, but host-neutral boot, gateway routing, and backend API traffic must not depend on them.
 
 ## No environment inference
 
 Never infer renderer or host capabilities from `HERMES_DESKTOP` (or any other backend process environment variable). That variable describes how a backend process was launched, not which client is connected, where the client runs, or what its browser/native surface can do. The server manifest and client-side browser detection are the authoritative inputs.
+
+## Backend-owned operations
+
+Files, previews, Git, persistent terminals, and lifecycle actions always target the connected backend. Browser uploads carry bytes rather than fabricated local paths. Persistent terminal references include profile, backend identity, protocol epoch, and terminal id; a connection change fails closed instead of silently starting or retargeting a shell.
+
+All backend operations use authenticated same-origin REST or WebSocket transports. Files remain jailed to authorized workspace roots. Git exposes an allowlisted operation vocabulary rather than arbitrary commands. Lifecycle actions accept fixed action names only and are advertised only when a canonical supervisor owns the fixed Hermes service. Unsupported uninstall remains unavailable.
+
+## Browser-owned operations
+
+Clipboard, microphone capture, notifications, external links, and screen wake lock use standards-based browser APIs. Permission denial, insecure context, revoked access, and missing user gestures are distinct runtime failures. Wake-lock acquisition is generation guarded so disabling it wins over an in-flight request.
+
+## Compatibility and rollout
+
+- `/desktop/` inherits dashboard authentication, Host/Origin checks, profile scoping, and CSRF policy.
+- Old backends may retain chat compatibility; optional mutations remain unavailable until advertised.
+- The browser bundle and Electron bundle are separate artifacts built from one renderer source tree.
+- Browser-first support remains gated on browser E2E plus Electron packaged smoke. Windows and Linux native parity is not claimed until their native lanes run.
+- Files/Git/terminal confirmation text should identify the backend host when destructive behavior could otherwise be ambiguous.

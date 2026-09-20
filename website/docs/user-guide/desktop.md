@@ -10,14 +10,30 @@ The Hermes desktop app is a native app built around the **same** agent you get f
 
 It runs on **macOS, Windows, and Linux**.
 
+The same chat-first renderer is also available as an authenticated browser page. Start the dashboard and open the printed origin with `/desktop/` appended:
+
+```bash
+hermes dashboard
+# Example: http://127.0.0.1:9119/desktop/
+```
+
+In browser mode, chat, sessions, profiles, projects, files, Git review, and persistent terminals operate on the **connected backend host**, not on the computer running the browser. Clipboard, microphone, notifications, external links, and wake lock use browser APIs and remain subject to browser permission and secure-context rules.
+
+For LAN/VPN, reverse-proxy, OAuth, or cloud deployments, use the same authentication policy as the dashboard APIs. Never expose a public bind without explicit authentication. Reverse proxies must preserve the configured prefix and WebSocket upgrades.
+
 :::tip Which interface is which?
 Hermes has several front ends that all talk to the same agent:
 
 - **Desktop App** (this page) — a native application with a purpose-built UI for chat, configuration, and management.
+- **Browser Desktop** (`hermes dashboard`, then `/desktop/`) — the same renderer using authenticated backend transports for core workflows.
 - **CLI** (`hermes`) and **[TUI](./tui.md)** (`hermes --tui`) — terminal interfaces.
 - **[Web Dashboard](./features/web-dashboard.md)** (`hermes dashboard`) — a browser admin panel; its optional **Chat** tab embeds the TUI through a pseudo-terminal.
 
 Pick whichever fits the moment. They share state, so you can start a session in one and resume it in another.
+:::
+
+:::note Native enhancements
+Electron remains the enhanced native host for global Quick Entry and hotkeys, HUD, pop-out pet overlays, translucency and native titlebar controls, OS deep-link registration, window-below inspection, and reveal-in-file-manager. Browser mode hides or disables those capabilities rather than pretending they exist. An in-page pet and ordinary browser windows remain available.
 :::
 
 ## Install
