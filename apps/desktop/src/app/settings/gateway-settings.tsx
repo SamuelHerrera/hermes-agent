@@ -5,8 +5,10 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
 import type { DesktopAuthProvider, DesktopCloudAgent, DesktopCloudOrg, DesktopConnectionProbeResult } from '@/global'
+import { getHermesConfigRecord, saveHermesConfig } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { ExternalLink } from '@/lib/external-link'
 import {
@@ -182,6 +184,8 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   const [localServices, setLocalServices] = useState<LocalServicesStatus | null>(null)
   const [browserLifecycleStatus, setBrowserLifecycleStatus] = useState<LifecycleStatus | null>(null)
   const [localServiceBusy, setLocalServiceBusy] = useState<LocalServiceAction | null>(null)
+  const [browserDesktopConfig, setBrowserDesktopConfig] = useState<Record<string, unknown> | null>(null)
+  const [browserDesktopSaving, setBrowserDesktopSaving] = useState(false)
 
   const acceptSavedConfig = (config: GatewaySettingsState) => {
     setState(config)
@@ -239,6 +243,63 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
   const showLocalServices = !embedded && scope === null && (
     (state.mode === 'local' && Boolean(window.hermesDesktop?.localServices)) || Boolean(browserLifecycle)
   )
+
+  const desktopConfig = browserDesktopConfig?.desktop
+
+  const browserDesktopEnabled = !(desktopConfig && typeof desktopConfig === 'object' &&
+    (desktopConfig as Record<string, unknown>).browser_access_enabled === false)
+
+  useEffect(() => {
+    if (!showLocalServices) {
+      return
+    }
+
+    let cancelled = false
+
+    void getHermesConfigRecord().then(config => {
+      if (!cancelled) {
+        setBrowserDesktopConfig(config)
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setBrowserDesktopConfig({})
+      }
+    })
+
+    return () => { cancelled = true }
+  }, [showLocalServices])
+
+  const setBrowserDesktopEnabled = async (enabled: boolean) => {
+    const current = browserDesktopConfig ?? {}
+
+    const currentDesktop = current.desktop && typeof current.desktop === 'object'
+      ? current.desktop as Record<string, unknown>
+      : {}
+
+    const next = {
+      ...current,
+      desktop: { ...currentDesktop, browser_access_enabled: enabled }
+    }
+
+    setBrowserDesktopConfig(next)
+    setBrowserDesktopSaving(true)
+
+    try {
+      await saveHermesConfig(next)
+      notify({
+        kind: 'success',
+        title: 'Browser Desktop updated',
+        message: enabled
+          ? 'Browser Desktop is available at the local backend URL.'
+          : 'Browser Desktop access is disabled.'
+      })
+    } catch (error) {
+      setBrowserDesktopConfig(current)
+      notifyError(error, 'Could not update Browser Desktop access')
+    } finally {
+      setBrowserDesktopSaving(false)
+    }
+  }
 
   const localBackendInstalled = browserLifecycleStatus
     ? browserLifecycleStatus.authority.externally_managed
@@ -1320,6 +1381,27 @@ export function GatewaySettings({ embedded = false }: { embedded?: boolean } = {
               localServices?.descriptor.serviceName || 'ai.hermes.serve'
             )}
             title={g.localServicesTitle}
+          />
+          <ListRow
+            action={
+              <div className="flex items-center gap-3">
+                {browserDesktopEnabled ? (
+                  <Button asChild size="sm" variant="outline">
+                    <ExternalLink href="http://127.0.0.1:9119/desktop/" showExternalIcon={false}>
+                      Open Browser Desktop
+                    </ExternalLink>
+                  </Button>
+                ) : null}
+                <Switch
+                  aria-label="Browser Desktop access"
+                  checked={browserDesktopEnabled}
+                  disabled={browserDesktopSaving || browserDesktopConfig === null}
+                  onCheckedChange={enabled => void setBrowserDesktopEnabled(enabled)}
+                />
+              </div>
+            }
+            description="Serve the authenticated Desktop interface from this always-on backend at /desktop/."
+            title="Browser Desktop"
           />
         </div>
       ) : null}

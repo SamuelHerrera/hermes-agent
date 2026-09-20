@@ -10,7 +10,14 @@ const localServicesStatus = vi.fn()
 const installBackend = vi.fn()
 const restartBackend = vi.fn()
 const restartGateway = vi.fn()
+const getHermesConfigRecord = vi.fn()
+const saveHermesConfig = vi.fn()
 const profiles = atom<ProfileInfo[]>([])
+
+vi.mock('@/hermes', () => ({
+  getHermesConfigRecord: () => getHermesConfigRecord(),
+  saveHermesConfig: (config: unknown) => saveHermesConfig(config)
+}))
 
 vi.mock('@/store/profile', () => ({
   $profiles: profiles,
@@ -71,6 +78,8 @@ beforeEach(() => {
   installBackend.mockResolvedValue({ action: 'install-local-backend', message: 'installed', ok: true })
   restartBackend.mockResolvedValue({ action: 'restart-local-backend', message: 'restarted backend', ok: true })
   restartGateway.mockResolvedValue({ action: 'restart-gateway', message: 'restarted gateway', ok: true })
+  getHermesConfigRecord.mockResolvedValue({ desktop: { browser_access_enabled: true } })
+  saveHermesConfig.mockResolvedValue({ ok: true })
   Object.defineProperty(window, 'hermesDesktop', {
     configurable: true,
     value: {
@@ -124,6 +133,25 @@ describe('GatewaySettings', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Restart backend' }))
     await waitFor(() => expect(restartBackend).toHaveBeenCalled())
+  })
+
+  it('enables Browser Desktop by default and persists the settings toggle', async () => {
+    const { GatewaySettings } = await import('./gateway-settings')
+
+    render(<GatewaySettings />)
+
+    const toggle = await screen.findByRole('switch', { name: 'Browser Desktop access' })
+
+    expect(toggle.getAttribute('data-state')).toBe('checked')
+    expect(screen.getByRole('link', { name: 'Open Browser Desktop' }).getAttribute('href')).toBe(
+      'http://127.0.0.1:9119/desktop/'
+    )
+
+    fireEvent.click(toggle)
+
+    await waitFor(() =>
+      expect(saveHermesConfig).toHaveBeenCalledWith({ desktop: { browser_access_enabled: false } })
+    )
   })
 
   it('shows and clears an SSH remote-profile mapping for a named Desktop profile', async () => {

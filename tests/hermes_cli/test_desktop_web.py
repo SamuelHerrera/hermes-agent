@@ -86,15 +86,39 @@ def test_desktop_serves_generated_resources_outside_assets(tmp_path, monkeypatch
     assert response.headers["cache-control"] == "public, max-age=3600"
 
 
-def test_headless_serve_never_serves_desktop_bundle(tmp_path, monkeypatch):
+def test_headless_serve_serves_browser_desktop_by_default(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_SERVE_HEADLESS", "1")
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.get("/desktop/")
+
+    assert response.status_code == 200
+    assert "Desktop SPA" in response.text
+
+
+def test_browser_desktop_can_be_disabled_in_config(tmp_path, monkeypatch):
+    import hermes_cli.desktop_web as desktop_web
+
+    monkeypatch.setenv("HERMES_SERVE_HEADLESS", "1")
+    monkeypatch.setattr(
+        desktop_web,
+        "load_config",
+        lambda: {"desktop": {"browser_access_enabled": False}},
+        raising=False,
+    )
     client = _client(tmp_path, monkeypatch)
 
     response = client.get("/desktop/")
 
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/json")
-    assert "headless" in response.json()["error"].lower()
+    assert "disabled" in response.json()["error"].lower()
+
+
+def test_browser_desktop_is_enabled_in_default_config():
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+    assert DEFAULT_CONFIG["desktop"]["browser_access_enabled"] is True
 
 
 def test_real_backend_mounts_desktop_beside_dashboard(tmp_path, monkeypatch):

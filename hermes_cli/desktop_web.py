@@ -11,9 +11,23 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from hermes_cli.config import load_config
+
 DESKTOP_WEB_DIST = Path(__file__).parent / "desktop_web_dist"
 IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 RESOURCE_CACHE_CONTROL = "public, max-age=3600"
+
+
+def browser_desktop_enabled() -> bool:
+    """Return whether the authenticated browser Desktop surface is enabled."""
+
+    try:
+        desktop = load_config().get("desktop", {})
+    except Exception:
+        return True
+    if not isinstance(desktop, dict):
+        return True
+    return desktop.get("browser_access_enabled", True) is not False
 
 
 def resolve_desktop_web_dist() -> Path:
@@ -25,8 +39,8 @@ def resolve_desktop_web_dist() -> Path:
 
 class _ImmutableAssetFiles(StaticFiles):
     async def get_response(self, path: str, scope):
-        if os.environ.get("HERMES_SERVE_HEADLESS") == "1":
-            return JSONResponse({"error": "Headless backend (hermes serve): Desktop web UI disabled"}, status_code=404)
+        if not browser_desktop_enabled():
+            return JSONResponse({"error": "Browser Desktop access is disabled in config"}, status_code=404)
         response = await super().get_response(path, scope)
         if response.status_code == 200:
             response.headers["Cache-Control"] = IMMUTABLE_CACHE_CONTROL
@@ -66,9 +80,9 @@ def mount_desktop_spa(
 
     @application.get("/desktop/{full_path:path}")
     async def serve_desktop(full_path: str, request: Request):
-        if os.environ.get("HERMES_SERVE_HEADLESS") == "1":
+        if not browser_desktop_enabled():
             return JSONResponse(
-                {"error": "Headless backend (hermes serve): Desktop web UI disabled"},
+                {"error": "Browser Desktop access is disabled in config"},
                 status_code=404,
             )
         dist_root = resolve_desktop_web_dist().resolve()

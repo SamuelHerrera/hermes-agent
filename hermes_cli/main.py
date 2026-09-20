@@ -10521,9 +10521,9 @@ def cmd_dashboard(args):
         remaining = _find_stale_dashboard_pids()
         sys.exit(1 if remaining else 0)
 
-    # `serve` is the headless backend: no UI build, no SPA mount, neutral
-    # ready sentinel. Resolved once and threaded through the re-exec, the
-    # build gate, and start_server.
+    # `serve` is headless with respect to the admin dashboard: no dashboard UI
+    # build or root SPA, and a neutral ready sentinel. The separately-built,
+    # authenticated /desktop/ surface remains available when enabled in config.
     _headless_backend = getattr(args, "headless_backend", False)
     _ssh_owner_nonce = getattr(args, "ssh_owner_nonce", None)
     if _ssh_owner_nonce and not re.fullmatch(r"[0-9a-f]{16}", _ssh_owner_nonce):
@@ -10704,8 +10704,9 @@ def cmd_dashboard(args):
                      exc_info=True)
 
     if _headless_backend:
-        # Don't build the SPA, and tell mount_spa() (read at web_server import
-        # below) to disable it even if a stray dist exists. Set it first.
+        # Don't build the admin dashboard SPA, and tell mount_spa() (read at
+        # web_server import below) to disable it even if a stray dist exists.
+        # This does not disable the separately mounted Browser Desktop bundle.
         os.environ["HERMES_SERVE_HEADLESS"] = "1"
     elif "HERMES_WEB_DIST" not in os.environ and not getattr(args, "skip_build", False):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):

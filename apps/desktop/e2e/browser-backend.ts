@@ -74,7 +74,9 @@ export async function startBrowserBackend(): Promise<BrowserBackend> {
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         HERMES_DESKTOP_WEB_DIST: BROWSER_DIST,
         HERMES_HOME: hermesHome,
-        HERMES_SERVE_HEADLESS: '0'
+        // Exercise the real `hermes serve` policy: the admin dashboard stays
+        // headless while the independently gated Browser Desktop remains live.
+        HERMES_SERVE_HEADLESS: '1'
       },
       stdio: 'pipe'
     }

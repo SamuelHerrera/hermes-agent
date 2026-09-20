@@ -3345,6 +3345,9 @@ DEFAULT_CONFIG = {
     # Hermes Desktop (Electron app) launch options. These only affect
     # `hermes desktop`; they do not touch the CLI/gateway.
     "desktop": {
+        # Serve the authenticated Desktop renderer from the backend's
+        # /desktop/ route. This is independent from the admin dashboard SPA.
+        "browser_access_enabled": True,
         # Git repository discovery for the Desktop Projects sidebar. Empty
         # roots preserve the historical bounded scan of the user's home.
         "repo_scan_enabled": False,

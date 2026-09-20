@@ -16946,9 +16946,9 @@ def mount_spa(application: FastAPI):
     and the SPA's runtime ``__HERMES_BASE_PATH__`` honour that prefix
     without rebuilding the bundle.
     """
-    # `hermes serve` is the headless backend: it must NEVER serve the browser
-    # SPA, even if a dist is lying around from a prior `dashboard`/build. Take
-    # the no-frontend path so only the JSON-RPC/WS/API surface is reachable.
+    # `hermes serve` is headless with respect to the admin dashboard: it must
+    # never serve that root SPA, even if a dist is lying around. The separate
+    # authenticated /desktop/ renderer is mounted independently below.
     _headless = os.environ.get("HERMES_SERVE_HEADLESS") == "1"
     if _headless or not WEB_DIST.exists():
         _msg = (
@@ -18514,9 +18514,11 @@ def start_server(
     — used when a profile alias (``<profile> dashboard``) routes to the
     machine dashboard.
 
-    ``headless`` is the ``serve`` path: the JSON-RPC/WS backend with no UI
-    build and no SPA mount (mount_spa() honours ``HERMES_SERVE_HEADLESS``), so
-    the banner announces the bind rather than a browser URL.
+    ``headless`` is the ``serve`` path: the JSON-RPC/WS backend with no admin
+    dashboard build or root SPA (mount_spa() honours
+    ``HERMES_SERVE_HEADLESS``), so the banner announces the bind rather than a
+    dashboard URL. The separately-built Browser Desktop may still be served at
+    ``/desktop/`` according to ``desktop.browser_access_enabled``.
 
     ``ssh_session_token`` and ``ssh_owner_nonce`` are process-local Desktop SSH
     bootstrap state. Neither is persisted or exported to child processes.

@@ -161,10 +161,9 @@ def build_dashboard_parser(
         default=None,
         help="Identify a Desktop-owned SSH backend process",
     )
-    # `headless_backend` marks the lean path: desktop/remote clients speak pure
-    # JSON-RPC/WS, so `serve` skips the web UI build AND never serves the SPA
-    # (cmd_dashboard exports HERMES_SERVE_HEADLESS=1). `dashboard` leaves it
-    # unset and serves the browser UI as before.
+    # `headless_backend` marks the lean path: `serve` skips the admin dashboard
+    # build/SPA. The authenticated Browser Desktop at /desktop/ is a separate,
+    # prebuilt surface controlled by desktop.browser_access_enabled.
     serve_parser.set_defaults(func=cmd_dashboard, no_open=True, headless_backend=True)
 
     # `hermes dashboard register` — register a self-hosted dashboard OAuth
