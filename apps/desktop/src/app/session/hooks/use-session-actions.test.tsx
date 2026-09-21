@@ -667,6 +667,7 @@ describe('createBackendSessionForSend profile routing', () => {
 // (b) arm $resumeFailedSessionId so use-route-resume can retry. A resume that
 // succeeds must NOT leave the flag armed.
 function ResumeHarness({
+  activeSessionIdRef,
   onStateUpdate,
   onReady,
   requestGateway,
@@ -674,6 +675,7 @@ function ResumeHarness({
   selectedStoredSessionId = null,
   sessionStateByRuntimeIdRef
 }: {
+  activeSessionIdRef?: MutableRefObject<string | null>
   onStateUpdate?: (sessionId: string, state: ClientSessionState) => void
   onReady: (resume: (storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) => void
   requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>
@@ -682,10 +684,11 @@ function ResumeHarness({
   sessionStateByRuntimeIdRef?: MutableRefObject<Map<string, ClientSessionState>>
 }) {
   const ref = <T,>(value: T): MutableRefObject<T> => ({ current: value })
+  const activeRuntimeRef = activeSessionIdRef ?? ref<string | null>(null)
 
   const actions = useSessionActions({
-    activeSessionId: null,
-    activeSessionIdRef: ref<string | null>(null),
+    activeSessionId: activeRuntimeRef.current,
+    activeSessionIdRef: activeRuntimeRef,
     busyRef: ref(false),
     creatingSessionRef: ref(false),
     ensureSessionState: () => ({}) as ClientSessionState,
@@ -838,6 +841,82 @@ describe('resumeSession failure recovery', () => {
     await resume!('stored-1', true)
 
     expect($messages.get().map(message => message.id)).toContain('user-optimistic')
+  })
+
+  it('does not graft the outgoing chat pending turn when selection already points at the promoted chat', async () => {
+    setMessages([
+      {
+        id: 'user-outgoing',
+        role: 'user',
+        parts: [{ type: 'text', text: 'archive this chat' }]
+      },
+      {
+        id: 'assistant-stream-outgoing',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'outgoing answer' }],
+        pending: false
+      }
+    ])
+
+    vi.mocked(getLatestSessionMessages).mockResolvedValue({
+      messages: [
+        { content: 'promoted question', role: 'user', timestamp: 10 },
+        { content: 'promoted answer', role: 'assistant', timestamp: 11 }
+      ],
+      session_id: 'promoted'
+    } as never)
+
+    const requestGateway = vi.fn(async (method: string) => {
+      if (method === 'session.resume') {
+        return {
+          info: {},
+          message_count: 2,
+          messages: [],
+          messages_omitted: true,
+          resumed: 'promoted',
+          running: false,
+          session_id: 'runtime-promoted',
+          session_key: 'promoted'
+        } as never
+      }
+
+      return {} as never
+    })
+
+    const activeSessionIdRef: MutableRefObject<string | null> = { current: 'runtime-outgoing' }
+
+    const runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>> = {
+      current: new Map([['outgoing', 'runtime-outgoing']])
+    }
+
+    const outgoingState = createClientSessionState('outgoing')
+
+    outgoingState.messages = $messages.get()
+
+    const sessionStateByRuntimeIdRef: MutableRefObject<Map<string, ClientSessionState>> = {
+      current: new Map([['runtime-outgoing', outgoingState]])
+    }
+
+    let resume: ((storedSessionId: string, replaceRoute?: boolean) => Promise<unknown>) | null = null
+
+    render(
+      <ResumeHarness
+        activeSessionIdRef={activeSessionIdRef}
+        onReady={ready => (resume = ready)}
+        requestGateway={requestGateway}
+        runtimeIdByStoredSessionIdRef={runtimeIdByStoredSessionIdRef}
+        selectedStoredSessionId="promoted"
+        sessionStateByRuntimeIdRef={sessionStateByRuntimeIdRef}
+      />
+    )
+    await waitFor(() => expect(resume).not.toBeNull())
+    await resume!('promoted', true)
+
+    const rendered = JSON.stringify($messages.get())
+    expect(rendered).toContain('promoted question')
+    expect(rendered).toContain('promoted answer')
+    expect(rendered).not.toContain('archive this chat')
+    expect(rendered).not.toContain('outgoing answer')
   })
 
   it('restores the in-flight turn and queued user prompt after a full renderer restart', async () => {

@@ -685,7 +685,33 @@ export function useSessionActions({
     async (storedSessionId: string, replaceRoute = false) => {
       const requestId = resumeRequestRef.current + 1
       resumeRequestRef.current = requestId
-      const resumedSameSelectedSession = selectedStoredSessionIdRef.current === storedSessionId
+      const outgoingRuntimeId = activeSessionIdRef.current
+
+      const outgoingStoredSessionId = outgoingRuntimeId
+        ? sessionStateByRuntimeIdRef.current.get(outgoingRuntimeId)?.storedSessionId
+        : null
+
+      // Selection can move to the promoted tab one render before the shared
+      // transcript/runtime leave the chat being archived. Stored selection alone
+      // therefore cannot prove `$messages` belongs to this resume target: doing so
+      // preserves the outgoing chat's optimistic `user-*` / `assistant-stream-*`
+      // tail and grafts it onto the promoted conversation. When a live cached
+      // runtime names another stored conversation, treat this as a real switch.
+      // Lineage matching keeps compression tip/root rotations in the same chat.
+      const outgoingRuntimeMatchesTarget =
+        !outgoingStoredSessionId ||
+        outgoingStoredSessionId === storedSessionId ||
+        $sessions
+          .get()
+          .some(
+            session =>
+              sessionMatchesStoredId(session, outgoingStoredSessionId) &&
+              sessionMatchesStoredId(session, storedSessionId)
+          )
+
+      const resumedSameSelectedSession =
+        selectedStoredSessionIdRef.current === storedSessionId && outgoingRuntimeMatchesTarget
+
       const resumeStartMessages = resumedSameSelectedSession ? $messages.get() : []
 
       const isCurrentResume = () =>
