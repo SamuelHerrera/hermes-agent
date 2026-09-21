@@ -79,6 +79,7 @@ import {
   type TileDock
 } from '@/store/session-states'
 import { broadcastSessionsChanged } from '@/store/session-sync'
+import { $remoteArchiveRequest } from '@/store/sidebar-archive'
 import { setSessionDraftingTool } from '@/store/tool-drafting'
 import { isWatchWindow } from '@/store/windows'
 import type { SessionCreateResponse, SessionMessage, SessionResumeResponse, UsageStats } from '@/types/hermes'
@@ -241,6 +242,8 @@ export function useSessionActions({
   const { t } = useI18n()
   const copy = t.desktop
   const resumeRequestRef = useRef(0)
+  const remoteArchiveRequest = useStore($remoteArchiveRequest)
+  const remoteArchiveSeenRef = useRef(remoteArchiveRequest.nonce)
 
   // Follow auto-compression's stored-id rotation only while the exact runtime,
   // selection, and route intent still belong to the rotating conversation.
@@ -1622,6 +1625,69 @@ export function useSessionActions({
       startFreshSessionDraft
     ]
   )
+
+  // Archive mutations can originate in another client (for example the phone
+  // PWA). The gateway event already reconciles sidebar rows; this effect owns
+  // the renderer-only part of that transition so a remotely archived chat
+  // cannot remain open in the main workspace or in a session tile.
+  // eslint-disable-next-line no-restricted-syntax -- one-shot request-seen sentinel, not an atom mirror
+  useEffect(() => {
+    if (remoteArchiveRequest.nonce === remoteArchiveSeenRef.current) {
+      return
+    }
+
+    remoteArchiveSeenRef.current = remoteArchiveRequest.nonce
+
+    if (
+      remoteArchiveRequest.profile &&
+      normalizeProfileKey(remoteArchiveRequest.profile) !== normalizeProfileKey($activeGatewayProfile.get())
+    ) {
+      return
+    }
+
+    const archivedIds = new Set(remoteArchiveRequest.sessionIds.filter(Boolean))
+
+    if (!archivedIds.size) {
+      return
+    }
+
+    const selected = selectedStoredSessionIdRef.current
+    const wasSelected = Boolean(selected && archivedIds.has(selected))
+
+    $pinnedSessionIds.set($pinnedSessionIds.get().filter(id => !archivedIds.has(id)))
+
+    for (const id of archivedIds) {
+      const runtimeId = runtimeIdByStoredSessionIdRef.current.get(id)
+
+      closeSessionTile(id)
+      runtimeIdByStoredSessionIdRef.current.delete(id)
+
+      if (runtimeId) {
+        sessionStateByRuntimeIdRef.current.delete(runtimeId)
+        dropSessionState(runtimeId)
+      }
+    }
+
+    if (!wasSelected) {
+      return
+    }
+
+    const replacementStoredSessionId = nextSessionTileForWorkspace()
+
+    if (replacementStoredSessionId) {
+      navigate(sessionRoute(replacementStoredSessionId), { replace: true })
+      void resumeSession(replacementStoredSessionId, true)
+    } else {
+      requestEmptyWorkspace('session.remote-archive-final-tab')
+    }
+  }, [
+    navigate,
+    remoteArchiveRequest,
+    resumeSession,
+    runtimeIdByStoredSessionIdRef,
+    selectedStoredSessionIdRef,
+    sessionStateByRuntimeIdRef
+  ])
 
   const archiveSession = useCallback(
     async (storedSessionId: string) => {

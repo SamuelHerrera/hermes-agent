@@ -70,6 +70,7 @@ import {
   setSessions
 } from '@/store/session'
 import { $sessionTiles } from '@/store/session-states'
+import { requestRemoteArchiveCleanup } from '@/store/sidebar-archive'
 
 import { sessionRoute } from '../../routes'
 import type { ClientSessionState } from '../../types'
@@ -2661,6 +2662,33 @@ describe('archiveSession delegate visibility', () => {
     expect(requestGateway).not.toHaveBeenCalled()
     expect($emptyWorkspaceRequest.get()).toBe(beforeEmptyRequests + 1)
     expect($sessions.get()).toEqual([])
+  })
+
+  it('closes the current chat when another client archives it', async () => {
+    const primary = storedSession({ id: 'primary', profile: 'default', title: 'Primary chat' })
+    const beforeEmptyRequests = $emptyWorkspaceRequest.get()
+
+    setSessions([primary])
+    setSelectedStoredSessionId('primary')
+    setActiveSessionId('runtime-primary')
+    $layoutTree.set(group(['workspace'], { active: 'workspace', id: 'main' }))
+
+    let handle: HarnessHandle | null = null
+    render(
+      <Harness
+        onReady={value => (handle = value)}
+        requestGateway={async () => ({}) as never}
+        selectedStoredSessionId="primary"
+        selectedStoredSessionIdRef={{ current: 'primary' }}
+      />
+    )
+    await waitFor(() => expect(handle).not.toBeNull())
+    vi.mocked(setSessionArchived).mockClear()
+
+    act(() => requestRemoteArchiveCleanup(['primary'], 'default'))
+
+    await waitFor(() => expect($emptyWorkspaceRequest.get()).toBe(beforeEmptyRequests + 1))
+    expect(setSessionArchived).not.toHaveBeenCalled()
   })
 })
 

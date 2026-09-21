@@ -11,6 +11,22 @@ const ARCHIVED_FETCH_LIMIT = 200
 export const $archivedSessions = atom<SessionInfo[]>([])
 export const $archivedSessionsLoading = atom(false)
 
+interface RemoteArchiveRequest {
+  nonce: number
+  profile?: string | null
+  sessionIds: string[]
+}
+
+export const $remoteArchiveRequest = atom<RemoteArchiveRequest>({ nonce: 0, sessionIds: [] })
+
+export function requestRemoteArchiveCleanup(sessionIds: readonly string[], profile?: string | null): void {
+  $remoteArchiveRequest.set({
+    nonce: $remoteArchiveRequest.get().nonce + 1,
+    profile,
+    sessionIds: [...sessionIds]
+  })
+}
+
 interface ArchivedSessionMatch {
   ids: readonly string[]
   profile?: string | null

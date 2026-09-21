@@ -69,7 +69,7 @@ import {
 } from '@/store/session'
 import { handleSessionSpawnRequest, handleSpawnChanged } from '@/store/session-spawn'
 import { dropSessionState } from '@/store/session-states'
-import { loadArchivedSessions, removeArchivedSessionRows } from '@/store/sidebar-archive'
+import { loadArchivedSessions, removeArchivedSessionRows, requestRemoteArchiveCleanup } from '@/store/sidebar-archive'
 import { pruneDelegateFallbackSubagents, pruneFinishedSessionSubagents, upsertSubagent } from '@/store/subagents'
 import { reportMcpToolResult } from '@/store/suggestion-providers/repair'
 import { invalidateSkillSuggestionIndex } from '@/store/suggestion-providers/skill'
@@ -381,6 +381,7 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
           const archived = payload.archive_cleanup
           clearArchivedTerminals(archived.session_ids, archived.profile, archived.process_ids)
           removeArchivedSessionRows(archived.session_ids, archived.profile)
+          requestRemoteArchiveCleanup(archived.session_ids, archived.profile)
           void loadArchivedSessions()
         }
 
