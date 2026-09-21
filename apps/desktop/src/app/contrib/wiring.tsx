@@ -96,6 +96,7 @@ import { RemoteFolderPicker } from '../right-sidebar/files/remote-picker'
 import { resetProjectTreeState } from '../right-sidebar/files/use-project-tree'
 import { PersistentTerminal } from '../right-sidebar/terminal/persistent'
 import { closeAllTerminals } from '../right-sidebar/terminal/terminals'
+import { useTerminalSync } from '../right-sidebar/terminal/use-terminal-sync'
 import {
   CRON_ROUTE,
   cronJobRoute,
@@ -856,6 +857,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
     refreshSessions,
     requestGateway
   })
+  useTerminalSync(normalizeProfileKey(activeGatewayProfile), gatewayState === 'open')
 
   // Electron-main / OS / cross-window integrations: update polling, ⌘W close,
   // deep links, native-notification nav, preview-shortcut enablement,

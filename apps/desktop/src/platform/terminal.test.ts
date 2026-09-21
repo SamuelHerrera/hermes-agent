@@ -27,10 +27,14 @@ describe('terminal host adapter', () => {
     vi.unstubAllGlobals()
   })
 
-  it('keeps Electron as the preferred native implementation', () => {
+  it('keeps Electron native operations and adds backend-shared tab operations', () => {
     const native = { persistent: true }
     vi.stubGlobal('window', { hermesDesktop: { terminal: native } })
-    expect(terminalApi()).toBe(native)
+    const api = terminalApi()
+
+    expect(api?.persistent).toBe(true)
+    expect(api?.list).toEqual(expect.any(Function))
+    expect(api?.updateShared).toEqual(expect.any(Function))
   })
 
   it('returns no terminal when a browser backend did not advertise persistence', () => {

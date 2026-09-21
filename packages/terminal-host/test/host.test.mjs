@@ -65,19 +65,37 @@ test('create is idempotent within scope, including after termination', async t =
   assert.deepEqual(await client.request('create', params), one);
   await assert.rejects(client.request('attach', { scope: 'a', terminalId: one.terminalId }), /NOT_FOUND/);
 });
-test('writer generation rejects stale input and detach without killing replacement', async t => {
+test('multiple attached clients can write and detaching revokes only that client', async t => {
   const { client } = await fixture(t);
   const s = await client.request('create', { scope: 'a', requestId: 'writer', ...shell });
   const first = await client.request('attach', { scope: 'a', terminalId: s.terminalId });
   await assert.rejects(client.request('attach', { scope: 'b', terminalId: s.terminalId }), /SCOPE_MISMATCH/);
   const second = await client.request('attach', { scope: 'a', terminalId: s.terminalId });
-  await assert.rejects(client.request('input', { ...first.identity, data: 'exit\r' }), /STALE_WRITER/);
-  await assert.rejects(client.request('detach', first.identity), /STALE_WRITER/);
+  await client.request('input', { ...first.identity, data: '\r' });
   await client.request('input', { ...second.identity, data: '\r' });
-  await client.request('detach', second.identity);
-  await assert.rejects(client.request('input', { ...second.identity, data: 'exit\r' }), /STALE_WRITER/);
-  const third = await client.request('attach', { scope: 'a', terminalId: s.terminalId });
-  assert.equal(third.pid, s.pid);
+  await client.request('detach', first.identity);
+  await assert.rejects(client.request('input', { ...first.identity, data: '\r' }), /STALE_WRITER/);
+  await client.request('input', { ...second.identity, data: '\r' });
+});
+test('shared terminal metadata is listed and updated for other clients', async t => {
+  const { client } = await fixture(t);
+  const metadata = { id: 'tab-one', title: 'Terminal', auto: true, cwd: '/repo', hidden: false };
+  const created = await client.request('create', { scope: 'shared', requestId: 'tab-one', metadata, ...shell });
+  const initial = await client.request('list', { scope: 'shared' });
+  assert.equal(initial.metadataVersion, 1);
+  assert.deepEqual(initial.sessions, [{
+    epoch: created.epoch,
+    metadata,
+    pid: created.pid,
+    terminalId: created.terminalId,
+  }]);
+  await client.request('update', {
+    scope: 'shared', terminalId: created.terminalId,
+    metadata: { ...metadata, title: 'Logs', auto: false, hidden: true },
+  });
+  assert.deepEqual((await client.request('list', { scope: 'shared' })).sessions[0].metadata, {
+    ...metadata, title: 'Logs', auto: false, hidden: true,
+  });
 });
 test('PTY screen snapshot precedes ordered deltas and host answers device queries', async t => {
   const { client } = await fixture(t);

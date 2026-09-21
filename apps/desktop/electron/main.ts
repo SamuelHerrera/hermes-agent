@@ -12675,7 +12675,7 @@ ipcMain.handle('hermes:terminal:start', async (event, payload = {}) => {
     } else { persistent = await openLocalPersistentTerminal({
       bundle: path.join(app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked'), 'dist', 'terminal-host'),
       home: HERMES_HOME, profile: route.profile,
-      requestId: String(payload.requestId || crypto.randomUUID()), reference: payload.reference,
+      requestId: String(payload.requestId || crypto.randomUUID()), reference: payload.reference, metadata: payload.metadata,
       file: command, args, cwd, env,
       cols: Math.max(2, Math.min(500, Number(payload.cols) || 80)),
       rows: Math.max(2, Math.min(500, Number(payload.rows) || 24))

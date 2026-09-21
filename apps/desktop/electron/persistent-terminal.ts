@@ -10,6 +10,7 @@ export async function openLocalPersistentTerminal(options: {
   profile: string
   requestId: string
   reference?: { scope: string; epoch: string; terminalId: string }
+  metadata?: { id: string; title: string; auto: boolean; cwd: string; hidden: boolean }
   file: string
   args: string[]
   cwd: string
@@ -17,7 +18,13 @@ export async function openLocalPersistentTerminal(options: {
   cols: number
   rows: number
 }) {
-  const scope = `local/${options.profile}`
+  const sharedScope = `profile/${options.profile}`
+  const legacyScope = `local/${options.profile}`
+  const scope = options.reference?.scope || sharedScope
+
+  if (scope !== sharedScope && scope !== legacyScope) {
+    throw new Error('OWNER_MISMATCH')
+  }
   const client = await ensureHost({
     bundle: options.bundle,
     versions: path.join(options.home, 'terminal-host', 'versions'),
@@ -27,6 +34,14 @@ export async function openLocalPersistentTerminal(options: {
     scope,
     reference: options.reference,
     requestId: options.requestId,
-    spawn: { file: options.file, args: options.args, cwd: options.cwd, env: options.env, cols: options.cols, rows: options.rows }
+    spawn: {
+      file: options.file,
+      args: options.args,
+      cwd: options.cwd,
+      env: options.env,
+      cols: options.cols,
+      rows: options.rows,
+      metadata: options.metadata
+    }
   })
 }

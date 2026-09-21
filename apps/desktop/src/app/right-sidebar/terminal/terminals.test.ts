@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const STORAGE_KEY = 'hermes.desktop.terminals.v1'
 vi.mock('@/components/pane-shell/tree/store', () => ({
   revealTreePane: vi.fn(),
+  setTreePaneHidden: vi.fn(),
   $layoutTree: atom(null),
   noteActiveTreeGroup: vi.fn()
 }))
@@ -163,6 +164,54 @@ describe('terminal store persistence', () => {
     expect(restored.$terminals.get()).toEqual([
       expect.objectContaining({ id: opened.id, kind: 'agent', procId: 'proc-opened', hidden: undefined })
     ])
+  })
+
+  it('reconciles shared host tabs across clients without deleting a shell that is still starting', async () => {
+    const store = await loadTerminalStore()
+    const starting = store.createTerminal('/starting')
+    store.$terminals.set([
+      ...store.$terminals.get(),
+      {
+        id: 'stale', title: 'Old', auto: true, cwd: '/old', kind: 'user', profile: 'default',
+        reference: { scope: 'local/default', epoch: 'epoch-1', terminalId: 'gone' }
+      },
+      { id: 'agent', title: 'Build', auto: false, cwd: '', kind: 'agent', profile: 'default', procId: 'proc-1' }
+    ])
+
+    store.reconcileSharedTerminals('default', [
+      {
+        metadata: { id: starting, title: 'Server', auto: false, cwd: '/repo', hidden: false },
+        pid: 42,
+        reference: { scope: 'local/default', epoch: 'epoch-1', terminalId: 'live' }
+      }
+    ])
+
+    expect(store.$terminals.get().map(term => term.id)).toEqual([starting, 'agent'])
+    expect(store.$terminals.get().find(term => term.id === starting)).toEqual(expect.objectContaining({
+      title: 'Server', kind: 'user', profile: 'default', hidden: undefined
+    }))
+  })
+
+  it('applies remotely changed tab visibility to the workspace layout', async () => {
+    const store = await loadTerminalStore()
+    const tree = await import('@/components/pane-shell/tree/store')
+    const id = store.createTerminal('/repo')
+    const reference = { scope: 'profile/default', epoch: 'epoch-1', terminalId: 'live' }
+    store.rememberTerminalHost(id, reference, 'local-handle')
+
+    store.reconcileSharedTerminals('default', [{
+      metadata: { id, title: 'Terminal', auto: true, cwd: '/repo', hidden: true },
+      pid: 42,
+      reference
+    }])
+    expect(tree.setTreePaneHidden).toHaveBeenCalledWith(store.terminalPaneId(id), true)
+
+    store.reconcileSharedTerminals('default', [{
+      metadata: { id, title: 'Terminal', auto: true, cwd: '/repo', hidden: false },
+      pid: 42,
+      reference
+    }])
+    expect(tree.revealTreePane).toHaveBeenCalledWith(store.terminalPaneId(id))
   })
 
   it('never attaches a revive buffer to an agent tab', async () => {

@@ -84,8 +84,17 @@ def test_disconnect_and_new_backend_client_preserve_process(host, tmp_path):
         with client.websocket_connect(url) as ws:
             ready = ws.receive_json()
             assert ready["protocol"] == 2
-            created = rpc(ws, "create", {"scope": ready["scope"], "requestId": "durable-tab", "cwd": str(tmp_path)})
+            metadata = {"id": "durable-tab", "title": "Terminal", "auto": True,
+                        "cwd": str(tmp_path), "hidden": False}
+            created = rpc(ws, "create", {"scope": ready["scope"], "requestId": "durable-tab",
+                                          "cwd": str(tmp_path), "metadata": metadata})
             reference = {"scope": ready["scope"], "epoch": ready["epoch"], "terminalId": created["terminalId"]}
+            listed = rpc(ws, "list", {"scope": ready["scope"]})
+            assert listed["metadataVersion"] == 1
+            assert listed["sessions"][0]["metadata"] == metadata
+            renamed = {**metadata, "title": "Shared logs"}
+            rpc(ws, "update", {**reference, "metadata": renamed})
+            assert rpc(ws, "list", {"scope": ready["scope"]})["sessions"][0]["metadata"] == renamed
             attached = rpc(ws, "attach", reference)
             pid = attached["pid"]
             rpc(ws, "input", {**attached["identity"], "data": ("set " if os.name == "nt" else "") + "HERMES_TEST_PROOF=preserved\r"})

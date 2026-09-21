@@ -2,7 +2,7 @@ import { atom, computed } from 'nanostores'
 
 import { findGroupOfPane } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup, revealTreePane, setTreePaneHidden } from '@/components/pane-shell/tree/store'
-import type { HermesTerminalReference } from '@/global'
+import type { HermesSharedTerminal, HermesTerminalMetadata, HermesTerminalReference } from '@/global'
 import { readKey, writeKey } from '@/lib/storage'
 import { terminalApi } from '@/platform/terminal'
 import { $activeGatewayProfile, $profileScope, ALL_PROFILES, normalizeProfileKey } from '@/store/profile'
@@ -199,7 +199,144 @@ export const $terminalPanes = computed([$terminals, $profileScope], (list, scope
   )
 )
 
-$terminals.subscribe(list => persistTerminals(list, $activeTerminalId.get()))
+export function terminalMetadataForSharing(term: TerminalEntry): HermesTerminalMetadata {
+  return {
+    id: term.id,
+    title: term.title,
+    auto: term.auto,
+    cwd: term.cwd,
+    ...(term.restoreCwd ? { restoreCwd: term.restoreCwd } : {}),
+    ...(term.projectId ? { projectId: term.projectId } : {}),
+    ...(term.profile ? { profile: term.profile } : {}),
+    ...(term.ownerSessionId ? { ownerSessionId: term.ownerSessionId } : {}),
+    hidden: term.hidden === true
+  }
+}
+
+const sharedMetadataSignatures = new Map<string, string>()
+const sharedMetadataPending = new Map<string, string>()
+const syncedTerminalProfiles = new Set<string>()
+
+function publishSharedTerminalMetadata(list: readonly TerminalEntry[]): void {
+  const api = typeof window === 'undefined' ? undefined : terminalApi()
+
+  if (!api?.updateShared) {
+    return
+  }
+
+  for (const term of list) {
+    if (
+      term.kind !== 'user' ||
+      !term.reference ||
+      !syncedTerminalProfiles.has(normalizeProfileKey(term.profile))
+    ) {
+      continue
+    }
+
+    const metadata = terminalMetadataForSharing(term)
+    const signature = JSON.stringify(metadata)
+
+    if (sharedMetadataSignatures.get(term.id) === signature || sharedMetadataPending.get(term.id) === signature) {
+      continue
+    }
+
+    sharedMetadataPending.set(term.id, signature)
+    void api.updateShared({ metadata, profile: term.profile, reference: term.reference })
+      .then(() => {
+        if (JSON.stringify(terminalMetadataForSharing($terminals.get().find(entry => entry.id === term.id) ?? term)) === signature) {
+          sharedMetadataSignatures.set(term.id, signature)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (sharedMetadataPending.get(term.id) === signature) {
+          sharedMetadataPending.delete(term.id)
+        }
+      })
+  }
+}
+
+export function reconcileSharedTerminals(profile: string, shared: readonly HermesSharedTerminal[]): void {
+  const owner = normalizeProfileKey(profile)
+  const current = $terminals.get()
+  const sharedById = new Map(shared.map(entry => [entry.metadata.id, entry]))
+  const next: TerminalEntry[] = []
+
+  for (const term of current) {
+    if (term.kind === 'agent' || normalizeProfileKey(term.profile) !== owner) {
+      next.push(term)
+      continue
+    }
+
+    const remote = sharedById.get(term.id)
+
+    if (!remote) {
+      if (!term.reference) {
+        next.push(term)
+      }
+      continue
+    }
+
+    sharedById.delete(term.id)
+    next.push({
+      ...term,
+      ...remote.metadata,
+      hidden: remote.metadata.hidden ? true : undefined,
+      kind: 'user',
+      profile: owner,
+      reference: remote.reference
+    })
+  }
+
+  for (const remote of sharedById.values()) {
+    next.push({
+      ...remote.metadata,
+      hidden: remote.metadata.hidden ? true : undefined,
+      kind: 'user',
+      profile: owner,
+      reference: remote.reference
+    })
+  }
+
+  const unchanged = next.length === current.length && next.every((term, index) => JSON.stringify(term) === JSON.stringify(current[index]))
+
+  if (!unchanged) {
+    $terminals.set(next)
+
+    for (const remote of shared) {
+      const previous = current.find(term => term.id === remote.metadata.id)
+
+      if (remote.metadata.hidden && !previous?.hidden) {
+        setTreePaneHidden(terminalPaneId(remote.metadata.id), true)
+      } else if (!remote.metadata.hidden && previous?.hidden) {
+        revealTreePane(terminalPaneId(remote.metadata.id))
+      }
+    }
+  }
+}
+
+export async function syncSharedTerminals(profile: string): Promise<void> {
+  const api = typeof window === 'undefined' ? undefined : terminalApi()
+
+  if (!api?.list) {
+    return
+  }
+
+  const shared = await api.list({ profile })
+  const owner = normalizeProfileKey(profile)
+
+  syncedTerminalProfiles.add(owner)
+  for (const entry of shared) {
+    sharedMetadataSignatures.set(entry.metadata.id, JSON.stringify(entry.metadata))
+  }
+  reconcileSharedTerminals(profile, shared)
+  publishSharedTerminalMetadata($terminals.get())
+}
+
+$terminals.subscribe(list => {
+  persistTerminals(list, $activeTerminalId.get())
+  publishSharedTerminalMetadata(list)
+})
 $activeTerminalId.subscribe(active => persistTerminals($terminals.get(), active))
 
 $openTerminals.subscribe(list => {

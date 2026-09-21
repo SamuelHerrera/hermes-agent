@@ -13,7 +13,26 @@ export function terminalApi(): TerminalApi | undefined {
   }
 
   if (host.kind === 'electron') {
-    return window.hermesDesktop?.terminal
+    const native = window.hermesDesktop?.terminal
+
+    if (!native) {
+      return undefined
+    }
+
+    if (cached?.host !== host) {
+      const shared = createBrowserTerminal(host)
+
+      cached = {
+        host,
+        api: {
+          ...native,
+          list: shared.list,
+          updateShared: shared.updateShared
+        }
+      }
+    }
+
+    return cached.api
   }
 
   if (!host.capabilities.persistentTerminal) {

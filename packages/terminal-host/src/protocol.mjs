@@ -15,6 +15,16 @@ export class DeliveryRing {
 }
 const string = (v, max = 256) => typeof v === 'string' && v.length > 0 && v.length <= max && !v.includes('\0');
 const dimension = v => Number.isInteger(v) && v >= 2 && v <= 500;
+const terminalMetadata = value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const allowed = new Set(['id', 'title', 'auto', 'cwd', 'restoreCwd', 'projectId', 'profile', 'ownerSessionId', 'hidden']);
+  if (Object.keys(value).some(key => !allowed.has(key))) return false;
+  if (!string(value.id) || !string(value.title, 1024)) return false;
+  if (typeof value.auto !== 'boolean' || typeof value.hidden !== 'boolean') return false;
+  return ['cwd', 'restoreCwd', 'projectId', 'profile', 'ownerSessionId'].every(key =>
+    value[key] === undefined || (typeof value[key] === 'string' && value[key].length <= 4096 && !value[key].includes('\0'))
+  );
+};
 export function admitCreate(sessions, creates) {
   if (sessions >= LIMITS.sessions) throw Error('SESSION_LIMIT');
   if (creates >= LIMITS.creates) throw Error('CREATE_LIMIT');
@@ -33,9 +43,11 @@ export function validate(method, p) {
     check(p.cwd === undefined || string(p.cwd, 4096));
     check(p.cols === undefined || dimension(p.cols));
     check(p.rows === undefined || dimension(p.rows));
+    check(p.metadata === undefined || terminalMetadata(p.metadata));
     return;
   }
   check(string(p.terminalId));
+  if (method === 'update') { check(terminalMetadata(p.metadata)); return; }
   if (['input', 'resize', 'detach'].includes(method)) check(Number.isSafeInteger(p.generation) && p.generation > 0);
   if (method === 'input') check(typeof p.data === 'string' && Buffer.byteLength(p.data) <= LIMITS.inputBytes);
   if (method === 'resize') check(dimension(p.cols) && dimension(p.rows));

@@ -63,14 +63,14 @@ export async function serve(directory) {
     validate(method, p);
     if (method === 'status') return { protocol: PROTOCOL_VERSION, maxQueuedBytes, epoch, pid: process.pid, sessions: sessions.size };
     if (stopping) throw Error('STOPPING');
-    if (method === 'list') return { sessions: [...sessions.values()].filter(s => s.scope === p.scope).map(s => ({ terminalId: s.id, pid: s.pty.pid })) };
+    if (method === 'list') return { metadataVersion: 1, sessions: [...sessions.values()].filter(s => s.scope === p.scope).map(s => ({ terminalId: s.id, pid: s.pty.pid, epoch, ...(s.metadata ? { metadata: s.metadata } : {}) })) };
     if (method === 'create') {
       const key = JSON.stringify([p.scope, p.requestId]);
       if (creates.has(key)) return creates.get(key);
       admitCreate(sessions.size, creates.size);
       const id = randomUUID();
       const child = pty.spawn(p.file, p.args || [], { name: 'xterm-256color', cols: p.cols ?? 80, rows: p.rows ?? 24, cwd: p.cwd || process.cwd(), env: p.env ?? process.env, encoding: null });
-      const s = { id, scope: p.scope, pty: child, generation: 0, delivery: new DeliveryRing(), screen: new Screen({ cols: p.cols ?? 80, rows: p.rows ?? 24 }) };
+      const s = { id, scope: p.scope, pty: child, generation: 0, writers: new Set(), metadata: p.metadata, delivery: new DeliveryRing(), screen: new Screen({ cols: p.cols ?? 80, rows: p.rows ?? 24 }) };
       s.kill = ownProcessTree(child);
       s.lifetime = new AbortController();
       s.requests = Promise.resolve();
@@ -122,13 +122,16 @@ export async function serve(directory) {
       alive(s);
       const snapshot = await barrier(s, s.screen.snapshot());
       check(); alive(s);
-      return { snapshot, pid: s.pty.pid, identity: { terminalId: s.id, scope: s.scope, generation: ++s.generation, epoch } };
+      const generation = ++s.generation;
+      s.writers.add(generation);
+      return { snapshot, pid: s.pty.pid, identity: { terminalId: s.id, scope: s.scope, generation, epoch } };
     }
     if (['input', 'detach', 'resize'].includes(method)) {
       alive(s);
-      if (p.generation !== s.generation) throw Error('STALE_WRITER');
+      if (!s.writers.has(p.generation)) throw Error('STALE_WRITER');
     }
-    if (method === 'detach') { s.generation++; return {}; }
+    if (method === 'detach') { s.writers.delete(p.generation); return {}; }
+    if (method === 'update') { s.metadata = p.metadata; return {}; }
     if (method === 'input') { s.pty.write(p.data); return {}; }
     if (method === 'resize') { await barrier(s, s.screen.resize(p.cols, p.rows, () => { check(); alive(s); })); check(); alive(s); s.pty.resize(p.cols, p.rows); return {}; }
     if (method === 'read') {
@@ -162,7 +165,7 @@ export async function serve(directory) {
       if (requestedEpoch !== epoch || (params?.epoch && params.epoch !== epoch)) throw Error('HOST_LOST');
       // Only writer operations for the same terminal share a queue. Admin RPCs
       // never wait for screen progress; create remains synchronously atomic.
-      const s = ['attach', 'input', 'resize', 'detach'].includes(method) && sessions.get(params?.terminalId);
+      const s = ['attach', 'input', 'resize', 'detach', 'update'].includes(method) && sessions.get(params?.terminalId);
       validate(method, params);
       if (s && s.scope !== params.scope) throw Error('SCOPE_MISMATCH');
       if (s && (s.pendingRequests >= 8 || pendingRequests >= 24)) throw Error('QUEUE_FULL');

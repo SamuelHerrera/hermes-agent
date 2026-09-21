@@ -49,7 +49,7 @@ async def proxy_terminal_host(ws: WebSocket, home: Path, profile: str, profile_h
                 frame = json.loads(text)
                 method, params = frame.get("method"), frame.get("params", {})
                 try:
-                    if method not in {"create", "attach", "read", "input", "resize", "detach", "terminate"} or not isinstance(params, dict):
+                    if method not in {"create", "attach", "list", "read", "input", "resize", "detach", "terminate", "update"} or not isinstance(params, dict):
                         raise ValueError("INVALID_METHOD")
                     if params.get("scope") != scope:
                         raise ValueError("OWNER_MISMATCH")
@@ -64,7 +64,8 @@ async def proxy_terminal_host(ws: WebSocket, home: Path, profile: str, profile_h
                         params = {"scope": scope, "requestId": params.get("requestId"),
                                   "file": shell, "args": [] if os.name == "nt" else ["-l"],
                                   "cwd": cwd, "cols": params.get("cols", 80), "rows": params.get("rows", 24),
-                                  "env": build_subprocess_env(extra={"HERMES_HOME": str(profile_home), "TERM": "xterm-256color"})}
+                                  "env": build_subprocess_env(extra={"HERMES_HOME": str(profile_home), "TERM": "xterm-256color"}),
+                                  **({"metadata": params["metadata"]} if "metadata" in params else {})}
                     result = await request(method, params)
                     if method == "attach":
                         leases[params["terminalId"]] = result["identity"]

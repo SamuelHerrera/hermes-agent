@@ -16,6 +16,7 @@ export async function openSession(client, { scope, reference, requestId, spawn }
     read: after => client.request('read', { ...durable, after }),
     input: data => client.request('input', { ...attached.identity, data }),
     resize: size => client.request('resize', { ...attached.identity, ...size }),
+    update: metadata => client.request('update', { ...durable, metadata }),
     detach: () => client.request('detach', attached.identity),
     terminate: () => client.request('terminate', durable),
   };

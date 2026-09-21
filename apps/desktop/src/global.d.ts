@@ -362,6 +362,12 @@ declare global {
       }
       terminal: {
         persistent?: boolean
+        list?: (options?: { profile?: string }) => Promise<HermesSharedTerminal[]>
+        updateShared?: (options: {
+          metadata: HermesTerminalMetadata
+          profile?: string
+          reference: HermesTerminalReference
+        }) => Promise<boolean>
         read?: (id: string, after: number) => Promise<{ events: Array<{ seq: number; type: string; data?: string; cols?: number; rows?: number }>; exit?: unknown; failure?: string }>
         checkpoint?: (id: string) => Promise<any>
         terminate?: (id: string) => Promise<unknown>
@@ -379,6 +385,7 @@ declare global {
           persistent?: boolean
           requestId?: string
           reference?: HermesTerminalReference
+          metadata?: HermesTerminalMetadata
           profile?: string
           cols?: number
           cwd?: string
@@ -475,6 +482,24 @@ export interface HermesTerminalReference {
   epoch: string
   profile?: string
   terminalId: string
+}
+
+export interface HermesTerminalMetadata {
+  id: string
+  title: string
+  auto: boolean
+  cwd: string
+  restoreCwd?: string
+  projectId?: string
+  profile?: string
+  ownerSessionId?: string
+  hidden: boolean
+}
+
+export interface HermesSharedTerminal {
+  metadata: HermesTerminalMetadata
+  pid: number
+  reference: HermesTerminalReference
 }
 
 export interface HermesTerminalSession {

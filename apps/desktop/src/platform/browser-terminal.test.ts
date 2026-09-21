@@ -30,10 +30,20 @@ class FakeSocket {
     const result: Record<string, unknown> = {
       create: { epoch: 'epoch-1', terminalId },
       attach: { identity: { scope: 'profile/work', epoch: 'epoch-1', terminalId, owner: 'lease-1' }, pid: 42, snapshot: { seq: 3 } },
+      list: {
+        metadataVersion: 1,
+        sessions: [{
+          epoch: 'epoch-1',
+          metadata: { id: 'tab-1', title: 'Logs', auto: false, cwd: '/srv', hidden: false },
+          pid: 42,
+          terminalId: 'terminal-1'
+        }]
+      },
       input: true,
       resize: true,
       read: { events: [], exit: null },
       detach: true,
+      update: true,
       terminate: true
     }
 
@@ -107,6 +117,36 @@ describe('browser persistent terminal transport', () => {
     expect(FakeSocket.instances).toHaveLength(2)
     expect(FakeSocket.instances[1].sent.some(frame => frame.method === 'create')).toBe(false)
     expect(FakeSocket.instances[1].sent.find(frame => frame.method === 'attach')?.params.terminalId).toBe('terminal-1')
+  })
+
+  it('lists shared tabs and publishes metadata through the owner host', async () => {
+    vi.stubGlobal('WebSocket', FakeSocket)
+    const api = createBrowserTerminal(host())
+    const metadata = { id: 'tab-1', title: 'Logs', auto: false, cwd: '/srv', hidden: false }
+    const session = await api.start({ requestId: 'tab-1', profile: 'work', metadata } as any)
+    expect(FakeSocket.instances[0].sent.find(frame => frame.method === 'create')?.params.metadata).toEqual(metadata)
+
+    await api.updateShared!({
+      metadata: { ...metadata, title: 'Server' },
+      profile: 'work',
+      reference: session.reference!
+    })
+    expect(FakeSocket.instances[1].sent.find(frame => frame.method === 'update')?.params.metadata.title).toBe('Server')
+
+    const shared = await api.list!({ profile: 'work' })
+    expect(shared).toEqual([
+      {
+        metadata,
+        pid: 42,
+        reference: {
+          backendIdentity: 'remote\u0000\u0000https://backend-b.test/prefix',
+          epoch: 'epoch-1',
+          profile: 'work',
+          scope: 'profile/work',
+          terminalId: 'terminal-1'
+        }
+      }
+    ])
   })
 
   it('refuses a persisted terminal after a backend connection switch instead of retargeting it', async () => {

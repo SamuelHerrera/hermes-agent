@@ -30,7 +30,7 @@ import {
   terminalTheme
 } from './selection'
 import { prepareTerminalFontFamily } from './terminal-font'
-import { $terminals, closeTerminal, forgetTerminalHandle, rememberTerminalHost, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
+import { $terminals, closeTerminal, forgetTerminalHandle, rememberTerminalHost, terminalMetadataForSharing, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
 import { useTerminalFontController } from './use-terminal-font'
 
 // How many scrollback lines to serialize for relaunch restore. Mirrors VS Code's
@@ -936,6 +936,11 @@ export function useTerminalSession({
           persistent: terminalApi.persistent,
           requestId: id,
           reference: $terminals.get().find(entry => entry.id === id)?.reference,
+          metadata: (() => {
+            const entry = $terminals.get().find(item => item.id === id)
+
+            return entry?.kind === 'user' ? terminalMetadataForSharing(entry) : undefined
+          })(),
           profile: ownerRef.current,
           cols: term.cols,
           cwd: initialRestoreCwdRef.current || cwd || undefined,

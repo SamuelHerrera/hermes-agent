@@ -1,4 +1,4 @@
-import type { HermesTerminalReference } from '@/global'
+import type { HermesSharedTerminal, HermesTerminalMetadata, HermesTerminalReference } from '@/global'
 
 import { openSession } from '../../../../packages/terminal-host/src/session-client.mjs'
 
@@ -165,6 +165,67 @@ export function createBrowserTerminal(host: HermesHost): TerminalApi {
 
   return {
     persistent: true,
+    async list(options = {}) {
+      const profile = options.profile || undefined
+      const connection = await host.getConnection(profile)
+      const identity = backendIdentity(connection)
+      const { client, socket, scope } = await connect(host, profile)
+
+      try {
+        const result = await client.request('list', { scope }) as { metadataVersion?: number; sessions?: Array<{
+          epoch: string
+          metadata?: HermesTerminalMetadata
+          pid: number
+          terminalId: string
+        }> }
+
+        if (result.metadataVersion !== 1) {
+          throw new Error('SHARED_TERMINALS_UNSUPPORTED')
+        }
+
+        if ((result.sessions ?? []).some(entry => !entry.metadata?.id)) {
+          throw new Error('SHARED_TERMINALS_INCOMPLETE')
+        }
+
+        return (result.sessions ?? [])
+          .filter((entry): entry is typeof entry & { metadata: HermesTerminalMetadata } => Boolean(entry.metadata?.id))
+          .map(entry => ({
+            metadata: entry.metadata,
+            pid: entry.pid,
+            reference: {
+              backendIdentity: identity,
+              epoch: entry.epoch || client.epoch,
+              profile: profile || 'default',
+              scope,
+              terminalId: entry.terminalId
+            }
+          } satisfies HermesSharedTerminal))
+      } finally {
+        socket.close()
+      }
+    },
+    async updateShared(options) {
+      const profile = options.profile || undefined
+      const connection = await host.getConnection(profile)
+      const identity = backendIdentity(connection)
+
+      if (
+        (options.reference.backendIdentity && options.reference.backendIdentity !== identity) ||
+        (options.reference.profile && options.reference.profile !== (profile || 'default')) ||
+        (!options.reference.backendIdentity && options.reference.scope !== `profile/${profile || 'default'}`)
+      ) {
+        throw new Error('HOST_LOST')
+      }
+
+      const { client, socket, scope } = await connect(host, profile)
+
+      try {
+        await client.request('update', { ...options.reference, scope, metadata: options.metadata })
+        return true
+      } finally {
+        socket.close()
+      }
+    },
     async start(options = {}) {
       const profile = options.profile || undefined
       const connection = await host.getConnection(profile)
@@ -185,7 +246,7 @@ export function createBrowserTerminal(host: HermesHost): TerminalApi {
           scope,
           reference: options.reference,
           requestId: options.requestId || crypto.randomUUID(),
-          spawn: { cols: options.cols, rows: options.rows, cwd: options.cwd }
+          spawn: { cols: options.cols, rows: options.rows, cwd: options.cwd, metadata: options.metadata }
         })
 
         const id = `browser-terminal-${++nextHandle}`
