@@ -1,5 +1,7 @@
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { $changeEventsAvailable } from '@/store/live-sync'
 import { $sessions } from '@/store/session'
 import {
   $attentionSessionIds,
@@ -11,7 +13,59 @@ import {
 import { $subagentsBySession, subagentStoreRevision, upsertSubagent } from '@/store/subagents'
 import type { SessionInfo } from '@/types/hermes'
 
-import { rehydrateActiveSubagentStatuses, rehydrateLiveSessionStatuses } from './use-background-sync'
+import type { GatewayRequester } from '../types'
+
+const { loadArchivedSessions } = vi.hoisted(() => ({ loadArchivedSessions: vi.fn() }))
+
+vi.mock('@/store/sidebar-archive', () => ({ loadArchivedSessions }))
+
+import {
+  rehydrateActiveSubagentStatuses,
+  rehydrateLiveSessionStatuses,
+  useBackgroundSync
+} from './use-background-sync'
+
+describe('useBackgroundSync', () => {
+  afterEach(() => {
+    $changeEventsAvailable.set(false)
+    loadArchivedSessions.mockClear()
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+  })
+
+  it('refreshes stored sessions when a suspended PWA becomes visible after missing change events', () => {
+    const refreshSessions = vi.fn()
+
+    $changeEventsAvailable.set(true)
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+
+    renderHook(() =>
+      useBackgroundSync({
+        activeGatewayProfile: 'default',
+        activeIsMessaging: false,
+        activeSessionId: null,
+        freshDraftReady: false,
+        gatewayState: 'open',
+        refreshActiveMessagingTranscript: vi.fn(),
+        refreshCronJobs: vi.fn(),
+        refreshCurrentModel: vi.fn(),
+        refreshHermesConfig: vi.fn(),
+        refreshMessagingSessions: vi.fn(),
+        refreshSessions,
+        requestGateway: vi.fn(async () => ({ sessions: [] })) as unknown as GatewayRequester
+      })
+    )
+
+    refreshSessions.mockClear()
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    expect(refreshSessions).toHaveBeenCalledTimes(1)
+    expect(loadArchivedSessions).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe('rehydrateLiveSessionStatuses', () => {
   beforeEach(() => {

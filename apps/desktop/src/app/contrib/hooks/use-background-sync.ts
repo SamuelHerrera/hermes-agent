@@ -12,6 +12,7 @@ import {
   SESSION_WATCHDOG_TIMEOUT_MS,
   setSessionStalled
 } from '@/store/session-states'
+import { loadArchivedSessions } from '@/store/sidebar-archive'
 import {
   reconcileActiveSubagents,
   type SubagentPayload,
@@ -42,6 +43,10 @@ const LIVE_SESSION_STATUS_POLL_INTERVAL_MS = 1_500
 // the interval only covers the degraded-socket edge the stream can't replay
 // (see rehydrateLiveSessionStatuses) — 30s is plenty for that.
 const LIVE_SESSION_STATUS_BACKSTOP_INTERVAL_MS = 30_000
+// Browser/PWA tabs may be suspended long enough to miss websocket broadcasts.
+// Reconcile the authoritative stored list when they become visible again, and
+// keep a low-frequency backstop for degraded sockets.
+const SESSIONS_LIST_BACKSTOP_INTERVAL_MS = 5 * 60_000
 // Coalesce tick-driven sidebar list refreshes: sessions.changed fires (floored
 // to 2s server-side) on every state.db write during a streaming turn, and the
 // full list refresh is heavier than the active_list snapshot. Trailing-edge
@@ -413,8 +418,17 @@ export function useBackgroundSync({
       }
     })
 
+    const disposeBackstop = visiblePoll(SESSIONS_LIST_BACKSTOP_INTERVAL_MS, () => {
+      // Unlike the normal recents page, the archived page is positive proof
+      // that a kept open/pinned row was archived by another client. PWA tabs
+      // can miss the websocket edge while suspended, so reconcile both views.
+      run()
+      void loadArchivedSessions()
+    })
+
     return () => {
       unsubscribe()
+      disposeBackstop()
 
       if (timer !== null) {
         window.clearTimeout(timer)
