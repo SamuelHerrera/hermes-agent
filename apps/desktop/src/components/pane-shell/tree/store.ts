@@ -1615,16 +1615,30 @@ function enforceFixedLeftPanel(tree: LayoutNode): LayoutNode {
 
   for (const paneId of extras) {
     const withoutPane = removePane(next, paneId)
-    const workspaceGroup = withoutPane ? findGroupOfPane(withoutPane, 'workspace') : null
 
-    if (!withoutPane || !workspaceGroup) {
+    if (!withoutPane) {
+      continue
+    }
+
+    const workspaceGroup = findGroupOfPane(withoutPane, 'workspace')
+
+    const mainGroup = allPaneIds(withoutPane)
+      .filter(id => !FIXED_LEFT_PANEL_PANES.has(id) && panePlacement(id) === 'main')
+      .map(id => findGroupOfPane(withoutPane, id))
+      .find((candidate): candidate is GroupNode => candidate !== null)
+
+    const sessionsGroup = findGroupOfPane(withoutPane, 'sessions')
+    const placement = panePlacement(paneId)
+    const targetGroup = placement === 'main' ? (mainGroup ?? sessionsGroup) : (workspaceGroup ?? mainGroup)
+
+    if (!targetGroup) {
       continue
     }
 
     const target =
-      panePlacement(paneId) === 'main'
-        ? { groupId: workspaceGroup.id, pos: 'center' as const }
-        : { groupId: workspaceGroup.id, pos: 'right' as const }
+      placement === 'main'
+        ? { groupId: targetGroup.id, pos: mainGroup ? ('center' as const) : ('right' as const) }
+        : { groupId: targetGroup.id, pos: 'right' as const }
 
     next = insertAtGroup(withoutPane, target.groupId, paneId, target.pos, undefined, false) ?? withoutPane
   }

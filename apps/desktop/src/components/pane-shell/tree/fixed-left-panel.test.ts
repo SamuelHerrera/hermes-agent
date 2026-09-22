@@ -46,6 +46,19 @@ describe('fixed left sessions panel', () => {
     expect(findGroupOfPane($layoutTree.get()!, 'git')?.panes).not.toContain('sessions')
   })
 
+  it('re-homes workspace when a persisted layout stacked it with sessions', () => {
+    registerPane('session-tile:one', 'main')
+    declareDefaultTree(
+      split('row', [
+        group(['sessions', 'workspace'], { active: 'workspace', id: 'g-left' }),
+        group(['session-tile:one'], { active: 'session-tile:one', id: 'g-main' })
+      ])
+    )
+
+    expect(findGroupOfPane($layoutTree.get()!, 'sessions')?.panes).toEqual(['sessions'])
+    expect(findGroupOfPane($layoutTree.get()!, 'workspace')?.panes).not.toContain('sessions')
+  })
+
   it('redirects tab drops away from the sessions group', () => {
     declareDefaultTree(
       split('row', [
