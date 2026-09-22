@@ -82,6 +82,31 @@ describe('Question notifications', () => {
     expect(openChat).toHaveBeenCalledWith('chat1')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
   })
+  it('discards a stale question without answering or opening its chat', async () => {
+    const api = gateway()
+    const openChat = vi.fn()
+    render(
+      <QuestionNotifications
+        copy={questionCopy.en}
+        gateway={api as never}
+        onOpenSession={openChat}
+        onSettings={vi.fn()}
+        profile="default"
+      />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }))
+    api.request.mockResolvedValue({ questions: [], open_count: 0 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard question' }))
+    await waitFor(() =>
+      expect(api.request).toHaveBeenCalledWith('questions.dismiss', {
+        profile: 'default',
+        question_id: 'q1'
+      })
+    )
+    expect(openChat).not.toHaveBeenCalled()
+    expect(api.request).not.toHaveBeenCalledWith('questions.respond', expect.anything())
+    await waitFor(() => expect(screen.queryByText('Which format?')).toBeNull())
+  })
   it('does not carry old questions or drafts into another profile', async () => {
     const api = gateway()
     const props = { gateway: api as never, copy: questionCopy.en, onOpenSession: vi.fn(), onSettings: vi.fn() }

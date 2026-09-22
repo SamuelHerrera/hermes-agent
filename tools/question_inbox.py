@@ -99,6 +99,25 @@ class QuestionInbox:
                        (json.dumps(row), question_id))
         return True
 
+    def dismiss(self, question_id: str) -> bool:
+        """Resolve a question without recording or delivering an answer."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            result = db.execute(
+                "SELECT payload FROM questions WHERE id=? AND "
+                "(status='open' OR json_extract(payload, '$.delivery_pending')=1)",
+                (question_id,),
+            ).fetchone()
+            if not result:
+                return False
+            row = json.loads(result[0])
+            row.update(status="dismissed", delivery_pending=False, dismissed_at=time.time())
+            db.execute(
+                "UPDATE questions SET status='dismissed', payload=? WHERE id=?",
+                (json.dumps(row), question_id),
+            )
+        return True
+
     def acknowledge_delivery(self, question_id: str) -> None:
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")

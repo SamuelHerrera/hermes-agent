@@ -132,6 +132,11 @@ function QuestionsInbox({
     await refresh()
   }
 
+  async function dismiss(row: Question) {
+    await gateway.request('questions.dismiss', { profile, question_id: row.id })
+    await refresh()
+  }
+
   const rows = data?.questions ?? []
 
   if (settingsOnly) {
@@ -184,6 +189,7 @@ function QuestionsInbox({
                 copy={copy}
                 key={row.id}
                 onAnswer={value => answer(row, value)}
+                onDismiss={() => dismiss(row)}
                 onOpen={() => openSession(row.session_id, navigate, 'tab')}
                 row={row}
               />

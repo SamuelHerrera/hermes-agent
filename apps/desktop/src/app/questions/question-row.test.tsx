@@ -6,6 +6,8 @@ import { QuestionRow } from './question-row'
 const copy = {
   resume: 'Continue with saved answer',
   answer: 'Answer and continue',
+  discard: 'Discard question',
+  dismissed: 'Discarded',
   other: 'Other answer',
   hard: 'User required',
   soft: 'Soft question',
@@ -35,6 +37,7 @@ describe('QuestionRow', () => {
       <QuestionRow
         copy={copy}
         onAnswer={answer}
+        onDismiss={vi.fn()}
         onOpen={vi.fn()}
         row={{ ...row, status: 'answered', answer: 'CSV', answered_by: 'user', delivery_pending: true }}
       />
@@ -45,14 +48,14 @@ describe('QuestionRow', () => {
   })
   it('renders every option and submits only the chosen answer', async () => {
     const answer = vi.fn().mockResolvedValue(undefined)
-    render(<QuestionRow copy={copy} onAnswer={answer} onOpen={vi.fn()} row={row} />)
+    render(<QuestionRow copy={copy} onAnswer={answer} onDismiss={vi.fn()} onOpen={vi.fn()} row={row} />)
     fireEvent.click(screen.getByLabelText('JSON'))
     fireEvent.click(screen.getByRole('button', { name: copy.answer }))
     await waitFor(() => expect(answer).toHaveBeenCalledWith('JSON'))
   })
   it('supports multiple choices without flattening them into prose', async () => {
     const answer = vi.fn().mockResolvedValue(undefined)
-    render(<QuestionRow copy={copy} onAnswer={answer} onOpen={vi.fn()} row={{ ...row, multi_select: true }} />)
+    render(<QuestionRow copy={copy} onAnswer={answer} onDismiss={vi.fn()} onOpen={vi.fn()} row={{ ...row, multi_select: true }} />)
     fireEvent.click(screen.getByLabelText('CSV'))
     fireEvent.click(screen.getByLabelText('JSON'))
     fireEvent.click(screen.getByRole('button', { name: copy.answer }))
@@ -60,7 +63,13 @@ describe('QuestionRow', () => {
   })
   it('leaves the options available after a failed answer', async () => {
     render(
-      <QuestionRow copy={copy} onAnswer={vi.fn().mockRejectedValue(new Error('Offline'))} onOpen={vi.fn()} row={row} />
+      <QuestionRow
+        copy={copy}
+        onAnswer={vi.fn().mockRejectedValue(new Error('Offline'))}
+        onDismiss={vi.fn()}
+        onOpen={vi.fn()}
+        row={row}
+      />
     )
     fireEvent.click(screen.getByLabelText('CSV'))
     fireEvent.click(screen.getByRole('button', { name: copy.answer }))

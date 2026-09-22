@@ -67,6 +67,15 @@ export function QuestionNotifications({
     }
   }
 
+  async function dismiss(row: Question) {
+    if (!gateway) {
+      throw new Error(copy.disconnected)
+    }
+
+    await gateway.request('questions.dismiss', { profile, question_id: row.id })
+    await inbox.refresh()
+  }
+
   function focusChat(sessionId: string) {
     skipRestoreFocus.current = true
     setOpen(false)
@@ -158,6 +167,7 @@ export function QuestionNotifications({
               copy={copy}
               key={`${profile}:${row.id}`}
               onAnswer={value => answer(row, value)}
+              onDismiss={() => dismiss(row)}
               onOpen={() => focusChat(row.session_id)}
               row={row}
             />

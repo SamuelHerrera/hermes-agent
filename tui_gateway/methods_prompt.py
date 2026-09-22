@@ -1351,6 +1351,14 @@ def _(rid, params: dict) -> dict:
     return respond_question(sys.modules[__name__], rid, params)
 
 
+@method("questions.dismiss")
+@_profile_scoped
+def _(rid, params: dict) -> dict:
+    import sys
+    from tui_gateway.questions import dismiss_question
+    return dismiss_question(sys.modules[__name__], rid, params)
+
+
 @method("terminal.read.respond")
 def _(rid, params: dict) -> dict:
     # `text` is a JSON string of the serialized terminal buffer + line metadata.

@@ -86,6 +86,20 @@ def test_failed_resume_keeps_question_open(gateway, monkeypatch):
     assert QuestionInbox().get(row["id"])["status"] == "open"
 
 
+def test_discard_closes_question_without_resuming_session(gateway, monkeypatch):
+    store = QuestionInbox()
+    row = store.create(session_id="durable", runtime_id="old", question="Still needed?", choices=None)
+    resumed = []
+    monkeypatch.setitem(gateway._methods, "session.resume", lambda rid, params: resumed.append(params))
+
+    result = gateway._methods["questions.dismiss"](1, {"question_id": row["id"]})
+
+    assert result["result"]["status"] == "dismissed"
+    assert resumed == []
+    assert store.get(row["id"])["status"] == "dismissed"
+    assert store.count_open() == 0
+
+
 def test_queued_answer_can_be_recovered_after_backend_restart(gateway, monkeypatch):
     from tui_gateway.questions import acknowledge_deliveries
     store = QuestionInbox()

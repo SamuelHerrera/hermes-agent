@@ -19,6 +19,8 @@ export interface Question {
 
 export interface QuestionRowCopy {
   answer: string
+  discard: string
+  dismissed: string
   resume: string
   other: string
   hard: string
@@ -33,16 +35,18 @@ interface QuestionRowProps {
   row: Question
   copy: QuestionRowCopy
   onAnswer: (answer: string | string[]) => Promise<void>
+  onDismiss: () => Promise<void>
   onOpen: () => void
 }
 
-export function QuestionRow({ row, copy, onAnswer, onOpen, compact = false }: QuestionRowProps) {
+export function QuestionRow({ row, copy, onAnswer, onDismiss, onOpen, compact = false }: QuestionRowProps) {
   const [selected, setSelected] = useState<string[]>([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showOther, setShowOther] = useState(!compact || !row.choices?.length)
   const answered = row.status === 'answered'
+  const dismissed = row.status === 'dismissed'
   const answer = row.delivery_pending ? (row.answer ?? '') : text.trim() || (row.multi_select ? selected : selected[0])
   const hasAnswer = Array.isArray(answer) ? answer.length > 0 : Boolean(answer)
 
@@ -56,6 +60,23 @@ export function QuestionRow({ row, copy, onAnswer, onOpen, compact = false }: Qu
 
     try {
       await onAnswer(answer)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function dismiss() {
+    if (busy) {
+      return
+    }
+
+    setBusy(true)
+    setError('')
+
+    try {
+      await onDismiss()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -102,6 +123,8 @@ export function QuestionRow({ row, copy, onAnswer, onOpen, compact = false }: Qu
             </p>
           )}
         </>
+      ) : dismissed ? (
+        <p className="text-sm text-(--ui-text-secondary)">{copy.dismissed}</p>
       ) : (
         <form
           className="grid gap-3"
@@ -162,9 +185,12 @@ export function QuestionRow({ row, copy, onAnswer, onOpen, compact = false }: Qu
               {error}
             </p>
           )}
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button disabled={busy || !hasAnswer} size="sm" type="submit">
               {copy.answer}
+            </Button>
+            <Button disabled={busy} onClick={() => void dismiss()} size="sm" type="button" variant="outline">
+              {copy.discard}
             </Button>
           </div>
         </form>

@@ -15,19 +15,23 @@ _review_slots = threading.BoundedSemaphore(2)
 def _result(row: dict) -> dict:
     from tools.clarify_tool import strip_recommended
     answered = row["status"] == "answered"
+    dismissed = row["status"] == "dismissed"
     value = row["answer"]
     if value is not None:
         value = [strip_recommended(v) for v in value] if isinstance(value, list) else strip_recommended(value)
     return {
         "question_id": row["id"], "question": row["question"],
         "choices_offered": row["choices"], "requires_user": row["requires_user"],
-        "status": "answered" if answered else "deferred",
-        "user_response": value if row["answered_by"] == "user" else None,
-        "automatic_response": value if row["answered_by"] == "reviewer" else None,
+        "status": "answered" if answered else "dismissed" if dismissed else "deferred",
+        "user_response": value if answered and row["answered_by"] == "user" else None,
+        "automatic_response": value if answered and row["answered_by"] == "reviewer" else None,
         "answered_by": row["answered_by"], "review": row["review"],
         "instruction": (
             "Continue the authorized task using this answer. An automatic response is NOT user consent."
             if answered else
+            "The user dismissed this question without answering it. Do not resume or repeat the question. "
+            "Continue only work that does not depend on the missing answer."
+            if dismissed else
             "The question remains open in the Questions inbox. Do not ask it again. "
             "Continue independent, reversible work within the existing user authorization. "
             "Do not guess this answer or take any action depending on it. If all remaining "
@@ -65,7 +69,7 @@ def wait_for_question(store: QuestionInbox, *, session_id: str, runtime_id: str,
 
     while True:
         current = store.get(row["id"])
-        if current["status"] == "answered":
+        if current["status"] in {"answered", "dismissed"}:
             return _result(current)
         if event.is_set():
             answer = read_answer()
@@ -228,6 +232,25 @@ def respond_question(server, rid, params):
                                     "delivery_error": submitted["error"].get("message", "Resume failed")})
     server._emit("questions.changed", sid, {"question_id": question_id})
     return server._ok(rid, {"status": "queued" if running else "resumed", "session_id": sid})
+
+
+def dismiss_question(server, rid, params):
+    """Close an inbox question without answering or resuming its session."""
+    store = QuestionInbox()
+    question_id = str(params.get("question_id") or "")
+    row = store.get(question_id)
+    if row is None:
+        return server._err(rid, 4004, "Question not found in this profile")
+    with server._prompt_lock:
+        if not store.dismiss(question_id):
+            return server._ok(rid, {"status": "already_resolved"})
+        pending = server._pending.get(question_id)
+        if pending:
+            pending[1].set()
+    sid = row.get("runtime_id") or row.get("session_id")
+    server._emit("prompt.resolved", sid, {"event": "clarify.request", "request_id": question_id})
+    server._emit("questions.changed", sid, {"question_id": question_id})
+    return server._ok(rid, {"status": "dismissed"})
 
 
 def acknowledge_deliveries(session, text):
