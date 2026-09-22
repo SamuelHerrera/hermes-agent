@@ -1,7 +1,8 @@
-import { type CSSProperties, type FocusEvent, type PointerEvent, useId, useRef, useState } from 'react'
+import { type CSSProperties, useId, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { titlebarButtonClass } from './titlebar'
@@ -52,7 +53,6 @@ export function codexUsageRemainingPercent(
 
 export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexUsageTitlebarControlProps) {
   const [open, setOpen] = useState(false)
-  const closeTimer = useRef<number | null>(null)
 
   if (state === 'hidden') {
     return null
@@ -65,83 +65,49 @@ export function CodexUsageTitlebarControl({ state = 'available', usage }: CodexU
   const resetProgress = unavailable ? 0 : codexUsageResetProgress(usage)
   const buttonLabel = codexUsageButtonLabel({ disabled, percentLeft, resetAt: usage?.resetAt, unavailable })
 
-  const cancelClose = () => {
-    if (closeTimer.current != null) {
-      window.clearTimeout(closeTimer.current)
-      closeTimer.current = null
-    }
-  }
-
-  const openSoon = () => {
-    cancelClose()
-    setOpen(true)
-  }
-
-  const closeSoon = () => {
-    cancelClose()
-    closeTimer.current = window.setTimeout(() => setOpen(false), 80)
-  }
-
-  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-      closeSoon()
-    }
-  }
-
-  const onPointerEnter = (_event: PointerEvent<HTMLDivElement>) => openSoon()
-  const onPointerLeave = (_event: PointerEvent<HTMLDivElement>) => closeSoon()
-
   return (
-    <div
-      className="relative"
-      onBlur={onBlur}
-      onFocus={openSoon}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
-    >
-      <Popover onOpenChange={setOpen} open={open}>
-        <PopoverAnchor asChild>
-          <Button
-            aria-disabled={disabled || unavailable || undefined}
-            aria-label={buttonLabel}
-            className={cn(
-              titlebarButtonClass,
-              'relative bg-transparent p-0 select-none text-(--ui-text-tertiary)',
-              (disabled || unavailable) && 'opacity-60 hover:text-(--ui-text-tertiary)'
-            )}
-            onPointerDown={event => event.stopPropagation()}
-            size="icon-titlebar"
-            style={CODEX_USAGE_ICON_STYLE}
-            title={buttonLabel}
-            type="button"
-            variant="ghost"
-          >
-            <UsageResetIcon
-              disabled={disabled}
-              percentLeft={percentLeft}
-              resetProgress={resetProgress}
-              unavailable={unavailable}
-            />
-          </Button>
-        </PopoverAnchor>
-        <PopoverContent
-          align="end"
-          className="w-64 p-0 text-[0.72rem] [-webkit-app-region:no-drag]"
-          onPointerEnter={openSoon}
-          onPointerLeave={closeSoon}
-          side="bottom"
-        >
-          <CodexUsagePopoverContent
-            disabled={disabled}
-            percentLeft={percentLeft}
-            percentUsed={percentUsed}
-            resetProgress={resetProgress}
-            unavailable={unavailable}
-            usage={usage}
-          />
-        </PopoverContent>
-      </Popover>
-    </div>
+    <Popover onOpenChange={setOpen} open={open}>
+      <TooltipProvider delayDuration={0}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                aria-disabled={disabled || unavailable || undefined}
+                aria-label={buttonLabel}
+                className={cn(
+                  titlebarButtonClass,
+                  'relative bg-transparent p-0 select-none text-(--ui-text-tertiary)',
+                  (disabled || unavailable) && 'opacity-60 hover:text-(--ui-text-tertiary)'
+                )}
+                onPointerDown={event => event.stopPropagation()}
+                size="icon-titlebar"
+                style={CODEX_USAGE_ICON_STYLE}
+                type="button"
+                variant="ghost"
+              >
+                <UsageResetIcon
+                  disabled={disabled}
+                  percentLeft={percentLeft}
+                  resetProgress={resetProgress}
+                  unavailable={unavailable}
+                />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>{buttonLabel}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+      <PopoverContent align="end" className="w-64 p-0 text-[0.72rem] [-webkit-app-region:no-drag]" side="bottom">
+        <CodexUsagePopoverContent
+          disabled={disabled}
+          percentLeft={percentLeft}
+          percentUsed={percentUsed}
+          resetProgress={resetProgress}
+          unavailable={unavailable}
+          usage={usage}
+        />
+      </PopoverContent>
+    </Popover>
   )
 }
 

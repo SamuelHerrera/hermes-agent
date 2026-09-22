@@ -1,5 +1,4 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { codexUsageRemainingPercent, codexUsageResetProgress, CodexUsageTitlebarControl } from './codex-usage-control'
@@ -75,7 +74,7 @@ describe('CodexUsageTitlebarControl', () => {
     }
   })
 
-  it('opens the detail popover on keyboard focus and renders supplied usage details', async () => {
+  it('opens the detail popover on click and renders supplied usage details', async () => {
     const resetAtRaw = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
 
     const { container } = render(
@@ -106,7 +105,7 @@ describe('CodexUsageTitlebarControl', () => {
       />
     )
 
-    fireEvent.focus(screen.getByRole('button', { name: /Codex usage: 65% allowance left/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Codex usage: 65% allowance left/ }))
 
     expect(await screen.findByText('65% left')).toBeTruthy()
     expect(screen.getByText('Team')).toBeTruthy()
@@ -128,33 +127,26 @@ describe('CodexUsageTitlebarControl', () => {
     expect(resetPaths[1]).toBe(resetPaths[0])
   })
 
-  it('does not toggle the hover popover from trigger clicks and closes on blur', () => {
-    vi.useFakeTimers()
+  it('shows a normal tooltip on hover and reserves the detail panel for clicks', async () => {
+    render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
 
-    try {
-      render(<CodexUsageTitlebarControl usage={{ plan: 'Pro', usedPercent: 25 }} />)
+    const button = screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })
+    expect(button.closest('[data-slot="tooltip-trigger"]')).toBe(button)
 
-      const button = screen.getByRole('button', { name: /Codex usage: 75% allowance left/ })
-      fireEvent.pointerEnter(button)
-      expect(screen.getByText('Pro')).toBeTruthy()
+    fireEvent.pointerEnter(button)
+    fireEvent.pointerMove(button)
 
-      fireEvent.click(button)
-      expect(screen.getByText('Pro')).toBeTruthy()
+    expect((await screen.findByRole('tooltip')).textContent).toContain('Codex usage: 75% allowance left')
+    expect(screen.queryByText('Pro')).toBeNull()
 
-      fireEvent.blur(button, { relatedTarget: button.ownerDocument.body })
-      act(() => {
-        vi.advanceTimersByTime(80)
-      })
-      expect(screen.queryByText('Pro')).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
+    fireEvent.click(button)
+    expect(await screen.findByText('Pro')).toBeTruthy()
   })
 
   it('renders unavailable and hidden states without requiring usage data', async () => {
     const { rerender } = render(<CodexUsageTitlebarControl state="unavailable" usage={null} />)
 
-    fireEvent.pointerEnter(screen.getByRole('button', { name: 'Codex usage unavailable' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Codex usage unavailable' }))
     expect(await screen.findByText('Unavailable')).toBeTruthy()
     expect(screen.getByText('Codex subscription usage is not available.')).toBeTruthy()
 
