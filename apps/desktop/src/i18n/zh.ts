@@ -461,6 +461,9 @@ export const zh: Translations = {
       toolViewTitle: '工具调用显示',
       toolViewDesc: '产品模式隐藏原始工具数据；技术模式显示完整输入/输出。',
       uiScaleTitle: '界面缩放',
+      uiScaleDecrease: '缩小界面',
+      uiScaleIncrease: '放大界面',
+      uiScaleReset: '将界面缩放重置为90%',
       uiScaleDesc: (percent: number) =>
         `缩放整个应用的文字和界面。也可使用 Cmd/Ctrl 加 +、- 或 0 调整。当前：${percent}%`,
       statusPulseTitle: '实时状态动画',

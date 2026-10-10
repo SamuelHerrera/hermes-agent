@@ -326,6 +326,9 @@ export const ja = defineLocale({
       toolViewTitle: 'ツール呼び出しの表示',
       toolViewDesc: 'プロダクト表示は生のツールペイロードを隠し、テクニカル表示は入出力をすべて表示します。',
       uiScaleTitle: 'UI スケール',
+      uiScaleDecrease: 'UI スケールを縮小',
+      uiScaleIncrease: 'UI スケールを拡大',
+      uiScaleReset: 'UI スケールを90%にリセット',
       uiScaleDesc: (percent: number) =>
         `アプリ全体の文字と UI を拡大縮小します。Cmd/Ctrl と +、-、0 でも変更できます。現在: ${percent}%`,
       statusPulseTitle: 'ライブ状態アニメーション',

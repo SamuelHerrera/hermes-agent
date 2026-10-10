@@ -370,6 +370,9 @@ export interface Translations {
       toolViewTitle: string
       toolViewDesc: string
       uiScaleTitle: string
+      uiScaleDecrease: string
+      uiScaleIncrease: string
+      uiScaleReset: string
       uiScaleDesc: (percent: number) => string
       statusPulseTitle: string
       statusPulseDesc: string

@@ -62,6 +62,7 @@ import { openProjectCreate } from '@/store/projects'
 import { openRouteTile } from '@/store/route-tiles'
 import { $connection } from '@/store/session'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
+import { $zoomPercent, setZoomPercent } from '@/store/zoom'
 import type { ProfileInfo } from '@/types/hermes'
 
 import { QuestionNotificationsControl } from '../questions/notifications'
@@ -836,6 +837,7 @@ function TitlebarOverflowMenu({
         </DropdownMenuTrigger>
       </Tip>
       <DropdownMenuContent align="end" className="w-64">
+        {window.hermesDesktop?.zoom ? <TitlebarUiScale /> : null}
         {utilityTools.length > 0 ? (
           <>
             <div
@@ -883,6 +885,49 @@ function TitlebarOverflowMenu({
         {settingsTool ? <TitlebarOverflowToolItem navigate={navigate} onClose={close} tool={settingsTool} /> : null}
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function TitlebarUiScale() {
+  const { t } = useI18n()
+  const percent = useStore($zoomPercent)
+  const a = t.settings.appearance
+  const presets = [75, 90, 100, 110, 125, 150, 175]
+  const smaller = [...presets].reverse().find(value => value < percent)
+  const larger = presets.find(value => value > percent)
+
+  const change = (event: Event, value: number) => {
+    event.preventDefault()
+    triggerHaptic('selection')
+    setZoomPercent(value)
+  }
+
+  return (
+    <>
+      <div aria-label={a.uiScaleTitle} className="flex items-center gap-1 px-2 py-1" role="group">
+        <span className="mr-auto text-sm">{a.uiScaleTitle}</span>
+        <DropdownMenuItem
+          asChild
+          disabled={smaller === undefined}
+          onSelect={event => change(event, smaller ?? percent)}
+        >
+          <Button aria-label={a.uiScaleDecrease} size="icon-sm" variant="ghost">
+            −
+          </Button>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild onSelect={event => change(event, 90)}>
+          <Button aria-label={a.uiScaleReset} size="sm" variant="ghost">
+            <span className="min-w-10 text-center tabular-nums">{percent}%</span>
+          </Button>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild disabled={larger === undefined} onSelect={event => change(event, larger ?? percent)}>
+          <Button aria-label={a.uiScaleIncrease} size="icon-sm" variant="ghost">
+            +
+          </Button>
+        </DropdownMenuItem>
+      </div>
+      <DropdownMenuSeparator />
+    </>
   )
 }
 

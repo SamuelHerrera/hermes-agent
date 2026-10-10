@@ -10,6 +10,7 @@ import { $sidebarOpen, setSidebarOpen, setSidebarWidth, SIDEBAR_DEFAULT_WIDTH } 
 import { $previewTabs, closeRightRail } from '@/store/preview'
 import { $activeGatewayProfile, $profiles, $showAllProfiles } from '@/store/profile'
 import { $projectDialog, closeProjectDialog } from '@/store/projects'
+import { $zoomPercent } from '@/store/zoom'
 
 import type { StatusbarItem } from './statusbar-controls'
 import { TitlebarControls } from './titlebar-controls'
@@ -46,6 +47,49 @@ afterEach(() => {
 })
 
 describe('TitlebarControls', () => {
+  it('adjusts UI scale directly without closing the menu and mirrors authoritative updates', () => {
+    const original = window.hermesDesktop
+    const setPercent = vi.fn()
+    window.hermesDesktop = {
+      ...original,
+      zoom: { get: vi.fn(), onChanged: vi.fn(), setPercent }
+    } as Window['hermesDesktop']
+
+    try {
+      act(() => $zoomPercent.set(100))
+      render(
+        <MemoryRouter>
+          <TitlebarControls onOpenSettings={vi.fn()} />
+        </MemoryRouter>
+      )
+      const more = screen.getByRole('button', { name: 'More app actions' })
+      fireEvent.pointerDown(more, { button: 0, pointerType: 'mouse' })
+      fireEvent.click(more)
+      const scale = screen.getByRole('group', { name: 'UI Scale' })
+      expect(within(scale).getByRole('menuitem', { name: 'Reset UI scale to 90%' }).textContent).toBe('100%')
+      fireEvent.click(within(scale).getByRole('menuitem', { name: 'Increase UI scale' }))
+      expect(setPercent).toHaveBeenLastCalledWith(110)
+      act(() => $zoomPercent.set(110))
+      expect(within(scale).getByRole('menuitem', { name: 'Reset UI scale to 90%' }).textContent).toBe('110%')
+      fireEvent.click(within(scale).getByRole('menuitem', { name: 'Decrease UI scale' }))
+      expect(setPercent).toHaveBeenLastCalledWith(100)
+      fireEvent.click(within(scale).getByRole('menuitem', { name: 'Reset UI scale to 90%' }))
+      expect(setPercent).toHaveBeenLastCalledWith(90)
+      act(() => $zoomPercent.set(175))
+      expect(
+        within(scale).getByRole('menuitem', { name: 'Increase UI scale' }).getAttribute('data-disabled')
+      ).not.toBeNull()
+      act(() => $zoomPercent.set(75))
+      expect(
+        within(scale).getByRole('menuitem', { name: 'Decrease UI scale' }).getAttribute('data-disabled')
+      ).not.toBeNull()
+      expect(screen.getByRole('menuitem', { name: 'Settings' })).toBeTruthy()
+    } finally {
+      window.hermesDesktop = original
+      act(() => $zoomPercent.set(90))
+    }
+  })
+
   it('keeps the sidebar toggle in the titlebar when the sidebar is hidden', () => {
     render(
       <MemoryRouter>

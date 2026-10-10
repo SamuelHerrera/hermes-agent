@@ -470,6 +470,9 @@ export const en: Translations = {
       toolViewTitle: 'Tool Call Display',
       toolViewDesc: 'Product hides raw tool payloads; Technical shows full input/output.',
       uiScaleTitle: 'UI Scale',
+      uiScaleDecrease: 'Decrease UI scale',
+      uiScaleIncrease: 'Increase UI scale',
+      uiScaleReset: 'Reset UI scale to 90%',
       uiScaleDesc: (percent: number) =>
         `Scales text and controls across the whole app. Cmd/Ctrl with +, - and 0 also works. Current: ${percent}%.`,
       statusPulseTitle: 'Live Status Animation',

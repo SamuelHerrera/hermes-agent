@@ -62,7 +62,7 @@ test('compact app controls stay in the header and extra actions stay in the menu
     await expect.poll(inlineNames).toEqual(baseline)
     await expect(toolbar.getByRole('button', { name: 'Capabilities', exact: true })).toHaveCount(0)
     await menu.click()
-    await expect(page.getByRole('menuitem')).toHaveText(['Approvals', 'Views', 'Settings'])
+    await expect(page.getByRole('menuitem').filter({ hasNotText: /^(−|\+|\d+%)$/ })).toHaveText(['Approvals', 'Views', 'Settings'])
     await page.getByRole('menuitem', { name: 'Views', exact: true }).hover()
     await expect(page.getByRole('menuitem', { name: 'Capabilities', exact: true })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: 'Messaging', exact: true })).toBeVisible()

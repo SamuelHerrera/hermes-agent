@@ -24,7 +24,6 @@ import {
 } from '@/store/status-pulse'
 import { $toolViewMode, setToolViewMode } from '@/store/tool-view'
 import { $translucency, setTranslucency } from '@/store/translucency'
-import { $zoomPercent, setZoomPercent } from '@/store/zoom'
 import { getBaseColors, useTheme } from '@/themes/context'
 import { installVscodeThemeFromMarketplace } from '@/themes/install'
 import type { DesktopTheme } from '@/themes/types'
@@ -70,19 +69,6 @@ function ThemePreview({ name, mode }: { name: string; mode: 'light' | 'dark' }) 
       </div>
     </div>
   )
-}
-
-// UI scale presets, as zoom percentages. 100 is Chromium's actual-size
-// baseline; the shipped default is the 90% preset. Ids double as the percent
-// values sent to the main process. A Cmd/Ctrl +/- step landing between
-// presets highlights nothing, and the row description keeps showing the
-// exact current percent.
-const UI_SCALE_PRESETS = ['90', '100', '110', '125', '150', '175'] as const
-
-type UiScalePreset = (typeof UI_SCALE_PRESETS)[number]
-
-function matchUiScalePreset(percent: number): UiScalePreset | null {
-  return UI_SCALE_PRESETS.find(preset => Number(preset) === percent) ?? null
 }
 
 function useDebounced<T>(value: T, delayMs: number): T {
@@ -254,7 +240,6 @@ export function AppearanceSettings() {
   const { t, isSavingLocale } = useI18n()
   const { themeName, mode, resolvedMode, availableThemes, setTheme, setMode } = useTheme()
   const toolViewMode = useStore($toolViewMode)
-  const zoomPercent = useStore($zoomPercent)
   const embedMode = useStore($embedMode)
   const embedAllowed = useStore($embedAllowed)
   const translucency = useStore($translucency)
@@ -304,14 +289,10 @@ export function AppearanceSettings() {
     { id: 'off', label: a.embedsOff }
   ] as const satisfies readonly { id: EmbedMode; label: string }[]
 
-  const uiScaleOptions = UI_SCALE_PRESETS.map(preset => ({ id: preset, label: `${preset}%` }))
-
   const statusPulseOptions = STATUS_PULSE_PERIODS_MS.map(periodMs => ({
     id: String(periodMs),
     label: `${periodMs / 1_000}s`
   }))
-
-  const matchedScalePreset = matchUiScalePreset(zoomPercent)
 
   return (
     <SettingsContent>
@@ -426,21 +407,6 @@ export function AppearanceSettings() {
               </div>
             }
             wide
-          />
-
-          <ListRow
-            action={
-              <SegmentedControl
-                onChange={id => {
-                  triggerHaptic('selection')
-                  setZoomPercent(Number(id))
-                }}
-                options={uiScaleOptions}
-                value={matchedScalePreset ?? ('' as UiScalePreset)}
-              />
-            }
-            description={a.uiScaleDesc(zoomPercent)}
-            title={a.uiScaleTitle}
           />
 
           <TerminalFontSetting />
