@@ -62,7 +62,7 @@ import { openProjectCreate } from '@/store/projects'
 import { openRouteTile } from '@/store/route-tiles'
 import { $connection } from '@/store/session'
 import { $statusbarHiddenIds } from '@/store/statusbar-prefs'
-import { $zoomPercent, setZoomPercent } from '@/store/zoom'
+import { $zoomPercent, isUiScaleAvailable, setZoomPercent } from '@/store/zoom'
 import type { ProfileInfo } from '@/types/hermes'
 
 import { QuestionNotificationsControl } from '../questions/notifications'
@@ -837,7 +837,7 @@ function TitlebarOverflowMenu({
         </DropdownMenuTrigger>
       </Tip>
       <DropdownMenuContent align="end" className="w-64">
-        {window.hermesDesktop?.zoom ? <TitlebarUiScale /> : null}
+        {isUiScaleAvailable() ? <TitlebarUiScale /> : null}
         {utilityTools.length > 0 ? (
           <>
             <div
