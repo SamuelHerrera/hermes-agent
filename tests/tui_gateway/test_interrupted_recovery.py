@@ -52,6 +52,13 @@ def test_terminal_receipts_remain_bounded(tmp_path):
     assert len(entries) <= turn_marker._MAX_ENTRIES
 
 
+def test_receipt_pruning_never_erases_unfinished_turn(tmp_path):
+    turn_marker.record_turn_start(tmp_path, "unfinished", "finish the task")
+    for i in range(turn_marker._MAX_ENTRIES + 1):
+        turn_marker.clear_turn_marker(tmp_path, str(i), reason="complete")
+    assert turn_marker.read_turn_marker(tmp_path, "unfinished") is not None
+
+
 def test_late_tool_result_after_stop_does_not_resurrect_turn(tmp_path):
     turn_marker.clear_turn_marker(tmp_path, "session", reason="cancelled")
     assert (
@@ -183,7 +190,7 @@ def test_missing_marker_stale_tail_is_visible_but_never_scheduled(
         "method": "session.resume",
         "params": {"session_id": "recovery-test"},
     })["result"]
-    assert result["recovery"]["reason"] == "stale"
+    assert result["recovery"]["reason"] == "missing_marker"
     assert result["recovery"]["needs_manual_continue"]
     assert "auto_continue" not in result
 
@@ -259,3 +266,16 @@ def test_missing_marker_dangling_call_requires_manual_continue(tmp_path):
     assert recovery["reason"] == "missing_marker"
     assert recovery["source"] == "raw_transcript"
     assert "task" not in str(recovery)
+
+
+def test_resume_surfaces_corrupt_recovery_store(resume_db, tmp_path):
+    path = tmp_path / "desktop" / "interrupted_turns.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{broken")
+    result = server.handle_request({
+        "id": "resume", "method": "session.resume",
+        "params": {"session_id": "recovery-test"},
+    })["result"]
+    assert result["recovery"]["reason"] == "storage_error"
+    assert "JSONDecodeError" in result["recovery"]["error"]
+    assert result["status"] == "error"

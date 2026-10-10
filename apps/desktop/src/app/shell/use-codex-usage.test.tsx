@@ -1,9 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { createBrowserHost } from '@/platform/browser-host'
+import { installHost, resetHostForTests } from '@/platform/host'
+
 import { CODEX_USAGE_REFRESH_MS, mapCodexUsageSnapshot, useCodexUsage } from './use-codex-usage'
 
 afterEach(() => {
+  resetHostForTests()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
@@ -52,6 +56,38 @@ function withLocalClock(timeZone: string, now: string, callback: () => void) {
 }
 
 describe('useCodexUsage', () => {
+  it('fetches mobile browser usage through the authenticated host without Electron', async () => {
+    vi.stubGlobal('hermesDesktop', undefined)
+
+    const fetcher = vi.fn(
+      async (path: string, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify(path.includes('/api/capabilities') ? { version: 1, capabilities: {} } : availableUsage()),
+          { status: 200 }
+        )
+    )
+
+    installHost(
+      await createBrowserHost(
+        { authRequired: false, basePath: '/hermes', sessionToken: 'test-session' },
+        { fetch: fetcher, location: { host: 'localhost', origin: 'http://localhost', protocol: 'http:' } }
+      )
+    )
+
+    const { result } = renderHook(() => useCodexUsage({ enabled: true, profile: 'default' }))
+
+    await waitFor(() => expect(result.current.state).toBe('available'))
+    expect(result.current.usage?.remainingPercent).toBe(68)
+    expect(fetcher).toHaveBeenLastCalledWith(
+      '/hermes/api/account/codex-usage?profile=default',
+      expect.objectContaining({
+        credentials: 'include',
+        headers: expect.any(Headers)
+      })
+    )
+    expect(new Headers(fetcher.mock.calls.at(-1)?.[1]?.headers).get('X-Hermes-Session-Token')).toBe('test-session')
+  })
+
   it('maps the sanitized Desktop RPC payload into the titlebar control shape', () => {
     const result = mapCodexUsageSnapshot(
       availableUsage({

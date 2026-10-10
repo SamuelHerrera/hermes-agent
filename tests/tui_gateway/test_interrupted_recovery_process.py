@@ -66,13 +66,14 @@ signal.pause()
     assert read_turn_marker(tmp_path, "claim-test")["attempts"] == 2
 
 
-@pytest.mark.parametrize("operation", ["cancel", "release"])
+@pytest.mark.parametrize("operation", ["start", "claim", "cancel", "release"])
 def test_safety_writes_wait_for_cross_process_lock(tmp_path, operation):
     import threading
     from tui_gateway.turn_marker import clear_turn_marker, release_turn_recovery
 
     record_turn_start(tmp_path, "contended", "controlled task")
-    token = claim_turn_recovery(tmp_path, "contended", read_turn_marker(tmp_path, "contended"))
+    expected = read_turn_marker(tmp_path, "contended")
+    token = claim_turn_recovery(tmp_path, "contended", expected) if operation != "claim" else None
     code = """
 import fcntl, sys
 with open(sys.argv[1], 'a+b') as handle:
@@ -86,9 +87,14 @@ with open(sys.argv[1], 'a+b') as handle:
     )
     finished = threading.Event()
     errors = []
+    claims = []
     def write():
         try:
-            if operation == "cancel":
+            if operation == "start":
+                record_turn_start(tmp_path, "contended", "next controlled task")
+            elif operation == "claim":
+                claims.append(claim_turn_recovery(tmp_path, "contended", expected))
+            elif operation == "cancel":
                 clear_turn_marker(tmp_path, "contended", reason="cancelled")
             else:
                 release_turn_recovery(tmp_path, "contended", token)
@@ -107,7 +113,11 @@ with open(sys.argv[1], 'a+b') as handle:
             worker.join(timeout=5)
     assert finished.is_set() and not errors
     marker = read_turn_marker(tmp_path, "contended")
-    if operation == "cancel":
+    if operation == "start":
+        assert marker and marker["prompt"] == "next controlled task"
+    elif operation == "claim":
+        assert claims and claims[0] and marker["claim"] == claims[0]
+    elif operation == "cancel":
         assert marker is None
     else:
         assert marker and "claim" not in marker
@@ -144,14 +154,42 @@ else:
     server._schedule_agent_build = lambda *a: None
     server._schedule_session_cap_enforcement = lambda: None
     server._default_session_cwd = lambda: str(home)
+    if os.environ['PHASE'] == 'resume_auto':
+        completed = threading.Event()
+        def capture_completion(event, *args, **kwargs):
+            if event == 'message.complete':
+                (home / 'completion.json').write_text(json.dumps(args))
+                completed.set()
+        server._emit = capture_completion
+        def build_fixture_agent(sid, session):
+            def recover(message, conversation_history=None, **kwargs):
+                assert 'UNKNOWN' in json.dumps(conversation_history)
+                (home / 'recovered').write_text('fixture recovery completed without replay')
+                history = list(conversation_history or []) + [
+                    {'role': 'user', 'content': message},
+                    {'role': 'assistant', 'content': 'Recovered fixture turn'},
+                ]
+                return {'final_response': 'Recovered fixture turn', 'messages': history}
+            session['agent'] = types.SimpleNamespace(
+                session_id='kill-test', run_conversation=recover, clear_interrupt=lambda: None,
+                _session_db=db,
+            )
+            session['agent_ready'].set()
+        server._start_agent_build = build_fixture_agent
     response = server.handle_request({'id':'resume', 'method':'session.resume', 'params':{'session_id':'kill-test'}})
+    if os.environ['PHASE'] == 'resume_auto':
+        assert response['result']['auto_continue']['attempt'] == 1
+        assert completed.wait(10), 'automatic recovery did not conclude'
+        session = server._sessions[response['result']['session_id']]
+        session['_run_thread'].join(timeout=5)
     (home / 'response.json').write_text(json.dumps(response))
     db.close()
 """
 
 
-def test_killed_fake_model_missing_marker_resumes_manual_without_replaying_effect(
-    tmp_path,
+@pytest.mark.parametrize("keep_marker", [False, True])
+def test_killed_fake_model_recovers_according_to_durable_evidence_without_replay(
+    tmp_path, keep_marker,
 ):
     env = {**os.environ, "HERMES_HOME": str(tmp_path), "PHASE": "run"}
     root = Path(__file__).resolve().parents[2]
@@ -180,7 +218,8 @@ def test_killed_fake_model_missing_marker_resumes_manual_without_replaying_effec
             )
         marker = tmp_path / "desktop" / "interrupted_turns.json"
         assert marker.exists(), "real turn pipeline must have written its marker"
-        marker.unlink()  # Fault injection, not a claimed causal reproduction.
+        if not keep_marker:
+            marker.unlink()  # Fault injection, not a claimed causal reproduction.
         process.kill()
         process.communicate(timeout=10)
     finally:
@@ -190,15 +229,20 @@ def test_killed_fake_model_missing_marker_resumes_manual_without_replaying_effec
     restarted = subprocess.run(
         [sys.executable, "-c", WORKER],
         cwd=root,
-        env={**env, "PHASE": "resume"},
+        env={**env, "PHASE": "resume_auto" if keep_marker else "resume"},
         capture_output=True,
         text=True,
         timeout=20,
     )
     assert restarted.returncode == 0, restarted.stderr
     response = json.loads((tmp_path / "response.json").read_text())["result"]
-    assert response["recovery"]["reason"] == "missing_marker"
-    assert response["recovery"]["needs_manual_continue"]
-    assert not response["running"]
-    assert "auto_continue" not in response
+    if keep_marker:
+        assert response["auto_continue"]["attempt"] == 1
+        assert (tmp_path / "recovered").exists(), restarted.stderr + (tmp_path / "completion.json").read_text()
+        assert read_turn_marker(tmp_path, "kill-test") is None
+    else:
+        assert response["recovery"]["reason"] == "missing_marker"
+        assert response["recovery"]["needs_manual_continue"]
+        assert not response["running"]
+        assert "auto_continue" not in response
     assert (tmp_path / "effect").read_text() == "executed once"

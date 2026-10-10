@@ -7,6 +7,7 @@ are rebound onto server.py's globals at install time — see method_ctx.py.
 from .method_ctx import HandlerRegistry
 
 import types
+from typing import Any
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -254,6 +255,30 @@ def _pending_reaction_notes(session: dict) -> str:
     return "\n".join(notes)
 
 
+def _broadcast_submitted_prompt(sid: str, text: Any, params: dict, status: str) -> None:
+    """Echo accepted user input to every viewer of this live session.
+
+    The originating renderer already inserted its optimistic bubble; its id
+    makes the broadcast an acknowledgement there and an insert on other peers.
+    Display text is presentation only, never substituted into model input.
+    """
+    # Rewind/regenerate modifies an existing turn, not a new prompt bubble.
+    # Its transcript reconciliation must not acquire a second insert-only echo.
+    if any(params.get(key) is not None for key in (
+        "truncate_before_user_ordinal", "truncate_before_row_id", "truncate_before_message_id",
+    )):
+        return
+    message_id = params.get("client_message_id")
+    if not isinstance(message_id, str) or not message_id or len(message_id) > 200:
+        message_id = f"user-{uuid.uuid4().hex}"
+    display_text = params.get("display_text")
+    if not isinstance(display_text, str) or not display_text:
+        display_text = _inflight_text(text)
+    _emit("prompt.accepted", sid, {
+        "message_id": message_id, "text": display_text, "status": status,
+    })
+
+
 @method("prompt.submit")
 def _(rid, params: dict) -> dict:
     from hermes_cli.input_sanitize import sanitize_user_prompt_text
@@ -344,6 +369,8 @@ def _(rid, params: dict) -> dict:
             queued=bool(params.get("queued")),
         )
         if busy_response is not None:
+            if not busy_response.get("error"):
+                _broadcast_submitted_prompt(sid, text, params, busy_response["result"]["status"])
             return busy_response
         # The old turn finished between the two lock acquisitions. Retry the
         # claim so this prompt starts normally instead of being stranded in a
@@ -611,6 +638,7 @@ def _(rid, params: dict) -> dict:
     if turn_isolation:
         isolated_response = _submit_prompt_to_compute_host(rid, sid, session, text)
         if not isolated_response.get("error"):
+            _broadcast_submitted_prompt(sid, text, params, "streaming")
             if survivor_user_row_ids is not None:
                 # The truncation already happened inline above (memory + DB),
                 # before compute-host dispatch — the rebind payload applies to
@@ -652,6 +680,7 @@ def _(rid, params: dict) -> dict:
             5071,
             f"session storage could not be written: {exc}",
         )
+    _broadcast_submitted_prompt(sid, text, params, "streaming")
     _start_agent_build(sid, session)
 
     def run_after_agent_ready() -> None:
@@ -1458,6 +1487,7 @@ def register(server) -> None:
         _coerce_truncate_int,
         _reconcile_client_ordinal,
         _pending_reaction_notes,
+        _broadcast_submitted_prompt,
     ):
         setattr(
             server,

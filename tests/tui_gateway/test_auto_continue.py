@@ -117,14 +117,16 @@ def test_marker_roundtrip(tmp_path):
     assert read_turn_marker(tmp_path, "abc") is None
 
 
-def test_marker_survives_corrupt_sidecar(tmp_path):
+def test_corrupt_sidecar_reports_error_without_erasing_evidence(tmp_path):
     path = tmp_path / "desktop" / "interrupted_turns.json"
     path.parent.mkdir(parents=True)
     path.write_text("{not json")
 
-    assert read_turn_marker(tmp_path, "abc") is None
-    record_turn_start(tmp_path, "abc", "prompt")
-    assert read_turn_marker(tmp_path, "abc")["prompt"] == "prompt"
+    with pytest.raises(RuntimeError, match="recovery_marker_read_failed"):
+        read_turn_marker(tmp_path, "abc")
+    with pytest.raises(RuntimeError, match="recovery_marker_write_failed"):
+        record_turn_start(tmp_path, "abc", "prompt")
+    assert path.read_text() == "{not json"
 
 
 # ── Turn lifecycle owns the marker ─────────────────────────────────────
@@ -179,6 +181,28 @@ def test_handled_failure_still_clears_marker(emits, turn_env, marker_home):
     server._run_prompt_submit("rid", "sid", session, "do the thing")
 
     assert read_turn_marker(marker_home, "session-key") is None
+
+
+def test_marker_write_failure_stops_before_model_and_surfaces_cause(
+    emits, turn_env, marker_home, monkeypatch
+):
+    from tui_gateway import turn_marker
+
+    calls = []
+    def fail_store(*args):
+        raise OSError("disk full while writing recovery state")
+
+    monkeypatch.setattr(turn_marker, "_store", fail_store)
+    agent = types.SimpleNamespace(
+        session_id="session-key",
+        run_conversation=lambda *a, **kw: calls.append(a) or {"final_response": "done"},
+        clear_interrupt=lambda: None,
+    )
+    session = _session(agent=agent, running=True)
+    server._run_prompt_submit("rid", "sid", session, "task")
+    assert not calls, "work must not execute without durable recovery intent"
+    assert not session["running"]
+    assert any("disk full" in str(payload) for event, _, payload in emits if event in {"error", "message.complete"})
 
 
 def test_process_shutdown_before_terminal_frame_keeps_marker(
@@ -299,8 +323,9 @@ def test_fresh_marker_schedules_continuation(emits, schedule_env, marker_home):
     assert ("message.start", "sid", None) in [(e, s, p) for e, s, p in emits]
 
 
-def test_stale_marker_is_retained_not_continued(schedule_env, marker_home, monkeypatch):
+def test_explicit_expiry_retains_marker_without_continuing(emits, schedule_env, marker_home, monkeypatch):
     record_turn_start(marker_home, "session-key", "old prompt")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"desktop": {"auto_continue": {"freshness_minutes": 15}}})
     monkeypatch.setattr(
         server, "time", types.SimpleNamespace(time=lambda: time.time() + 3600)
     )
@@ -310,6 +335,15 @@ def test_stale_marker_is_retained_not_continued(schedule_env, marker_home, monke
     assert result is None
     assert not schedule_env
     assert read_turn_marker(marker_home, "session-key")["suppression"] == "stale"
+
+
+@pytest.mark.parametrize("settings", [{}, {"freshness_minutes": 0}])
+def test_no_expiry_recovers_after_long_offline_period(emits, schedule_env, marker_home, monkeypatch, settings):
+    record_turn_start(marker_home, "session-key", "finish interrupted work")
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"desktop": {"auto_continue": settings}})
+    monkeypatch.setattr(server, "time", types.SimpleNamespace(time=lambda: time.time() + 86400))
+    assert server._maybe_schedule_auto_continue("sid", _session(), "session-key") is not None
+    assert len(schedule_env) == 1
 
 
 def test_config_widens_freshness_window(emits, schedule_env, marker_home, monkeypatch):
@@ -451,7 +485,35 @@ def test_failed_agent_build_leaves_marker_for_retry(
     assert result is not None
     assert not schedule_env
     assert session["_auto_continue_scheduled"] is False
+    assert session["recovery"]["error"] == "boom"
     assert read_turn_marker(marker_home, "session-key") is not None
+
+
+def test_dispatch_failure_preserves_actual_error(emits, schedule_env, marker_home, monkeypatch):
+    record_turn_start(marker_home, "session-key", "prompt")
+    def fail(*args, **kwargs):
+        raise RuntimeError("recovery dispatcher exploded")
+    monkeypatch.setattr(server, "_run_prompt_submit", fail)
+    session = _session()
+    server._maybe_schedule_auto_continue("sid", session, "session-key")
+    assert session["recovery"]["reason"] == "dispatch_failed"
+    assert session["recovery"]["error"] == "RuntimeError: recovery dispatcher exploded"
+    assert not session["running"] and not session["_auto_continue_scheduled"]
+    assert read_turn_marker(marker_home, "session-key") is not None
+    assert any(event == "message.complete" for event, _, _ in emits)
+
+
+def test_claim_storage_failure_reports_actual_error(emits, schedule_env, marker_home, monkeypatch):
+    from tui_gateway import turn_marker
+    record_turn_start(marker_home, "session-key", "prompt")
+    def fail(*args, **kwargs):
+        raise OSError("disk full while claiming recovery")
+    monkeypatch.setattr(turn_marker, "_store", fail)
+    session = _session()
+    assert server._maybe_schedule_auto_continue("sid", session, "session-key") is None
+    assert not schedule_env
+    assert session["recovery"]["reason"] == "storage_error"
+    assert "disk full while claiming recovery" in session["recovery"]["error"]
 
 
 def test_recheck_live_lease_after_agent_build(emits, schedule_env, marker_home, monkeypatch):

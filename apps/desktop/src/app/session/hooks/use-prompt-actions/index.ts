@@ -745,7 +745,9 @@ export function usePromptActions({
           })
 
         try {
-          const result = await requestGateway<SessionRedirectResponse>('session.redirect', { session_id: id, text })
+          const result = await requestGateway<SessionRedirectResponse>('session.redirect', {
+            session_id: id, text, client_message_id: messageId, display_text: text
+          })
 
           if (result?.status === 'redirected') {
             triggerHaptic('submit')

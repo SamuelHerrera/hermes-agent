@@ -878,17 +878,31 @@ export function hydrateSessionTodosFromMessages(
  * memory. Stable ids let repeated activate/resume hydration reconcile instead
  * of growing duplicate rows.
  */
+const recoveryFailureReasons: Record<string, string> = {
+  missing_marker: 'The durable recovery marker is missing; automatic recovery cannot identify the unfinished turn.',
+  stale: 'The configured recovery window expired.',
+  exhausted: 'The automatic recovery attempt limit was reached after repeated interruptions.',
+  disabled: 'Automatic recovery is disabled in desktop.auto_continue.enabled.',
+  explicit_interrupt: 'The turn was explicitly interrupted.',
+  lease_unavailable: 'The turn ownership could not be verified.',
+  claim_unavailable: 'The recovery claim could not be acquired.',
+  build_failed: 'The agent could not be built for automatic recovery.',
+  storage_error: 'The durable recovery state could not be read.'
+}
+
 export function appendLiveSessionProjection(
   messages: ChatMessage[],
   projection: Pick<SessionResumeResponse, 'inflight' | 'queued' | 'pending_prompt' | 'session_id' | 'recovery' | 'running'>
 ): ChatMessage[] {
   if (projection.recovery?.needs_manual_continue && !projection.running && !projection.inflight?.streaming) {
     const id = `assistant-recovery-${projection.session_id}`
+    const { reason, error } = projection.recovery
+    const cause = error || recoveryFailureReasons[reason] || 'Automatic recovery failed.'
     return [...messages.filter(message => message.id !== id), {
       id,
       role: 'assistant',
       parts: [],
-      error: 'Interrupted turn. No final reply was saved. Continue only after checking work already performed; tool outcomes may be unknown.'
+      error: `Interrupted turn [${reason}]. ${cause} No final reply was saved; inspect completed work before repeating tools.`
     }]
   }
   const inflightUser = projection.inflight?.user?.trim() ?? ''

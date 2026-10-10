@@ -621,6 +621,8 @@ export function useSubmitPrompt(deps: SubmitPromptDeps) {
         const submitParams = (targetId: string) => ({
           session_id: targetId,
           text,
+          client_message_id: optimisticId,
+          display_text: bubbleText,
           ...(interrupted && { interrupted }),
           // Typed into the floating HUD, so the user is looking at another app
           // rather than at Hermes. The gateway turns this into a per-turn hint

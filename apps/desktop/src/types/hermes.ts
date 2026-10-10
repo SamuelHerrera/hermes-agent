@@ -617,6 +617,7 @@ export interface SessionResumeResponse {
     reason: string
     needs_manual_continue: boolean
     interrupted_at: number
+    error?: string
   }
   /** Present when the backend found a fresh crash-interrupted turn and
    *  scheduled its automatic continuation; the turn arrives as a normal

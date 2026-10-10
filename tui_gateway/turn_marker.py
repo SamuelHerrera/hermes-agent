@@ -10,13 +10,9 @@ Recovery claims serialize cold resumes across clients/processes. A dead claim
 owner can be replaced; a live PID cannot. PID reuse can conservatively defer
 recovery, never authorize duplicate execution.
 
-Markers are stored per ``HERMES_HOME`` (callers pass the session's home so
-profile sessions keep their state in their own profile directory) and the
-file is bounded: writes prune entries older than ``_MAX_AGE_SECS`` and cap
-the total count, so an unlucky streak of crashes can't grow it unboundedly.
-
-Every function is best-effort by design — marker bookkeeping must never
-break a turn — so I/O errors degrade to "no marker" instead of raising.
+Markers are stored per ``HERMES_HOME``. Completed receipts are bounded;
+unfinished intent is retained until explicitly concluded. Start writes are
+mandatory before work executes. Storage errors are errors, not "no marker".
 """
 
 from __future__ import annotations
@@ -85,7 +81,7 @@ def inspect_interrupted_tail(
 @contextlib.contextmanager
 def _locked(home, *, blocking=False):
     # Serialize all sidecar read/modify/write transactions across backend PIDs.
-    # Refuse rather than block a resume indefinitely if another writer is stuck.
+    # Critical reads/writes wait for brief transactions instead of losing intent.
     with _lock:
         path = _marker_path(home).with_suffix(".lock")
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,7 +112,7 @@ def _locked(home, *, blocking=False):
 def claim_turn_recovery(home, session_key, expected) -> str | None:
     """Compare-and-claim the exact marker, counting attempts before agent build."""
     try:
-        with _locked(home):
+        with _locked(home, blocking=True):
             path = _marker_path(home)
             entries = _load(path)
             entry = entries.get(session_key, {})
@@ -136,9 +132,9 @@ def claim_turn_recovery(home, session_key, expected) -> str | None:
             )
             _store(path, entries)
             return token
-    except Exception:
-        logger.debug("turn recovery claim unavailable session=%s", session_key)
-        return None
+    except Exception as exc:
+        logger.error("turn recovery claim failed session=%s: %s", session_key, exc)
+        raise RuntimeError(f"recovery_marker_claim_failed: {exc}") from exc
 
 
 def release_turn_recovery(home, session_key, token) -> None:
@@ -166,31 +162,28 @@ def _load(path: Path) -> dict[str, dict]:
             data = json.load(f)
     except FileNotFoundError:
         return {}
-    except Exception:
-        logger.debug(
-            "unreadable turn-marker file %s; starting fresh", path, exc_info=True
-        )
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    return {k: v for k, v in data.items() if isinstance(v, dict)}
+    except Exception as exc:
+        raise RuntimeError(f"recovery_marker_read_failed: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict) or any(not isinstance(v, dict) for v in data.values()):
+        raise RuntimeError("recovery_marker_read_failed: invalid marker store structure")
+    return data
 
 
 def _prune(entries: dict[str, dict], now: float) -> dict[str, dict]:
+    # Unfinished intent is not a cache. Other sessions' completed receipts
+    # must never evict it, regardless of how long the backend was offline.
+    unfinished = {key: entry for key, entry in entries.items() if entry.get("prompt")}
     fresh = {
         key: entry
         for key, entry in entries.items()
-        if entry.get("suppression")
-        or now - float(entry.get("started_at") or 0) <= _MAX_AGE_SECS
+        if key not in unfinished and now - float(entry.get("started_at") or 0) <= _MAX_AGE_SECS
     }
-    if len(fresh) <= _MAX_ENTRIES:
-        return fresh
     newest = sorted(
         fresh.items(),
         key=lambda item: float(item[1].get("started_at") or 0),
         reverse=True,
     )[:_MAX_ENTRIES]
-    return dict(newest)
+    return {**unfinished, **dict(newest)}
 
 
 def _store(path: Path, entries: dict[str, dict]) -> None:
@@ -229,7 +222,7 @@ def record_turn_start(
         "started_at": now,
     }
     try:
-        with _locked(home):
+        with _locked(home, blocking=True):
             path = _marker_path(home)
             entries = _prune(_load(path), now)
             previous = entries.get(session_key, {})
@@ -239,8 +232,10 @@ def record_turn_start(
                 )
             entries[session_key] = entry
             _store(path, entries)
-    except Exception:
-        logger.debug("failed to record turn marker for %s", session_key, exc_info=True)
+            logger.info("turn marker recorded session=%s attempt=%d", session_key, entry["attempts"])
+    except Exception as exc:
+        logger.error("failed to record turn marker session=%s: %s", session_key, exc)
+        raise RuntimeError(f"recovery_marker_write_failed: {exc}") from exc
 
 
 def clear_turn_marker(
@@ -292,10 +287,10 @@ def read_turn_marker(home: Path | str, session_key: str) -> dict[str, Any] | Non
     if not session_key:
         return None
     try:
-        with _locked(home):
+        with _locked(home, blocking=True):
             entry = _load(_marker_path(home)).get(session_key)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"recovery_marker_read_failed: {exc}") from exc
     if not isinstance(entry, dict):
         return None
     prompt = str(entry.get("prompt") or "")

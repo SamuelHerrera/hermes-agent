@@ -3393,7 +3393,8 @@ DEFAULT_CONFIG = {
         "auto_continue": {
             "enabled": True,
             # How recent the interruption must be to auto-continue (minutes).
-            "freshness_minutes": 15,
+            # 0 disables age expiry; ownership and crash-loop checks still apply.
+            "freshness_minutes": 0,
             # Crash-loop breaker: max automatic re-runs of one interrupted turn.
             "max_attempts": 2,
         },

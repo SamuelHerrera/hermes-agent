@@ -46,6 +46,10 @@ vi.mock('@/hermes', () => ({
 // the runtime id directly.
 const RUNTIME_SESSION_ID = 'rt-abc123'
 
+function expectedPrompt(params: Record<string, unknown>) {
+  return { ...params, client_message_id: expect.stringMatching(/^user-/), display_text: expect.any(String) }
+}
+
 function sessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
     ended_at: null,
@@ -1240,10 +1244,10 @@ describe('usePromptActions slash.exec dispatch payloads', () => {
       command: 'goal write the implementation plan',
       session_id: RUNTIME_SESSION_ID
     })
-    expect(calls[1]?.params).toEqual({
+    expect(calls[1]?.params).toEqual(expectedPrompt({
       session_id: RUNTIME_SESSION_ID,
       text: 'write the implementation plan'
-    })
+    }))
 
     const renderedText = states
       .flatMap(state => {
@@ -1770,12 +1774,20 @@ describe('usePromptActions submit / queue drain semantics', () => {
     // every delta of this brand-new turn.
     expect(seeds.length).toBeGreaterThan(0)
     expect(seeds.every(s => s.interrupted === false)).toBe(true)
+    // The echoed identity must be the optimistic bubble's identity, not merely
+    // any generated string — that relationship prevents sender duplicates.
+    const seededMessage = (seeds.at(-1)?.messages as { id: string }[]).at(-1)
+
+    expect(requestGateway).toHaveBeenCalledWith('prompt.submit', expect.objectContaining({
+      client_message_id: seededMessage?.id,
+      display_text: 'hello after a stop'
+    }), 1_800_000)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         session_id: RUNTIME_SESSION_ID,
         text: 'hello after a stop'
-      },
+      }),
       1_800_000
     )
   })
@@ -1795,21 +1807,21 @@ describe('usePromptActions submit / queue drain semantics', () => {
     // The latch is one-shot: the flag rides this submit, the next is clean.
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         session_id: RUNTIME_SESSION_ID,
         text: 'stop! rude interruption',
         interrupted: true
-      },
+      }),
       1_800_000
     )
 
     await handle!.submitText('follow-up without a barge')
     expect(requestGateway).toHaveBeenLastCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         session_id: RUNTIME_SESSION_ID,
         text: 'follow-up without a barge'
-      },
+      }),
       1_800_000
     )
   })
@@ -1835,11 +1847,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(accepted).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: RUNTIME_SESSION_ID,
         text: 'queued message'
-      },
+      }),
       1_800_000
     )
   })
@@ -1872,11 +1884,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(accepted).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: 'rt-session-a',
         text: 'queued for background session'
-      },
+      }),
       1_800_000
     )
     expect(requestGateway).not.toHaveBeenCalledWith('session.resume', expect.anything())
@@ -1927,11 +1939,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     })
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: 'rt-session-b',
         text: 'queued for B mid-switch'
-      },
+      }),
       1_800_000
     )
     // The invariant: the stale foreground runtime never receives the prompt.
@@ -1971,11 +1983,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(accepted).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: 'rt-session-b-live',
         text: 'queued for B, B already re-bound'
-      },
+      }),
       1_800_000
     )
     expect(requestGateway).not.toHaveBeenCalledWith('session.resume', expect.anything())
@@ -2014,10 +2026,10 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(accepted).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         session_id: 'rt-tab',
         text: 'kickoff for the tab'
-      },
+      }),
       1_800_000
     )
   })
@@ -2066,11 +2078,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     // The prompt must land in the resumed session, NOT the foreground.
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: 'rt-session-a-rebound',
         text: 'queued for background session'
-      },
+      }),
       1_800_000
     )
     // The invariant: the foreground runtime never receives the prompt.
@@ -2117,11 +2129,11 @@ describe('usePromptActions submit / queue drain semantics', () => {
     expect(second).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         queued: true,
         session_id: RUNTIME_SESSION_ID,
         text: 'please send me'
-      },
+      }),
       1_800_000
     )
   })
@@ -2208,10 +2220,10 @@ describe('usePromptActions redirectPrompt', () => {
     const accepted = await handle!.redirectPrompt('  nudge the run  ')
 
     expect(accepted).toBe(true)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.redirect', expectedPrompt({
       session_id: RUNTIME_SESSION_ID,
       text: 'nudge the run'
-    })
+    }))
     expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything())
     expect((capturedStates.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
       role: 'user',
@@ -2277,10 +2289,10 @@ describe('usePromptActions redirectPrompt', () => {
     )
 
     expect(await handle!.redirectPrompt('build-window nudge')).toBe(true)
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.redirect', expectedPrompt({
       session_id: RUNTIME_SESSION_ID,
       text: 'build-window nudge'
-    })
+    }))
     expect(requestGateway).not.toHaveBeenCalledWith('prompt.submit', expect.anything())
     expect((capturedStates.at(-1)?.messages as unknown[]).at(-1)).toMatchObject({
       role: 'user',
@@ -2331,9 +2343,9 @@ describe('usePromptActions redirectPrompt', () => {
 
     expect(await handle!.redirectPrompt('reconnect nudge')).toBe(true)
     expect(calls.map(c => c.method)).toEqual(['session.redirect', 'session.resume', 'session.redirect'])
-    expect(calls[0]?.params).toEqual({ session_id: RUNTIME_SESSION_ID, text: 'reconnect nudge' })
+    expect(calls[0]?.params).toEqual(expectedPrompt({ session_id: RUNTIME_SESSION_ID, text: 'reconnect nudge' }))
     expect(calls[1]?.params).toEqual({ session_id: STORED_SESSION_ID, source: 'desktop', omit_messages: true })
-    expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID, text: 'reconnect nudge' })
+    expect(calls[2]?.params).toEqual(expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'reconnect nudge' }))
     expect(handle!.activeSessionIdRef.current).toBe(RECOVERED_SESSION_ID)
   })
 })
@@ -2570,10 +2582,10 @@ describe('usePromptActions file attachment sync', () => {
       name: 'report.txt',
       data_url: 'data:text/plain;base64,aGVsbG8='
     })
-    expect(calls[1]?.params).toEqual({
+    expect(calls[1]?.params).toEqual(expectedPrompt({
       session_id: RUNTIME_SESSION_ID,
       text: '@file:.hermes/desktop-attachments/report.txt\n\nconvert this to epub'
-    })
+    }))
   })
 
   it('uploads Windows file bytes when local mode fronts a POSIX WSL/Docker backend', async () => {
@@ -2626,7 +2638,7 @@ describe('usePromptActions file attachment sync', () => {
     })
     expect(calls[1]).toEqual({
       method: 'prompt.submit',
-      params: { session_id: RUNTIME_SESSION_ID, text: '@file:.hermes/desktop-attachments/report.txt\n\nsummarize' }
+      params: expectedPrompt({ session_id: RUNTIME_SESSION_ID, text: '@file:.hermes/desktop-attachments/report.txt\n\nsummarize' })
     })
   })
 
@@ -2808,7 +2820,7 @@ describe('usePromptActions file attachment sync', () => {
     expect(calls[0]?.params).not.toHaveProperty('data_url')
     expect(calls[1]).toEqual({
       method: 'prompt.submit',
-      params: { session_id: RUNTIME_SESSION_ID, text: '@file:data/report.txt\n\nsummarize' }
+      params: expectedPrompt({ session_id: RUNTIME_SESSION_ID, text: '@file:data/report.txt\n\nsummarize' })
     })
   })
 })
@@ -2930,7 +2942,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     // First submit (stale id) → session.resume (stored id) → retry submit (fresh id).
     expect(calls.map(c => c.method)).toEqual(['prompt.submit', 'session.resume', 'prompt.submit'])
     expect(calls[1]?.params).toEqual({ session_id: STORED_SESSION_ID, source: 'desktop', omit_messages: true })
-    expect(calls[2]?.params).toEqual({ session_id: RECOVERED_SESSION_ID, text: 'message after wake' })
+    expect(calls[2]?.params).toEqual(expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'message after wake' }))
   })
 
   // #67603 (second symptom): a recovery resume must re-register on the session's
@@ -3086,21 +3098,21 @@ describe('usePromptActions sleep/wake session recovery', () => {
 
     expect(ok).toBe(true)
     expect(calls.map(c => c.method)).toEqual(['prompt.submit', 'session.resume', 'prompt.submit'])
-    expect(calls[0]?.params).toEqual({
+    expect(calls[0]?.params).toEqual(expectedPrompt({
       queued: true,
       session_id: 'rt-background-stale',
       text: 'queued background message after wake'
-    })
+    }))
     expect(calls[1]?.params).toEqual({
       session_id: STORED_SESSION_ID,
       source: 'desktop',
       omit_messages: true
     })
-    expect(calls[2]?.params).toEqual({
+    expect(calls[2]?.params).toEqual(expectedPrompt({
       queued: true,
       session_id: RECOVERED_SESSION_ID,
       text: 'queued background message after wake'
-    })
+    }))
     expect(handle!.activeSessionIdRef.current).toBe(RUNTIME_SESSION_ID)
   })
 
@@ -3286,10 +3298,10 @@ describe('usePromptActions sleep/wake session recovery', () => {
       profile: 'default',
       omit_messages: true
     })
-    expect(calls[2]?.params).toEqual({
+    expect(calls[2]?.params).toEqual(expectedPrompt({
       session_id: RECOVERED_SESSION_ID,
       text: 'message during starved loop'
-    })
+    }))
   })
 
   it('resumes the SELECTED stored session instead of minting a new one when activeSessionId is null (#55578 split)', async () => {
@@ -3410,7 +3422,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(createBackendSessionForSend).not.toHaveBeenCalled()
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      { session_id: RECOVERED_SESSION_ID, text: 'follow-up while the profile route is rebinding' },
+      expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'follow-up while the profile route is rebinding' }),
       1_800_000
     )
   })
@@ -3447,7 +3459,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(resumeStoredSession).toHaveBeenCalledWith(STORED_SESSION_ID)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      { session_id: RECOVERED_SESSION_ID, text: 'stay in the routed profile session' },
+      expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'stay in the routed profile session' }),
       1_800_000
     )
   })
@@ -3478,7 +3490,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(resumeStoredSession).not.toHaveBeenCalled()
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      { session_id: RECOVERED_SESSION_ID, text: 'normal follow-up' },
+      expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'normal follow-up' }),
       1_800_000
     )
   })
@@ -3535,7 +3547,7 @@ describe('usePromptActions sleep/wake session recovery', () => {
     expect(await handle!.submitText('retry after recovery')).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      { session_id: RECOVERED_SESSION_ID, text: 'retry after recovery' },
+      expectedPrompt({ session_id: RECOVERED_SESSION_ID, text: 'retry after recovery' }),
       1_800_000
     )
   })
@@ -3962,7 +3974,7 @@ describe('usePromptActions new-chat first-send delivery (#63078)', () => {
     expect(calls).toEqual([
       {
         method: 'prompt.submit',
-        params: { session_id: NEW_RUNTIME_ID, text: 'first message of a new chat' }
+        params: expectedPrompt({ session_id: NEW_RUNTIME_ID, text: 'first message of a new chat' })
       }
     ])
   })
@@ -4018,10 +4030,10 @@ describe('usePromptActions new-chat first-send delivery (#63078)', () => {
     expect(await handle!.submitText('hello')).toBe(true)
     expect(requestGateway).toHaveBeenCalledWith(
       'prompt.submit',
-      {
+      expectedPrompt({
         session_id: NEW_RUNTIME_ID,
         text: 'hello'
-      },
+      }),
       1_800_000
     )
   })
@@ -4673,10 +4685,10 @@ describe('usePromptActions stale-closure session routing', () => {
     // A redirect reaches the model mid-turn. Sent to the stale session, the
     // correction lands in a conversation the user is no longer looking at —
     // this is the observed "session suddenly working on another chat's task".
-    expect(requestGateway).toHaveBeenCalledWith('session.redirect', {
+    expect(requestGateway).toHaveBeenCalledWith('session.redirect', expectedPrompt({
       session_id: RUNTIME_SESSION_B,
       text: 'actually use Postgres'
-    })
+    }))
     expect(requestGateway).not.toHaveBeenCalledWith(
       'session.redirect',
       expect.objectContaining({ session_id: RUNTIME_SESSION_ID })

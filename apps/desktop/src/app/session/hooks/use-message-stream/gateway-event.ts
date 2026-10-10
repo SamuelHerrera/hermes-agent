@@ -614,6 +614,32 @@ export function useGatewayEventHandler(deps: GatewayEventDeps) {
               explicitSid && sessionId ? modelOptionsQueryKey(activeGatewayProfile, sessionId) : ['model-options']
           })
         }
+      } else if (event.type === 'prompt.accepted') {
+        const messageId = payload?.message_id
+
+        if (!sessionId || !explicitSid || typeof messageId !== 'string' || !messageId) {
+          return
+        }
+
+        updateSessionState(sessionId, state => {
+          if (state.messages.some(message => message.id === messageId)) {
+            return state
+          }
+
+          const message = { id: messageId, role: 'user' as const, parts: [textPart(coerceGatewayText(payload?.text))] }
+
+          // Compute-host output may beat the acceptance echo back to this
+          // client. Keep the user prompt before its already-started answer.
+          const streamIndex = (payload?.status === 'streaming' || payload?.status === 'redirected') && state.streamId
+            ? state.messages.findIndex(row => row.id === state.streamId)
+            : -1
+
+          const messages = [...state.messages]
+
+          messages.splice(streamIndex < 0 ? messages.length : streamIndex, 0, message)
+
+          return { ...state, messages, interrupted: payload?.status === 'streaming' ? false : state.interrupted }
+        })
       } else if (event.type === 'message.start') {
         if (!sessionId) {
           return

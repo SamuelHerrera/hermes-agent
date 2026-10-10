@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 
+import { tryResolveHost } from '@/platform/host'
+
 import type { CodexUsageControlState, CodexUsageData } from './codex-usage-control'
 
 export const CODEX_USAGE_REFRESH_MS = 120_000
@@ -29,7 +31,15 @@ export function useCodexUsage({ enabled, profile }: UseCodexUsageOptions): UseCo
   const [result, setResult] = useState<UseCodexUsageResult>(UNAVAILABLE_USAGE)
 
   useEffect(() => {
-    const client = window.hermesDesktop?.codexUsage
+    const host = tryResolveHost()
+
+    const client =
+      host?.kind === 'browser'
+        ? {
+            get: (profile?: null | string) =>
+              host.api<DesktopCodexUsageSnapshot>({ path: '/api/account/codex-usage', profile })
+          }
+        : window.hermesDesktop?.codexUsage
 
     if (!enabled || !client) {
       setResult(UNAVAILABLE_USAGE)

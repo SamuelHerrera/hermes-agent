@@ -7896,7 +7896,7 @@ def _fail_inflight_turn(session: dict, error: Any) -> None:
 # raw-transcript/manual fallback, never automatic execution.
 
 _AUTO_CONTINUE_ENABLED_DEFAULT = True
-_AUTO_CONTINUE_FRESHNESS_MINUTES_DEFAULT = 15
+_AUTO_CONTINUE_FRESHNESS_MINUTES_DEFAULT = 0
 _AUTO_CONTINUE_MAX_ATTEMPTS_DEFAULT = 2
 
 
@@ -8034,9 +8034,17 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
     if session.get("_auto_continue_scheduled"):
         return None
     home = _session_home(session)
-    marker = read_turn_marker(home, session_key)
     if session.get("running") or session.get("_turn_cancel_requested"):
         session.pop("recovery", None)
+        return None
+    try:
+        marker = read_turn_marker(home, session_key)
+    except RuntimeError as exc:
+        logger.error("turn recovery failed session=%s: %s", session_key, exc)
+        session["recovery"] = {
+            "state": "interrupted", "source": "marker", "reason": "storage_error",
+            "error": str(exc), "needs_manual_continue": True, "interrupted_at": 0,
+        }
         return None
     lease_state = _has_live_durable_turn_lease(session, session_key)
     if lease_state is not False:
@@ -8056,9 +8064,7 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
         if recovery:
             recovery = dict(recovery)
             recovery["interrupted_at"] = (session.get("_recovery_evidence") or {}).get("updated_at") or recovery["interrupted_at"]
-            age = time.time() - recovery["interrupted_at"]
-            if age > freshness_secs or age < -60:
-                recovery["reason"] = "stale"
+
         session["recovery"] = recovery
         return None
     if float((session.get("_recovery_evidence") or {}).get("final_reply_at") or 0) >= marker["started_at"]:
@@ -8069,7 +8075,7 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
     reason = marker.get("suppression") or (
         "explicit_interrupt" if (session.get("_recovery_evidence") or {}).get("explicit_interrupt") else
         "disabled" if not enabled else "exhausted" if marker["attempts"] >= max_attempts
-        else "stale" if age > freshness_secs or age < -60 else None
+        else "stale" if (freshness_secs > 0 and age > freshness_secs) or age < -60 else None
     )
     if reason:
         suppress_turn_marker(home, session_key, reason, expected=marker)
@@ -8078,7 +8084,14 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
             "needs_manual_continue": True, "interrupted_at": updated_at,
         }
         return None
-    claim = claim_turn_recovery(home, session_key, marker)
+    try:
+        claim = claim_turn_recovery(home, session_key, marker)
+    except RuntimeError as exc:
+        session["recovery"] = {
+            "state": "interrupted", "source": "marker", "reason": "storage_error",
+            "error": str(exc), "needs_manual_continue": True, "interrupted_at": marker["started_at"],
+        }
+        return None
     if claim is None:
         peer_claim = (read_turn_marker(home, session_key) or {}).get("claim")
         session["recovery"] = {
@@ -8100,13 +8113,15 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
         try:
             _start_agent_build(sid, session)
             err = _wait_agent(session, rid, timeout=120.0)
-        except Exception:
-            logger.warning("auto-continue agent build failed session=%s", sid)
-            err = {"error": {"message": "agent build failed"}}
+        except Exception as exc:
+            logger.exception("auto-continue agent build failed session=%s", sid)
+            err = {"error": {"message": f"{type(exc).__name__}: {exc}"}}
         if err:
             # Failed builds also consume the durable retry budget.
+            build_error = err.get("error") if isinstance(err, dict) else err
             session["recovery"] = {
                 "state": "interrupted", "source": "marker", "reason": "build_failed",
+                "error": build_error.get("message") if isinstance(build_error, dict) else str(build_error),
                 "needs_manual_continue": True, "interrupted_at": updated_at,
             }
             release_turn_recovery(home, session_key, claim)
@@ -8144,10 +8159,20 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
             _emit("message.start", sid)
             _run_prompt_submit(rid, sid, session, text, display_kind="auto_continue")
         except Exception as exc:
-            logger.warning("auto-continue dispatch failed session=%s error_type=%s", sid, type(exc).__name__)
+            logger.exception("auto-continue dispatch failed session=%s", sid)
             release_turn_recovery(home, session_key, claim)
             with session["history_lock"]:
                 session["running"] = False
+                session["_auto_continue_scheduled"] = False
+                session["recovery"] = {
+                    "state": "interrupted", "source": "marker", "reason": "dispatch_failed",
+                    "error": f"{type(exc).__name__}: {exc}", "needs_manual_continue": True,
+                    "interrupted_at": marker["started_at"],
+                }
+            _emit("message.complete", sid, {
+                "text": f"Error: {session['recovery']['error']}", "status": "error",
+                "error": session["recovery"]["error"], "recoverable": True,
+            })
 
     threading.Thread(target=kickoff, daemon=True).start()
     logger.info(
@@ -8274,6 +8299,7 @@ def _handle_busy_submit(
         try:
             if agent.steer(plain_text):
                 with session["history_lock"]:
+                    _record_inflight_correction(session, plain_text)
                     session["last_active"] = time.time()
                 return _ok(rid, {"status": "steered"})
         except Exception:
@@ -10704,10 +10730,11 @@ def _run_prompt_submit(
         marker_key = str(session.get("session_key") or "")
         marker_attempt = int(session.pop("_auto_continue_attempt", 0) or 0)
         marker_text = session.pop("_auto_continue_prompt", None) or text
-        with session["history_lock"]:
-            if not session.get("_turn_cancel_requested") and isinstance(marker_text, str) and marker_text.strip():
-                record_turn_start(marker_home, marker_key, marker_text, attempts=marker_attempt)
+        history = []
         try:
+            with session["history_lock"]:
+                if not session.get("_turn_cancel_requested") and isinstance(marker_text, str) and marker_text.strip():
+                    record_turn_start(marker_home, marker_key, marker_text, attempts=marker_attempt)
             from tools.approval import (
                 reset_current_session_key,
                 set_current_session_key,
@@ -11403,6 +11430,7 @@ def _run_prompt_submit(
             # Keep the partial turn available to the next prompt; the durable
             # inflight record still carries the recoverable error state.
             _restore_agent_history_after_turn_error(session, agent)
+            turn_error_retained = True
             try:
                 # Close the turn with the same terminal error frame shape as
                 # the returned-error path (uniform client handling), retaining

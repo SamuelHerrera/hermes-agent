@@ -3305,6 +3305,7 @@ def _(rid, params: dict) -> dict:
             with session["history_lock"]:
                 _record_inflight_correction(session, text)
                 session["last_active"] = time.time()
+            _broadcast_submitted_prompt(sid, text, params, "steered")
         return _ok(rid, {"status": "queued" if accepted else "rejected", "text": text})
 
 
@@ -3330,6 +3331,7 @@ def _(rid, params: dict) -> dict:
         if agent is None and session.get("running"):
             _enqueue_prompt(session, text, current_transport() or _stdio_transport)
             session["last_active"] = time.time()
+            _broadcast_submitted_prompt(sid, text, params, "queued")
             return _ok(rid, {"status": "queued", "text": text})
         if (
             agent is None
@@ -3345,6 +3347,7 @@ def _(rid, params: dict) -> dict:
             with session["history_lock"]:
                 _record_inflight_correction(session, text)
                 session["last_active"] = time.time()
+            _broadcast_submitted_prompt(sid, text, params, "redirected")
         return _ok(
             rid,
             {"status": "redirected" if accepted else "rejected", "text": text},
