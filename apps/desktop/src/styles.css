@@ -4,6 +4,15 @@
 @import 'katex/dist/katex.min.css';
 @import '@vscode/codicons/dist/codicon.css';
 
+/* Keep the mobile app at its layout scale while preserving one-finger
+   scrolling in both axes. Do not suppress touch events or native selection. */
+@layer base {
+  :where(html, body, #root, #root *) {
+    touch-action: pan-x pan-y;
+  }
+}
+
+
 /* Titlebar clusters: 24×24 hit targets, 13.9px glyphs. codicon.css is
    unlayered (`font: 16px/1`); Tailwind utilities in @layer lose that fight. */
 .titlebar-icon-button .codicon[class*='codicon-'] {
