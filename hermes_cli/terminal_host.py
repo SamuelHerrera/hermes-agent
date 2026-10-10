@@ -2,7 +2,82 @@
 import asyncio
 import json
 import os
+import logging
+import platform
+import subprocess
+import sys
 from pathlib import Path
+
+
+_log = logging.getLogger(__name__)
+
+
+def ensure_installed_terminal_host() -> bool:
+    """Recover an installed host without Electron or replacing a live host.
+
+    No downloads or dependency installs happen here. The immutable native bundle
+    owns stale endpoint/lock recovery through its existing `start` command, and
+    the independent host deliberately outlives this backend.
+    """
+    from hermes_constants import get_hermes_home
+    from hermes_cli.web_routers.capabilities import _closed_probe, _persistent_terminal_available
+
+    if _closed_probe(_persistent_terminal_available):
+        return True
+    root = get_hermes_home() / "terminal-host"
+    versions = root / "versions"
+    if not versions.is_dir():
+        return False
+    import time
+
+    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "AMD64": "x64"}.get(platform.machine())
+    if not arch:
+        return False
+    candidates = []
+    try:
+        for bundle in versions.iterdir():
+            try:
+                # installBundle publishes immutable directories by atomic rename.
+                # Never execute unfinished .install-* trees or external symlinks.
+                if bundle.name.startswith(".") or bundle.is_symlink() or not bundle.is_dir():
+                    continue
+                candidates.append((bundle.stat().st_mtime, bundle))
+            except OSError:
+                continue
+    except OSError:
+        return False
+    deadline = time.monotonic() + 15
+    attempts = 0
+    for _, bundle in sorted(candidates, reverse=True):
+        try:
+            manifest = json.loads((bundle / "manifest.json").read_text())
+            if not isinstance(manifest, dict) or manifest.get("platform") != sys.platform or manifest.get("arch") != arch:
+                continue
+            node = bundle / ("node.exe" if os.name == "nt" else "node")
+            cli = bundle / "package" / "src" / "cli.mjs"
+            if not node.is_file() or not cli.is_file():
+                continue
+            # The previous CLI may have published a live endpoint even if its
+            # process failed/timed out. A live authenticated host always wins.
+            if _closed_probe(_persistent_terminal_available):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or attempts >= 3:
+                break
+            attempts += 1
+            subprocess.run(
+                [str(node), str(cli), "start", "--dir", str(root / "runtime")],
+                timeout=remaining, check=True, capture_output=True,
+                env={key: value for key, value in os.environ.items() if key not in {
+                    "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "NODE_PATH", "HERMES_PARENT_PID",
+                }},
+            )
+            if _closed_probe(_persistent_terminal_available):
+                return True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            # Do not log CLI output: endpoint credentials must remain local.
+            _log.warning("Installed persistent terminal host could not start")
+    return _closed_probe(_persistent_terminal_available)
 
 import httpx
 from fastapi import WebSocket, WebSocketDisconnect

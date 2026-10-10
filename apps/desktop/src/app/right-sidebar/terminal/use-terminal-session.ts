@@ -32,6 +32,7 @@ import {
 import { prepareTerminalFontFamily } from './terminal-font'
 import { $terminals, closeTerminal, forgetTerminalHandle, rememberTerminalHost, terminalMetadataForSharing, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
 import { useTerminalFontController } from './use-terminal-font'
+import { watchTerminalWebglSizing } from './webgl-sizing'
 
 // How many scrollback lines to serialize for relaunch restore. Mirrors VS Code's
 // terminal.integrated.persistentSessionScrollback default; the store caps the
@@ -1117,6 +1118,12 @@ export function useTerminalSession({
           cleanup.push(() => webgl.dispose())
         } else { term.loadAddon(webgl) }
         webglRef.current = webgl
+        const sizing = watchTerminalWebglSizing(term, () => {
+          webgl.dispose()
+          webglRef.current = null
+          term.refresh(0, term.rows - 1)
+        })
+        cleanup.push(() => sizing.dispose())
       } catch (err) {
         console.warn('[hermes-terminal] WebGL unavailable; falling back to DOM', err)
       }

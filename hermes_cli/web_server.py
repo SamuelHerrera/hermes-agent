@@ -235,6 +235,17 @@ async def _lifespan(app: "FastAPI"):
     # Desktop's 10-second WebSocket ready-probe to time out (GH-73083).
     _warm_gateway_module()
 
+    # Browser-only serve/dashboard has no Electron process to start the
+    # independently installed host after a reboot. Recover it before clients
+    # cache /api/capabilities; never stop it when this backend exits.
+    from hermes_cli.terminal_host import ensure_installed_terminal_host
+    try:
+        await asyncio.to_thread(ensure_installed_terminal_host)
+    except Exception:
+        # Terminal support is optional. Never expose host credentials or make
+        # an unavailable installed bundle prevent chat/API startup.
+        _log.warning("Optional persistent terminal host recovery failed")
+
     # Desktop-spawned backends (HERMES_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `hermes
     # dashboard` is unaffected — it relies on its own gateway.
