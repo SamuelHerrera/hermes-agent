@@ -31,6 +31,7 @@ import {
 } from './selection'
 import { prepareTerminalFontFamily } from './terminal-font'
 import { $terminals, closeTerminal, forgetTerminalHandle, rememberTerminalHost, terminalMetadataForSharing, updateTerminalRestoreCwd, updateTerminalReviveBuffer } from './terminals'
+import { attachTerminalTouchScroll } from './touch-scroll'
 import { useTerminalFontController } from './use-terminal-font'
 import { watchTerminalWebglSizing } from './webgl-sizing'
 
@@ -562,6 +563,7 @@ export function useTerminalSession({
   useEffect(() => {
     const host = hostRef.current
     const terminalApi = resolveTerminalApi()
+
     if (terminalApi?.persistent && !runtime) { return }
 
     if (!host || !terminalApi) {
@@ -575,6 +577,7 @@ export function useTerminalSession({
     let lastSentSize: { cols: number; rows: number } | null = null
 
     const TerminalEngine = runtime || Terminal
+
     const term = new TerminalEngine({
       allowProposedApi: true,
       // ⌥-drag is our force-selection gesture (below), and xterm's default
@@ -620,6 +623,7 @@ export function useTerminalSession({
     const serialize = new SerializeAddon()
 
     termRef.current = term
+
     // Presentation-only addons do not extend the checkpoint parser profile.
     if (terminalApi.persistent) {
       fit.activate(term)
@@ -632,7 +636,9 @@ export function useTerminalSession({
       term.loadAddon(serialize)
       term.loadAddon(terminalWebLinksAddon())
     }
+
     if (!terminalApi.persistent) { term.loadAddon(new Unicode11Addon()) }
+
     if (!terminalApi.persistent) { term.unicode.activeVersion = '11' }
 
     // Replay last session's scrollback before the fresh shell boots. The process
@@ -997,11 +1003,15 @@ export function useTerminalSession({
             let liveSessionId = session.id
             let timer: ReturnType<typeof setTimeout> | undefined
             cleanup.push(() => clearTimeout(timer))
+
             const reconnect = async () => {
               if (disposed) { return }
+
               try {
                 const next = await terminalApi.start({ persistent: true, reference: session.reference, requestId: id, profile: ownerRef.current })
+
                 if (disposed) { void terminalApi.dispose(next.id); return }
+
                 if (!next.snapshot || !next.reference) { void terminalApi.dispose(next.id); throw new Error('HOST_LOST') }
                 const previous = liveSessionId
                 liveSessionId = next.id
@@ -1015,40 +1025,57 @@ export function useTerminalSession({
                 void poll()
               } catch (error) {
                 if (disposed) { return }
+
                 if (/HOST_LOST|NOT_FOUND|OWNER_MISMATCH|INVALID_CHECKPOINT|INCOMPATIBLE_XTERM/.test(String(error))) {
                   setStatus('closed')
+
                   return
                 }
+
                 timer = setTimeout(() => void reconnect(), 2000)
               }
             }
+
             const poll = async () => {
               if (disposed) { return }
+
               try {
                 const result = await terminalApi.read!(liveSessionId, sequence)
+
                 if (disposed) { return }
+
                 for (const event of result.events) {
                   if (event.seq <= sequence) { continue }
+
                   if (event.type === 'resize') { term.resize(event.cols!, event.rows!) }
                   else { await hostPlayback.writePlayback(event.data || '') }
+
                   sequence = event.seq
+
                   if (disposed) { return }
                 }
+
                 if (result.failure) { throw new Error(result.failure) }
+
                 if (result.exit) { setStatus('closed'); return }
+
                 timer = setTimeout(() => void poll(), 50)
               } catch (error) {
                 if (disposed) { return }
+
                 if (String(error).includes('GAP')) {
                   try {
                     const snapshot = await terminalApi.checkpoint!(liveSessionId)
+
                     if (disposed) { return }
                     hostPlayback.suppress(() => hydrateTerminalState(term, snapshot))
                     sequence = snapshot.seq
                     timer = setTimeout(() => void poll(), 50)
+
                     return
                   } catch { /* Keep the saved identity; never recreate the process. */ }
                 }
+
                 if (/HOST_LOST|NOT_FOUND|OWNER_MISMATCH|INVALID_CHECKPOINT|INCOMPATIBLE_XTERM/.test(String(error))) { setStatus('closed') }
                 else {
                   setStatus('starting')
@@ -1056,8 +1083,10 @@ export function useTerminalSession({
                 }
               }
             }
+
             fitAndResize(initialActiveRef.current)
             void poll()
+
             return
           }
 
@@ -1102,6 +1131,7 @@ export function useTerminalSession({
       }
 
       term.open(host)
+      cleanup.push(attachTerminalTouchScroll(term))
       mountedRef.current = true
       term.focus()
 
@@ -1110,17 +1140,21 @@ export function useTerminalSession({
       try {
         const webgl = new WebglAddon()
         let sizing: ReturnType<typeof watchTerminalWebglSizing> | undefined
+
         const fallback = () => {
           sizing?.dispose()
           webgl.dispose()
           webglRef.current = null
           term.refresh(0, term.rows - 1)
         }
+
         webgl.onContextLoss(fallback)
+
         if (terminalApi.persistent) {
           webgl.activate(term)
           cleanup.push(() => webgl.dispose())
         } else { term.loadAddon(webgl) }
+
         webglRef.current = webgl
         sizing = watchTerminalWebglSizing(term, fallback)
         cleanup.push(() => sizing?.dispose())

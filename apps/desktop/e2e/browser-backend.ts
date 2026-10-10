@@ -24,7 +24,7 @@ async function availablePort(): Promise<number> {
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : 0
 
-  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  await new Promise<void>((resolve, reject) => server.close(error => (error ? reject(error) : resolve())))
 
   return port
 }
@@ -55,7 +55,7 @@ async function waitForBackend(baseUrl: string, token: string, process: ChildProc
   throw new Error('Timed out waiting for isolated browser backend.')
 }
 
-export async function startBrowserBackend(): Promise<BrowserBackend> {
+export async function startBrowserBackend(options: { terminal?: boolean } = {}): Promise<BrowserBackend> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-browser-e2e-'))
   const hermesHome = path.join(root, 'hermes-home')
   const port = await availablePort()
@@ -63,6 +63,29 @@ export async function startBrowserBackend(): Promise<BrowserBackend> {
 
   fs.mkdirSync(hermesHome, { recursive: true })
   fs.writeFileSync(path.join(hermesHome, 'config.yaml'), '# isolated browser E2E\n', 'utf8')
+
+  const terminalHost = options.terminal
+    ? spawn(
+        process.execPath,
+        [
+          path.join(DESKTOP_ROOT, 'dist/terminal-host/package/src/cli.mjs'),
+          'serve',
+          '--dir',
+          path.join(hermesHome, 'terminal-host/runtime')
+        ],
+        { stdio: 'pipe' }
+      )
+    : undefined
+  if (terminalHost) {
+    const deadline = Date.now() + 10_000
+    while (!fs.existsSync(path.join(hermesHome, 'terminal-host/runtime/endpoint.json'))) {
+      if (terminalHost.exitCode !== null || Date.now() > deadline) {
+        terminalHost.kill('SIGTERM')
+        throw new Error('Isolated terminal host did not start')
+      }
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }
 
   const child = spawn(
     process.env.PYTHON ?? 'python',
@@ -87,6 +110,7 @@ export async function startBrowserBackend(): Promise<BrowserBackend> {
     await waitForBackend(baseUrl, token, child)
   } catch (error) {
     child.kill('SIGTERM')
+    terminalHost?.kill('SIGTERM')
     fs.rmSync(root, { recursive: true, force: true })
     throw error
   }
@@ -95,6 +119,7 @@ export async function startBrowserBackend(): Promise<BrowserBackend> {
     baseUrl,
     token,
     async cleanup() {
+      terminalHost?.kill('SIGTERM')
       if (child.exitCode === null) {
         child.kill('SIGTERM')
         await Promise.race([

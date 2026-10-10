@@ -16,6 +16,7 @@ import { mirrorSelection, terminalClipboardIntent } from './clipboard'
 import { terminalLinkHandler, terminalWebLinksAddon } from './links'
 import { isMacPlatform, resolveSurfaceColor, terminalTheme } from './selection'
 import { prepareTerminalFontFamily } from './terminal-font'
+import { attachTerminalTouchScroll } from './touch-scroll'
 import { useTerminalFontController } from './use-terminal-font'
 
 // Read-only terminal for an agent background process: a write-only xterm (no PTY,
@@ -54,6 +55,8 @@ export function useAgentTerminal({ active, id, procId }: { active: boolean; id: 
     let unregister = () => {}
 
     let unregisterReader = () => {}
+
+    let detachTouchScroll = () => {}
 
     const term = new Terminal({
       allowProposedApi: true,
@@ -120,6 +123,7 @@ export function useAgentTerminal({ active, id, procId }: { active: boolean; id: 
       }
 
       term.open(host)
+      detachTouchScroll = attachTerminalTouchScroll(term)
       termRef.current = term
       mountedRef.current = true
 
@@ -160,6 +164,7 @@ export function useAgentTerminal({ active, id, procId }: { active: boolean; id: 
       mountedRef.current = false
       unregister()
       unregisterReader()
+      detachTouchScroll()
       selectionDisposable.dispose()
       fitRef.current = null
       term.dispose()

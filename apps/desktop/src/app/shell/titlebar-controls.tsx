@@ -80,6 +80,7 @@ import {
 import type { SidebarNavContribution } from '../routes'
 
 import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
+import { ReorderableToolbar } from './reorderable-toolbar'
 import type { StatusbarItem } from './statusbar-controls'
 import {
   TITLEBAR_ICON_BADGE_SCALE,
@@ -753,31 +754,50 @@ export function TitlebarControls({
             top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
           }}
         >
-          <TitlebarOverflowMenu
-            navigate={navigate}
-            statusbarItems={overflowMenuStatusbarItems}
-            tools={overflowOptionalToolbarTools}
+          <ReorderableToolbar
+            entries={[
+              {
+                id: 'app-menu',
+                node: (
+                  <TitlebarOverflowMenu
+                    navigate={navigate}
+                    statusbarItems={overflowMenuStatusbarItems}
+                    tools={overflowOptionalToolbarTools}
+                  />
+                )
+              },
+              {
+                id: 'sidebar',
+                node: (
+                  <span data-titlebar-sidebar-toggle>
+                    <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
+                  </span>
+                )
+              },
+              { id: 'profiles', node: <TitlebarProfileMenu /> },
+              { id: 'notifications', node: <QuestionNotificationsControl /> },
+              ...leftTools
+                .filter(tool => !tool.hidden)
+                .map(tool => ({ id: tool.id, node: <TitlebarToolButton navigate={navigate} tool={tool} /> })),
+              { id: 'codex-usage', node: <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} /> },
+              ...[...pinnedSystemTools, ...pinnedWorkspacePageTools].map(tool => ({
+                id: tool.id,
+                node: <TitlebarToolButton navigate={navigate} tool={tool} />
+              })),
+              ...(terminalStatusbarItem
+                ? [
+                    {
+                      id: 'terminal',
+                      node: <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />
+                    }
+                  ]
+                : []),
+              { id: newBrowserTool.id, node: <TitlebarToolButton navigate={navigate} tool={newBrowserTool} /> },
+              ...(newChatTool
+                ? [{ id: newChatTool.id, node: <TitlebarToolButton navigate={navigate} tool={newChatTool} /> }]
+                : [])
+            ]}
           />
-          <span data-titlebar-sidebar-toggle>
-            <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
-          </span>
-          <TitlebarProfileMenu />
-          <QuestionNotificationsControl />
-          {leftTools
-            .filter(tool => !tool.hidden)
-            .map(tool => (
-              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-            ))}
-          <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-          {pinnedSystemTools.map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-          ))}
-          {pinnedWorkspacePageTools.map(tool => (
-            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-          ))}
-          {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
-          <TitlebarToolButton navigate={navigate} tool={newBrowserTool} />
-          {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
         </div>
       )}
     </>

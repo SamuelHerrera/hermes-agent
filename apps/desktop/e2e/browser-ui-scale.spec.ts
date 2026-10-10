@@ -100,12 +100,14 @@ for (const device of [
             return Math.max(...centers) - Math.min(...centers)
           })
         ).toBeLessThan(2)
-        expect(await header.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
-        await header.evaluate(element => {
+        const fixedBefore = await page.locator('.app-header-right').boundingBox()
+        expect(await appControls.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+        await appControls.evaluate(element => {
           element.scrollLeft = element.scrollWidth
         })
+        expect(await page.locator('.app-header-right').boundingBox()).toEqual(fixedBefore)
         await expect(page.locator('.app-header-right').getByRole('button').last()).toBeInViewport()
-        await header.evaluate(element => {
+        await appControls.evaluate(element => {
           element.scrollLeft = 0
         })
       }

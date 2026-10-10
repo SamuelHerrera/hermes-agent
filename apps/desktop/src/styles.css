@@ -83,7 +83,7 @@
   }
 }
 
-/* App and workspace controls share ONE swipeable row on narrow screens. */
+/* Only app actions scroll; workspace buttons remain pinned in the same row. */
 @media (max-width: 767px) {
   .app-header-controls {
     display: flex;
@@ -91,15 +91,19 @@
     align-items: center;
     width: 100%;
     height: 100%;
-    overflow-x: auto;
-    padding-left: var(--titlebar-controls-left, 14px);
+    overflow: hidden;
     padding-right: 14px;
     scrollbar-width: none;
   }
 
   [data-app-toolbar] {
     position: static;
-    flex-shrink: 0;
+    min-width: 0;
+    flex: 1;
+    height: 100%;
+    overflow-x: auto;
+    padding-left: var(--titlebar-controls-left, 14px);
+    scrollbar-width: none;
     order: 0;
   }
 

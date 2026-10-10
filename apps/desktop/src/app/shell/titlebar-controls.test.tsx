@@ -365,7 +365,7 @@ describe('TitlebarControls', () => {
       'New browser tab',
       'New session'
     ])
-    expect(appControls.children[0]).toBe(more)
+    expect(appControls.querySelector('button')).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Profiles' }).querySelector('.codicon-chevron-down')).toBeNull()
 
