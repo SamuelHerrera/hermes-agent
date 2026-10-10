@@ -242,13 +242,17 @@ function TitlebarProfileTriggerGlyph({
   showAllProfiles: boolean
 }) {
   if (showAllProfiles) {
-    return <Codicon aria-hidden="true" className="text-(--ui-text-tertiary)" name="layers" size="0.875rem" />
+    return <TitlebarIcon className="text-(--ui-text-tertiary)" name="layers" />
+  }
+
+  if (activeProfile?.is_default ?? activeKey === 'default') {
+    return <TitlebarIcon className="text-(--ui-text-quaternary)" name="home" />
   }
 
   return (
     <ProfileGlyph
       aria-hidden="true"
-      className="size-3.5"
+      className="size-(--titlebar-icon-size) text-[calc(var(--titlebar-icon-size)*0.57)]"
       color={activeColor}
       isDefault={activeProfile?.is_default ?? activeKey === 'default'}
       name={activeName}
@@ -618,17 +622,19 @@ export function TitlebarControls({
       title: t.titlebar.layoutEditorTitle
     },
     ...(hostSupports('nativeWindows')
-      ? [{
-          // No `title`: keep the short label beside the keybind hint.
-          actionId: 'view.toggleHud',
-          icon: <TitlebarIcon name="comment-discussion" />,
-          id: 'hud',
-          label: t.titlebar.enterHud,
-          onSelect: () => {
-            triggerHaptic('open')
-            toggleHud(hudTargetSessionId())
+      ? [
+          {
+            // No `title`: keep the short label beside the keybind hint.
+            actionId: 'view.toggleHud',
+            icon: <TitlebarIcon name="comment-discussion" />,
+            id: 'hud',
+            label: t.titlebar.enterHud,
+            onSelect: () => {
+              triggerHaptic('open')
+              toggleHud(hudTargetSessionId())
+            }
           }
-        }]
+        ]
       : []),
     {
       active: hapticsMuted,
@@ -733,20 +739,21 @@ export function TitlebarControls({
       <div
         aria-label={t.shell.appControls}
         className={titlebarToolClusterClass}
+        data-app-toolbar
         ref={toolbarRef}
         style={{
           left: 'var(--titlebar-controls-left, 14px)',
           top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
         }}
       >
-        <span data-titlebar-sidebar-toggle>
-          <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
-        </span>
         <TitlebarOverflowMenu
           navigate={navigate}
           statusbarItems={overflowMenuStatusbarItems}
           tools={overflowOptionalToolbarTools}
         />
+        <span data-titlebar-sidebar-toggle>
+          <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
+        </span>
         <TitlebarProfileMenu />
         <QuestionNotificationsControl />
         {leftTools
@@ -836,18 +843,18 @@ function TitlebarOverflowMenu({
           </Button>
         </DropdownMenuTrigger>
       </Tip>
-      <DropdownMenuContent align="end" className="w-64">
-        {isUiScaleAvailable() ? <TitlebarUiScale /> : null}
-        {utilityTools.length > 0 ? (
+      <DropdownMenuContent align="start" className="w-max max-w-[calc(100vw-1rem)]">
+        {utilityTools.length > 0 || isUiScaleAvailable() ? (
           <>
             <div
               aria-label="More controls"
-              className="mx-0.5 mb-1 flex flex-wrap items-center gap-1 rounded-md bg-(--ui-bg-muted)/45 p-1"
+              className="app-actions-toolbar mx-0.5 mb-1 flex items-center gap-1 overflow-x-auto rounded-md bg-(--ui-bg-muted)/45 p-1"
               role="toolbar"
             >
               {utilityTools.map(tool => (
                 <TitlebarOverflowToolbarToolButton key={tool.id} navigate={navigate} onClose={close} tool={tool} />
               ))}
+              {isUiScaleAvailable() ? <TitlebarUiScale /> : null}
             </div>
             {hasMenuRows ? <DropdownMenuSeparator /> : null}
           </>
@@ -903,31 +910,23 @@ function TitlebarUiScale() {
   }
 
   return (
-    <>
-      <div aria-label={a.uiScaleTitle} className="flex items-center gap-1 px-2 py-1" role="group">
-        <span className="mr-auto text-sm">{a.uiScaleTitle}</span>
-        <DropdownMenuItem
-          asChild
-          disabled={smaller === undefined}
-          onSelect={event => change(event, smaller ?? percent)}
-        >
-          <Button aria-label={a.uiScaleDecrease} size="icon-sm" variant="ghost">
-            −
-          </Button>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild onSelect={event => change(event, 90)}>
-          <Button aria-label={a.uiScaleReset} size="sm" variant="ghost">
-            <span className="min-w-10 text-center tabular-nums">{percent}%</span>
-          </Button>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild disabled={larger === undefined} onSelect={event => change(event, larger ?? percent)}>
-          <Button aria-label={a.uiScaleIncrease} size="icon-sm" variant="ghost">
-            +
-          </Button>
-        </DropdownMenuItem>
-      </div>
-      <DropdownMenuSeparator />
-    </>
+    <div aria-label={a.uiScaleTitle} className="ui-scale-controls flex shrink-0 items-center" role="group">
+      <DropdownMenuItem asChild disabled={smaller === undefined} onSelect={event => change(event, smaller ?? percent)}>
+        <Button aria-label={a.uiScaleDecrease} size="icon-titlebar" variant="ghost">
+          −
+        </Button>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild onSelect={event => change(event, 90)}>
+        <Button aria-label={a.uiScaleReset} className="px-1" size="sm" variant="ghost">
+          <span className="min-w-10 text-center tabular-nums">{percent}%</span>
+        </Button>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild disabled={larger === undefined} onSelect={event => change(event, larger ?? percent)}>
+        <Button aria-label={a.uiScaleIncrease} size="icon-titlebar" variant="ghost">
+          +
+        </Button>
+      </DropdownMenuItem>
+    </div>
   )
 }
 
@@ -1006,7 +1005,7 @@ function TitlebarOverflowToolbarToolButton({
       aria-label={tool.label}
       aria-pressed={tool.active ?? undefined}
       className={cn(
-        'size-7 bg-transparent p-0 text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-foreground',
+        'bg-transparent text-(--ui-text-tertiary) hover:bg-(--ui-control-hover-background) hover:text-foreground',
         tool.className
       )}
       disabled={tool.disabled}
@@ -1019,6 +1018,7 @@ function TitlebarOverflowToolbarToolButton({
         onClose()
       }}
       onPointerDown={event => event.stopPropagation()}
+      size="icon-titlebar"
       title={String(tool.title ?? tool.label)}
       type="button"
       variant="ghost"

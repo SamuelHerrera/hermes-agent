@@ -19,6 +19,57 @@
   font-size: var(--titlebar-icon-size);
 }
 
+.app-actions-toolbar {
+  --titlebar-control-size: var(--app-menu-control-size, 28px);
+  --titlebar-control-height: var(--app-menu-control-size, 28px);
+}
+
+.ui-scale-controls button {
+  min-height: var(--titlebar-control-height);
+}
+
+/* Explicit SVG sizes follow the same responsive glyph token as Codicons. */
+@media (max-width: 767px), (any-pointer: coarse) {
+  :root {
+    --titlebar-control-size: 32px;
+    --titlebar-control-height: 32px;
+    --titlebar-icon-size: 20px;
+    --app-menu-control-size: 32px;
+    --app-header-height: 42px;
+  }
+
+  .titlebar-icon-button svg {
+    width: var(--titlebar-icon-size);
+    height: var(--titlebar-icon-size);
+  }
+
+  .ui-scale-controls button {
+    font-size: 16px;
+  }
+
+  .app-actions-toolbar {
+    gap: 0;
+  }
+}
+
+/* Narrow screens separate workspace controls from the larger app buttons.
+   Preserve a single, swipeable app row rather than overlapping the clusters. */
+@media (max-width: 767px) {
+  :root {
+    --app-header-height: 84px;
+  }
+
+  [data-app-toolbar] {
+    max-width: calc(100% - var(--titlebar-controls-left, 14px) - 14px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-header-right {
+    top: calc(100% - 21px);
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 /* Blanket reduced-motion override: kill ALL CSS animations and transitions

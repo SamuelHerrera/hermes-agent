@@ -31,7 +31,8 @@ test('compact app controls stay in the header and extra actions stay in the menu
 
   await expect(createNew).toBeVisible()
   const baseline = await inlineNames()
-  expect(baseline.slice(-3)).toEqual(['New project', 'New terminal', 'New session'])
+  expect(baseline.slice(0, 2)).toEqual(['More app actions', 'Hide sidebar'])
+  expect(baseline.slice(-4)).toEqual(['New project', 'New terminal', 'New browser tab', 'New session'])
   const rect = await toolbar.boundingBox()
   expect(rect).not.toBeNull()
   expect(rect!.y).toBeLessThan(20)

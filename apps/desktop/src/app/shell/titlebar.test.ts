@@ -19,7 +19,8 @@ describe('titlebar sizing', () => {
   it('uses 24×24 hit targets and 13.9px glyphs', () => {
     expect(TITLEBAR_CONTROL_SIZE).toBe(24)
     expect(TITLEBAR_ICON_SIZE).toBe(13.9)
-    expect(titlebarIconSizeCss()).toBe('13.9px')
+    expect(titlebarIconSizeCss()).toBe('var(--titlebar-icon-size)')
+    expect(titlebarIconSizeCss(0.65)).toBe('calc(var(--titlebar-icon-size) * 0.65)')
   })
 
   it('reserves width from abutting hit targets only', () => {

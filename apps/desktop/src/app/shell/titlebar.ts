@@ -13,7 +13,7 @@ export const TITLEBAR_CONTROLS_TOP = (TITLEBAR_HEIGHT - TITLEBAR_CONTROL_HEIGHT)
 
 /** Inline font-size for titlebar Codicons — beats unlayered codicon.css `font: 16px`. */
 export function titlebarIconSizeCss(scale = 1): string {
-  return `${TITLEBAR_ICON_SIZE * scale}px`
+  return scale === 1 ? 'var(--titlebar-icon-size)' : `calc(var(--titlebar-icon-size) * ${scale})`
 }
 
 export const TITLEBAR_FALLBACK_WINDOW_BUTTON_X = 24

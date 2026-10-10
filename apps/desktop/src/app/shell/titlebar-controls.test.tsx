@@ -355,8 +355,8 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
-      'Hide sidebar',
       'More app actions',
+      'Hide sidebar',
       'Profiles',
       'Notifications',
       'Codex usage unavailable',
@@ -365,7 +365,7 @@ describe('TitlebarControls', () => {
       'New browser tab',
       'New session'
     ])
-    expect(appControls.children[1]).toBe(more)
+    expect(appControls.children[0]).toBe(more)
     expect(more.querySelector('svg')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Profiles' }).querySelector('.codicon-chevron-down')).toBeNull()
 
@@ -437,8 +437,8 @@ describe('TitlebarControls', () => {
       .map(button => button.getAttribute('aria-label'))
 
     expect(buttonNames).toEqual([
-      'Hide sidebar',
       'More app actions',
+      'Hide sidebar',
       'Profiles',
       'Notifications',
       'Codex usage unavailable',

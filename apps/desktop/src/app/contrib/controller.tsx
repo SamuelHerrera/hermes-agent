@@ -444,7 +444,11 @@ registry.registerMany([
 // tree, never as a tab stacked into the files sidebar.
 const DEFAULT_TREE = split(
   'row',
-  [group(['sessions'], { id: 'grp-sessions' }), group(['workspace'], { id: 'grp-main' }), group(['files'], { id: 'grp-files' })],
+  [
+    group(['sessions'], { id: 'grp-sessions' }),
+    group(['workspace'], { id: 'grp-main' }),
+    group(['files'], { id: 'grp-files' })
+  ],
   [1, 3.4, 1],
   'spl-root'
 )
@@ -808,7 +812,7 @@ export function ContribController() {
                   tree-published --workspace-left/right vars (pure CSS, no rect
                   threading), clamped to clear the REAL TitlebarControls
                   clusters (fixed, z-70); center is truly window-centered. */}
-            <div className="relative flex h-[34px] shrink-0 items-center bg-(--ui-sidebar-surface-background) text-xs">
+            <div className="relative flex h-(--app-header-height,34px) shrink-0 items-center bg-(--ui-sidebar-surface-background) text-xs">
               {/* Drag strips, AppShell-style: cut to AVOID the fixed control
                 clusters instead of overlapping them — Electron's no-drag
                 carve-out of fixed/transformed elements is unreliable, so a
@@ -836,7 +840,7 @@ export function ContribController() {
               />
               <TitlebarSlot
                 area="titleBar.right"
-                className="pointer-events-auto absolute top-1/2 z-10 flex w-max -translate-y-1/2 items-center gap-0 [-webkit-app-region:no-drag]"
+                className="app-header-right pointer-events-auto absolute top-1/2 z-10 flex w-max -translate-y-1/2 items-center gap-0 [-webkit-app-region:no-drag]"
                 style={{
                   right: 'var(--titlebar-tools-right, 0.75rem)'
                 }}

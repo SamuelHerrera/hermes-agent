@@ -16,6 +16,10 @@ test('header UI scale adjusts live, stays open and persists after reload', async
   const { page, app } = fixture
   await page.getByRole('button', { name: 'More app actions', exact: true }).click()
   const scale = page.getByRole('group', { name: 'UI Scale', exact: true })
+  await expect(
+    page.getByRole('toolbar', { name: 'More controls' }).getByRole('group', { name: 'UI Scale' })
+  ).toBeVisible()
+  await expect(scale).not.toContainText('UI Scale')
   const reset = scale.getByRole('menuitem', { name: 'Reset UI scale to 90%' })
   await expect(reset).toHaveText('100%')
   await scale.getByRole('menuitem', { name: 'Increase UI scale' }).click()
