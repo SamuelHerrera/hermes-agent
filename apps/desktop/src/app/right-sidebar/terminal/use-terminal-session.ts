@@ -1109,21 +1109,21 @@ export function useTerminalSession({
       // renderer paints SGR via CSS classes that visibly mute against our skins.
       try {
         const webgl = new WebglAddon()
-        webgl.onContextLoss(() => {
+        let sizing: ReturnType<typeof watchTerminalWebglSizing> | undefined
+        const fallback = () => {
+          sizing?.dispose()
           webgl.dispose()
           webglRef.current = null
-        })
+          term.refresh(0, term.rows - 1)
+        }
+        webgl.onContextLoss(fallback)
         if (terminalApi.persistent) {
           webgl.activate(term)
           cleanup.push(() => webgl.dispose())
         } else { term.loadAddon(webgl) }
         webglRef.current = webgl
-        const sizing = watchTerminalWebglSizing(term, () => {
-          webgl.dispose()
-          webglRef.current = null
-          term.refresh(0, term.rows - 1)
-        })
-        cleanup.push(() => sizing.dispose())
+        sizing = watchTerminalWebglSizing(term, fallback)
+        cleanup.push(() => sizing?.dispose())
       } catch (err) {
         console.warn('[hermes-terminal] WebGL unavailable; falling back to DOM', err)
       }
