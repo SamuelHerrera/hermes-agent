@@ -71,6 +71,7 @@ test('browser scale is usable, fills the viewport and survives reload on desktop
 for (const device of [
   { name: 'desktop', width: 1280, touch: false, enlarged: false },
   { name: 'mobile', width: 390, touch: true, enlarged: true },
+  { name: 'Titan2', width: 574, touch: true, enlarged: true },
   { name: 'touch laptop', width: 1280, touch: true, enlarged: true }
 ]) {
   test.describe(device.name, () => {
@@ -86,15 +87,40 @@ for (const device of [
       await expect(buttons.nth(0)).toHaveAttribute('aria-label', 'More app actions')
       await expect(buttons.nth(1)).toHaveAttribute('aria-label', /sidebar/i)
       const more = buttons.nth(0)
-      expect((await more.boundingBox())!.width).toBe(device.enlarged ? 32 : 24)
+      expect((await more.boundingBox())!.width).toBe(device.enlarged ? 44 : 24)
       expect((await more.locator('svg').boundingBox())!.width).toBeCloseTo(device.enlarged ? 20 : 14)
       if (device.width < 768) {
-        const app = (await appControls.boundingBox())!
-        const workspace = (await page.locator('.app-header-right').boundingBox())!
-        expect(workspace.y).toBeGreaterThanOrEqual(app.y + app.height)
+        const header = page.locator('.app-header-controls')
+        expect(
+          await header.evaluate(element => {
+            const centers = [...element.querySelectorAll('button')].map(button => {
+              const bounds = button.getBoundingClientRect()
+              return bounds.y + bounds.height / 2
+            })
+            return Math.max(...centers) - Math.min(...centers)
+          })
+        ).toBeLessThan(2)
+        expect(await header.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true)
+        await header.evaluate(element => {
+          element.scrollLeft = element.scrollWidth
+        })
+        await expect(page.locator('.app-header-right').getByRole('button').last()).toBeInViewport()
+        await header.evaluate(element => {
+          element.scrollLeft = 0
+        })
       }
       await more.click()
       const toolbar = page.getByRole('toolbar', { name: 'More controls' })
+      if (device.enlarged) {
+        expect(
+          (await page.getByRole('menuitem', { name: 'Settings', exact: true }).boundingBox())!.height
+        ).toBeGreaterThanOrEqual(44)
+        expect(
+          await page
+            .getByRole('menuitem', { name: 'Settings', exact: true })
+            .evaluate(element => getComputedStyle(element).fontSize)
+        ).toBe('16px')
+      }
       const scale = toolbar.getByRole('group', { name: 'UI Scale', exact: true })
       await expect(scale).toBeVisible()
       await expect(scale).not.toContainText('UI Scale')

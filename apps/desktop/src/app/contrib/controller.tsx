@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import { atom, computed } from 'nanostores'
 import type { CSSProperties, ReactElement, PointerEvent as ReactPointerEvent } from 'react'
+import { useState } from 'react'
 
 import { SessionDraftTitle } from '@/app/chat/session-draft-title'
 import { PALETTE_AREA, type PaletteContribution, paletteToggle } from '@/app/command-palette/contrib'
@@ -774,6 +775,7 @@ function TitlebarSlot({ area, className, style }: TitlebarSlotProps) {
 }
 
 export function ContribController() {
+  const [headerToolbarContainer, setHeaderToolbarContainer] = useState<HTMLDivElement | null>(null)
   const sidebarOpen = useStore($sidebarOpen)
 
   // HUD mode is the SAME app with its frame removed: the wiring (gateway,
@@ -795,7 +797,7 @@ export function ContribController() {
       open={sidebarOpen}
       style={{ '--sidebar-width': '100%' } as CSSProperties}
     >
-      <ContribWiring>
+      <ContribWiring headerToolbarContainer={headerToolbarContainer}>
         <ShellContextMenu>
           <div
             className="flex h-full min-h-0 w-full flex-col bg-(--ui-bg-chrome) text-(--ui-text-primary)"
@@ -838,13 +840,15 @@ export function ContribController() {
                 area="titleBar.center"
                 className="pointer-events-auto absolute left-1/2 top-1/2 z-10 flex w-max -translate-x-1/2 -translate-y-1/2 items-center gap-2 [-webkit-app-region:no-drag]"
               />
-              <TitlebarSlot
-                area="titleBar.right"
-                className="app-header-right pointer-events-auto absolute top-1/2 z-10 flex w-max -translate-y-1/2 items-center gap-0 [-webkit-app-region:no-drag]"
-                style={{
-                  right: 'var(--titlebar-tools-right, 0.75rem)'
-                }}
-              />
+              <div className="app-header-controls contents" ref={setHeaderToolbarContainer}>
+                <TitlebarSlot
+                  area="titleBar.right"
+                  className="app-header-right pointer-events-auto absolute top-1/2 z-10 flex w-max items-center gap-0 [-webkit-app-region:no-drag]"
+                  style={{
+                    right: 'var(--titlebar-tools-right, 0.75rem)'
+                  }}
+                />
+              </div>
             </div>
 
             <LayoutTreeRoot />

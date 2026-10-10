@@ -28,14 +28,18 @@
   min-height: var(--titlebar-control-height);
 }
 
+.app-header-right {
+  transform: translateY(-50%);
+}
+
 /* Explicit SVG sizes follow the same responsive glyph token as Codicons. */
 @media (max-width: 767px), (any-pointer: coarse) {
   :root {
-    --titlebar-control-size: 32px;
-    --titlebar-control-height: 32px;
+    --titlebar-control-size: 44px;
+    --titlebar-control-height: 44px;
     --titlebar-icon-size: 20px;
-    --app-menu-control-size: 32px;
-    --app-header-height: 42px;
+    --app-menu-control-size: 44px;
+    --app-header-height: 54px;
   }
 
   .titlebar-icon-button svg {
@@ -50,23 +54,61 @@
   .app-actions-toolbar {
     gap: 0;
   }
-}
 
-/* Narrow screens separate workspace controls from the larger app buttons.
-   Preserve a single, swipeable app row rather than overlapping the clusters. */
-@media (max-width: 767px) {
-  :root {
-    --app-header-height: 84px;
+  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [data-slot='select-item']) {
+    min-height: 44px;
+    padding-block: 10px;
+    padding-inline: 12px;
+    font-size: 16px;
+    line-height: 22px;
   }
 
-  [data-app-toolbar] {
-    max-width: calc(100% - var(--titlebar-controls-left, 14px) - 14px);
+  /* The inline icon toolbar keeps square targets rather than menu-row padding. */
+  .app-actions-toolbar [role='menuitem'] {
+    padding: 0;
+  }
+
+  :is([role='menu'], [role='listbox']) {
+    max-width: calc(100vw - 16px);
+  }
+
+  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [data-slot='select-item']) svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Menu Codicons also have inline legacy sizes; keep their touch glyphs legible. */
+  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [data-slot='select-item']) .codicon {
+    font-size: 20px !important;
+  }
+}
+
+/* App and workspace controls share ONE swipeable row on narrow screens. */
+@media (max-width: 767px) {
+  .app-header-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    width: 100%;
+    height: 100%;
     overflow-x: auto;
+    padding-left: var(--titlebar-controls-left, 14px);
+    padding-right: 14px;
     scrollbar-width: none;
   }
 
+  [data-app-toolbar] {
+    position: static;
+    flex-shrink: 0;
+    order: 0;
+  }
+
   .app-header-right {
-    top: calc(100% - 21px);
+    position: static;
+    flex-shrink: 0;
+    order: 1;
+    margin-left: auto;
+    transform: none;
   }
 }
 

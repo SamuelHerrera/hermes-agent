@@ -10,7 +10,17 @@
 
 import { useStore } from '@nanostores/react'
 import { useQueryClient } from '@tanstack/react-query'
-import { type CSSProperties, lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import { ProjectDialog } from '@/app/chat/sidebar/project-dialog'
@@ -158,7 +168,13 @@ const StarmapView = lazy(async () => ({ default: (await import('../starmap')).St
 // the controller that assembles them.
 export { WiredPane } from './context'
 
-export function ContribWiring({ children }: { children: ReactNode }) {
+export function ContribWiring({
+  children,
+  headerToolbarContainer
+}: {
+  children: ReactNode
+  headerToolbarContainer?: HTMLDivElement | null
+}) {
   const queryClient = useQueryClient()
   const location = useLocation()
   const navigate = useNavigate()
@@ -1040,7 +1056,16 @@ export function ContribWiring({ children }: { children: ReactNode }) {
       statusbar: statusbarNode,
       terminal: terminalNode
     }),
-    [chatRoutesNode, sidebarNode, statusbarNode, terminalNode, refreshHermesConfig, refreshCurrentModel, applySavedMainModel, queryClient]
+    [
+      chatRoutesNode,
+      sidebarNode,
+      statusbarNode,
+      terminalNode,
+      refreshHermesConfig,
+      refreshCurrentModel,
+      applySavedMainModel,
+      queryClient
+    ]
   )
 
   // The REAL titlebar tool clusters (sidebar/flip toggles, haptics, keybinds,
@@ -1092,6 +1117,7 @@ export function ContribWiring({ children }: { children: ReactNode }) {
             buttons. Exits are the ⌘⇧H toggle and ⌘W. */}
         {!isHudWindow() && (
           <TitlebarControls
+            appToolbarContainer={headerToolbarContainer}
             codexUsage={codexUsage.usage}
             codexUsageState={codexUsage.state}
             leftTools={leftTitlebarTools}

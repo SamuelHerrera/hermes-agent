@@ -8,6 +8,7 @@ import {
   useRef,
   useState
 } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
 
 import { hudTargetSessionId } from '@/app/hud/handoff'
@@ -152,6 +153,7 @@ export type TitlebarToolSide = 'left' | 'right'
 export type SetTitlebarToolGroup = (id: string, tools: readonly TitlebarTool[], side?: TitlebarToolSide) => void
 
 interface TitlebarControlsProps extends ComponentProps<'div'> {
+  appToolbarContainer?: HTMLDivElement | null
   codexUsage?: CodexUsageData | null
   codexUsageState?: CodexUsageControlState
   leftTools?: readonly TitlebarTool[]
@@ -365,6 +367,7 @@ function TitlebarProfileMenu() {
 }
 
 export function TitlebarControls({
+  appToolbarContainer,
   codexUsage,
   codexUsageState = 'unavailable',
   leftTools = [],
@@ -405,7 +408,7 @@ export function TitlebarControls({
     observer.observe(element)
 
     return () => observer.disconnect()
-  }, [onWidthChange, overlayOpen])
+  }, [appToolbarContainer, onWidthChange, overlayOpen])
 
   const connection = useStore($connection)
   const [serviceBusy, setServiceBusy] = useState<null | 'backend' | 'gateway'>(null)
@@ -712,6 +715,9 @@ export function TitlebarControls({
     item => item.id !== PROJECT_WORKSPACE_STATUSBAR_ID && item.id !== GATEWAY_STATUSBAR_ID
   )
 
+  const renderAppToolbar = (toolbar: ReactNode) =>
+    appToolbarContainer ? createPortal(toolbar, appToolbarContainer) : toolbar
+
   return (
     <>
       {/*
@@ -736,42 +742,44 @@ export function TitlebarControls({
         </div>
       )}
 
-      <div
-        aria-label={t.shell.appControls}
-        className={titlebarToolClusterClass}
-        data-app-toolbar
-        ref={toolbarRef}
-        style={{
-          left: 'var(--titlebar-controls-left, 14px)',
-          top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
-        }}
-      >
-        <TitlebarOverflowMenu
-          navigate={navigate}
-          statusbarItems={overflowMenuStatusbarItems}
-          tools={overflowOptionalToolbarTools}
-        />
-        <span data-titlebar-sidebar-toggle>
-          <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
-        </span>
-        <TitlebarProfileMenu />
-        <QuestionNotificationsControl />
-        {leftTools
-          .filter(tool => !tool.hidden)
-          .map(tool => (
+      {renderAppToolbar(
+        <div
+          aria-label={t.shell.appControls}
+          className={titlebarToolClusterClass}
+          data-app-toolbar
+          ref={toolbarRef}
+          style={{
+            left: 'var(--titlebar-controls-left, 14px)',
+            top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
+          }}
+        >
+          <TitlebarOverflowMenu
+            navigate={navigate}
+            statusbarItems={overflowMenuStatusbarItems}
+            tools={overflowOptionalToolbarTools}
+          />
+          <span data-titlebar-sidebar-toggle>
+            <TitlebarToolButton navigate={navigate} tool={sidebarTool} />
+          </span>
+          <TitlebarProfileMenu />
+          <QuestionNotificationsControl />
+          {leftTools
+            .filter(tool => !tool.hidden)
+            .map(tool => (
+              <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+            ))}
+          <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
+          {pinnedSystemTools.map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
-        <CodexUsageTitlebarControl state={codexUsageState} usage={codexUsage} />
-        {pinnedSystemTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
-        {pinnedWorkspacePageTools.map(tool => (
-          <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
-        ))}
-        {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
-        <TitlebarToolButton navigate={navigate} tool={newBrowserTool} />
-        {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
-      </div>
+          {pinnedWorkspacePageTools.map(tool => (
+            <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
+          ))}
+          {terminalStatusbarItem && <TitlebarStatusbarItemButton item={terminalStatusbarItem} navigate={navigate} />}
+          <TitlebarToolButton navigate={navigate} tool={newBrowserTool} />
+          {newChatTool && <TitlebarToolButton navigate={navigate} tool={newChatTool} />}
+        </div>
+      )}
     </>
   )
 }
