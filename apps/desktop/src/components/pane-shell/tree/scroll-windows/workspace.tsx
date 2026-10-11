@@ -37,6 +37,7 @@ import { paneChrome } from '../renderer/track-model'
 import {
   $hiddenTreePanes,
   $layoutTree,
+  $narrowViewport,
   $panesWithCloser,
   $treePaneEpochs,
   closeAllTreeTabs,
@@ -97,6 +98,7 @@ export function ScrollWindowWorkspace() {
   const panesWithCloser = useStore($panesWithCloser)
   const paneEpochs = useStore($treePaneEpochs)
   const fileBrowserOpen = useStore($fileBrowserOpen)
+  const narrow = useStore($narrowViewport)
   const sidebarOpen = useStore($sidebarOpen)
   const sidebarWidth = useStore($sidebarWidth)
   const workspaceEmpty = useStore($workspaceEmptyPlaceholder)
@@ -536,9 +538,20 @@ export function ScrollWindowWorkspace() {
       </div>
       {fileBrowserOpen && filesPane?.render ? (
         <aside
-          className="relative z-10 flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)"
+          className={cn(
+            'z-10 flex min-h-0 shrink-0 flex-col overflow-hidden border-l border-(--ui-stroke-tertiary) bg-(--ui-sidebar-surface-background)',
+            narrow ? 'absolute inset-y-0 right-0 shadow-2xl' : 'relative'
+          )}
           data-scroll-window-files=""
-          style={{ maxWidth: FILE_BROWSER_MAX_WIDTH, minWidth: FILE_BROWSER_MIN_WIDTH, width: FILE_BROWSER_DEFAULT_WIDTH }}
+          style={
+            narrow
+              ? { width: `min(${FILE_BROWSER_DEFAULT_WIDTH}, 85vw)` }
+              : {
+                  maxWidth: FILE_BROWSER_MAX_WIDTH,
+                  minWidth: FILE_BROWSER_MIN_WIDTH,
+                  width: FILE_BROWSER_DEFAULT_WIDTH
+                }
+          }
         >
           <PaneGroupContext.Provider value="scroll-files">
             <PaneVisibleContext.Provider value>

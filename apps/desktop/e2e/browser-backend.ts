@@ -11,6 +11,7 @@ const BROWSER_DIST = path.join(REPO_ROOT, 'hermes_cli', 'desktop_web_dist')
 export interface BrowserBackend {
   baseUrl: string
   token: string
+  workspacePath?: string
   cleanup(): Promise<void>
 }
 
@@ -55,7 +56,9 @@ async function waitForBackend(baseUrl: string, token: string, process: ChildProc
   throw new Error('Timed out waiting for isolated browser backend.')
 }
 
-export async function startBrowserBackend(options: { terminal?: boolean } = {}): Promise<BrowserBackend> {
+export async function startBrowserBackend(
+  options: { terminal?: boolean; workspace?: boolean } = {}
+): Promise<BrowserBackend> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-browser-e2e-'))
   const hermesHome = path.join(root, 'hermes-home')
   const port = await availablePort()
@@ -63,6 +66,13 @@ export async function startBrowserBackend(options: { terminal?: boolean } = {}):
 
   fs.mkdirSync(hermesHome, { recursive: true })
   fs.writeFileSync(path.join(hermesHome, 'config.yaml'), '# isolated browser E2E\n', 'utf8')
+  const workspacePath = options.workspace ? path.join(root, 'workspace') : undefined
+  if (workspacePath) {
+    fs.mkdirSync(path.join(workspacePath, 'backend-folder'), { recursive: true })
+    fs.writeFileSync(path.join(workspacePath, 'backend-file.txt'), 'Connected backend file\n', 'utf8')
+    fs.writeFileSync(path.join(workspacePath, 'backend-folder', 'nested.txt'), 'Nested backend file\n', 'utf8')
+    fs.writeFileSync(path.join(hermesHome, 'config.yaml'), JSON.stringify({ terminal: { cwd: workspacePath } }), 'utf8')
+  }
 
   const terminalHost = options.terminal
     ? spawn(
@@ -118,6 +128,7 @@ export async function startBrowserBackend(options: { terminal?: boolean } = {}):
   return {
     baseUrl,
     token,
+    workspacePath,
     async cleanup() {
       terminalHost?.kill('SIGTERM')
       if (child.exitCode === null) {

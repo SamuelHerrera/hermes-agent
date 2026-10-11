@@ -522,10 +522,8 @@ export function toggleSidebarOpen() {
 }
 
 export function toggleFileBrowserOpen() {
-  if (revealNarrowPane(FILE_BROWSER_PANE_ID, 'toggle')) {
-    return
-  }
-
+  // Files is a non-collapsible right pane, not a narrow hover overlay.
+  // Dispatching a reveal event here has no consumer and drops touch toggles.
   // Ask the TREE, not the pane's boolean. `$fileBrowserOpen` stays true while
   // the tree pane sits behind a sibling tab in the shared right column (the
   // preview rail, the diff) or inside a minimized zone, so ⌘J spent its press
@@ -543,7 +541,6 @@ export function toggleFileBrowserOpen() {
 
 export function setFileBrowserOpen(open: boolean) {
   setPaneOpen(FILE_BROWSER_PANE_ID, open)
-  revealNarrowPane(FILE_BROWSER_PANE_ID, open ? 'open' : 'close')
 }
 
 // "Reveal this file in the file-browser tree" — an absolute path the tree
