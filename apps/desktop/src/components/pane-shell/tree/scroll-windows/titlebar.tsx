@@ -1,6 +1,7 @@
 import { useStore } from '@nanostores/react'
 import type { ComponentProps } from 'react'
 
+import { TitlebarIcon } from '@/app/shell/titlebar-icon'
 import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { useContributions } from '@/contrib/react/use-contributions'
@@ -219,7 +220,7 @@ export function ScrollWindowsWorkspaceChips() {
         type="button"
         variant="ghost"
       >
-        <Codicon name="layout-sidebar-right" size="13.9px" />
+        <TitlebarIcon name="layout-sidebar-right" />
       </Button>
     </div>
   )

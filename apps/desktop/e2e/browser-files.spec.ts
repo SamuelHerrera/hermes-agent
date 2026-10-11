@@ -12,6 +12,22 @@ test.afterAll(async () => {
   await backend?.cleanup()
 })
 
+for (const width of [393, 1280]) {
+  test(`Files icon matches the sidebar icon at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 851 })
+    await page.goto(`${backend.baseUrl}/desktop/`)
+    await page.getByRole('button', { name: "I'll choose a provider later" }).click()
+    const filesIcon = page.getByRole('button', { name: 'Show files', exact: true }).locator('.codicon')
+    const sidebarIcon = page.getByRole('button', { name: /^(Show|Hide) sidebar$/ }).locator('.codicon')
+    await expect(filesIcon).toBeVisible()
+    const referenceSize = await sidebarIcon.evaluate(icon => getComputedStyle(icon).fontSize)
+    await expect(filesIcon).toHaveCSS('font-size', referenceSize)
+    await expect(filesIcon).toHaveCSS('width', await sidebarIcon.evaluate(icon => getComputedStyle(icon).width))
+    await expect(filesIcon).toHaveCSS('height', await sidebarIcon.evaluate(icon => getComputedStyle(icon).height))
+    await page.screenshot({ path: testInfo.outputPath('header-icon-parity.png') })
+  })
+}
+
 for (const mode of ['tabbed', 'scroll-windows']) {
   test(`${mode}: Show files opens an on-screen panel on a touch viewport`, async ({ page }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('hermes.desktop.layoutSurfaceMode.v1', value), mode)
