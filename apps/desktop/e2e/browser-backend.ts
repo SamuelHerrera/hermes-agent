@@ -57,21 +57,25 @@ async function waitForBackend(baseUrl: string, token: string, process: ChildProc
 }
 
 export async function startBrowserBackend(
-  options: { terminal?: boolean; workspace?: boolean } = {}
+  options: { terminal?: boolean; workspace?: boolean; browserProxySetup?: boolean } = {}
 ): Promise<BrowserBackend> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-browser-e2e-'))
-  const hermesHome = path.join(root, 'hermes-home')
+  const hermesHome = path.join(root, '.hermes')
   const port = await availablePort()
   const token = 'browser-e2e-session-token'
 
   fs.mkdirSync(hermesHome, { recursive: true })
-  fs.writeFileSync(path.join(hermesHome, 'config.yaml'), '# isolated browser E2E\n', 'utf8')
+  const desktop = {
+    browser_proxy_setup_complete: !options.browserProxySetup,
+    browser_proxy_port: await availablePort()
+  }
+  fs.writeFileSync(path.join(hermesHome, 'config.yaml'), JSON.stringify({ desktop }), 'utf8')
   const workspacePath = options.workspace ? path.join(root, 'workspace') : undefined
   if (workspacePath) {
     fs.mkdirSync(path.join(workspacePath, 'backend-folder'), { recursive: true })
     fs.writeFileSync(path.join(workspacePath, 'backend-file.txt'), 'Connected backend file\n', 'utf8')
     fs.writeFileSync(path.join(workspacePath, 'backend-folder', 'nested.txt'), 'Nested backend file\n', 'utf8')
-    fs.writeFileSync(path.join(hermesHome, 'config.yaml'), JSON.stringify({ terminal: { cwd: workspacePath } }), 'utf8')
+    fs.writeFileSync(path.join(hermesHome, 'config.yaml'), JSON.stringify({ desktop, terminal: { cwd: workspacePath } }), 'utf8')
   }
 
   const terminalHost = options.terminal
@@ -104,6 +108,10 @@ export async function startBrowserBackend(
       cwd: REPO_ROOT,
       env: {
         ...process.env,
+        // Named/default profile APIs are HOME-anchored; isolate those too.
+        HOME: root,
+        USERPROFILE: root,
+        PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         HERMES_DESKTOP_WEB_DIST: BROWSER_DIST,
         HERMES_HOME: hermesHome,

@@ -31,6 +31,7 @@ import { FindBar } from '@/components/find-bar'
 import { GatewayConnectingOverlay } from '@/components/gateway-connecting-overlay'
 import { NotificationStack } from '@/components/notifications'
 import { DesktopOnboardingOverlay } from '@/components/onboarding'
+import { BrowserProxySetup } from '@/components/onboarding/browser-proxy-setup'
 import { hideLoneTreeTab, parkEmptyWorkspaceHost, registerPaneCloser } from '@/components/pane-shell/tree/store'
 import { FloatingPet } from '@/components/pet/floating-pet'
 import { RemoteDisplayBanner } from '@/components/remote-display-banner'
@@ -1150,6 +1151,7 @@ export function ContribWiring({
           requestGateway={requestGateway}
         />
       )}
+      {!isAuxiliaryWindow() && <BrowserProxySetup enabled={gatewayState === 'open'} profile={activeGatewayProfile} />}
       <ModelPickerOverlay gateway={gateway || undefined} onSelect={selectModel} profile={activeGatewayProfile} />
       <SessionPickerOverlay onResume={sessionId => openSession(sessionId, navigate)} />
       <ModelVisibilityOverlay

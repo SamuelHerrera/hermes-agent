@@ -109,6 +109,7 @@ class TestExistingInstallDefault:
                 stack,
                 prompt_choice="hermes_cli.setup.prompt_choice",
                 quick="hermes_cli.setup._run_quick_setup",
+                browser="hermes_cli.setup.setup_browser_proxy",
                 model="hermes_cli.setup.setup_model_provider",
                 terminal="hermes_cli.setup.setup_terminal_backend",
                 agent="hermes_cli.setup.setup_agent_settings",
@@ -120,6 +121,7 @@ class TestExistingInstallDefault:
 
         # No menu shown.
         m["prompt_choice"].assert_not_called()
+        m["browser"].assert_called_once()
         # Quick-setup path NOT taken.
         m["quick"].assert_not_called()
         # Model/terminal/gateway/tools run; agent settings are no longer

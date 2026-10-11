@@ -2745,12 +2745,42 @@ def _offer_openclaw_migration(hermes_home: Path) -> bool:
 # Main Wizard Orchestrator
 # =============================================================================
 
+def setup_browser_proxy(config: dict):
+    """Ask for the isolated PWA site; listener and routing settings stay intact."""
+    if not is_interactive_stdin():
+        return
+    from hermes_cli.browser_proxy import _origin
+
+    print_header("PWA Browser")
+    print_info("The browser proxy is included with installation; no backend browser is launched.")
+    print_info("Use a separate HTTPS hostname AND registrable domain from Hermes.")
+    print_info("Route that entire HTTPS site, including WebSockets, to this backend's proxy listener.")
+    print_info("Setup does not create DNS records or TLS certificates. Leave blank to configure later.")
+    desktop = config.setdefault("desktop", {})
+    while True:
+        value = prompt("Separate HTTPS proxy origin", default=desktop.get("browser_proxy_origin", "")).strip()
+        try:
+            origin = _origin(value) if value else ""
+        except (ValueError, UnicodeError) as error:
+            print_error(str(error))
+            continue
+        desktop["browser_proxy_origin"] = origin
+        desktop["browser_proxy_setup_complete"] = True
+        if origin:
+            print_success("Browser proxy configured — it starts automatically with the Desktop backend.")
+            print_info(f"Route {origin} to {desktop.get('browser_proxy_bind', '127.0.0.1')}:{desktop.get('browser_proxy_port', 9120)}.")
+        else:
+            print_info("PWA browser setup deferred. Run 'hermes setup browser' when your HTTPS site is ready.")
+        return
+
+
 SETUP_SECTIONS = [
     ("model", "Model & Provider", setup_model_provider),
     ("tts", "Text-to-Speech", setup_tts),
     ("terminal", "Terminal Backend", setup_terminal_backend),
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
+    ("browser", "PWA Browser", setup_browser_proxy),
     ("telemetry", "Shared Metrics", setup_telemetry),
     ("agent", "Agent Settings", setup_agent_settings),
 ]
@@ -2850,6 +2880,7 @@ def run_setup_wizard(args):
       hermes setup terminal  — just terminal backend
       hermes setup gateway   — just messaging platforms
       hermes setup tools     — just tool configuration
+      hermes setup browser   — isolated HTTPS PWA browser origin
       hermes setup telemetry — just local shared metrics
       hermes setup agent     — just agent settings
     """
@@ -3072,6 +3103,8 @@ def run_setup_wizard(args):
     if not (migration_ran and _skip_configured_section(config, "tools", "Tools")):
         setup_tools(config, first_install=not is_existing)
 
+    setup_browser_proxy(config)
+
     # Save and show summary
     save_config(config)
     if _backup_path and _backup_path.exists():
@@ -3150,6 +3183,9 @@ def _run_first_time_quick_setup(config: dict, hermes_home, is_existing: bool):
         ensure_gateway_service(context="setup")
 
     print()
+    setup_browser_proxy(config)
+    save_config(config)
+
     print_success("Setup complete! You're ready to go.")
     print()
     print_info("  Configure all settings:    hermes setup")
@@ -3228,6 +3264,12 @@ def _blank_slate_minimize_config(config: dict):
     config.setdefault("checkpoints", {})["enabled"] = False
     config.setdefault("smart_model_routing", {})["enabled"] = False
     config.setdefault("session_reset", {})["mode"] = "none"
+
+    # Honor the explicit "everything optional off" choice; Desktop must not
+    # turn this into a first-run browser setup prompt afterwards.
+    desktop = config.setdefault("desktop", {})
+    desktop["browser_proxy_origin"] = ""
+    desktop["browser_proxy_setup_complete"] = True
 
     # Quiet, minimal display.
     config.setdefault("display", {})["tool_progress"] = "all"

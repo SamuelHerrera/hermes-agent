@@ -7278,8 +7278,10 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.put("/api/config")
-async def update_config(body: ConfigUpdate, profile: Optional[str] = None):
+async def update_config(body: ConfigUpdate, profile: Optional[str] = None, request: Request = None):
     def _run():
+        from hermes_constants import get_hermes_home
+        active_home = get_hermes_home()
         with _profile_scope(body.profile or profile):
             # The dashboard form is schema-driven (see CONFIG_SCHEMA). Any root
             # key absent from the schema — most visibly ``custom_providers``, but
@@ -7290,11 +7292,37 @@ async def update_config(body: ConfigUpdate, profile: Optional[str] = None):
             with _CONFIG_MUTATION_LOCK:
                 existing = read_raw_config()
                 incoming = _denormalize_config_from_web(body.config)
-                save_config(_deep_merge(existing, incoming))
-        return {"ok": True}
+                desktop = incoming.get('desktop', {})
+                proxy_changed = isinstance(desktop, dict) and bool({
+                    'browser_proxy_origin', 'browser_proxy_bind', 'browser_proxy_port', 'browser_proxy_denied_hosts',
+                }.intersection(desktop))
+                merged = _deep_merge(existing, incoming)
+                if proxy_changed:
+                    from hermes_cli.browser_proxy import proxy_options, validate_setup_site
+                    try:
+                        options = proxy_options(merged['desktop'])
+                        validate_setup_site(request.headers.get('origin', '') if request else '', options['origin'])
+                    except (TypeError, ValueError, UnicodeError) as error:
+                        raise HTTPException(status_code=400, detail=str(error))
+                    except RuntimeError as error:
+                        raise HTTPException(status_code=503, detail=str(error))
+                    merged['desktop']['browser_proxy_origin'] = options['origin']
+                save_config(merged)
+                active = get_hermes_home() == active_home
+        return proxy_changed, active
 
     try:
-        return await asyncio.to_thread(_run)
+        proxy_changed, active = await asyncio.to_thread(_run)
+        result = {"ok": True}
+        if proxy_changed:
+            if active:
+                from hermes_cli.browser_proxy import apply_proxy_config
+                result['browser_proxy'] = await apply_proxy_config(app)
+            else:
+                # Another profile starts its helper with its own backend;
+                # editing it must not retarget this process's live helper.
+                result['browser_proxy'] = {'running': False, 'deferred': True}
+        return result
     except HTTPException:
         raise
     except Exception:

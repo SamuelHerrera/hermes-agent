@@ -12,6 +12,7 @@ import type {
   AuxiliaryModelsResponse,
   BackendUpdateCheckResponse,
   ComputerUseStatus,
+  ConfigSaveResponse,
   ConfigSchemaResponse,
   CronDeliveryTarget,
   CronJob,
@@ -857,9 +858,9 @@ export function getHermesConfigSchema(): Promise<ConfigSchemaResponse> {
   })
 }
 
-export function saveHermesConfig(config: HermesConfigRecord): Promise<{ ok: boolean }> {
-  return hostApi<{ ok: boolean }>({
-    ...profileScoped(),
+export function saveHermesConfig(config: HermesConfigRecord, profile?: string): Promise<ConfigSaveResponse> {
+  return hostApi<ConfigSaveResponse>({
+    ...profileScoped(profile),
     path: '/api/config',
     method: 'PUT',
     body: { config }

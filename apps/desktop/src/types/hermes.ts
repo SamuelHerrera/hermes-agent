@@ -333,6 +333,11 @@ export interface HermesConfig {
     interim_assistant_messages?: boolean
   }
   desktop?: {
+    browser_access_enabled?: boolean
+    browser_proxy_origin?: string
+    browser_proxy_setup_complete?: boolean
+    browser_proxy_bind?: string
+    browser_proxy_port?: number
     repo_scan_enabled?: boolean
     repo_scan_roots?: string[]
     repo_scan_exclude_paths?: string[]
@@ -353,6 +358,11 @@ export interface HermesConfig {
 }
 
 export type HermesConfigRecord = Record<string, unknown>
+
+export interface ConfigSaveResponse {
+  ok: boolean
+  browser_proxy?: { running: boolean; error?: string; deferred?: boolean; port?: number }
+}
 
 export interface ModelInfoResponse {
   auto_context_length?: number

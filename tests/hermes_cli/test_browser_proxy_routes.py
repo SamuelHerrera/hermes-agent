@@ -95,3 +95,66 @@ def test_same_registrable_site_is_rejected_by_real_helper(client):
     response = client.post('/api/browser-proxy/bootstrap', headers=headers())
     assert response.status_code == 503
     assert 'isolation' in response.text
+
+
+def test_setup_save_starts_helper_without_backend_restart(client):
+    proxy = web_server.app.state.browser_proxy
+    client.portal.call(proxy.stop)
+    response = client.put('/api/config', headers=headers(), json={'config': {'desktop': {
+        'browser_proxy_origin': 'https://browser.example.net/',
+        'browser_proxy_setup_complete': True,
+    }}})
+    assert response.status_code == 200, response.text
+    assert response.json()['browser_proxy']['running'] is True
+    assert proxy.process is not None and proxy.process.returncode is None
+    assert web_server.app.state.browser_proxy_origin == 'https://browser.example.net'
+    assert client.get('/api/status', headers={'Origin': 'https://browser.example.net'}).status_code == 403
+
+
+@pytest.mark.parametrize('settings', [
+    {'browser_proxy_origin': 'http://browser.example.net'},
+    {'browser_proxy_origin': 'https://user:password@browser.example.net'},
+    {'browser_proxy_bind': '0.0.0.0'},
+    {'browser_proxy_port': -1},
+])
+def test_bad_proxy_settings_are_rejected_before_save(client, settings):
+    from hermes_cli.config import load_config
+    before = load_config()['desktop']
+    process = web_server.app.state.browser_proxy.process
+    response = client.put('/api/config', headers=headers(), json={'config': {'desktop': settings}})
+    assert response.status_code == 400
+    assert load_config()['desktop'] == before
+    assert web_server.app.state.browser_proxy.process is process
+
+
+def test_disabling_proxy_reaps_helper(client):
+    process = web_server.app.state.browser_proxy.process
+    response = client.put('/api/config', headers=headers(), json={'config': {'desktop': {'browser_proxy_origin': ''}}})
+    assert response.status_code == 200
+    assert response.json()['browser_proxy']['running'] is False
+    assert process.returncode is not None
+    assert web_server.app.state.browser_proxy.process is None
+
+
+@pytest.mark.parametrize('origin', ['https://www.python.org', 'https://browser.python.org'])
+def test_setup_rejects_same_site_before_changing_config_or_guard(client, origin):
+    from hermes_cli.config import load_config
+    before = load_config()['desktop']
+    process = web_server.app.state.browser_proxy.process
+    response = client.put('/api/config', headers=headers(), json={'config': {'desktop': {'browser_proxy_origin': origin}}})
+    assert response.status_code == 400
+    assert load_config()['desktop'] == before
+    assert web_server.app.state.browser_proxy.process is process
+    assert client.get('/api/status', headers=headers()).status_code == 200
+
+
+def test_other_profile_save_does_not_retarget_live_helper(client, tmp_path, monkeypatch):
+    other = tmp_path / 'other'
+    other.mkdir()
+    monkeypatch.setattr(web_server, '_resolve_profile_dir', lambda _: other)
+    process = web_server.app.state.browser_proxy.process
+    response = client.put('/api/config?profile=other', headers=headers(), json={'config': {'desktop': {'browser_proxy_origin': 'https://browser.example.net'}}})
+    assert response.status_code == 200, response.text
+    assert response.json()['browser_proxy'] == {'running': False, 'deferred': True}
+    assert web_server.app.state.browser_proxy.process is process
+    assert web_server.app.state.browser_proxy_origin == 'https://www.wikipedia.org'

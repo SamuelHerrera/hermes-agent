@@ -24,6 +24,18 @@ const mime = {
 }
 const token = () => randomBytes(32).toString('base64url')
 
+export function validateOriginPair(parentOrigin, proxyOrigin, testOnly = false) {
+  const parent = new URL(parentOrigin), origin = new URL(proxyOrigin)
+  if (parent.origin === origin.origin || parent.hostname === origin.hostname ||
+      ((parent.protocol !== 'https:' || origin.protocol !== 'https:') && !testOnly))
+    throw new Error('Origin isolation required')
+  const parentSite = getDomain(parent.hostname, { allowPrivateDomains: true }),
+    proxySite = getDomain(origin.hostname, { allowPrivateDomains: true })
+  if (!testOnly && (!parentSite || !proxySite || parentSite === proxySite))
+    throw new Error('Separate registrable proxy domain required')
+  return parent
+}
+
 export async function createProxy(config) {
   if (config.debug) logging.set_level(logging.DEBUG)
   const origin = new URL(config.origin)
@@ -274,17 +286,7 @@ export async function createProxy(config) {
     sessions,
     async mint(parentOrigin, resolveManagement = true) {
       reap()
-      const parent = new URL(parentOrigin)
-      if (
-        parent.origin === origin.origin ||
-        parent.hostname === origin.hostname ||
-        (parent.protocol !== 'https:' && !config.testOnly)
-      )
-        throw new Error('Origin isolation required')
-      const parentSite = getDomain(parent.hostname, { allowPrivateDomains: true }),
-        proxySite = getDomain(origin.hostname, { allowPrivateDomains: true })
-      if (!config.testOnly && (!parentSite || !proxySite || parentSite === proxySite))
-        throw new Error('Separate registrable proxy domain required')
+      const parent = validateOriginPair(parentOrigin, origin.origin, config.testOnly)
       if (tickets.size + sessions.size >= MAX_SESSIONS) throw new Error('Proxy capacity reached')
       if (resolveManagement) {
         await policy.denyHost(parent.hostname)

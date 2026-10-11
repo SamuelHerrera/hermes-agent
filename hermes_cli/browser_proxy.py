@@ -46,6 +46,8 @@ def install_dependencies(root=None):
 
 
 def _origin(value):
+    if not isinstance(value, str):
+        raise ValueError('Browser proxy requires a bare HTTPS origin')
     parsed = urlsplit(value)
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or
             parsed.password or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
@@ -89,6 +91,55 @@ def validate_denied_hosts(value):
     return value
 
 
+def proxy_options(desktop):
+    """Validate saved settings before persisting them or starting a helper."""
+    origin = desktop.get('browser_proxy_origin', '')
+    bind = validate_bind(desktop.get('browser_proxy_bind', '127.0.0.1'))
+    port = int(desktop.get('browser_proxy_port', 9120))
+    if not 0 <= port <= 65535:
+        raise ValueError('Invalid browser proxy port')
+    return {'origin': _origin(origin) if origin else '', 'port': port, 'listenHost': bind,
+            'deniedHosts': validate_denied_hosts(desktop.get('browser_proxy_denied_hosts', []))}
+
+
+def validate_setup_site(parent_origin, proxy_origin):
+    """Reuse the helper's PSL policy when setup knows the parent HTTPS site."""
+    from hermes_constants import find_node_executable
+    from hermes_cli._subprocess_compat import windows_hide_flags
+    if not proxy_origin or not parent_origin:
+        return
+    parent = urlsplit(parent_origin)
+    if parent.hostname and parent.hostname == urlsplit(proxy_origin).hostname:
+        raise ValueError('Origin isolation required')
+    # Native IPC clients do not reveal the public PWA site. Capability minting
+    # still enforces the shared policy once that HTTPS parent is known.
+    if parent.scheme != 'https':
+        return
+    node = find_node_executable('node')
+    if not node:
+        raise RuntimeError('Install the bundled browser proxy dependencies before configuring its site')
+    script = ("import { validateOriginPair } from './server.mjs'; "
+              "try { validateOriginPair(...process.argv.slice(1)) } "
+              "catch (error) { process.stderr.write(error.message); process.exitCode = 2 }")
+    try:
+        result = subprocess.run([node, '--input-type=module', '-e', script, _origin(parent_origin), proxy_origin],
+                                cwd=Path(__file__).with_name('browser_proxy'), capture_output=True, text=True,
+                                timeout=10, env=proxy_environment(), creationflags=windows_hide_flags())
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError('Browser proxy site validation unavailable') from error
+    if result.returncode == 2:
+        raise ValueError(result.stderr.strip())
+    if result.returncode:
+        raise RuntimeError('Install the bundled browser proxy dependencies before configuring its site')
+
+
+def proxy_environment():
+    """Neither transport nor site-validation subprocesses inherit credentials."""
+    return {key: value for key, value in os.environ.items() if key in {
+        'PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT',
+    }}
+
+
 class BrowserProxy:
     def __init__(self):
         self.process = None
@@ -100,13 +151,7 @@ class BrowserProxy:
         origin = desktop.get('browser_proxy_origin', '')
         if not origin:
             raise RuntimeError('Configure desktop.browser_proxy_origin with a separate HTTPS site to enable the browser')
-        origin = _origin(origin)
-        bind = validate_bind(desktop.get('browser_proxy_bind', '127.0.0.1'))
-        port = int(desktop.get('browser_proxy_port', 9120))
-        if not 0 <= port <= 65535:
-            raise ValueError('Invalid browser proxy port')
-        config = {'origin': origin, 'port': port, 'listenHost': bind,
-                  'deniedHosts': validate_denied_hosts(desktop.get('browser_proxy_denied_hosts', []))}
+        config = proxy_options(desktop)
         if self.process and self.process.returncode is None and self.config == config:
             return
         await self.stop()
@@ -119,9 +164,7 @@ class BrowserProxy:
             node, str(root / 'server.mjs'), cwd=str(root),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
-            env={key: value for key, value in os.environ.items() if key in {
-                'PATH', 'HOME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'SYSTEMROOT',
-            }},
+            env=proxy_environment(),
         )
         try:
             result = await self._command(config)
@@ -185,6 +228,34 @@ async def recover_proxy(app):
             await proxy.start(desktop)
     except Exception as error:
         _log.warning('Optional browser proxy unavailable: %s', error)
+
+
+async def apply_proxy_config(app):
+    """Apply this backend's latest saved settings without restarting chat."""
+    proxy = getattr(app.state, 'browser_proxy', None)
+    if proxy is None:
+        proxy = app.state.browser_proxy = BrowserProxy()
+    async with proxy.lock:
+        # Read inside the helper lock so concurrent saves cannot replay an
+        # older request's settings after a newer request has finished.
+        desktop = await asyncio.to_thread(desktop_proxy_config)
+        origin = desktop.get('browser_proxy_origin', '')
+        if not origin:
+            await proxy.stop()
+            app.state.browser_proxy_origin = ''
+            return {'running': False}
+        origin = _origin(origin)
+        app.state.browser_proxy_origin = origin
+        origins = getattr(app.state, 'browser_proxy_origins', None)
+        if origins is None:
+            origins = app.state.browser_proxy_origins = set()
+        origins.add(origin)
+        try:
+            await proxy.start(desktop)
+            return {'running': True, 'port': proxy.port}
+        except Exception as error:
+            _log.warning('Configured browser proxy unavailable: %s', error)
+            return {'running': False, 'error': str(error)}
 
 
 if __name__ == '__main__':

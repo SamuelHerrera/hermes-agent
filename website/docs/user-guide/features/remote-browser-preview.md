@@ -24,6 +24,18 @@ Desktop installer's staged backend setup. No separate npm command is needed.
 independently of the main workspace lockfile. Successful repeated installations
 reuse matching dependencies; failed installs are not recorded as successful.
 
+First-time CLI setup asks for the separate HTTPS proxy origin. Desktop's
+graphical first-run setup offers the same prompt after provider setup (including
+when the provider is deferred). Enter a bare origin such as
+`https://browser.example.net`, or choose **Set up later**. Existing proxy origins
+and listener settings are preserved. Blank Slate keeps the optional proxy off.
+To configure or revisit the CLI prompt, run `hermes setup browser`.
+
+Saving an origin in Desktop starts the helper on the connected backend without
+restarting chat. CLI setup saves it for automatic startup with the backend.
+The setup prompt does **not** create DNS, TLS certificates, or reverse-proxy
+routes; those must already route the separate site to that backend's listener.
+
 The helper uses Hermes-managed Node (22.22 or newer) and a separate lockfile with
 exact dependency versions. Installation uses `npm ci --ignore-scripts` and never
 downloads a browser for the proxy. Scramjet 2's alpha distribution is pinned;
@@ -69,8 +81,10 @@ Avoid logging the bounded capability segment of `/wisp/`.
 
 Add other publicly reachable management hostnames to
 `desktop.browser_proxy_denied_hosts`. The helper automatically blocks the
-Hermes parent and proxy hostnames and all their resolved addresses. Restart the
-backend after changing the origin or listener settings, then reload the PWA.
+Hermes parent and proxy hostnames and all their resolved addresses. Changes
+saved through Desktop's config API are applied to the helper automatically.
+For changes made directly through CLI config or a file edit, restart the backend
+to apply them. Reload the PWA after changing its proxy origin.
 
 ## Authentication and isolation
 
