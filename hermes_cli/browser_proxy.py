@@ -60,8 +60,12 @@ def _origin(value):
     return f'https://{hostname}' + (f':{port}' if port is not None and port != 443 else '')
 
 
-def validate_origins(proxy, parent):
+def validate_origins(proxy, parent, allow_same_origin=False):
     proxy, parent = _origin(proxy), _origin(parent)
+    if allow_same_origin:
+        if proxy != parent:
+            raise ValueError('Same-origin development mode requires the exact Hermes origin')
+        return proxy
     if urlsplit(proxy).hostname == urlsplit(parent).hostname:
         raise ValueError('Browser proxy must use a separate hostname and registrable domain')
     return proxy
@@ -98,15 +102,22 @@ def proxy_options(desktop):
     port = int(desktop.get('browser_proxy_port', 9120))
     if not 0 <= port <= 65535:
         raise ValueError('Invalid browser proxy port')
+    same_origin = desktop.get('browser_proxy_allow_same_origin', False)
+    if not isinstance(same_origin, bool):
+        raise ValueError('Browser proxy same-origin override must be a boolean')
     return {'origin': _origin(origin) if origin else '', 'port': port, 'listenHost': bind,
+            'allowSameOrigin': same_origin,
             'deniedHosts': validate_denied_hosts(desktop.get('browser_proxy_denied_hosts', []))}
 
 
-def validate_setup_site(parent_origin, proxy_origin):
+def validate_setup_site(parent_origin, proxy_origin, allow_same_origin=False):
     """Reuse the helper's PSL policy when setup knows the parent HTTPS site."""
     from hermes_constants import find_node_executable
     from hermes_cli._subprocess_compat import windows_hide_flags
     if not proxy_origin or not parent_origin:
+        return
+    if allow_same_origin and urlsplit(parent_origin).scheme == 'https':
+        validate_origins(proxy_origin, parent_origin, True)
         return
     parent = urlsplit(parent_origin)
     if parent.hostname and parent.hostname == urlsplit(proxy_origin).hostname:
@@ -184,7 +195,8 @@ class BrowserProxy:
         return json.loads(line)
 
     async def bootstrap(self, desktop, parent):
-        validate_origins(desktop.get('browser_proxy_origin', ''), parent)
+        validate_origins(desktop.get('browser_proxy_origin', ''), parent,
+                         desktop.get('browser_proxy_allow_same_origin', False))
         async with self.lock:
             await self.start(desktop)
             try:
@@ -196,7 +208,7 @@ class BrowserProxy:
                 raise
             if result.get('id') != 'bootstrap' or not result.get('ticket'):
                 raise RuntimeError('Browser isolation, capacity or management-host DNS check failed')
-            return {key: result[key] for key in ('origin', 'ticket', 'expiresIn')}
+            return {key: result[key] for key in ('origin', 'ticket', 'expiresIn', 'path', 'sameOrigin') if key in result}
 
     async def stop(self):
         process, self.process = self.process, None
@@ -221,9 +233,11 @@ async def recover_proxy(app):
     proxy = app.state.browser_proxy = BrowserProxy()
     app.state.browser_proxy_origin = ''
     app.state.browser_proxy_origins = set()
+    app.state.browser_proxy_allow_same_origin = False
     try:
         desktop = await asyncio.to_thread(desktop_proxy_config)
         if desktop.get('browser_proxy_origin'):
+            app.state.browser_proxy_allow_same_origin = desktop.get('browser_proxy_allow_same_origin', False)
             app.state.browser_proxy_origin = _origin(desktop['browser_proxy_origin'])
             await proxy.start(desktop)
     except Exception as error:
@@ -240,6 +254,7 @@ async def apply_proxy_config(app):
         # older request's settings after a newer request has finished.
         desktop = await asyncio.to_thread(desktop_proxy_config)
         origin = desktop.get('browser_proxy_origin', '')
+        app.state.browser_proxy_allow_same_origin = desktop.get('browser_proxy_allow_same_origin', False)
         if not origin:
             await proxy.stop()
             app.state.browser_proxy_origin = ''
@@ -249,7 +264,8 @@ async def apply_proxy_config(app):
         origins = getattr(app.state, 'browser_proxy_origins', None)
         if origins is None:
             origins = app.state.browser_proxy_origins = set()
-        origins.add(origin)
+        if not desktop.get('browser_proxy_allow_same_origin', False):
+            origins.add(origin)
         try:
             await proxy.start(desktop)
             return {'running': True, 'port': proxy.port}

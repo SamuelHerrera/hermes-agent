@@ -3351,6 +3351,8 @@ DEFAULT_CONFIG = {
         # PWA browser uses a client-rendered Scramjet proxy on a separate
         # registrable HTTPS domain. Empty disables this optional helper.
         "browser_proxy_origin": "",
+        # Development opt-in: proxied code shares Hermes's browser origin.
+        "browser_proxy_allow_same_origin": False,
         # First-run setup offers the origin once; deferring is remembered.
         "browser_proxy_setup_complete": False,
         "browser_proxy_port": 9120,

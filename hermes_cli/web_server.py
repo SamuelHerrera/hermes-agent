@@ -7295,13 +7295,14 @@ async def update_config(body: ConfigUpdate, profile: Optional[str] = None, reque
                 desktop = incoming.get('desktop', {})
                 proxy_changed = isinstance(desktop, dict) and bool({
                     'browser_proxy_origin', 'browser_proxy_bind', 'browser_proxy_port', 'browser_proxy_denied_hosts',
+                    'browser_proxy_allow_same_origin',
                 }.intersection(desktop))
                 merged = _deep_merge(existing, incoming)
                 if proxy_changed:
                     from hermes_cli.browser_proxy import proxy_options, validate_setup_site
                     try:
                         options = proxy_options(merged['desktop'])
-                        validate_setup_site(request.headers.get('origin', '') if request else '', options['origin'])
+                        validate_setup_site(request.headers.get('origin', '') if request else '', options['origin'], options['allowSameOrigin'])
                     except (TypeError, ValueError, UnicodeError) as error:
                         raise HTTPException(status_code=400, detail=str(error))
                     except RuntimeError as error:
@@ -16588,11 +16589,13 @@ async def browser_proxy_bootstrap(request: Request) -> JSONResponse:
                 or parsed.path or parsed.query or parsed.fragment or parsed.username):
             raise ValueError("Browser bootstrap requires the exact HTTPS request Origin")
         desktop = await asyncio.to_thread(desktop_proxy_config)
-        isolated_origin = validate_origins(desktop.get("browser_proxy_origin", ""), origin)
+        isolated_origin = validate_origins(desktop.get("browser_proxy_origin", ""), origin,
+                                          desktop.get('browser_proxy_allow_same_origin', False))
         registered = getattr(app.state, "browser_proxy_origins", None)
         if registered is None:
             registered = app.state.browser_proxy_origins = set()
-        registered.add(isolated_origin)
+        if not desktop.get('browser_proxy_allow_same_origin', False):
+            registered.add(isolated_origin)
     except ValueError as error:
         raise HTTPException(status_code=403, detail=str(error)) from None
     proxy = getattr(request.app.state, "browser_proxy", None)

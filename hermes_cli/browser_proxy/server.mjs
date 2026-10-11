@@ -24,8 +24,12 @@ const mime = {
 }
 const token = () => randomBytes(32).toString('base64url')
 
-export function validateOriginPair(parentOrigin, proxyOrigin, testOnly = false) {
+export function validateOriginPair(parentOrigin, proxyOrigin, testOnly = false, allowSameOrigin = false) {
   const parent = new URL(parentOrigin), origin = new URL(proxyOrigin)
+  if (allowSameOrigin === true) {
+    if (parent.origin !== origin.origin || parent.protocol !== 'https:') throw new Error('Exact HTTPS Hermes origin required')
+    return parent
+  }
   if (parent.origin === origin.origin || parent.hostname === origin.hostname ||
       ((parent.protocol !== 'https:' || origin.protocol !== 'https:') && !testOnly))
     throw new Error('Origin isolation required')
@@ -39,6 +43,9 @@ export function validateOriginPair(parentOrigin, proxyOrigin, testOnly = false) 
 export async function createProxy(config) {
   if (config.debug) logging.set_level(logging.DEBUG)
   const origin = new URL(config.origin)
+  const basePath = config.allowSameOrigin === true ? '/browser-proxy/' : '/'
+  const localPath = pathname => basePath === '/' ? pathname :
+    (pathname.startsWith(basePath) ? '/' + pathname.slice(basePath.length) : null)
   if (origin.protocol !== 'https:' && !config.testOnly) throw new Error('HTTPS proxy required')
   const tickets = new Map(),
     sessions = new Map()
@@ -129,7 +136,9 @@ export async function createProxy(config) {
     if (!validHost(req)) return respond(res, 403, { error: 'Host rejected' })
     try {
       const url = new URL(req.url, origin)
-      if (url.pathname === '/bootstrap' && req.method === 'POST') {
+      const pathname = localPath(url.pathname)
+      if (pathname === null) return respond(res, 404, { error: 'Unavailable' })
+      if (pathname === '/bootstrap' && req.method === 'POST') {
         if (req.headers.origin !== origin.origin) return respond(res, 403, { error: 'Origin rejected' })
         let body = ''
         for await (const chunk of req) {
@@ -152,7 +161,7 @@ export async function createProxy(config) {
         )
         return respond(res, 200, { session: id, parentOrigin: grant.parentOrigin, expiresIn: sessionTTL })
       }
-      if (url.pathname === '/release' && req.method === 'POST') {
+      if (pathname === '/release' && req.method === 'POST') {
         if (req.headers.origin !== origin.origin) return respond(res, 403, { error: 'Origin rejected' })
         let body = ''
         for await (const chunk of req) {
@@ -175,17 +184,18 @@ export async function createProxy(config) {
         '/assets/libcurl/': path.dirname(fileURLToPath(import.meta.resolve('@mercuryworkshop/libcurl-transport')))
       }
       let root = publicPath,
-        suffix = url.pathname === '/' ? 'index.html' : url.pathname.slice(1)
+        suffix = pathname === '/' ? 'index.html' : pathname.slice(1)
       for (const [prefix, dir] of Object.entries(roots))
-        if (url.pathname.startsWith(prefix)) {
+        if (pathname.startsWith(prefix)) {
           root = dir
-          suffix = url.pathname.slice(prefix.length)
+          suffix = pathname.slice(prefix.length)
           break
         }
       const filename = path.resolve(root, suffix)
       if (!filename.startsWith(path.resolve(root) + path.sep)) return respond(res, 403, { error: 'Path rejected' })
-      const bytes = await readFile(filename)
-      if (url.pathname === '/sw.js') res.setHeader('Service-Worker-Allowed', '/')
+      let bytes = await readFile(filename)
+      if (pathname === '/' && basePath !== '/') bytes = Buffer.from(bytes.toString().replaceAll('src="/', `src="${basePath}`))
+      if (pathname === '/sw.js') res.setHeader('Service-Worker-Allowed', basePath)
       return respond(res, 200, bytes, mime[path.extname(filename)] || 'application/octet-stream')
     } catch {
       return respond(res, 404, { error: 'Unavailable' })
@@ -206,7 +216,7 @@ export async function createProxy(config) {
       socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
       return
     }
-    const match = /^\/wisp\/([A-Za-z0-9_-]{43})\/$/.exec(url.pathname)
+    const match = /^\/wisp\/([A-Za-z0-9_-]{43})\/$/.exec(localPath(url.pathname) || '')
     const session = match && sessions.get(match[1])
     if (!validHost(req) || req.headers.origin !== origin.origin || !session || session.sockets.size >= 4) {
       socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
@@ -286,7 +296,7 @@ export async function createProxy(config) {
     sessions,
     async mint(parentOrigin, resolveManagement = true) {
       reap()
-      const parent = validateOriginPair(parentOrigin, origin.origin, config.testOnly)
+      const parent = validateOriginPair(parentOrigin, origin.origin, config.testOnly, config.allowSameOrigin)
       if (tickets.size + sessions.size >= MAX_SESSIONS) throw new Error('Proxy capacity reached')
       if (resolveManagement) {
         await policy.denyHost(parent.hostname)
@@ -295,7 +305,8 @@ export async function createProxy(config) {
       }
       const id = token()
       tickets.set(id, { parentOrigin: parent.origin, expires: Date.now() + ticketTTL })
-      return { ticket: id, origin: origin.origin, expiresIn: ticketTTL }
+      return { ticket: id, origin: origin.origin, expiresIn: ticketTTL, path: basePath,
+        sameOrigin: config.allowSameOrigin === true && parent.origin === origin.origin }
     },
     async close() {
       if (closed) return

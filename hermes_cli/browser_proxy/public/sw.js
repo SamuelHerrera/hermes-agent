@@ -1,4 +1,4 @@
-importScripts('/assets/controller/controller.sw.js')
+importScripts(new URL('assets/controller/controller.sw.js', self.location.href).href)
 const policy =
   "default-src 'self' data: blob:; script-src 'self' data: 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; object-src 'none'; base-uri 'self'"
 self.addEventListener('fetch', event => {

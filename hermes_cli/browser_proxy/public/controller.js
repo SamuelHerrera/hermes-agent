@@ -6,20 +6,23 @@
   }
   try {
     const ticket = new URLSearchParams(location.hash.slice(1)).get('ticket')
-    history.replaceState(null, '', '/') // Capability never goes to HTTP logs or target URLs.
+    const basePath = location.pathname
+    history.replaceState(null, '', basePath) // Capability never goes to HTTP logs or target URLs.
     if (!ticket) throw new Error('Open this browser from Hermes to obtain a fresh capability.')
-    const response = await fetch('/bootstrap', {
+    const response = await fetch(basePath + 'bootstrap', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ticket }),
-      credentials: 'omit'
+      // Same-origin dev deployments use the existing upstream access gate.
+      // The edge must strip Hermes/access credentials before forwarding to Node.
+      credentials: basePath === '/browser-proxy/' ? 'same-origin' : 'omit'
     })
     if (!response.ok) throw new Error('Browser capability expired. Reconnect in Hermes.')
     const grant = await response.json()
     parentOrigin = grant.parentOrigin
-    const release = () => navigator.sendBeacon('/release', JSON.stringify({ session: grant.session }))
+    const release = () => navigator.sendBeacon(basePath + 'release', JSON.stringify({ session: grant.session }))
     window.addEventListener('pagehide', release, { once: true })
-    const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    const registration = await navigator.serviceWorker.register(basePath + 'sw.js', { scope: basePath })
     if (!registration.active)
       await new Promise((resolve, reject) => {
         const worker = registration.installing || registration.waiting
@@ -34,16 +37,16 @@
           }
         })
       })
-    const wispUrl = new URL(`/wisp/${encodeURIComponent(grant.session)}/`, location.origin)
+    const wispUrl = new URL(`${basePath}wisp/${encodeURIComponent(grant.session)}/`, location.origin)
     wispUrl.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const scramjet = new $scramjetController.Controller({
       serviceworker: registration.active,
       transport: new LibcurlTransport.LibcurlClient({ wisp: wispUrl.href }),
       config: {
-        prefix: '/service/',
-        scramjetPath: '/assets/scram/scramjet.js',
-        wasmPath: '/assets/scram/scramjet.wasm',
-        injectPath: '/assets/controller/controller.inject.js'
+        prefix: basePath + 'service/',
+        scramjetPath: basePath + 'assets/scram/scramjet.js',
+        wasmPath: basePath + 'assets/scram/scramjet.wasm',
+        injectPath: basePath + 'assets/controller/controller.inject.js'
       }
     })
     await scramjet.wait()

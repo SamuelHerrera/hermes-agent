@@ -116,6 +116,7 @@ def test_setup_save_starts_helper_without_backend_restart(client):
     {'browser_proxy_origin': 'https://user:password@browser.example.net'},
     {'browser_proxy_bind': '0.0.0.0'},
     {'browser_proxy_port': -1},
+    {'browser_proxy_allow_same_origin': 'true'},
 ])
 def test_bad_proxy_settings_are_rejected_before_save(client, settings):
     from hermes_cli.config import load_config
@@ -158,3 +159,40 @@ def test_other_profile_save_does_not_retarget_live_helper(client, tmp_path, monk
     assert response.json()['browser_proxy'] == {'running': False, 'deferred': True}
     assert web_server.app.state.browser_proxy.process is process
     assert web_server.app.state.browser_proxy_origin == 'https://www.wikipedia.org'
+
+
+def test_explicit_same_origin_development_mode_keeps_hermes_working(client):
+    response = client.put('/api/config', headers=headers(), json={'config': {'desktop': {
+        'browser_proxy_origin': 'https://www.python.org',
+        'browser_proxy_allow_same_origin': True,
+    }}})
+    assert response.status_code == 200, response.text
+    assert response.json()['browser_proxy']['running'] is True
+    assert client.get('/api/status', headers=headers()).status_code == 200
+    grant = client.post('/api/browser-proxy/bootstrap', headers=headers())
+    assert grant.status_code == 200, grant.text
+    assert grant.json()['path'] == '/browser-proxy/'
+    assert grant.json()['sameOrigin'] is True
+    assert client.post('/api/browser-proxy/bootstrap', headers={'Origin': 'https://www.python.org'}).status_code == 401
+    proxy = web_server.app.state.browser_proxy
+    with httpx.Client(trust_env=False) as http:
+        helper = f'http://127.0.0.1:{proxy.port}'
+        assert http.get(helper + '/desktop/', headers={'Host': 'www.python.org'}).status_code == 404
+        result = http.post(helper + '/browser-proxy/bootstrap', headers={
+            'Host': 'www.python.org', 'Origin': 'https://www.python.org',
+        }, json={'ticket': grant.json()['ticket']})
+        assert result.status_code == 200, result.text
+        worker = http.get(helper + '/browser-proxy/sw.js', headers={'Host': 'www.python.org'})
+        assert worker.headers['service-worker-allowed'] == '/browser-proxy/'
+    mismatch = client.put('/api/config', headers=headers(), json={'config': {'desktop': {
+        'browser_proxy_origin': 'https://www.wikipedia.org',
+    }}})
+    assert mismatch.status_code == 400
+    assert client.get('/api/status', headers=headers()).status_code == 200
+    restore = client.put('/api/config', headers=headers(), json={'config': {'desktop': {
+        'browser_proxy_origin': 'https://www.wikipedia.org',
+        'browser_proxy_allow_same_origin': False,
+    }}})
+    assert restore.status_code == 200
+    assert client.get('/api/status', headers=headers()).status_code == 200
+    assert client.get('/api/status', headers={'Origin': 'https://www.wikipedia.org'}).status_code == 403

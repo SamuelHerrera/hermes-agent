@@ -88,6 +88,30 @@ to apply them. Reload the PWA after changing its proxy origin.
 
 ## Authentication and isolation
 
+### Explicit same-origin development override
+
+For a development deployment whose owner deliberately accepts sharing Hermes's
+browser security boundary with proxied third-party code:
+
+```bash
+hermes config set desktop.browser_proxy_allow_same_origin true
+hermes config set desktop.browser_proxy_origin https://hermes.example.com
+```
+
+Restart the backend after CLI changes. Route `/browser-proxy/*` (without
+stripping that prefix), including WebSockets, to its proxy listener. Keep the
+existing access gate in front of **both** routes; after access verification,
+strip Cookie, Authorization, and X-Hermes-Session-Token on the Node upstream.
+All other paths still go to the Hermes API. No separate DNS/TLS hostname is
+needed. The proxy service worker is scoped to `/browser-proxy/`, not `/`.
+
+This is **not an isolation guarantee**: proxied code may access Hermes's DOM,
+storage, browser credentials and authenticated APIs. Authentication, expiring
+transport capabilities, and SSRF protections remain enabled, but do not restore
+the browser origin boundary. The override defaults to false and requires the
+exact HTTPS Hermes origin. Moving origins starts a separate website cookie store;
+sign-in state on the old isolated site is not migrated.
+
 1. Desktop calls authenticated `POST /api/browser-proxy/bootstrap` on Hermes.
    The endpoint requires its exact HTTPS request Origin and the active Hermes
    credential, even when the backend otherwise runs with public auth disabled.

@@ -22,6 +22,9 @@ class ProxyOriginGuard:
             except ValueError:
                 hostname = source = None
             proxy_hosts = {urlsplit(origin).hostname for origin in origins}
+            # Development opt-in removes the shared-origin block, not auth.
+            if getattr(state, 'browser_proxy_allow_same_origin', False):
+                proxy_hosts.discard(urlsplit(config.get('origin', '') or getattr(state, 'browser_proxy_origin', '')).hostname)
             # OAuth callbacks are state-checked public top-level navigations,
             # not readable cross-origin API fetches. Preserve the existing MCP
             # provider callback, but never exempt a proxy-origin request.

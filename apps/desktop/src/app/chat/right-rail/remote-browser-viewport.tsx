@@ -11,6 +11,8 @@ export interface RemoteBrowserHandle {
 }
 interface ProxyGrant {
   origin: string
+  path?: string
+  sameOrigin?: boolean
   ticket: string
   expiresIn: number
 }
@@ -56,6 +58,7 @@ export const RemoteBrowserViewport = forwardRef<
   const [src, setSrc] = useState('')
   const [error, setError] = useState('')
   const [retry, setRetry] = useState(0)
+  const [sharedOrigin, setSharedOrigin] = useState(false)
 
   const send = (command: Record<string, unknown>) => {
     if (command.type === 'navigate') {
@@ -96,6 +99,7 @@ export const RemoteBrowserViewport = forwardRef<
     originRef.current = ''
     setSrc('')
     setError('')
+    setSharedOrigin(false)
     callback.current({ loading: true })
 
     const fail = (message: string) => {
@@ -159,10 +163,11 @@ export const RemoteBrowserViewport = forwardRef<
         }
 
         const origin = new URL(grant.origin)
+        const devSameOrigin = grant.sameOrigin === true && grant.path === '/browser-proxy/'
 
         if (
           origin.protocol !== 'https:' ||
-          origin.hostname === window.location.hostname ||
+          (origin.hostname === window.location.hostname && !devSameOrigin) ||
           origin.origin !== grant.origin ||
           origin.username ||
           origin.password ||
@@ -181,7 +186,8 @@ export const RemoteBrowserViewport = forwardRef<
         meta.content = policy
         document.head.append(meta)
         originRef.current = origin.origin
-        setSrc(`${origin.origin}/#ticket=${encodeURIComponent(grant.ticket)}`)
+        setSharedOrigin(devSameOrigin)
+        setSrc(`${origin.origin}${devSameOrigin ? '/browser-proxy/' : '/'}#ticket=${encodeURIComponent(grant.ticket)}`)
         timeout = setTimeout(
           () => fail('Isolated browser startup timed out. Check the proxy hostname and reconnect.'),
           30_000
@@ -202,6 +208,7 @@ export const RemoteBrowserViewport = forwardRef<
 
   return (
     <div className="absolute inset-0 flex flex-col bg-white text-black">
+      {sharedOrigin && <p className="shrink-0 bg-amber-100 px-2 py-1 text-xs text-amber-950">Development mode: browsing shares Hermes’s origin.</p>}
       {src ? (
         <iframe
           allow="autoplay; encrypted-media"

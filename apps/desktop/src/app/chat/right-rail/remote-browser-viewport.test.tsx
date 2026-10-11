@@ -9,8 +9,8 @@ import { $connection } from '@/store/session'
 
 import { type RemoteBrowserHandle, RemoteBrowserViewport } from './remote-browser-viewport'
 
-function setup(origin = 'https://proxy.example.net') {
-  const api = vi.fn(async () => ({ origin, ticket: 'proxy-only-ticket-1234567890123456', expiresIn: 30_000 }))
+function setup(origin = 'https://proxy.example.net', extra = {}) {
+  const api = vi.fn(async () => ({ origin, ticket: 'proxy-only-ticket-1234567890123456', expiresIn: 30_000, ...extra }))
   installHost({
     kind: 'browser',
     api: api as HermesHost['api'],
@@ -31,6 +31,12 @@ afterEach(() => {
 })
 
 describe('isolated client browser', () => {
+  it('uses the dedicated prefix only for an explicitly granted same-origin mode', async () => {
+    setup('https://localhost', { sameOrigin: true, path: '/browser-proxy/' })
+    render(<RemoteBrowserViewport initialUrl="about:blank" onState={vi.fn()} />)
+    const iframe = (await screen.findByTitle('Isolated browser')) as HTMLIFrameElement
+    expect(iframe.src).toBe('https://localhost/browser-proxy/#ticket=proxy-only-ticket-1234567890123456')
+  })
   it('bootstraps on Hermes and sends controls only to exact iframe origin and source', async () => {
     const api = setup()
     const ref = createRef<RemoteBrowserHandle>()

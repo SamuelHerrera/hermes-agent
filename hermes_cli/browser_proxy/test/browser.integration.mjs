@@ -19,9 +19,11 @@ const close = server =>
     server.close(resolve)
   })
 
-for (const cachedParent of [false, true])
+for (const mode of ['isolated', 'cached', 'same-origin']) {
+  const cachedParent = mode === 'cached'
+  const sameOrigin = mode === 'same-origin'
   test(
-    `real cross-site non-isolated proxy: render/media/escape; cached parent=${cachedParent}`,
+    `real proxy render/media/navigation: ${mode}`,
     { timeout: 120_000 },
     async () => {
       const dir = await mkdtemp(path.join(tmpdir(), 'hermes-proxy-test-'))
@@ -52,11 +54,13 @@ for (const cachedParent of [false, true])
         origin: proxyOrigin,
         port: 0,
         testOnly: true,
+        allowSameOrigin: sameOrigin,
         deniedHosts: ['parent.example.org']
       })
       const tunnelSockets = new Set()
       // Exact production reverse-proxy semantics: preserve Host and Origin.
       edge.on('request', (req, res) => {
+        if (sameOrigin && req.url === '/desktop/') return parentHandler(req, res)
         const upstream = http.request(
           { host: '127.0.0.1', port: helper.port, path: req.url, method: req.method, headers: req.headers },
           incoming => {
@@ -88,7 +92,7 @@ for (const cachedParent of [false, true])
       })
       let grant
       let parentRequests = 0
-      const parent = https.createServer(tls, (req, res) => {
+      const parentHandler = (req, res) => {
         parentRequests++
         res.setHeader('Content-Type', 'text/html')
         const policy = `frame-src ${proxyOrigin} blob: data:; object-src 'none'`
@@ -98,11 +102,12 @@ for (const cachedParent of [false, true])
           : ''
         // Deliberately no COOP/COEP, matching today's installed Hermes PWA.
         res.end(
-          `${meta}<iframe id="browser" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay; encrypted-media" src="${proxyOrigin}/#ticket=${grant.ticket}" style="width:100%;height:90vh"></iframe><script>window.events=[];window.addEventListener('message',e=>{if(e.source===document.querySelector('iframe').contentWindow&&e.origin===${JSON.stringify(proxyOrigin)})events.push(e.data)});window.send=(url)=>document.querySelector('iframe').contentWindow.postMessage({protocol:'hermes-proxy-v1',command:{type:'navigate',url}},${JSON.stringify(proxyOrigin)});</script>`
+          `${meta}<iframe id="browser" sandbox="allow-scripts allow-same-origin allow-forms" allow="autoplay; encrypted-media" src="${proxyOrigin}${sameOrigin ? '/browser-proxy/' : '/'}#ticket=${grant.ticket}" style="width:100%;height:90vh"></iframe><script>window.events=[];window.addEventListener('message',e=>{if(e.source===document.querySelector('iframe').contentWindow&&e.origin===${JSON.stringify(proxyOrigin)})events.push(e.data)});window.send=(url)=>document.querySelector('iframe').contentWindow.postMessage({protocol:'hermes-proxy-v1',command:{type:'navigate',url}},${JSON.stringify(proxyOrigin)});</script>`
         )
-      })
+      }
+      const parent = https.createServer(tls, parentHandler)
       const parentPort = await listen(parent),
-        parentOrigin = `https://parent.example.org:${parentPort}`
+        parentOrigin = sameOrigin ? proxyOrigin : `https://parent.example.org:${parentPort}`
       grant = await helper.mint(parentOrigin, false)
       const browser = await chromium.launch({
         headless: true,
@@ -123,10 +128,15 @@ for (const cachedParent of [false, true])
           if (message.type() === 'error') console.log('browser:', message.text().slice(0, 400))
         })
         page.on('pageerror', error => console.log('pageerror:', error.message))
-        await page.goto(parentOrigin)
+        await page.goto(parentOrigin + (sameOrigin ? '/desktop/' : '/'))
         assert.equal(await page.evaluate(() => crossOriginIsolated), false)
         assert.equal(await page.evaluate(() => typeof SharedArrayBuffer), 'undefined')
         await page.waitForFunction(() => events.some(event => event.type === 'ready'), null, { timeout: 30_000 })
+        if (sameOrigin) {
+          const scopes = await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).map(reg => reg.scope))
+          assert.deepEqual(scopes, [proxyOrigin + '/browser-proxy/'])
+          assert.equal(await page.evaluate(() => navigator.serviceWorker.controller), null, 'Proxy SW does not control Desktop')
+        }
         const html =
           '<!doctype html><html><head><title>Native proxy fixture</title></head><body><h1>Native proxy fixture</h1><input aria-label="Phone input"><button id="play">Play</button><p id="fetched">Loading</p><img src="https://httpbin.org/image/png"><audio src="https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3" preload="auto"></audio><script>fetch("https://httpbin.org/anything").then(r=>r.json()).then(v=>document.querySelector("#fetched").textContent=v.method);document.querySelector("#play").onclick=()=>document.querySelector("audio").play();</script></body></html>'
         const fixture = 'https://httpbin.org/base64/' + encodeURIComponent(Buffer.from(html).toString('base64'))
@@ -182,6 +192,13 @@ for (const cachedParent of [false, true])
           .first()
           .waitFor({ timeout: 20_000 })
         const requestsBeforeEscape = parentRequests
+        if (sameOrigin) {
+          grant = await helper.mint(parentOrigin, false)
+          await page.reload()
+          await page.waitForFunction(() => events.some(event => event.type === 'ready'), null, { timeout: 30_000 })
+          assert.equal(page.url(), parentOrigin + '/desktop/', 'Desktop remains outside proxy SW after reload')
+          return
+        }
         // Simulate the worst case: a compromised controller tries to become a
         // same-origin privileged Hermes frame. Parent CSP must reject navigation.
         await page
@@ -204,3 +221,4 @@ for (const cachedParent of [false, true])
       }
     }
   )
+}
