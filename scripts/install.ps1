@@ -2940,6 +2940,11 @@ You are Hermes Agent, an intelligent AI assistant created by Nous Research. You 
 }
 
 function Install-NodeDeps {
+    # Stage drivers refresh PATH between processes. Recover the managed
+    # runtime directly even if the registry PATH has not propagated yet.
+    if (Test-Path "$HermesHome\node\node.exe") {
+        $env:Path = "$HermesHome\node;$env:Path"
+    }
     if (-not $HasNode) {
         # Cross-process driver mode (Hermes-Setup.exe runs each -Stage NAME
         # in a fresh powershell.exe) means $script:HasNode set by Stage-Node
@@ -3022,6 +3027,9 @@ function Install-NodeDeps {
         $cmdLine = "/d /s /c "" ""$exePath"" $argLine > ""$logPath"" 2>&1 """
         $proc = Start-Process -FilePath $env:ComSpec -ArgumentList $cmdLine `
             -WorkingDirectory $workDir -NoNewWindow -PassThru
+        # Windows PowerShell 5.1 can otherwise lose ExitCode for short-lived
+        # children. Retain the handle before polling HasExited.
+        $null = $proc.Handle
         $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSec)
         $shown = 0
         function _Drain-NewLines([string]$path, [ref]$count) {
@@ -3041,6 +3049,7 @@ function Install-NodeDeps {
             Start-Sleep -Milliseconds 750
             _Drain-NewLines $logPath ([ref]$shown)
         }
+        $proc.WaitForExit()
         _Drain-NewLines $logPath ([ref]$shown)
         return $proc.ExitCode
     }
