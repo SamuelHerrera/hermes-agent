@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { registry } from '@/contrib/registry'
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
 import { $previewTabs } from '@/store/preview'
 import { $connection } from '@/store/session'
 
@@ -37,6 +39,7 @@ describe('PreviewPane console state', () => {
   afterEach(() => {
     cleanup()
     clearPreviewWebviewCache()
+    resetHostForTests()
     $connection.set(null)
     $previewTabs.set([])
     vi.unstubAllGlobals()
@@ -176,6 +179,47 @@ describe('PreviewPane console state', () => {
 
     expect(webview?.getAttribute('src')).toBe('https://example.com')
     expect(input.value).toBe('https://example.com')
+  })
+
+  it('proxies browser-host URL tab navigation to the origin backend handler', async () => {
+    const api = vi.fn().mockResolvedValue({ ok: true })
+    installHost({
+      api,
+      capabilities: {} as HermesHost['capabilities'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn(),
+      kind: 'browser'
+    })
+
+    let rendered!: ReturnType<typeof render>
+    await act(async () => {
+      rendered = render(
+        <PreviewPane
+          embedded
+          tabId="url:about:blank"
+          target={{
+            kind: 'url',
+            label: 'New tab',
+            source: 'about:blank',
+            url: 'about:blank'
+          }}
+        />
+      )
+    })
+
+    const input = rendered.getByLabelText('Web address') as HTMLInputElement
+    const webview = rendered.container.querySelector('webview')
+
+    fireEvent.change(input, { target: { value: 'youtube.com' } })
+    fireEvent.submit(input.closest('form')!)
+
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/system/open-external',
+      method: 'POST',
+      body: { url: 'https://youtube.com' }
+    })
+    expect(webview?.getAttribute('src')).toBe('about:blank')
+    expect(input.value).toBe('https://youtube.com')
   })
 
   it('parks and reattaches browser webviews across pane moves without resetting src', async () => {

@@ -10,9 +10,11 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { type Translations, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
 import { guardGuestPointers } from '@/lib/guest-pointer-guard'
+import { openExternalLink } from '@/lib/external-link'
 import { openPreviewTargetInBrowser, remoteHtmlPreviewDocument } from '@/lib/local-preview'
 import { rafCoalesce } from '@/lib/raf-coalesce'
 import { cn } from '@/lib/utils'
+import { hasHostApi } from '@/platform/host-api'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $previewServerRestart,
@@ -352,6 +354,13 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       setCurrentUrl(next)
       setAddressValue(next)
       persistBrowserLocation(next)
+
+      if (!window.hermesDesktop && hasHostApi() && /^https?:/i.test(next)) {
+        openExternalLink(next)
+        setLoading(false)
+
+        return
+      }
 
       if (webview?.loadURL) {
         webview.loadURL(next)
