@@ -16,7 +16,51 @@ test.afterAll(async () => {
   await backend?.cleanup()
 })
 
-test('swiping from the home profile button scrolls without opening its menu, while tapping opens it', async ({ page }) => {
+for (const percent of [75, 100, 125]) {
+  test(`terminal overlay matches its slot and leaves tabs clickable at ${percent}% UI scale`, async ({ page }) => {
+    await page.addInitScript(value => localStorage.setItem('hermes.browser.uiScale.v1', String(value)), percent)
+    await page.goto(`${backend.baseUrl}/desktop/`)
+    await page.getByRole('button', { name: "I'll choose a provider later" }).click()
+    await page.getByRole('button', { name: 'New terminal', exact: true }).click()
+    await expect(page.locator('.xterm:visible').first()).toBeVisible()
+
+    const drift = () =>
+      page.evaluate(() => {
+        const host = [...document.querySelectorAll('[data-persistent-terminal]')].find(
+          element => getComputedStyle(element).visibility === 'visible'
+        )
+
+        if (!host) {
+          return Infinity
+        }
+
+        const id = host.getAttribute('data-persistent-terminal')
+        const slot = document.querySelector(`[data-terminal-slot="${id}"]`)!.getBoundingClientRect()
+        const overlay = host.getBoundingClientRect()
+
+        return Math.max(...(['top', 'left', 'right', 'bottom'] as const).map(key => Math.abs(slot[key] - overlay[key])))
+      })
+
+    await expect.poll(drift).toBeLessThanOrEqual(1.1)
+    // Exercise live scale updates as well as restored scaling.
+    await page.getByRole('button', { name: 'More app actions', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Increase UI scale', exact: true }).click()
+    // Modal menus hide the trigger from the accessibility tree. Dismiss by
+    // clicking outside, rather than routing Escape through xterm's keyboard.
+    await page.mouse.click(550, 800)
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    await expect.poll(drift).toBeLessThanOrEqual(1.1)
+    await page.locator('[data-tree-tab="workspace"]:visible').click()
+    await expect(page.locator('[data-persistent-terminal]:visible')).toHaveCount(0)
+    await page.locator('[data-tree-tab^="terminal-instance:"]:visible').first().click()
+    await expect(page.locator('.xterm:visible').first()).toBeVisible()
+    await expect.poll(drift).toBeLessThanOrEqual(1.1)
+  })
+}
+
+test('swiping from the home profile button scrolls without opening its menu, while tapping opens it', async ({
+  page
+}) => {
   await page.goto(`${backend.baseUrl}/desktop/`)
   await page.getByRole('button', { name: "I'll choose a provider later" }).click()
   const button = page.getByRole('button', { name: 'Profiles', exact: true })
@@ -76,6 +120,7 @@ test('touch tab drag stays held and commits a split over the terminal body', asy
   await expect(page.locator('.xterm:visible').first()).toBeVisible()
   const tab = page.locator('[data-tree-tab^="terminal-instance:"]:visible').first()
   const group = tab.locator('xpath=ancestor::*[@data-tree-group]').first()
+  const paneId = await tab.getAttribute('data-tree-tab')
   const initialGroups = await page.locator('[data-tree-group]:visible').count()
   const source = (await tab.boundingBox())!
   const target = (await group.boundingBox())!
@@ -101,7 +146,7 @@ test('touch tab drag stays held and commits a split over the terminal body', asy
 
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await expect.poll(() => page.locator('[data-tree-group]:visible').count()).toBe(initialGroups + 1)
-  await expect(page.locator('[data-tree-tab^="terminal-instance:"]:visible')).toHaveCount(1)
+  await expect(page.locator(`[data-tree-tab="${paneId}"]:visible`)).toHaveCount(1)
   await expect(page.locator('.xterm:visible').first()).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('touch-terminal-split.png') })
 })

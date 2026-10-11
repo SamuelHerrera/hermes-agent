@@ -133,15 +133,19 @@ export function PersistentTerminalHost({
       // full pixel footprint, so half-pixel rects can't leak page bg through.
       const top = Math.floor(r.top)
       const left = Math.floor(r.left)
+      // DOM rects are viewport pixels, while fixed CSS coordinates inherit
+      // the document's browser UI zoom. Convert back to layout pixels once;
+      // Electron's native zoom leaves document CSS zoom at 1.
+      const zoom = Number.parseFloat(getComputedStyle(document.documentElement).zoom) || 1
 
       // Inactive keep-alive panes deliberately retain the same rect as the
       // foreground pane, so visibility must be sampled independently.
       const next: Rect = {
         hidden: isElementInHiddenPane(slot),
-        top,
-        left,
-        width: Math.ceil(r.right) - left,
-        height: Math.ceil(r.bottom) - top
+        top: top / zoom,
+        left: left / zoom,
+        width: (Math.ceil(r.right) - left) / zoom,
+        height: (Math.ceil(r.bottom) - top) / zoom
       }
 
       if (!sameRect(prev, next)) {
@@ -218,6 +222,7 @@ export function PersistentTerminalHost({
 
       scheduleMeasure('scroll')
     }
+
     const scrollTargets: Array<HTMLElement | Window> = [window]
     window.addEventListener('scroll', handleScroll)
 
