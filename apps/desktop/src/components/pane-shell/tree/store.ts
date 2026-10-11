@@ -6,7 +6,6 @@
 
 import { atom, computed, type ReadableAtom } from 'nanostores'
 
-import { SIDEBAR_COLLAPSE_MEDIA_QUERY } from '@/app/layout-constants'
 import { setPluginEnabled } from '@/contrib/plugins-store'
 import { registry } from '@/contrib/registry'
 import { translateNow } from '@/i18n'
@@ -15,6 +14,7 @@ import { logUatEvent } from '@/lib/uat-diagnostics'
 import { notify } from '@/store/notifications'
 import { clearAllPaneSizeOverrides } from '@/store/panes'
 import { $selectedStoredSessionId, $workspaceEmptyPlaceholder, markSessionRead } from '@/store/session'
+import { $sidebarNarrowViewport } from '@/store/sidebar-viewport'
 import { isSecondaryWindow } from '@/store/windows'
 
 import {
@@ -933,8 +933,7 @@ function shownPanesInGroup(group: { panes: readonly string[] }): string[] {
     // Match TreeGroup's paneShown for the narrow breakpoint — collapsible
     // panes drop out of the strip when the viewport collapses them.
     if (
-      typeof window !== 'undefined' &&
-      window.matchMedia?.(SIDEBAR_COLLAPSE_MEDIA_QUERY).matches &&
+      $sidebarNarrowViewport.get() &&
       Boolean((pane.data as { collapsible?: boolean } | undefined)?.collapsible)
     ) {
       return false
@@ -1439,14 +1438,9 @@ export function revealTreePane(paneId: string) {
  * contribution declares `collapsible: true` leave the grid and become
  * edge overlays (see NarrowOverlays in renderer.tsx).
  */
-// Optional-chained + `typeof window` guarded like every other matchMedia call
-// site: this module is imported by non-DOM code paths (session actions) whose
-// test env has no `window`/`matchMedia` — an unguarded call throws at load.
-const narrowQuery = typeof window !== 'undefined' ? window.matchMedia?.(SIDEBAR_COLLAPSE_MEDIA_QUERY) : undefined
-
-export const $narrowViewport = atom(Boolean(narrowQuery?.matches))
-
-narrowQuery?.addEventListener('change', event => $narrowViewport.set(event.matches))
+// Shared by pane rendering, tab visibility, and titlebar/keybind toggles.
+// Its authority is effective viewport width, including browser CSS UI scale.
+export const $narrowViewport = $sidebarNarrowViewport
 
 /** The titlebar flip toggle (⌘\): mirror the whole layout left↔right. */
 export function mirrorLayoutTree() {

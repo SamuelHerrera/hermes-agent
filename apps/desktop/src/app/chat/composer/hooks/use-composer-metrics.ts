@@ -12,44 +12,6 @@ import { useResizeObserver } from '@/hooks/use-resize-observer'
 
 import { COMPOSER_COMPACT_PILL_PX, COMPOSER_SINGLE_LINE_MAX_PX, COMPOSER_STACK_BREAKPOINT_PX } from '../composer-utils'
 
-interface ComposerExpansionInput {
-  composerWidth: number
-  editorScrollHeight: number
-  expanded: boolean
-  hasHardNewline: boolean
-  isEmpty: boolean
-}
-
-export function nextComposerExpanded({
-  composerWidth,
-  editorScrollHeight,
-  expanded,
-  hasHardNewline,
-  isEmpty
-}: ComposerExpansionInput): boolean {
-  if (isEmpty) {
-    return false
-  }
-
-  if (hasHardNewline) {
-    return true
-  }
-
-  if (editorScrollHeight > COMPOSER_SINGLE_LINE_MAX_PX) {
-    return true
-  }
-
-  // When a phone-sized/web zoomed view widens (landscape, zoomed out, split
-  // pane expanded), the editor may fit back on one line. Let the controls return
-  // to the inline row once the composer is past the progressive-collapse width;
-  // below that, keep the stacked row so the CTA does not crowd the input.
-  if (expanded && composerWidth >= COMPOSER_COMPACT_PILL_PX) {
-    return false
-  }
-
-  return expanded
-}
-
 interface UseComposerMetricsArgs {
   composerDockRef: RefObject<HTMLDivElement | null>
   composerRef: RefObject<HTMLFormElement | null>
@@ -124,16 +86,10 @@ export function useComposerMetrics({
   const lastBucketedSurfaceHeightRef = useRef(0)
   const lastTightRef = useRef<boolean | null>(null)
   const lastCompactPillRef = useRef<boolean | null>(null)
-  const expandedRef = useRef(expanded)
-  const hasHardNewlineRef = useRef(hasHardNewline)
-  const isEmptyRef = useRef(isEmpty)
   // Mirrored into a ref so `syncComposerMetrics` stays referentially stable —
   // it's the shared ResizeObserver's handler, and a new identity every render
   // would re-register the observation.
   const poppedOutRef = useRef(poppedOut)
-  expandedRef.current = expanded
-  hasHardNewlineRef.current = hasHardNewline
-  isEmptyRef.current = isEmpty
   poppedOutRef.current = poppedOut
 
   const syncComposerMetrics = useCallback(() => {
@@ -180,26 +136,16 @@ export function useComposerMetrics({
       }
     }
 
-    // Expand once the input has actually wrapped past a single line, and undo
-    // that expansion when the same draft fits again after the composer widens
-    // enough (Android landscape / zoomed-out browser views). The observer only
-    // fires on real size changes, so this reads scrollHeight at most once per
-    // wrap/resize rather than per keystroke.
+    // Expand once the input has actually wrapped past a single line. The
+    // observer only fires on real size changes, so this reads scrollHeight at
+    // most once per wrap (not per keystroke). One line ≈ 28px (1.625rem
+    // min-height + padding); a second line clears ~36px. We only ever expand
+    // here — collapse is handled by the emptied-draft effect to avoid
+    // oscillating across the wrap boundary as the input switches widths.
     const editor = editorRef.current
 
-    if (editor) {
-      const nextExpanded = nextComposerExpanded({
-        composerWidth: width,
-        editorScrollHeight: editor.scrollHeight,
-        expanded: expandedRef.current,
-        hasHardNewline: hasHardNewlineRef.current,
-        isEmpty: isEmptyRef.current
-      })
-
-      if (nextExpanded !== expandedRef.current) {
-        expandedRef.current = nextExpanded
-        setExpanded(nextExpanded)
-      }
+    if (editor && editor.scrollHeight > COMPOSER_SINGLE_LINE_MAX_PX) {
+      setExpanded(true)
     }
 
     if (height > 0) {
