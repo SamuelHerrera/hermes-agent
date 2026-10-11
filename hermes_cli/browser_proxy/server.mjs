@@ -9,8 +9,6 @@ import { once } from 'node:events'
 import { WebSocketServer } from 'ws'
 import { server as wisp, logging } from '@mercuryworkshop/wisp-js/server'
 import { scramjetPath } from '@mercuryworkshop/scramjet/path'
-import { baremuxPath } from '@mercuryworkshop/bare-mux/node'
-import { libcurlPath } from '@mercuryworkshop/libcurl-transport'
 import { TargetPolicy } from './security.mjs'
 import { getDomain } from 'tldts'
 
@@ -114,7 +112,7 @@ export async function createProxy(config) {
     )
     res.setHeader(
       'Content-Security-Policy',
-      `default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self' ${ancestors}`
+      `default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' data:; frame-src 'self'; worker-src 'self' blob:; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self' ${ancestors}`
     )
     if (!validHost(req)) return respond(res, 403, { error: 'Host rejected' })
     try {
@@ -158,7 +156,12 @@ export async function createProxy(config) {
         return respond(res, 200, { ok: true })
       }
       if (req.method !== 'GET') return respond(res, 405, { error: 'Method rejected' })
-      const roots = { '/assets/scram/': scramjetPath, '/assets/baremux/': baremuxPath, '/assets/libcurl/': libcurlPath }
+      const roots = {
+        '/assets/scram/': scramjetPath,
+        '/assets/controller/': path.dirname(fileURLToPath(import.meta.resolve('@mercuryworkshop/scramjet-controller'))),
+        '/assets/utils/': path.dirname(fileURLToPath(import.meta.resolve('@mercuryworkshop/scramjet-utils'))),
+        '/assets/libcurl/': path.dirname(fileURLToPath(import.meta.resolve('@mercuryworkshop/libcurl-transport')))
+      }
       let root = publicPath,
         suffix = url.pathname === '/' ? 'index.html' : url.pathname.slice(1)
       for (const [prefix, dir] of Object.entries(roots))
@@ -170,7 +173,7 @@ export async function createProxy(config) {
       const filename = path.resolve(root, suffix)
       if (!filename.startsWith(path.resolve(root) + path.sep)) return respond(res, 403, { error: 'Path rejected' })
       const bytes = await readFile(filename)
-      if (url.pathname === '/sw.js') res.setHeader('Service-Worker-Allowed', '/service/')
+      if (url.pathname === '/sw.js') res.setHeader('Service-Worker-Allowed', '/')
       return respond(res, 200, bytes, mime[path.extname(filename)] || 'application/octet-stream')
     } catch {
       return respond(res, 404, { error: 'Unavailable' })

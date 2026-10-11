@@ -9,9 +9,10 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@mercuryworkshop/bare-mux": "2.1.9",
-    "@mercuryworkshop/libcurl-transport": "1.5.2",
-    "@mercuryworkshop/scramjet": "https://github.com/MercuryWorkshop/scramjet/releases/download/v1.1.0/mercuryworkshop-scramjet-1.1.0.tgz",
+    "@mercuryworkshop/libcurl-transport": "2.0.5",
+    "@mercuryworkshop/scramjet": "2.0.67-alpha.2",
+    "@mercuryworkshop/scramjet-controller": "0.0.14",
+    "@mercuryworkshop/scramjet-utils": "0.0.3",
     "@mercuryworkshop/wisp-js": "0.5.0",
     "ipaddr.js": "2.2.0",
     "tldts": "7.4.4",
