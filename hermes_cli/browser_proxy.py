@@ -1,13 +1,48 @@
 """Optional isolated Scramjet helper. No browser process runs on the backend."""
 import asyncio
+import hashlib
 import ipaddress
 import json
 import logging
 import os
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
 _log = logging.getLogger(__name__)
+
+
+def install_dependencies(root=None):
+    """Install the bundled proxy during installation/update, never during browsing."""
+    from hermes_constants import find_node_executable, with_hermes_node_path
+    root = Path(root) if root is not None else Path(__file__).with_name('browser_proxy')
+    dependencies = json.loads((root / 'package.json').read_text())['dependencies']
+    fingerprint = hashlib.sha256(
+        (root / 'package.json').read_bytes() + (root / 'package-lock.json').read_bytes()
+    ).hexdigest()
+    stamp = root / 'node_modules' / '.hermes-proxy-lock.sha256'
+    try:
+        ready = all(
+            json.loads((root / 'node_modules' / name / 'package.json').read_text()).get('version') == version
+            for name, version in dependencies.items()
+        )
+        if ready and stamp.read_text() == fingerprint:
+            return False
+    except (OSError, ValueError):
+        pass
+    npm = find_node_executable('npm')
+    if not npm:
+        raise RuntimeError('Browser proxy installation requires npm; re-run the Hermes installer to provision Node.')
+    from hermes_cli._subprocess_compat import windows_hide_flags
+    result = subprocess.run(
+        [npm, 'ci', '--ignore-scripts', '--workspaces=false', '--no-fund', '--no-audit'],
+        cwd=root, timeout=600, env=with_hermes_node_path(), creationflags=windows_hide_flags(),
+    )
+    if result.returncode:
+        raise RuntimeError('Browser proxy dependency installation failed; re-run the installer or hermes update.')
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(fingerprint)
+    return True
 
 
 def _origin(value):
@@ -79,7 +114,7 @@ class BrowserProxy:
         node = await asyncio.to_thread(find_node_executable, 'node')
         root = Path(__file__).with_name('browser_proxy')
         if not node or not (root / 'node_modules' / '@mercuryworkshop' / 'scramjet').exists():
-            raise RuntimeError('Optional browser proxy dependencies missing. Install Node 22.22+ and run npm ci --ignore-scripts --workspaces=false in hermes_cli/browser_proxy')
+            raise RuntimeError('Browser proxy dependencies missing. Re-run the Hermes installer or hermes update (npm ci --ignore-scripts --workspaces=false).')
         self.process = await asyncio.create_subprocess_exec(
             node, str(root / 'server.mjs'), cwd=str(root),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
@@ -150,3 +185,15 @@ async def recover_proxy(app):
             await proxy.start(desktop)
     except Exception as error:
         _log.warning('Optional browser proxy unavailable: %s', error)
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Install bundled Hermes browser proxy dependencies')
+    parser.add_argument('--install', action='store_true', required=True)
+    parser.parse_args()
+    try:
+        installed = install_dependencies()
+        print('Browser proxy dependencies installed' if installed else 'Browser proxy dependencies already current')
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        parser.exit(1, f'{error}\n')

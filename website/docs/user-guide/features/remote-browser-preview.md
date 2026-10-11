@@ -11,26 +11,23 @@ transport. Touch input, text editing and audio playback are native to the phone
 browser. The backend runs a small Node transport helper, not Chromium, Playwright
 or a screenshot stream. Native Electron still uses its existing webview.
 
-The helper also includes a dedicated Worker/MessagePort adapter for browsers
-without native SharedWorker, including older Android Chrome. Its proxy-only
-broker validates origin and direct child source; it imports the declared bare-mux
-worker distribution and has no Hermes authority. Native SharedWorker is untouched
-when available.
+The Scramjet 2 controller uses MessagePorts without requiring SharedWorker,
+SharedArrayBuffer or a cross-origin-isolated parent. Unsupported SharedWorker
+interception is skipped without inventing a browser API.
 
-## Install the optional helper
+## Included with installation
 
-Use Node 22.22 or newer. From the Hermes installation's source directory:
+The standard macOS/Linux installer and Windows installer install the proxy's
+locked npm dependencies as part of backend setup. This also applies to the
+Desktop installer's staged backend setup. No separate npm command is needed.
+`hermes update` installs or refreshes these dependencies for existing installs,
+independently of the main workspace lockfile. Successful repeated installations
+reuse matching dependencies; failed installs are not recorded as successful.
 
-```bash
-cd hermes_cli/browser_proxy
-npm ci --ignore-scripts --workspaces=false
-```
-
-This directory declares exact versions and a separate lockfile. Scramjet 1.1.0
-uses the upstream release tarball, because that is the distribution used by the
-upstream demo. The transport dependencies are bare-mux 2.1.9, libcurl-transport
-1.5.2 and wisp-js 0.5.0. No third-party source is copied into Hermes. The pinned
-libcurl release works without SharedArrayBuffer or cross-origin isolation.
+The helper uses Hermes-managed Node (22.22 or newer) and a separate lockfile with
+exact dependency versions. Installation uses `npm ci --ignore-scripts` and never
+downloads a browser for the proxy. Scramjet 2's alpha distribution is pinned;
+upgrades are explicit, not automatic tracking of the npm alpha tag.
 
 The helper starts automatically when a proxy origin is configured. Hermes uses
 its managed Node resolver. Missing Node or dependencies leave chat and the API
@@ -106,7 +103,8 @@ Origin. Desktop accepts state only from that exact iframe window and proxy
 Origin. Neither side interprets incoming HTML or executes messages as code.
 Proxy response CSP blocks native network/form/frame escapes to Hermes. The
 service worker reapplies that policy after Scramjet rewrites upstream headers.
-The service worker controls only `/service/`, not the controller or bootstrap.
+The service worker is registered on the isolated proxy origin and routes only
+Scramjet requests; controller and bootstrap requests are not target traffic.
 
 **Preserve the parent Desktop CSP.** While this feature is configured,
 `/desktop/` responses permit frames only on the isolated proxy origin or opaque
@@ -123,7 +121,7 @@ browser cross-site API/WebSocket traffic, including requests without Origin.
 ## Compatibility and verification
 
 The client needs service workers, dedicated Workers, IndexedDB and WebAssembly.
-Native SharedWorker is optional because of the mobile adapter. Browser/site
+Native SharedWorker is optional. Browser/site
 compatibility, DRM,
 upstream bot protection and account sign-in remain site-specific. Successful
 native audio playback does not establish YouTube Music account or DRM playback.
@@ -145,7 +143,7 @@ node --test test/browser.integration.mjs
 The browser integration test uses separate HTTPS sites, an ordinary non-isolated
 parent, normal browser storage partitioning and deliberately stripped proxy
 cookies. Its cached-parent case also disables native SharedWorker to exercise the
-mobile dedicated-Worker adapter. It exercises a real Scramjet service worker and
+mobile compatibility path. It exercises a real Scramjet service worker and
 Wisp transport, redirect,
 script fetch, image decoding, native input and advancing audio playback. It also
 verifies private target rejection and blocks controller navigation back into the

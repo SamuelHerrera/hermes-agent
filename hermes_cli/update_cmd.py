@@ -2159,7 +2159,12 @@ def _update_node_dependencies() -> list[str]:
                 for workspace in ("ui-tui", "web")
             ):
                 failed.append("ui-tui, web workspaces")
+            if (_m().PROJECT_ROOT / 'hermes_cli' / 'browser_proxy' / 'package.json').exists():
+                failed.append('browser proxy')
             return failed
+        if (_m().PROJECT_ROOT / 'hermes_cli' / 'browser_proxy' / 'package.json').exists():
+            print('  ⚠ Bundled browser proxy requires npm; re-run the Hermes installer to provision Node.')
+            return ['browser proxy']
         return []
 
     from hermes_constants import get_default_hermes_root
@@ -2168,6 +2173,19 @@ def _update_node_dependencies() -> list[str]:
     # Hermes profile using this checkout. Keep one per-checkout cache under the
     # shared Hermes root rather than rerunning npm once per named profile.
     shared_hermes_root = get_default_hermes_root()
+
+    # The proxy has its own locked dependency tree; refresh it even when the
+    # workspace lockfile is unchanged. Existing installs gain it on update.
+    proxy_failures = []
+    if (_m().PROJECT_ROOT / 'hermes_cli' / 'browser_proxy' / 'package.json').exists():
+        from hermes_cli.browser_proxy import install_dependencies
+        try:
+            installed = install_dependencies(_m().PROJECT_ROOT / 'hermes_cli' / 'browser_proxy')
+            if installed:
+                print('  ✓ Bundled browser proxy dependencies installed')
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            print(f'  ⚠ Browser proxy installation failed: {error}')
+            proxy_failures.append('browser proxy')
 
     # Best-effort: warm npx's cache for agent-browser (#43564). Runs before
     # the lockfile-unchanged early return below since that's the common
@@ -2182,7 +2200,7 @@ def _update_node_dependencies() -> list[str]:
 
     if not _m()._npm_lockfile_changed(shared_hermes_root):
         logger.info("npm lockfile unchanged, skipping npm install")
-        return []
+        return proxy_failures
 
     # Root package.json has no dependencies of its own (agent-browser and
     # @streamdown/math were moved out — see #43564): agent-browser resolves
@@ -2242,7 +2260,7 @@ def _update_node_dependencies() -> list[str]:
             print(f"    {stderr.splitlines()[-1]}")
         failures = _partial_update_failure("ui-tui, web workspaces")
 
-    return failures
+    return proxy_failures + failures
 
 def _log_only_write(text: str) -> None:
     """Write ``text`` to ``~/.hermes/logs/update.log`` only, never the terminal.

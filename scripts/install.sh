@@ -2315,6 +2315,14 @@ install_node_deps() {
         fi
         log_success "Node.js dependencies installed"
 
+        # The PWA proxy is a bundled backend capability, independent of the
+        # Playwright browser tools (including --skip-browser installs).
+        log_info "Installing bundled PWA browser proxy..."
+        if ! run_with_timeout "$NODE_DEPS_TIMEOUT" "$INSTALL_DIR/venv/bin/python" -m hermes_cli.browser_proxy --install; then
+            log_error "Bundled browser proxy installation failed"
+            return 1
+        fi
+
         # Install Playwright browser + system dependencies.
         # Playwright's --with-deps only supports apt-based systems natively.
         # For Arch/Manjaro we install the system libs via pacman first.

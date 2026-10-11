@@ -3107,6 +3107,18 @@ function Install-NodeDeps {
         }
     }
 
+    # The PWA proxy is installed with the backend, not as an optional manual npm step.
+    if ($NoVenv) { Resolve-UvCmd }
+    $proxyPython = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $proxyLog = "$env:TEMP\hermes-browser-proxy-install-$(Get-Random).log"
+    Write-Info "Installing bundled PWA browser proxy..."
+    $proxyCode = _Invoke-NativeWithTimeout $proxyPython "-m hermes_cli.browser_proxy --install" `
+        $InstallDir $proxyLog $nodeDepsTimeoutSec
+    if ($proxyCode -ne 0) {
+        throw "Bundled browser proxy installation failed (exit $proxyCode). Log: $proxyLog"
+    }
+    Remove-Item -Force $proxyLog -ErrorAction SilentlyContinue
+
     # Browser tools
     if (Test-Path "$InstallDir\package.json") {
         Write-Info "Installing Node.js dependencies (browser tools)..."

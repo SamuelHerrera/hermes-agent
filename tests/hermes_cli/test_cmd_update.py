@@ -224,7 +224,9 @@ class TestCmdUpdateBranchFallback:
             hm,
             "_get_origin_url",
             return_value="https://github.com/example/hermes-agent.git",
-        ), patch.object(hm, "_sync_with_upstream_if_needed") as sync_mock:
+        ), patch.object(hm, "_sync_with_upstream_if_needed") as sync_mock, patch(
+            "hermes_cli.update_cmd._update_node_dependencies", return_value=[]
+        ):
             cmd_update(mock_args)
 
         expected_git_cmd = (
