@@ -15,7 +15,7 @@ self.addEventListener('fetch', event => {
       // Scramjet removes upstream CSP while rewriting. Put our boundary back on
       // the final response, including redirects, nested pages and worker scripts.
       headers.set('Content-Security-Policy', policy)
-      headers.set('Referrer-Policy', 'no-referrer')
+      headers.set('Referrer-Policy', 'same-origin')
       headers.set('X-Content-Type-Options', 'nosniff')
       let body = response.body
       if (event.request.mode === 'navigate' && headers.get('Content-Type')?.includes('text/html')) {

@@ -53,7 +53,9 @@
     // No popups, top navigation, downloads, or access to the Hermes origin.
     frame.frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms')
     frame.frame.setAttribute('allow', 'autoplay; encrypted-media')
-    frame.frame.referrerPolicy = 'no-referrer'
+    // Scramjet needs its own controller as the referrer to distinguish this
+    // logical browser tab from a site's nested frames. Never send it cross-origin.
+    frame.frame.referrerPolicy = 'same-origin'
     document.getElementById('error').remove()
     document.body.appendChild(frame.frame)
     const state = () => {

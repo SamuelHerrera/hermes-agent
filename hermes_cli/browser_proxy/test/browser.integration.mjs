@@ -131,8 +131,12 @@ for (const cachedParent of [false, true])
           '<!doctype html><html><head><title>Native proxy fixture</title></head><body><h1>Native proxy fixture</h1><input aria-label="Phone input"><button id="play">Play</button><p id="fetched">Loading</p><img src="https://httpbin.org/image/png"><audio src="https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3" preload="auto"></audio><script>fetch("https://httpbin.org/anything").then(r=>r.json()).then(v=>document.querySelector("#fetched").textContent=v.method);document.querySelector("#play").onclick=()=>document.querySelector("audio").play();</script></body></html>'
         const fixture = 'https://httpbin.org/base64/' + encodeURIComponent(Buffer.from(html).toString('base64'))
         const redirect = 'https://httpbin.org/redirect-to?url=' + encodeURIComponent(fixture)
-        await page.evaluate(url => send(url), redirect)
         const site = page.frameLocator('#browser').frameLocator('iframe')
+        await page.evaluate(() => send('https://httpbin.org/anything'))
+        await site.locator('body').getByText(/"headers"/).waitFor({ timeout: 40_000 })
+        const navigation = JSON.parse(await site.locator('body').innerText())
+        assert.equal(navigation.headers['Sec-Fetch-Dest'], 'document', 'Browser tab is a logical top-level page')
+        await page.evaluate(url => send(url), redirect)
         await site.getByRole('heading', { name: 'Native proxy fixture' }).waitFor({ timeout: 40_000 })
         await site.getByText('GET', { exact: true }).waitFor({ timeout: 20_000 })
         await site.getByRole('textbox', { name: 'Phone input' }).fill('client native input')
@@ -154,6 +158,17 @@ for (const cachedParent of [false, true])
           'Native browser media playback advances'
         )
         console.log('REAL_PROXY_RENDER_MEDIA_INPUT_REDIRECT_PASS', await site.locator('body').innerText())
+        await site.locator('body').evaluate(body => {
+          const link = document.createElement('a')
+          link.href = 'https://httpbin.org/anything'
+          link.textContent = 'Navigate within the browser tab'
+          body.append(link)
+        })
+        await site.getByRole('link', { name: 'Navigate within the browser tab' }).click()
+        await site.locator('body').getByText(/"headers"/).waitFor({ timeout: 40_000 })
+        const linkedNavigation = JSON.parse(await site.locator('body').innerText())
+        assert.equal(linkedNavigation.headers['Sec-Fetch-Dest'], 'document', 'In-page links remain top-level navigations')
+        assert.ok(!JSON.stringify(linkedNavigation.headers).includes(grant.ticket), 'Bootstrap capability never reaches targets')
         assert.equal(
           (await context.cookies()).some(cookie => cookie.name === '__Host-HermesProxy'),
           false
