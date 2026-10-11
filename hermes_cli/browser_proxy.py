@@ -41,6 +41,19 @@ def validate_bind(value):
     return str(ip)
 
 
+def validate_denied_hosts(value):
+    # `hermes config set` stores JSON arrays as strings. Normalize that
+    # supported CLI input before the helper iterates DNS hostnames.
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError as error:
+            raise ValueError('Browser proxy denied hosts must be a JSON list of hostnames') from error
+    if not isinstance(value, list) or any(not isinstance(host, str) or not host.strip() for host in value):
+        raise ValueError('Browser proxy denied hosts must be a list of hostnames')
+    return value
+
+
 class BrowserProxy:
     def __init__(self):
         self.process = None
@@ -58,7 +71,7 @@ class BrowserProxy:
         if not 0 <= port <= 65535:
             raise ValueError('Invalid browser proxy port')
         config = {'origin': origin, 'port': port, 'listenHost': bind,
-                  'deniedHosts': desktop.get('browser_proxy_denied_hosts', [])}
+                  'deniedHosts': validate_denied_hosts(desktop.get('browser_proxy_denied_hosts', []))}
         if self.process and self.process.returncode is None and self.config == config:
             return
         await self.stop()

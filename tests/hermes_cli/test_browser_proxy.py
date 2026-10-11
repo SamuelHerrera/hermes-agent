@@ -1,6 +1,15 @@
 import pytest
 
 
+def test_denied_hosts_accepts_cli_json_without_iterating_characters():
+    from hermes_cli.browser_proxy import validate_denied_hosts
+    assert validate_denied_hosts('["hypeer.space"]') == ['hypeer.space']
+    assert validate_denied_hosts(['hypeer.space']) == ['hypeer.space']
+    for value in ['hypeer.space', 'null', '{}', '[1]', [''], None]:
+        with pytest.raises(ValueError):
+            validate_denied_hosts(value)
+
+
 def test_proxy_requires_distinct_https_origin():
     from hermes_cli.browser_proxy import validate_origins
     assert validate_origins('https://proxy.example.net', 'https://hermes.example.org') == 'https://proxy.example.net'
