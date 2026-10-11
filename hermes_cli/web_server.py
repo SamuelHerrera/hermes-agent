@@ -16535,6 +16535,27 @@ async def console_ws(ws: WebSocket) -> None:
                 pass
 
 
+@app.websocket("/api/remote-browser")
+async def remote_browser_ws(ws: WebSocket) -> None:
+    # Same credential, single-use ticket, origin and peer gates as terminals.
+    if _ws_auth_reason(ws)[0] is not None:
+        await ws.close(code=4401, reason="Browser authentication required")
+        return
+    if _ws_host_origin_reason(ws) is not None:
+        await ws.close(code=4403, reason="Browser host/origin rejected")
+        return
+    if _ws_client_reason(ws) is not None:
+        await ws.close(code=4408, reason="Browser peer rejected")
+        return
+    try:
+        _resolve_profile_dir(ws.query_params.get("profile") or "default")
+    except HTTPException:
+        await ws.close(code=4400, reason="Browser owner unavailable")
+        return
+    from hermes_cli.remote_browser import serve_remote_browser
+    await serve_remote_browser(ws)
+
+
 @app.websocket("/api/persistent-terminal")
 async def persistent_terminal_ws(ws: WebSocket) -> None:
     if _ws_auth_reason(ws)[0] is not None:

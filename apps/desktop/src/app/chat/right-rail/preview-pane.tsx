@@ -10,11 +10,10 @@ import { useContributions } from '@/contrib/react/use-contributions'
 import { type Translations, useI18n } from '@/i18n'
 import { isDesktopFsRemoteMode } from '@/lib/desktop-fs'
 import { guardGuestPointers } from '@/lib/guest-pointer-guard'
-import { openExternalLink } from '@/lib/external-link'
 import { openPreviewTargetInBrowser, remoteHtmlPreviewDocument } from '@/lib/local-preview'
 import { rafCoalesce } from '@/lib/raf-coalesce'
 import { cn } from '@/lib/utils'
-import { hasHostApi } from '@/platform/host-api'
+import { tryResolveHost } from '@/platform/host'
 import { notify, notifyError } from '@/store/notifications'
 import {
   $previewServerRestart,
@@ -38,6 +37,7 @@ import { isPreviewRendererContribution, PREVIEW_RENDERERS_AREA } from './preview
 import { LocalFilePreview, PreviewEmptyState } from './preview-file'
 import { registerPreviewPageReader } from './preview-reader'
 import { previewConsoleState } from './preview-strip-tools'
+import { type RemoteBrowserHandle, RemoteBrowserViewport } from './remote-browser-viewport'
 
 type PreviewWebview = HTMLElement & {
   canGoBack?: () => boolean
@@ -82,7 +82,8 @@ function parkingLot(): HTMLDivElement | null {
   if (!previewWebviewParkingLot) {
     previewWebviewParkingLot = document.createElement('div')
     previewWebviewParkingLot.setAttribute('data-preview-webview-parking-lot', '')
-    previewWebviewParkingLot.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;opacity:0;'
+    previewWebviewParkingLot.style.cssText =
+      'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none;opacity:0;'
     document.body.appendChild(previewWebviewParkingLot)
   }
 
@@ -269,6 +270,8 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
   const previewServerRestart = useStore($previewServerRestart)
   const consoleHeight = useStore(consoleState.$height)
   const consoleOpen = useStore(consoleState.$open)
+  const remoteBrowserRef = useRef<RemoteBrowserHandle>(null)
+  const isBrowserHost = tryResolveHost()?.kind === 'browser'
   const [currentUrl, setCurrentUrl] = useState(target.url)
   const currentUrlRef = useRef(target.url)
   const [addressValue, setAddressValue] = useState(target.url)
@@ -355,9 +358,9 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       setAddressValue(next)
       persistBrowserLocation(next)
 
-      if (!window.hermesDesktop && hasHostApi() && /^https?:/i.test(next)) {
-        openExternalLink(next)
-        setLoading(false)
+      if (isBrowserHost) {
+        setLoading(true)
+        remoteBrowserRef.current?.send({ type: 'navigate', url: next })
 
         return
       }
@@ -368,11 +371,17 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
         webview?.setAttribute('src', next)
       }
     },
-    [persistBrowserLocation]
+    [isBrowserHost, persistBrowserLocation]
   )
 
   const navigateBrowserHistory = useCallback(
     (offset: -1 | 1) => {
+      if (isBrowserHost) {
+        remoteBrowserRef.current?.send({ type: offset < 0 ? 'back' : 'forward' })
+
+        return
+      }
+
       const webview = webviewRef.current
 
       if (offset < 0 && webview?.canGoBack?.()) {
@@ -405,7 +414,7 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
         webview?.setAttribute('src', next.url)
       }
     },
-    [persistBrowserLocation, tabId, target]
+    [isBrowserHost, persistBrowserLocation, tabId, target]
   )
 
   const startConsoleResize = useCallback(
@@ -475,12 +484,18 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
       return
     }
 
+    if (isBrowserHost) {
+      remoteBrowserRef.current?.send({ type: 'reload' })
+
+      return
+    }
+
     if (webviewRef.current?.reloadIgnoringCache) {
       webviewRef.current.reloadIgnoringCache()
     } else {
       webviewRef.current?.reload?.()
     }
-  }, [isWebPreview])
+  }, [isBrowserHost, isWebPreview])
 
   const appendConsoleEntry = useCallback(
     (entry: Omit<ConsoleEntry, 'id'>) => {
@@ -775,6 +790,11 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
 
     setLoading(!parked)
 
+    if (isBrowserHost && isWebPreview && !isRemoteHtml) {
+      // The remote transport reports loading/ready; no native guest is created.
+      return
+    }
+
     if (!isWebPreview || isRemoteHtml) {
       setLoading(false)
 
@@ -928,7 +948,17 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
         }
       }
     }
-  }, [appendConsoleEntry, consoleState, copy, isRemoteHtml, isWebPreview, persistBrowserLocation, tabId, target.kind])
+  }, [
+    appendConsoleEntry,
+    consoleState,
+    copy,
+    isBrowserHost,
+    isRemoteHtml,
+    isWebPreview,
+    persistBrowserLocation,
+    tabId,
+    target.kind
+  ])
 
   return (
     <aside className="relative flex h-full w-full min-w-0 flex-col overflow-hidden bg-transparent text-muted-foreground">
@@ -962,7 +992,13 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
                 <button
                   aria-label={loading ? 'Stop loading' : 'Reload'}
                   className="grid size-6 shrink-0 place-items-center rounded text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={() => (loading ? webviewRef.current?.stop?.() : reloadPreview())}
+                  onClick={() =>
+                    loading
+                      ? isBrowserHost
+                        ? remoteBrowserRef.current?.send({ type: 'stop' })
+                        : webviewRef.current?.stop?.()
+                      : reloadPreview()
+                  }
                   type="button"
                 >
                   {loading ? '×' : '↻'}
@@ -1042,6 +1078,26 @@ export function PreviewPane({ embedded = false, onRestartServer, reloadRequest =
             )}
             ref={hostRef}
           />
+          {isBrowserHost && isWebPreview && !isRemoteHtml && (
+            <RemoteBrowserViewport
+              initialUrl={currentUrl}
+              onState={state => {
+                if (typeof state.loading === 'boolean') {
+                  setLoading(state.loading)
+                }
+
+                if (state.url) {
+                  if (currentUrlRef.current !== state.url) {
+                    setCurrentUrl(state.url)
+                    setAddressValue(state.url)
+                  }
+
+                  persistBrowserLocation(state.url, { title: state.title })
+                }
+              }}
+              ref={remoteBrowserRef}
+            />
+          )}
           {isRemoteHtml && (
             <iframe
               className="absolute inset-0 size-full border-0 bg-white"
