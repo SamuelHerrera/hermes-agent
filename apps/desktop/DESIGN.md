@@ -182,6 +182,16 @@ Notes:
 - **No dividers between rows** unless the list genuinely needs them; prefer
   spacing. When you do need one, it's a single `--ui-stroke-tertiary` hairline.
 
+### Touch tab targets
+
+Horizontal `PaneTabStrip` tabs, their close buttons and `PaneStripGlyph` tools,
+plus shared `TextTab` / Radix tab triggers use a 48px minimum on coarse-pointer
+devices, including wide viewports. Browser CSS zoom-out is compensated through
+`--browser-ui-scale` so a 75% setting cannot shrink the hit target below 48px.
+Closeable horizontal tabs reserve a separate activation area beside the close
+button. Mouse-only desktop and collapsed vertical rails retain compact geometry;
+tab strips remain horizontally scrollable.
+
 ## Feedback & empty/error/loading states
 
 - **Loading:** `Loader` (`src/components/ui/loader.tsx`) — animated math/ascii
