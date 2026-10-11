@@ -181,13 +181,31 @@ describe('PreviewPane console state', () => {
     expect(input.value).toBe('https://example.com')
   })
 
-  it('proxies browser-host URL tab navigation to the origin backend handler', async () => {
+  it('renders an interactive backend viewport instead of an OS handoff', async () => {
+    class Socket extends EventTarget {
+      static instances: Socket[] = []
+      readyState = 1
+      send = vi.fn()
+      close = vi.fn()
+      constructor(public url: string) {
+        super()
+        Socket.instances.push(this)
+      }
+    }
+    vi.stubGlobal('WebSocket', Socket)
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      }
+    )
     const api = vi.fn().mockResolvedValue({ ok: true })
     installHost({
       api,
       capabilities: {} as HermesHost['capabilities'],
       getConnection: vi.fn(),
-      getGatewayWsUrl: vi.fn(),
+      getGatewayWsUrl: vi.fn(async () => 'wss://backend.test/prefix/api/ws?ticket=fresh'),
       kind: 'browser'
     })
 
@@ -213,12 +231,17 @@ describe('PreviewPane console state', () => {
     fireEvent.change(input, { target: { value: 'youtube.com' } })
     fireEvent.submit(input.closest('form')!)
 
-    expect(api).toHaveBeenCalledWith({
-      path: '/api/system/open-external',
-      method: 'POST',
-      body: { url: 'https://youtube.com' }
-    })
-    expect(webview?.getAttribute('src')).toBe('about:blank')
+    await waitFor(() => expect(Socket.instances).toHaveLength(1))
+    const socket = Socket.instances[0]
+    act(() =>
+      socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'ready', protocol: 1 }) }))
+    )
+    fireEvent.submit(input.closest('form')!)
+    expect(socket.url).toBe('wss://backend.test/prefix/api/remote-browser?ticket=fresh')
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'navigate', url: 'https://youtube.com' }))
+    expect(api).not.toHaveBeenCalled()
+    expect(webview).toBeNull()
+    expect(rendered.getByLabelText('Remote browser viewport')).toBeTruthy()
     expect(input.value).toBe('https://youtube.com')
   })
 
@@ -248,7 +271,9 @@ describe('PreviewPane console state', () => {
         urlReads += 1
 
         if (urlReads > 1) {
-          throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.')
+          throw new Error(
+            'The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.'
+          )
         }
 
         return 'https://music.youtube.com/watch?v=playing'
@@ -260,7 +285,9 @@ describe('PreviewPane console state', () => {
 
     let second!: ReturnType<typeof render>
     await act(async () => {
-      second = render(<PreviewPane embedded tabId={tabId} target={{ ...target, url: 'https://music.youtube.com/watch?v=playing' }} />)
+      second = render(
+        <PreviewPane embedded tabId={tabId} target={{ ...target, url: 'https://music.youtube.com/watch?v=playing' }} />
+      )
     })
 
     const reattached = second.container.querySelector('webview')

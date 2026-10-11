@@ -116,7 +116,8 @@ describe('external link helpers', () => {
     expect(openExternal).toHaveBeenCalledWith('https://example.com/path/to/resource')
   })
 
-  it('proxies browser-served link opens to the origin backend', () => {
+  it('keeps explicit external links browser-owned in the PWA', () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
     const api = vi.fn().mockResolvedValue({ ok: true })
     installHost({
       api,
@@ -129,11 +130,8 @@ describe('external link helpers', () => {
     render(<ExternalLink href="https://example.com/path/to/resource">Example link</ExternalLink>)
 
     fireEvent.click(screen.getByRole('link', { name: 'Example link' }))
-    expect(api).toHaveBeenCalledWith({
-      path: '/api/system/open-external',
-      method: 'POST',
-      body: { url: 'https://example.com/path/to/resource' }
-    })
+    expect(api).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith('https://example.com/path/to/resource', '_blank', 'noopener,noreferrer')
   })
 
   it('hides the trailing external-link icon by default', () => {
