@@ -414,10 +414,13 @@ py-modules = [
 ]
 
 [tool.setuptools.packages.find]
+# Browser proxy is package data, not a Python namespace. Never vendor its npm
+# install (or test browser lane) into wheels/uv2nix closures.
+exclude = ["hermes_cli.browser_proxy*"]
 include = ["agent", "agent.*", "tools", "tools.*", "hermes_cli", "hermes_cli.*", "gateway", "gateway.*", "tui_gateway", "tui_gateway.*", "cron", "cron.*", "acp_adapter", "plugins", "plugins.*", "providers", "providers.*"]
 
 [tool.setuptools.package-data]
-hermes_cli = ["observability/schemas/*.json", "data/*.json", "remote_browser_worker.mjs"]
+hermes_cli = ["observability/schemas/*.json", "data/*.json", "browser_proxy/*.mjs", "browser_proxy/package*.json", "browser_proxy/public/*.js", "browser_proxy/public/*.html"]
 # gateway/assets/ ships status_phrases.yaml and the Telegram BotFather
 # screenshot. Without this, sealed venvs (uv2nix) silently lose both —
 # status phrases fall back to the tiny hardcoded set and the Telegram

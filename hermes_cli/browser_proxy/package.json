@@ -1,0 +1,23 @@
+{
+  "name": "hermes-browser-proxy",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@mercuryworkshop/bare-mux": "2.1.9",
+    "@mercuryworkshop/libcurl-transport": "1.5.2",
+    "@mercuryworkshop/scramjet": "https://github.com/MercuryWorkshop/scramjet/releases/download/v1.1.0/mercuryworkshop-scramjet-1.1.0.tgz",
+    "@mercuryworkshop/wisp-js": "0.5.0",
+    "ipaddr.js": "2.2.0",
+    "tldts": "7.4.4",
+    "ws": "8.22.0"
+  },
+  "overrides": {
+    "ws": "8.22.0"
+  }
+}

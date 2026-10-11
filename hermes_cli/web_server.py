@@ -246,6 +246,9 @@ async def _lifespan(app: "FastAPI"):
         # an unavailable installed bundle prevent chat/API startup.
         _log.warning("Optional persistent terminal host recovery failed")
 
+    from hermes_cli.browser_proxy import recover_proxy
+    await recover_proxy(app)
+
     # Desktop-spawned backends (HERMES_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `hermes
     # dashboard` is unaffected — it relies on its own gateway.
@@ -288,6 +291,7 @@ async def _lifespan(app: "FastAPI"):
     try:
         yield
     finally:
+        await app.state.browser_proxy.stop()
         pty_reaper_task.cancel()
         selftest_task.cancel()
         auto_archive_task.cancel()
@@ -739,6 +743,10 @@ async def _token_auth_seam(request: Request, call_next):
     """
     from hermes_cli.dashboard_auth.token_auth import token_auth_middleware
     return await token_auth_middleware(request, call_next)
+
+
+from hermes_cli.browser_proxy_guard import ProxyOriginGuard
+app.add_middleware(ProxyOriginGuard)
 
 
 # ---------------------------------------------------------------------------
@@ -16535,25 +16543,45 @@ async def console_ws(ws: WebSocket) -> None:
                 pass
 
 
+@app.post("/api/browser-proxy/bootstrap")
+async def browser_proxy_bootstrap(request: Request) -> JSONResponse:
+    """Mint a short-lived proxy-only capability; never export Hermes auth."""
+    _require_token(request)
+    # Public/insecure backend mode still injects the short-lived Hermes
+    # session token into its trusted PWA. Require that credential here too;
+    # an anonymous caller cannot mint an open transport even in that mode.
+    if not getattr(request.app.state, "auth_required", False) and not _has_valid_session_token(request):
+        raise HTTPException(status_code=401, detail="Browser capability authentication required")
+    from hermes_cli.browser_proxy import BrowserProxy, desktop_proxy_config, validate_origins
+    origin = request.headers.get("origin", "")
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+        if (parsed.scheme != "https" or parsed.netloc.lower() != request.headers.get("host", "").lower()
+                or parsed.path or parsed.query or parsed.fragment or parsed.username):
+            raise ValueError("Browser bootstrap requires the exact HTTPS request Origin")
+        desktop = await asyncio.to_thread(desktop_proxy_config)
+        isolated_origin = validate_origins(desktop.get("browser_proxy_origin", ""), origin)
+        registered = getattr(app.state, "browser_proxy_origins", None)
+        if registered is None:
+            registered = app.state.browser_proxy_origins = set()
+        registered.add(isolated_origin)
+    except ValueError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from None
+    proxy = getattr(request.app.state, "browser_proxy", None)
+    if proxy is None:
+        proxy = request.app.state.browser_proxy = BrowserProxy()
+    try:
+        grant = await proxy.bootstrap(desktop, origin)
+    except (ValueError, RuntimeError, OSError, TimeoutError) as error:
+        raise HTTPException(status_code=503, detail=str(error)) from None
+    return JSONResponse(grant, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
 @app.websocket("/api/remote-browser")
 async def remote_browser_ws(ws: WebSocket) -> None:
-    # Same credential, single-use ticket, origin and peer gates as terminals.
-    if _ws_auth_reason(ws)[0] is not None:
-        await ws.close(code=4401, reason="Browser authentication required")
-        return
-    if _ws_host_origin_reason(ws) is not None:
-        await ws.close(code=4403, reason="Browser host/origin rejected")
-        return
-    if _ws_client_reason(ws) is not None:
-        await ws.close(code=4408, reason="Browser peer rejected")
-        return
-    try:
-        _resolve_profile_dir(ws.query_params.get("profile") or "default")
-    except HTTPException:
-        await ws.close(code=4400, reason="Browser owner unavailable")
-        return
-    from hermes_cli.remote_browser import serve_remote_browser
-    await serve_remote_browser(ws)
+    # Retired screenshot transport. Never launch backend Chromium, including
+    # when an older PWA still has this endpoint cached.
+    await ws.close(code=4404, reason="Use the isolated client browser proxy")
 
 
 @app.websocket("/api/persistent-terminal")
