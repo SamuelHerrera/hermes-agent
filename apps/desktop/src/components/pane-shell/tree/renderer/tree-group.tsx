@@ -389,7 +389,9 @@ export function TreeGroup({
               startPaneDrag(activeId, e, undefined, undefined, undefined, active?.title ?? activeId)
             }
             ref={stripRef}
-            style={{ cursor: 'grab' }}
+            // Declare gesture ownership before pointerdown; preventDefault
+            // alone cannot stop Chrome cancelling a touch drag for scrolling.
+            style={{ cursor: 'grab', touchAction: 'none' }}
             trailing={
               <>
                 <StripDropCaret groupId={node.id} stripRef={stripRef} />
@@ -496,7 +498,7 @@ export function TreeGroup({
                   preview={chrome.tabPreview?.()}
                   role="tab"
                   selected={isSelected}
-                  style={{ cursor: 'grab' }}
+                  style={{ cursor: 'grab', touchAction: 'none' }}
                 >
                   {chrome.tabActivity?.()}
                   {chrome.tabLead ? (
@@ -598,6 +600,7 @@ export function TreeGroup({
             onPointerDown={e => startPaneDrag(activeId, e, undefined, undefined, undefined, active?.title ?? activeId)}
             style={{
               top: headerVisible ? 28 : 0,
+              touchAction: 'none',
               background:
                 'color-mix(in srgb, var(--ui-accent) 6%, color-mix(in srgb, var(--ui-bg-chrome) 55%, transparent))',
               outlineColor: 'color-mix(in srgb, var(--ui-accent) 55%, transparent)'
