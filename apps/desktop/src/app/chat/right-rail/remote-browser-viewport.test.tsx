@@ -9,123 +9,93 @@ import { $connection } from '@/store/session'
 
 import { type RemoteBrowserHandle, RemoteBrowserViewport } from './remote-browser-viewport'
 
-class Socket extends EventTarget {
-  static instances: Socket[] = []
-  readyState = 1
-  send = vi.fn()
-  close = vi.fn()
-  constructor(public url: string) {
-    super()
-    Socket.instances.push(this)
-  }
-  message(frame: unknown) {
-    this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(frame) }))
-  }
-}
-
-function setup() {
-  Socket.instances = []
-  vi.stubGlobal('WebSocket', Socket)
-  vi.stubGlobal(
-    'ResizeObserver',
-    class {
-      observe() {}
-      disconnect() {}
-    }
-  )
-  const getGatewayWsUrl = vi.fn(async () => 'wss://backend.test/prefix/api/ws?ticket=fresh')
+function setup(origin = 'https://proxy.example.net') {
+  const api = vi.fn(async () => ({ origin, ticket: 'proxy-only-ticket-1234567890123456', expiresIn: 30_000 }))
   installHost({
     kind: 'browser',
-    api: vi.fn(),
+    api: api as HermesHost['api'],
     capabilities: {} as HermesHost['capabilities'],
     getConnection: vi.fn(),
-    getGatewayWsUrl
+    getGatewayWsUrl: vi.fn()
   })
 
-  return getGatewayWsUrl
+  return api
 }
 
 afterEach(() => {
   cleanup()
+  window.document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]').forEach(meta => meta.remove())
   resetHostForTests()
   $connection.set(null)
   $activeGatewayProfile.set('default')
-  vi.unstubAllGlobals()
 })
 
-describe('remote browser viewport', () => {
-  it('forwards controls and keyboard input without exposing website HTML', async () => {
-    setup()
+describe('isolated client browser', () => {
+  it('bootstraps on Hermes and sends controls only to exact iframe origin and source', async () => {
+    const api = setup()
     const ref = createRef<RemoteBrowserHandle>()
     const onState = vi.fn()
-    const rendered = render(<RemoteBrowserViewport initialUrl="about:blank" onState={onState} ref={ref} />)
-    act(() => ref.current?.send({ type: 'navigate', url: 'https://queued.test/' }))
-    await waitFor(() => expect(Socket.instances).toHaveLength(1))
-    const socket = Socket.instances[0]
-    act(() => socket.message({ type: 'ready', protocol: 1 }))
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'navigate', url: 'https://queued.test/' }))
-    expect(socket.send.mock.calls.filter(([value]) => JSON.parse(value).type === 'navigate')).toHaveLength(1)
-    act(() =>
-      socket.message({
-        type: 'frame',
-        image: '/9j/AA==',
-        url: 'http://backend-only.test',
-        title: '<script>bad</script>',
-        width: 390,
-        height: 640
-      })
+    render(<RemoteBrowserViewport initialUrl="https://example.com/" onState={onState} ref={ref} />)
+    const iframe = (await screen.findByTitle('Isolated browser')) as HTMLIFrameElement
+    expect(api).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/browser-proxy/bootstrap', method: 'POST' }))
+    expect(iframe.src).toBe('https://proxy.example.net/#ticket=proxy-only-ticket-1234567890123456')
+    expect(iframe.getAttribute('sandbox')).not.toContain('allow-top-navigation')
+    const policy = window.document.querySelector<HTMLMetaElement>('meta[http-equiv="Content-Security-Policy"]')
+    expect(policy?.content).toBe("frame-src https://proxy.example.net blob: data:; object-src 'none'")
+    expect(policy?.content).not.toContain("'self'")
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage')
+
+    const message = (source: MessageEventSource | null, origin: string, data: unknown) =>
+      act(() => window.dispatchEvent(new MessageEvent('message', { source, origin, data })))
+
+    message(window, 'https://proxy.example.net', { protocol: 'hermes-proxy-v1', type: 'ready' })
+    expect(post).not.toHaveBeenCalled()
+    message(iframe.contentWindow, 'https://evil.example', { protocol: 'hermes-proxy-v1', type: 'ready' })
+    expect(post).not.toHaveBeenCalled()
+    message(iframe.contentWindow, 'https://proxy.example.net', { protocol: 'hermes-proxy-v1', type: 'ready' })
+    expect(post).toHaveBeenCalledWith(
+      { protocol: 'hermes-proxy-v1', command: { type: 'navigate', url: 'https://example.com/' } },
+      'https://proxy.example.net'
     )
-    expect(screen.getByAltText('Backend browser page').getAttribute('src')).toBe('data:image/jpeg;base64,/9j/AA==')
-    expect(rendered.container.querySelector('iframe,webview,script')).toBeNull()
-    // Identical raster frames must still be acknowledged; React won't fire an
-    // image load event when a static page's src does not change.
-    act(() =>
-      socket.message({
-        type: 'frame',
-        image: '/9j/AA==',
-        url: 'http://backend-only.test',
-        title: 'same',
-        width: 390,
-        height: 640
-      })
-    )
-    expect(socket.send.mock.calls.filter(([value]) => JSON.parse(value).type === 'ack')).toHaveLength(2)
-    const viewport = screen.getByRole('application')
-    fireEvent.keyDown(viewport, { key: 'a' })
-    fireEvent.keyDown(viewport, { key: 'Backspace' })
-    fireEvent.wheel(viewport, { deltaX: 0, deltaY: 400 })
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'type', text: 'a' }))
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'key', key: 'Backspace' }))
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'scroll', deltaX: 0, deltaY: 400 }))
     act(() => ref.current?.send({ type: 'back' }))
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'back' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Keyboard' }))
-    fireEvent.change(screen.getByLabelText('Type into remote page'), { target: { value: 'phone text' } })
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'type', text: 'phone text' }))
-    rendered.unmount()
-    expect(socket.close).toHaveBeenCalledOnce()
+    expect(post).toHaveBeenLastCalledWith(
+      { protocol: 'hermes-proxy-v1', command: { type: 'back' } },
+      'https://proxy.example.net'
+    )
+    message(iframe.contentWindow, 'https://proxy.example.net', {
+      protocol: 'hermes-proxy-v1',
+      type: 'state',
+      url: 'javascript:evil()',
+      title: '<script>',
+      loading: false
+    })
+    expect(onState).not.toHaveBeenCalledWith(expect.objectContaining({ url: 'javascript:evil()' }))
   })
 
-  it('closes old ownership on profile switch and mints a fresh ticket', async () => {
-    const mint = setup()
-    const rendered = render(<RemoteBrowserViewport initialUrl="about:blank" onState={vi.fn()} />)
-    await waitFor(() => expect(Socket.instances).toHaveLength(1))
-    act(() => $activeGatewayProfile.set('work'))
-    await waitFor(() => expect(Socket.instances).toHaveLength(2))
-    expect(Socket.instances[0].close).toHaveBeenCalledOnce()
-    expect(mint).toHaveBeenCalledTimes(2)
-    rendered.unmount()
-    expect(Socket.instances[1].close).toHaveBeenCalledOnce()
-  })
-
-  it('surfaces unavailable backends and reconnects without OS fallback', async () => {
-    const mint = setup()
+  it('rejects same-host proxy configuration before rendering untrusted HTML', async () => {
+    setup(window.location.origin)
     render(<RemoteBrowserViewport initialUrl="about:blank" onState={vi.fn()} />)
-    await waitFor(() => expect(Socket.instances).toHaveLength(1))
-    act(() => Socket.instances[0].dispatchEvent(new CloseEvent('close', { code: 4404 })))
-    expect(screen.getByRole('alert').textContent).toContain('4404')
+    expect((await screen.findByRole('alert')).textContent).toContain('separate HTTPS')
+    expect(screen.queryByTitle('Isolated browser')).toBeNull()
+  })
+
+  it('obtains fresh ownership on profile change and supports bounded reconnect', async () => {
+    const api = setup()
+    render(<RemoteBrowserViewport initialUrl="about:blank" onState={vi.fn()} />)
+    await screen.findByTitle('Isolated browser')
+    act(() => $activeGatewayProfile.set('work'))
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(2))
+    const iframe = screen.getByTitle('Isolated browser') as HTMLIFrameElement
+    act(() =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          source: iframe.contentWindow,
+          origin: 'https://proxy.example.net',
+          data: { protocol: 'hermes-proxy-v1', type: 'error', error: 'Expired' }
+        })
+      )
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }))
-    await waitFor(() => expect(mint).toHaveBeenCalledTimes(2))
-    expect(Socket.instances[0].close).toHaveBeenCalledOnce()
+    await waitFor(() => expect(api).toHaveBeenCalledTimes(3))
   })
 })

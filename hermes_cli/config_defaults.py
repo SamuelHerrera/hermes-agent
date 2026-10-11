@@ -3348,6 +3348,13 @@ DEFAULT_CONFIG = {
         # Serve the authenticated Desktop renderer from the backend's
         # /desktop/ route. This is independent from the admin dashboard SPA.
         "browser_access_enabled": True,
+        # PWA browser uses a client-rendered Scramjet proxy on a separate
+        # registrable HTTPS domain. Empty disables this optional helper.
+        "browser_proxy_origin": "",
+        "browser_proxy_port": 9120,
+        "browser_proxy_bind": "127.0.0.1",
+        # Additional publicly reachable management hosts to deny through Wisp.
+        "browser_proxy_denied_hosts": [],
         # Git repository discovery for the Desktop Projects sidebar. Empty
         # roots preserve the historical bounded scan of the user's home.
         "repo_scan_enabled": False,

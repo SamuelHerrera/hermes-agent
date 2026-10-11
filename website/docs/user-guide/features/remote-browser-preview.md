@@ -1,83 +1,153 @@
-# Remote browser preview tabs
+---
+sidebar_position: 40
+title: Browser preview in the PWA
+---
 
-In the browser/PWA Desktop, URL preview tabs render an isolated Chromium running
-on the connected Hermes backend. The phone receives JPEG frames and sends input
-through `/api/remote-browser`; it does not fetch the website itself. Go, Back,
-Forward, Reload, Stop, clicks, scrolling, typing and keyboard shortcuts act on
-that backend browser. On phones, use the **Keyboard** button to type into the
-focused page field. Electron continues to use its native webview.
+# Browser preview in the PWA
 
-Explicit external links elsewhere in Hermes remain browser-owned: they open a
-normal client browser tab, not an OS window on the backend.
+The browser version of Desktop renders websites on the client using Scramjet.
+Pages, scripts, images, redirects and media travel through an authenticated Wisp
+transport. Touch input, text editing and audio playback are native to the phone
+browser. The backend runs a small Node transport helper, not Chromium, Playwright
+or a screenshot stream. Native Electron still uses its existing webview.
 
-## Backend runtime requirements
+The helper also includes a dedicated Worker/MessagePort adapter for browsers
+without native SharedWorker, including older Android Chrome. Its proxy-only
+broker validates origin and direct child source; it imports the declared bare-mux
+worker distribution and has no Hermes authority. Native SharedWorker is untouched
+when available.
 
-For a source-checkout deployment:
+## Install the optional helper
 
-1. Install the root optional npm dependency, pinned in `package-lock.json`:
-   `npm install --workspaces=false --include=optional` (Playwright 1.58.2).
-   No Python Playwright dependency or globally installed npm package is needed.
-2. Provide Node 22.22.0 or later through Hermes' managed Node installation or
-   the backend service's PATH. The backend uses `find_node_executable`, not a
-   shell command or a guessed Node path. A login shell's mise/nvm PATH does not
-   imply the systemd service can find Node; verify with the service environment.
-3. On Linux, the helper uses `/usr/bin/chromium` when installed. Otherwise,
-   install the browser for the **service user** with
-   `./node_modules/.bin/playwright install chromium` and the browser's required
-   OS libraries. The service must be able to run Chromium with its sandbox
-   enabled. Running as root or on a kernel which disables the required sandbox
-   fails closed; there is no `--no-sandbox` fallback.
-4. Build the PWA with `npm run build:browser --workspace apps/desktop`, then
-   restart the backend using the deployment's normal procedure. Reverse proxies
-   must permit the existing authenticated WebSocket path and the new
-   `/api/remote-browser` path under the same prefix.
+Use Node 22.22 or newer. From the Hermes installation's source directory:
 
-If these dependencies are unavailable, the tab shows a connection error with a
-Reconnect button. It never silently hands Go to an OS browser.
-
-## Isolation and limits
-
-- Each authenticated socket owns one ephemeral browser/context. There is no
-  session identifier or attach API that another client can guess. Cookies,
-  logins and history are not shared with agent browser tools, Electron or other
-  remote tabs, and are discarded on disconnect/reconnect.
-- The route uses the existing single-use WebSocket ticket/token, host/origin,
-  peer and profile-validation boundaries, before spawning a process. Backend
-  API keys are excluded from the worker environment.
-- Only HTTP(S) URLs and `about:blank` are accepted, without embedded credentials.
-  Page requests for other schemes are aborted. Website HTML/JavaScript is never
-  proxied into the privileged Hermes origin; only raster images and plain-text
-  metadata cross the boundary. Downloads and service workers are disabled;
-  permissions are not granted. Popups are redirected into the owned viewport
-  and extra pages are closed.
-- Per backend process: four concurrent sockets; viewport dimensions 160–1920;
-  at most four frames/second with acknowledgement backpressure; command/text
-  size and input-rate limits; five-minute input-idle timeout (frame ACKs do not
-  keep a session alive); one-hour maximum lifetime.
-- Disconnect, startup failure, timeouts and cancellation close Chromium, reap
-  the helper and release capacity. Switching backend/profile closes the old
-  socket and mints a fresh credential.
-
-This is a raster viewport, not a local browser DOM. Website text is not locally
-selectable; audio/video streaming, native download dialogs, browser extensions,
-DevTools and persistent logins are not provided by this transport.
-
-## Verification
-
-Focused backend tests:
-
-```
-python -m pytest tests/hermes_cli/test_remote_browser.py tests/hermes_cli/test_remote_browser_ws.py
+```bash
+cd hermes_cli/browser_proxy
+npm ci --ignore-scripts --workspaces=false
 ```
 
-Real integration tests (requires the runtime above):
+This directory declares exact versions and a separate lockfile. Scramjet 1.1.0
+uses the upstream release tarball, because that is the distribution used by the
+upstream demo. The transport dependencies are bare-mux 2.1.9, libcurl-transport
+1.5.2 and wisp-js 0.5.0. No third-party source is copied into Hermes. The pinned
+libcurl release works without SharedArrayBuffer or cross-origin isolation.
 
-```
-python -m pytest tests/hermes_cli/test_remote_browser_integration.py -v
+The helper starts automatically when a proxy origin is configured. Hermes uses
+its managed Node resolver. Missing Node or dependencies leave chat and the API
+working and show an actionable optional-feature error in the browser pane.
+Stopping the backend closes the helper and its transport sessions.
+
+## Configure two separate sites
+
+The proxy must use a different HTTPS hostname **and registrable domain** from
+Hermes. `browser.example.com` beside `hermes.example.com` is rejected. Public
+Suffix List validation includes multi-label and private suffixes. Neither
+Hermes nor an upstream authentication gate may use a cookie domain shared with
+the proxy. Hermes authentication cookies must remain host-only.
+
+For example, if Desktop is `https://hermes.example.com/desktop/`, publish the
+proxy on a separately owned site and configure the backend serving that Desktop:
+
+```bash
+hermes config set desktop.browser_proxy_origin https://browser.example.net
+hermes config set desktop.browser_proxy_port 9120
+hermes config set desktop.browser_proxy_bind 127.0.0.1
 ```
 
-The integration suite serves a disposable HTTP fixture, verifies actual
-backend-side requests, JPEG decoding, input/navigation/resize, and a real
-WebSocket proxy. It checks that disconnect leaves no Chromium/helper processes.
-It skips when the browser is not installed; a skipped integration test is not
-proof that a deployment can run Chromium.
+Port `0` requests a dynamic port, useful in tests. A stable reverse proxy should
+use a fixed port. The default listener is loopback. For an explicitly trusted
+private network, `browser_proxy_bind` may name a single private interface IP,
+for example a ZeroTier address. Wildcard and public addresses are rejected.
+Do not expose the helper on an unauthenticated public IP.
+
+Route the **entire proxy hostname** to the helper, including `/`, `/bootstrap`,
+`/assets/`, `/sw.js`, `/service/` and `/wisp/`. Never send that hostname to the
+Hermes Python API listener. A TLS reverse proxy must preserve the public Host,
+Origin, binary WebSocket upgrades and security response headers. Do not cache
+bootstrap or HTML responses. Restrict access to the private listener at the
+network boundary. When Hermes uses `auth_disabled=true` behind an upstream
+authentication gate, protect its entire hostname, including `/api/*` and
+WebSockets, not just `/desktop/`. Keep that gate off the separate proxy host.
+Avoid logging the bounded capability segment of `/wisp/`.
+
+Add other publicly reachable management hostnames to
+`desktop.browser_proxy_denied_hosts`. The helper automatically blocks the
+Hermes parent and proxy hostnames and all their resolved addresses. Restart the
+backend after changing the origin or listener settings, then reload the PWA.
+
+## Authentication and isolation
+
+1. Desktop calls authenticated `POST /api/browser-proxy/bootstrap` on Hermes.
+   The endpoint requires its exact HTTPS request Origin and the active Hermes
+   credential, even when the backend otherwise runs with public auth disabled.
+2. Hermes sends a fresh, opaque, 30-second one-time capability to the Node helper
+   through inherited stdio. No helper management endpoint is network-accessible.
+3. Desktop passes only that proxy capability in the isolated iframe fragment.
+   The controller removes the fragment before navigating to a website.
+4. The proxy exchanges the one-time capability for a separate proxy-scoped
+   session. Wisp upgrades require that session and the exact proxy Origin/Host.
+   Sessions expire after one hour and close on unload when possible. There are
+   at most eight tickets/sessions, four Wisp connections per session and 64 TCP
+   streams per connection.
+5. An optional `__Host-` cookie is Secure, HttpOnly, SameSite=None and Partitioned,
+   with no Domain attribute. Wisp also uses its bounded proxy-only session URL,
+   so blocked third-party cookies do not prevent playback. Hermes credentials
+   never enter the proxy origin, storage, iframe messages or transport URLs.
+
+Every target connection resolves to a checked global unicast address and connects
+to that exact address. This prevents DNS rebinding between validation and socket
+creation. Private, loopback, link-local, CGNAT, reserved, mapped/tunnel and
+multicast addresses are denied. Direct IP targets, UDP, unknown stream types,
+duplicate stream IDs and ports other than 80/443 are denied. Each redirected
+resource creates a new checked stream when its destination changes.
+
+The controller accepts commands only from its exact Hermes parent window and
+Origin. Desktop accepts state only from that exact iframe window and proxy
+Origin. Neither side interprets incoming HTML or executes messages as code.
+Proxy response CSP blocks native network/form/frame escapes to Hermes. The
+service worker reapplies that policy after Scramjet rewrites upstream headers.
+The service worker controls only `/service/`, not the controller or bootstrap.
+
+**Preserve the parent Desktop CSP.** While this feature is configured,
+`/desktop/` responses permit frames only on the isolated proxy origin or opaque
+blob/data documents. They deliberately do not permit `frame-src 'self'`. Without
+that restriction, a compromised proxy controller could navigate its iframe back
+to Desktop and acquire the parent's privileged origin. Desktop also installs the
+same CSP as a meta policy before creating the iframe, protecting cached/offline
+PWA HTML that predates the server header. This restriction stays for the
+document's lifetime. Same-origin HTML/document iframe previews are therefore
+unavailable while the proxy is configured. Native
+Electron webviews are unaffected. Hermes additionally rejects proxy-origin and
+browser cross-site API/WebSocket traffic, including requests without Origin.
+
+## Compatibility and verification
+
+The client needs service workers, dedicated Workers, IndexedDB and WebAssembly.
+Native SharedWorker is optional because of the mobile adapter. Browser/site
+compatibility, DRM,
+upstream bot protection and account sign-in remain site-specific. Successful
+native audio playback does not establish YouTube Music account or DRM playback.
+Do not bypass upstream access restrictions to make a site work.
+
+```bash
+# Python configuration, authenticated API, actual helper and shutdown tests
+scripts/run_tests.sh tests/hermes_cli/test_browser_proxy.py tests/hermes_cli/test_browser_proxy_routes.py -q
+
+# Real HTTP/WebSocket auth and SSRF tests
+cd hermes_cli/browser_proxy
+npm test
+
+# Explicit browser integration lane, only for testing
+# Requires the repo's Playwright dependency and installed Chromium.
+node --test test/browser.integration.mjs
+```
+
+The browser integration test uses separate HTTPS sites, an ordinary non-isolated
+parent, normal browser storage partitioning and deliberately stripped proxy
+cookies. Its cached-parent case also disables native SharedWorker to exercise the
+mobile dedicated-Worker adapter. It exercises a real Scramjet service worker and
+Wisp transport, redirect,
+script fetch, image decoding, native input and advancing audio playback. It also
+verifies private target rejection and blocks controller navigation back into the
+privileged parent origin. This lane launches a disposable test browser only.
+The normal runtime never launches a backend browser.

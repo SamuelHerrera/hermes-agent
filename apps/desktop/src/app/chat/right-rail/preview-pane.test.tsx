@@ -181,67 +181,40 @@ describe('PreviewPane console state', () => {
     expect(input.value).toBe('https://example.com')
   })
 
-  it('renders an interactive backend viewport instead of an OS handoff', async () => {
-    class Socket extends EventTarget {
-      static instances: Socket[] = []
-      readyState = 1
-      send = vi.fn()
-      close = vi.fn()
-      constructor(public url: string) {
-        super()
-        Socket.instances.push(this)
-      }
-    }
-    vi.stubGlobal('WebSocket', Socket)
-    vi.stubGlobal(
-      'ResizeObserver',
-      class {
-        observe() {}
-        disconnect() {}
-      }
-    )
-    const api = vi.fn().mockResolvedValue({ ok: true })
+  it('renders a client proxy iframe without a backend browser or OS handoff', async () => {
+    const sockets = vi.fn()
+    vi.stubGlobal('WebSocket', sockets)
+    const origin = 'https://proxy.example.net'
+    const api = vi.fn().mockResolvedValue({ origin, ticket: 'proxy-only-capability-for-the-iframe', expiresIn: 30_000 })
+    const getGatewayWsUrl = vi.fn()
     installHost({
       api,
       capabilities: {} as HermesHost['capabilities'],
       getConnection: vi.fn(),
-      getGatewayWsUrl: vi.fn(async () => 'wss://backend.test/prefix/api/ws?ticket=fresh'),
+      getGatewayWsUrl,
       kind: 'browser'
     })
 
-    let rendered!: ReturnType<typeof render>
-    await act(async () => {
-      rendered = render(
-        <PreviewPane
-          embedded
-          tabId="url:about:blank"
-          target={{
-            kind: 'url',
-            label: 'New tab',
-            source: 'about:blank',
-            url: 'about:blank'
-          }}
-        />
-      )
-    })
+    const rendered = render(
+      <PreviewPane embedded tabId="url:about:blank" target={{
+        kind: 'url', label: 'New tab', source: 'about:blank', url: 'about:blank'
+      }} />
+    )
 
+    const iframe = await rendered.findByTitle('Isolated browser') as HTMLIFrameElement
     const input = rendered.getByLabelText('Web address') as HTMLInputElement
-    const webview = rendered.container.querySelector('webview')
-
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage')
+    act(() => window.dispatchEvent(new MessageEvent('message', {
+      source: iframe.contentWindow, origin, data: { protocol: 'hermes-proxy-v1', type: 'ready' }
+    })))
     fireEvent.change(input, { target: { value: 'youtube.com' } })
     fireEvent.submit(input.closest('form')!)
 
-    await waitFor(() => expect(Socket.instances).toHaveLength(1))
-    const socket = Socket.instances[0]
-    act(() =>
-      socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ type: 'ready', protocol: 1 }) }))
-    )
-    fireEvent.submit(input.closest('form')!)
-    expect(socket.url).toBe('wss://backend.test/prefix/api/remote-browser?ticket=fresh')
-    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: 'navigate', url: 'https://youtube.com' }))
-    expect(api).not.toHaveBeenCalled()
-    expect(webview).toBeNull()
-    expect(rendered.getByLabelText('Remote browser viewport')).toBeTruthy()
+    expect(post).toHaveBeenLastCalledWith({ protocol: 'hermes-proxy-v1', command: { type: 'navigate', url: 'https://youtube.com' } }, origin)
+    expect(api).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/browser-proxy/bootstrap', method: 'POST' }))
+    expect(getGatewayWsUrl).not.toHaveBeenCalled()
+    expect(sockets).not.toHaveBeenCalled()
+    expect(rendered.container.querySelector('webview')).toBeNull()
     expect(input.value).toBe('https://youtube.com')
   })
 
