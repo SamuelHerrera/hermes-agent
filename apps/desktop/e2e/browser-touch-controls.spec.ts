@@ -16,6 +16,27 @@ test.afterAll(async () => {
   await backend?.cleanup()
 })
 
+test('swiping from the home profile button scrolls without opening its menu, while tapping opens it', async ({ page }) => {
+  await page.goto(`${backend.baseUrl}/desktop/`)
+  await page.getByRole('button', { name: "I'll choose a provider later" }).click()
+  const button = page.getByRole('button', { name: 'Profiles', exact: true })
+  const box = (await button.boundingBox())!
+  const cdp = await page.context().newCDPSession(page)
+  const x = box.x + box.width / 2
+  const y = box.y + box.height / 2
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1 }] })
+
+  for (let i = 1; i <= 5; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x - i * 15, y, id: 1 }] })
+  }
+
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await expect(page.getByRole('menu')).toHaveCount(0)
+  await expect.poll(() => page.locator('[data-app-toolbar]').evaluate(element => element.scrollLeft)).toBeGreaterThan(0)
+  await button.tap()
+  await expect(page.getByRole('menu')).toBeVisible()
+})
+
 test('touch long-press reorders header actions and persists without activating them', async ({ page }) => {
   await page.goto(`${backend.baseUrl}/desktop/`)
   await page.getByRole('button', { name: "I'll choose a provider later" }).click()

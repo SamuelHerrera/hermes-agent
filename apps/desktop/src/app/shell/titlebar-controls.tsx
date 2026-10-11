@@ -309,7 +309,20 @@ function TitlebarProfileMenu() {
               titlebarButtonClass,
               'w-auto gap-1 bg-transparent px-1.5 select-none data-[state=open]:bg-(--ui-control-active-background) data-[state=open]:text-foreground'
             )}
-            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              if ((event.nativeEvent as PointerEvent).pointerType === 'touch') {
+                setOpen(previous => !previous)
+              }
+            }}
+            onPointerDown={event => {
+              // Radix opens on pointerdown. Touch must wait for a completed
+              // tap so a horizontal swipe can scroll the action strip instead.
+              if (event.pointerType === 'touch') {
+                event.preventDefault()
+              }
+
+              event.stopPropagation()
+            }}
             size="icon-titlebar"
             type="button"
             variant="ghost"
