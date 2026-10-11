@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { ArrowUpRight } from '@/lib/icons'
 import { browserClientApis } from '@/platform/browser-client'
+import { hasHostApi, hostApi } from '@/platform/host-api'
 
 import { resolveBrandIcon } from './brand-icon'
 import { cn } from './utils'
@@ -202,6 +203,10 @@ export function openExternalLink(href: string): void {
   }
   if (window.hermesDesktop?.openExternal) {
     void window.hermesDesktop.openExternal(href)
+    return
+  }
+  if (hasHostApi()) {
+    void hostApi({ path: '/api/system/open-external', method: 'POST', body: { url: href } }).catch(() => undefined)
     return
   }
   browserClientApis().openExternal(href)

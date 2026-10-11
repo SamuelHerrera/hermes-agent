@@ -351,6 +351,32 @@ class TestWebServerEndpoints:
 
         assert seen["thread"] != event_loop_thread
 
+    def test_open_external_proxies_to_origin_handler(self, monkeypatch):
+        import hermes_cli.web_server as web_server
+
+        calls = []
+
+        class FakeProc:
+            pass
+
+        def fake_popen(args, **kwargs):
+            calls.append((args, kwargs))
+            return FakeProc()
+
+        monkeypatch.setattr(web_server.sys, "platform", "darwin")
+        monkeypatch.setattr(web_server.subprocess, "Popen", fake_popen)
+
+        resp = self.client.post("/api/system/open-external", json={"url": "https://example.com/demo"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        assert calls[0][0] == ["open", "https://example.com/demo"]
+
+    def test_open_external_rejects_unsupported_protocol(self):
+        resp = self.client.post("/api/system/open-external", json={"url": "file:///etc/passwd"})
+
+        assert resp.status_code == 400
+
     def test_get_sessions_auto_archive_uses_maintenance_writer(self):
         from hermes_cli import web_server
         from hermes_cli.config import load_config, save_config

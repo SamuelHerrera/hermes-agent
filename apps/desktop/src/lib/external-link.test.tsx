@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { installHost, resetHostForTests } from '@/platform/host'
+import type { HermesHost } from '@/platform/types'
+
 import {
   __resetLinkTitleCache,
   ExternalLink,
@@ -35,6 +38,7 @@ function installTitleBridge(title: string) {
 
 afterEach(() => {
   __resetLinkTitleCache()
+  resetHostForTests()
   vi.restoreAllMocks()
   cleanup()
 
@@ -110,6 +114,26 @@ describe('external link helpers', () => {
 
     fireEvent.click(screen.getByRole('link', { name: 'Example link' }))
     expect(openExternal).toHaveBeenCalledWith('https://example.com/path/to/resource')
+  })
+
+  it('proxies browser-served link opens to the origin backend', () => {
+    const api = vi.fn().mockResolvedValue({ ok: true })
+    installHost({
+      api,
+      capabilities: {} as HermesHost['capabilities'],
+      getConnection: vi.fn(),
+      getGatewayWsUrl: vi.fn(),
+      kind: 'browser'
+    })
+
+    render(<ExternalLink href="https://example.com/path/to/resource">Example link</ExternalLink>)
+
+    fireEvent.click(screen.getByRole('link', { name: 'Example link' }))
+    expect(api).toHaveBeenCalledWith({
+      path: '/api/system/open-external',
+      method: 'POST',
+      body: { url: 'https://example.com/path/to/resource' }
+    })
   })
 
   it('hides the trailing external-link icon by default', () => {

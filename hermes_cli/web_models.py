@@ -231,6 +231,10 @@ class FsPath(BaseModel):
     path: str
 
 
+class ExternalOpenRequest(BaseModel):
+    url: str
+
+
 # --- from web_server.py (originally lines 2826-2856) ---
 
 class GitPathBody(BaseModel):

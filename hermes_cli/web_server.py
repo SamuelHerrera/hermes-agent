@@ -1402,6 +1402,7 @@ from hermes_cli.web_models import (  # noqa: F401
     MoaPresetPayload,
     MoaConfigPayload,
     FsPath,
+    ExternalOpenRequest,
     FsRename,
     FsWriteText,
     GitPathBody,
@@ -1801,6 +1802,38 @@ _MEDIA_MAX_BYTES = 25 * 1024 * 1024
 _MANAGED_FILES_ROOT_ENV = "HERMES_DASHBOARD_FILES_ROOT"
 _MANAGED_FILE_MAX_BYTES = 100 * 1024 * 1024
 _HOSTED_MANAGED_FILES_ROOT = Path("/opt/data")
+
+_EXTERNAL_OPEN_PROTOCOLS = {"http:", "https:", "mailto:"}
+
+
+def _open_external_on_origin(url: str) -> bool:
+    """Ask the origin machine's OS to open a URL with its default handler."""
+    raw = str(url or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except Exception:
+        return False
+    if parsed.scheme and f"{parsed.scheme}:" not in _EXTERNAL_OPEN_PROTOCOLS:
+        return False
+    if not parsed.scheme:
+        return False
+    if parsed.scheme in {"http", "https"} and not parsed.netloc:
+        return False
+    if parsed.scheme == "mailto" and not parsed.path:
+        return False
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", raw], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif os.name == "nt":
+        os.startfile(raw)  # type: ignore[attr-defined]
+    else:
+        opener = shutil.which("xdg-open")
+        if not opener:
+            return False
+        subprocess.Popen([opener, raw], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
 
 
 @dataclass(frozen=True)
@@ -2804,6 +2837,18 @@ async def fs_git_root(path: str):
 async def fs_default_cwd():
     cwd = _fs_default_cwd()
     return {"cwd": cwd, "branch": _fs_git_branch(cwd)}
+
+
+@app.post("/api/system/open-external")
+async def system_open_external(payload: ExternalOpenRequest):
+    """Open a URL on the backend/origin host for browser-served clients."""
+    try:
+        opened = await asyncio.to_thread(_open_external_on_origin, payload.url)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not open URL: {exc}") from exc
+    if not opened:
+        raise HTTPException(status_code=400, detail="Invalid or unsupported URL")
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------
