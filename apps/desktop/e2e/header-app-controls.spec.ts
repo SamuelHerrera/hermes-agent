@@ -78,6 +78,28 @@ test('compact app controls stay in the header and extra actions stay in the menu
   expect(errors).toEqual([])
 })
 
+test('native header ignores old saved orders and mouse drags do not reorder actions', async () => {
+  const { page } = fixture
+  const actions = page.locator('[data-header-action]')
+  const ids = () => actions.evaluateAll(elements => elements.map(element => element.getAttribute('data-header-action')))
+  const baseline = await ids()
+  expect(baseline.slice(0, 2)).toEqual(['app-menu', 'sidebar'])
+  await page.evaluate(
+    order => localStorage.setItem('hermes.global.headerActionOrder.v1', JSON.stringify(order)),
+    [...baseline].reverse()
+  )
+  await page.reload()
+  await waitForAppReady(fixture, 120_000)
+  await expect.poll(ids).toEqual(baseline)
+  const from = (await page.locator('[data-header-action="sidebar"]').boundingBox())!
+  const to = (await page.locator('[data-header-action="notifications"]').boundingBox())!
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await expect.poll(ids).toEqual(baseline)
+})
+
 test('separate header buttons open session, project and terminal actions', async ({}, testInfo) => {
   const { page } = fixture
   const toolbar = page.getByLabel('App controls', { exact: true })

@@ -81,9 +81,15 @@ test('swiping from the home profile button scrolls without opening its menu, whi
   await expect(page.getByRole('menu')).toBeVisible()
 })
 
-test('touch long-press reorders header actions and persists without activating them', async ({ page }) => {
+test('header actions keep their fixed order after mouse and long-press touch drags and reload', async ({ page }) => {
   await page.goto(`${backend.baseUrl}/desktop/`)
   await page.getByRole('button', { name: "I'll choose a provider later" }).click()
+  const ids = () =>
+    page
+      .locator('[data-header-action]')
+      .evaluateAll(elements => elements.map(element => element.getAttribute('data-header-action')))
+  const order = await ids()
+  expect(order.slice(0, 2)).toEqual(['app-menu', 'sidebar'])
   const cdp = await page.context().newCDPSession(page)
   const from = (await page.locator('[data-header-action="sidebar"]').boundingBox())!
   const to = (await page.locator('[data-header-action="notifications"]').boundingBox())!
@@ -100,15 +106,21 @@ test('touch long-press reorders header actions and persists without activating t
   await page.waitForTimeout(100)
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
 
-  const ids = () =>
-    page
-      .locator('[data-header-action]')
-      .evaluateAll(elements => elements.map(element => element.getAttribute('data-header-action')))
-
-  await expect.poll(ids).toEqual(expect.arrayContaining(['sidebar', 'notifications']))
-  expect((await ids()).indexOf('sidebar')).toBeGreaterThan((await ids()).indexOf('notifications'))
-  await expect(page.getByRole('button', { name: 'Hide sidebar', exact: true })).toHaveCount(1)
-  const order = await ids()
+  await expect.poll(ids).toEqual(order)
+  await page.setViewportSize({ width: 1280, height: 844 })
+  const mouseFrom = (await page.locator('[data-header-action="sidebar"]').boundingBox())!
+  const mouseTo = (await page.locator('[data-header-action="notifications"]').boundingBox())!
+  await page.mouse.move(mouseFrom.x + mouseFrom.width / 2, mouseFrom.y + mouseFrom.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(mouseTo.x + mouseTo.width / 2, mouseTo.y + mouseTo.height / 2, { steps: 12 })
+  await page.mouse.up()
+  await expect.poll(ids).toEqual(order)
+  expect(await page.evaluate(() => localStorage.getItem('hermes.global.headerActionOrder.v1'))).toBeNull()
+  // Old saved drag orders must not change the fixed toolbar after upgrading.
+  await page.evaluate(
+    value => localStorage.setItem('hermes.global.headerActionOrder.v1', JSON.stringify(value)),
+    [...order].reverse()
+  )
   await page.reload()
   await expect.poll(ids).toEqual(order)
 })

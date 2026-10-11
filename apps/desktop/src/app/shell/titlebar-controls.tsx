@@ -79,8 +79,8 @@ import {
 } from '../routes'
 import type { SidebarNavContribution } from '../routes'
 
+import { AppToolbar } from './app-toolbar'
 import { type CodexUsageControlState, type CodexUsageData, CodexUsageTitlebarControl } from './codex-usage-control'
-import { ReorderableToolbar } from './reorderable-toolbar'
 import type { StatusbarItem } from './statusbar-controls'
 import {
   TITLEBAR_ICON_BADGE_SCALE,
@@ -767,7 +767,7 @@ export function TitlebarControls({
             top: 'calc(var(--titlebar-controls-top, 5px) + var(--titlebar-controls-y-nudge, 0px))'
           }}
         >
-          <ReorderableToolbar
+          <AppToolbar
             entries={[
               {
                 id: 'app-menu',
