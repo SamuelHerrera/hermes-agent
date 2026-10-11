@@ -167,6 +167,39 @@ const COMPOSER_MARKDOWN_STYLE_CLASS: Record<InlineMarkdownKind, string> = {
   strong: 'font-semibold'
 }
 
+const COMPOSER_MARKDOWN_BLOCK_CLASS = {
+  blockquote: 'border-l-2 border-(--ui-stroke-tertiary) pl-2 text-muted-foreground italic',
+  code: 'font-mono text-[0.9em] leading-relaxed text-foreground/90',
+  fence: 'font-mono text-[0.86em] text-muted-foreground/65',
+  h1: 'text-[1rem] font-semibold tracking-tight',
+  h2: 'text-[0.95rem] font-semibold tracking-tight',
+  h3: 'text-[0.9rem] font-semibold',
+  h4: 'text-[0.86rem] font-semibold',
+  h5: 'text-[0.82rem] font-semibold',
+  h6: 'text-[0.78rem] font-semibold uppercase tracking-[0.08em] text-muted-foreground',
+  hr: 'my-1 border-t border-(--ui-stroke-tertiary) text-muted-foreground/55',
+  list: 'pl-1',
+  paragraph: ''
+} as const
+
+function appendMarkdownMarker(target: HTMLElement, text: string) {
+  const marker = document.createElement('span')
+
+  marker.dataset.mdMarker = 'block'
+  marker.className = 'text-muted-foreground/45'
+  marker.textContent = text
+  target.append(marker)
+}
+
+function markdownBlockLine(className: string) {
+  const line = document.createElement('div')
+
+  line.dataset.mdBlock = 'true'
+  line.className = className
+
+  return line
+}
+
 function appendMarkdownText(target: DocumentFragment | HTMLElement, text: string) {
   for (const token of tokenizeInlineMarkdown(text)) {
     if (token.kind === 'text') {
@@ -208,6 +241,96 @@ function appendTextWithBreaks(target: DocumentFragment | HTMLElement, text: stri
   })
 }
 
+function appendMarkdownBlockLine(target: DocumentFragment | HTMLElement, lineText: string) {
+  const heading = /^(#{1,6})\s+(.*)$/.exec(lineText)
+
+  if (heading) {
+    const level = Math.min(heading[1].length, 6) as 1 | 2 | 3 | 4 | 5 | 6
+    const line = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS[`h${level}`])
+
+    appendMarkdownMarker(line, `${heading[1]} `)
+    appendMarkdownText(line, heading[2] ?? '')
+    target.append(line)
+
+    return
+  }
+
+  const quote = /^(>\s?)(.*)$/.exec(lineText)
+
+  if (quote) {
+    const line = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.blockquote)
+
+    appendMarkdownMarker(line, quote[1] ?? '> ')
+    appendMarkdownText(line, quote[2] ?? '')
+    target.append(line)
+
+    return
+  }
+
+  const task = /^(\s*[-*+]\s+\[[ xX]\]\s+)(.*)$/.exec(lineText)
+
+  if (task) {
+    const line = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.list)
+
+    appendMarkdownMarker(line, task[1] ?? '')
+    appendMarkdownText(line, task[2] ?? '')
+    target.append(line)
+
+    return
+  }
+
+  const list = /^(\s*(?:[-*+]\s+|\d+[.)]\s+))(.*)$/.exec(lineText)
+
+  if (list) {
+    const line = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.list)
+
+    appendMarkdownMarker(line, list[1] ?? '')
+    appendMarkdownText(line, list[2] ?? '')
+    target.append(line)
+
+    return
+  }
+
+  if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(lineText)) {
+    const line = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.hr)
+
+    line.textContent = lineText
+    target.append(line)
+
+    return
+  }
+
+  appendMarkdownText(target, lineText)
+}
+
+function appendMarkdownBlocks(target: DocumentFragment | HTMLElement, text: string) {
+  const lines = text.split('\n')
+  let inFence = false
+
+  lines.forEach((line, index) => {
+    const fence = /^\s*```/.test(line)
+
+    if (fence) {
+      const rendered = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.fence)
+
+      rendered.textContent = line
+      target.append(rendered)
+      inFence = !inFence
+    } else if (inFence) {
+      const rendered = markdownBlockLine(COMPOSER_MARKDOWN_BLOCK_CLASS.code)
+
+      rendered.textContent = line
+      target.append(rendered)
+    } else if (line) {
+      appendMarkdownBlockLine(target, line)
+    }
+
+    if (index < lines.length - 1) {
+      target.append(document.createElement('br'))
+    }
+  })
+}
+
 /** Every span of `text` that renders as a chip, in source order. */
 function chipSpans(text: string, options: SlashCommandScanOptions) {
   REF_RE.lastIndex = 0
@@ -237,8 +360,15 @@ export function appendComposerContents(
   options: SlashCommandScanOptions = {}
 ) {
   let cursor = 0
+  const spans = chipSpans(text, options)
 
-  for (const span of chipSpans(text, options)) {
+  if (spans.length === 0) {
+    appendMarkdownBlocks(target, text)
+
+    return
+  }
+
+  for (const span of spans) {
     // A `@` ref wins an overlap: a command token can't contain an `@`, so the
     // only way spans collide is a slash inside a quoted ref value
     // (`` @url:`a /clean` ``), which belongs to that value.
@@ -631,7 +761,7 @@ export function composerPlainText(node: Node): string {
   }
 
   const text = Array.from(node.childNodes).map(composerPlainText).join('')
-  const block = el.tagName === 'DIV' || el.tagName === 'P'
+  const block = (el.tagName === 'DIV' || el.tagName === 'P') && !el.dataset.mdBlock
 
   return block && text && el.dataset.slot !== RICH_INPUT_SLOT ? `${text}\n` : text
 }

@@ -7,6 +7,7 @@ import {
   deleteSelectionInEditor,
   insertComposerContentsAtCaret,
   normalizeComposerEditorDom,
+  placeCaretAtOffset,
   refChipElement,
   renderComposerContents,
   renderComposerContentsPreservingCaret,
@@ -49,6 +50,39 @@ describe('renderComposerContents', () => {
     expect(editor.querySelector('[data-md-inline="strike"]')?.textContent).toBe('~~gone~~')
     expect(editor.querySelector('[data-md-inline="code"]')?.textContent).toBe('`code`')
     expect(composerPlainText(editor)).toBe('**bold** *em* ~~gone~~ `code`')
+  })
+
+  it('renders block markdown affordances without changing submitted text', () => {
+    const editor = document.createElement('div')
+    const source = '# Heading\n- item\n> quote\n---\n```ts\nconst x = 1\n```'
+
+    editor.dataset.slot = RICH_INPUT_SLOT
+
+    renderComposerContents(editor, source)
+
+    expect(editor.querySelector('[data-md-block]')?.className).toContain('font-semibold')
+    expect(editor.querySelector('[data-md-marker="block"]')?.textContent).toBe('# ')
+    expect(editor.textContent).toContain('- item')
+    expect(editor.textContent).toContain('> quote')
+    expect(editor.textContent).toContain('const x = 1')
+    expect(composerPlainText(editor)).toBe(source)
+  })
+
+  it('keeps block markdown caret offsets in serialized source coordinates', () => {
+    const editor = document.createElement('div')
+
+    editor.dataset.slot = RICH_INPUT_SLOT
+    document.body.append(editor)
+
+    renderComposerContents(editor, '# Heading\n- item')
+    placeCaretAtOffset(editor, '# Heading\n- '.length)
+
+    expect(caretOffsetInEditor(editor)).toBe('# Heading\n- '.length)
+
+    renderComposerContentsPreservingCaret(editor, '# Heading\n- item')
+
+    expect(caretOffsetInEditor(editor)).toBe('# Heading\n- '.length)
+    editor.remove()
   })
 
   it('does not markdown-style directive quoting inside composer refs', () => {
