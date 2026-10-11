@@ -83,6 +83,64 @@
   }
 }
 
+/* Touch tab targets must survive application zoom-out (28px used to render
+   at 21px at 75%). Input capability matters even on a wide/zoomed-out viewport.
+   Mouse-only desktop keeps the compact primitive sizes. */
+@media (any-pointer: coarse) {
+  :root {
+    --tab-touch-target: calc(48px / min(1, var(--browser-ui-scale, 1)));
+  }
+
+  .pane-tab-strip {
+    height: var(--tab-touch-target);
+    min-height: var(--tab-touch-target);
+  }
+
+  [data-slot='pane-tab']:not([data-vertical]) {
+    min-width: var(--tab-touch-target);
+  }
+
+  [data-slot='pane-tab'][data-closeable]:not([data-vertical]) {
+    min-width: calc(2 * var(--tab-touch-target));
+  }
+
+  [data-slot='pane-tab']:not([data-vertical]) [data-slot='pane-tab-close'],
+  .pane-strip-tool {
+    width: var(--tab-touch-target);
+    height: var(--tab-touch-target);
+    min-width: var(--tab-touch-target);
+    min-height: var(--tab-touch-target);
+    flex-shrink: 0;
+  }
+
+  [data-slot='pane-tab']:not([data-vertical]) [data-slot='pane-tab-close'] {
+    right: 0;
+  }
+
+  [data-slot='pane-tab'][data-closeable]:not([data-vertical]) [data-slot='pane-tab-label'] {
+    padding-right: var(--tab-touch-target);
+  }
+
+  [data-slot='pane-tab-label'] > span {
+    font-size: calc(13px / min(1, var(--browser-ui-scale, 1)));
+  }
+
+  [data-slot='text-tab'],
+  [data-slot='tabs-trigger'] {
+    min-width: var(--tab-touch-target);
+    min-height: var(--tab-touch-target);
+    flex-shrink: 0;
+  }
+
+  [data-slot='tabs-list'] {
+    height: auto;
+    max-width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+}
+
 /* Only app actions scroll; workspace buttons remain pinned in the same row. */
 @media (max-width: 767px) {
   .app-header-controls {

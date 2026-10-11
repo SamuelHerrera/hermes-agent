@@ -14,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   window.hermesDesktop = originalBridge
   document.documentElement.style.zoom = ''
+  document.documentElement.style.removeProperty('--browser-ui-scale')
   localStorage.clear()
 })
 
@@ -24,6 +25,7 @@ describe('UI scale', () => {
     expect(zoom.$zoomPercent.get()).toBe(100)
     zoom.setZoomPercent(125)
     expect(document.documentElement.style.zoom).toBe('1.25')
+    expect(document.documentElement.style.getPropertyValue('--browser-ui-scale')).toBe('1.25')
     expect(zoom.$zoomPercent.get()).toBe(125)
     vi.resetModules()
     const restored = await import('./zoom')

@@ -19,6 +19,7 @@ function TextTab({ active = false, children, className, type = 'button', ...prop
         className
       )}
       data-active={active}
+      data-slot="text-tab"
       type={type}
       {...props}
     >

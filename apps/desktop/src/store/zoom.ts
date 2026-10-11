@@ -33,6 +33,7 @@ export function setZoomPercent(percent: number): void {
     const scale = clampBrowserScale(percent)
     // Scale the document, including portaled menus/dialogs, not only #root.
     document.documentElement.style.zoom = String(scale / 100)
+    document.documentElement.style.setProperty('--browser-ui-scale', String(scale / 100))
     $zoomPercent.set(scale)
     persistString(BROWSER_SCALE_KEY, String(scale))
 

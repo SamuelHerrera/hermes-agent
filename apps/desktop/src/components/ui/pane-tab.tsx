@@ -106,6 +106,7 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
       data-closeable={onClose ? true : undefined}
       data-preview={preview || undefined}
       data-selected={selected || undefined}
+      data-slot="pane-tab"
       data-vertical={vertical || undefined}
       onClickCapture={event => {
         // Sites whose tab activates on the label's own onClick (the preview
@@ -153,6 +154,7 @@ export const PaneTab = React.forwardRef<HTMLDivElement, PaneTabProps>(function P
             'absolute grid size-4 place-items-center rounded-sm text-(--ui-text-quaternary) opacity-70 transition hover:bg-(--ui-control-hover-background) hover:text-(--ui-text-primary) hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-(--ui-focus-ring)',
             vertical ? 'right-1 top-1' : 'right-1 top-1/2 -translate-y-1/2'
           )}
+          data-slot="pane-tab-close"
           onClick={event => {
             event.preventDefault()
             event.stopPropagation()
@@ -200,10 +202,16 @@ export const PaneTabLabel = React.forwardRef<HTMLElement, PaneTabLabelProps>(fun
   return (
     <Comp
       className="flex h-full min-w-0 max-w-full items-center overflow-hidden px-2 text-left outline-none group-data-[closeable]/tab:pr-6 group-data-[vertical]/tab:h-auto group-data-[vertical]/tab:w-full group-data-[vertical]/tab:justify-center group-data-[vertical]/tab:py-2 group-data-[vertical]/tab:pr-2"
+      data-slot="pane-tab-label"
       ref={ref}
       {...props}
     >
-      <span className={cn('block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase group-data-[preview]/tab:italic', className)}>
+      <span
+        className={cn(
+          'block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase group-data-[preview]/tab:italic',
+          className
+        )}
+      >
         {children}
       </span>
     </Comp>
@@ -238,9 +246,10 @@ export const PaneTabStrip = React.forwardRef<HTMLDivElement, PaneTabStripProps>(
       // as one piece of chrome with the titlebar above it. No bottom rule — the
       // active tab's primary underline is the only seam.
       className={cn(
-        'group/pane-header relative flex h-7 shrink-0 select-none bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag] [--pane-tab-active-bg:var(--ui-sidebar-surface-background)]',
+        'pane-tab-strip group/pane-header relative flex h-7 shrink-0 select-none bg-(--ui-sidebar-surface-background) [-webkit-app-region:no-drag] [--pane-tab-active-bg:var(--ui-sidebar-surface-background)]',
         className
       )}
+      data-slot="pane-tab-strip"
       ref={ref}
       {...props}
     >
@@ -284,9 +293,10 @@ export function PaneStripGlyph({ active, disabled, icon, label, onSelect }: Omit
         aria-label={label}
         aria-pressed={active ?? undefined}
         className={cn(
-          'self-center bg-transparent select-none',
+          'pane-strip-tool self-center bg-transparent select-none',
           active ? 'opacity-100' : 'opacity-60 hover:opacity-100'
         )}
+        data-slot="pane-strip-tool"
         disabled={disabled}
         onClick={onSelect}
         onPointerDown={event => event.stopPropagation()}
