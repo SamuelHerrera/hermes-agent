@@ -537,6 +537,50 @@ export function insertComposerContentsAtCaret(editor: HTMLElement, text: string,
   }
 }
 
+function markdownContinuationFor(text: string, offset: number) {
+  const before = text.slice(0, offset)
+  const line = before.slice(before.lastIndexOf('\n') + 1)
+  const task = /^(\s*[-*+]\s+\[[ xX]\]\s+)(.*)$/.exec(line)
+  const unordered = /^(\s*[-*+]\s+)(.*)$/.exec(line)
+  const ordered = /^(\s*)(\d+)([.)]\s+)(.*)$/.exec(line)
+  const quote = /^(>\s?)(.*)$/.exec(line)
+
+  if (task) {
+    return { consumeBefore: task[2] ? 0 : task[1].length, insert: task[2] ? `\n${task[1]}` : '\n' }
+  }
+
+  if (unordered) {
+    return { consumeBefore: unordered[2] ? 0 : unordered[1].length, insert: unordered[2] ? `\n${unordered[1]}` : '\n' }
+  }
+
+  if (ordered) {
+    const marker = `${ordered[1]}${ordered[2]}${ordered[3]}`
+    const next = `${ordered[1]}${Number(ordered[2]) + 1}${ordered[3]}`
+
+    return { consumeBefore: ordered[4] ? 0 : marker.length, insert: ordered[4] ? `\n${next}` : '\n' }
+  }
+
+  if (quote) {
+    return { consumeBefore: quote[2] ? 0 : quote[1].length, insert: quote[2] ? `\n${quote[1]}` : '\n' }
+  }
+
+  return null
+}
+
+/** Shift+Enter inside markdown list/quote lines behaves like code editors:
+ * continue the current marker, or exit the list/quote when the item is empty. */
+export function continueMarkdownAtCaret(editor: HTMLElement) {
+  const continuation = markdownContinuationFor(composerPlainText(editor), caretOffsetInEditor(editor))
+
+  if (!continuation) {
+    return false
+  }
+
+  insertComposerContentsAtCaret(editor, continuation.insert, continuation.consumeBefore)
+
+  return true
+}
+
 /** Range covering exactly `length` serialized characters immediately before a
  *  collapsed caret, spanning Chromium's split text nodes. Null when the caret
  *  isn't a collapsed selection in `editor`, or when a chip/<br>/block boundary

@@ -4,6 +4,7 @@ import { insertInlineRefsIntoEditor } from './inline-refs'
 import {
   caretOffsetInEditor,
   composerPlainText,
+  continueMarkdownAtCaret,
   deleteSelectionInEditor,
   insertComposerContentsAtCaret,
   normalizeComposerEditorDom,
@@ -210,6 +211,53 @@ describe('renderComposerContents', () => {
 
     expect(editor.querySelector('[data-slash-kind]')).toBeNull()
     expect(composerPlainText(editor)).toBe('/goal ship the redesign')
+  })
+})
+
+describe('continueMarkdownAtCaret', () => {
+  function editorWithCaret(text: string) {
+    const editor = document.createElement('div')
+
+    editor.dataset.slot = RICH_INPUT_SLOT
+    editor.contentEditable = 'true'
+    document.body.append(editor)
+    renderComposerContents(editor, text)
+    placeCaretAtOffset(editor, text.length)
+
+    return editor
+  }
+
+  it('continues bullet, task, quote and numbered markdown lines on Shift+Enter', () => {
+    const cases = [
+      ['- first', '- first\n- '],
+      ['- [ ] task', '- [ ] task\n- [ ] '],
+      ['> quote', '> quote\n> '],
+      ['1. first', '1. first\n2. ']
+    ] as const
+
+    for (const [source, expected] of cases) {
+      const editor = editorWithCaret(source)
+
+      expect(continueMarkdownAtCaret(editor)).toBe(true)
+      expect(composerPlainText(editor)).toBe(expected)
+      editor.remove()
+    }
+  })
+
+  it('exits an empty markdown list item instead of adding another marker', () => {
+    const editor = editorWithCaret('- ')
+
+    expect(continueMarkdownAtCaret(editor)).toBe(true)
+    expect(composerPlainText(editor)).toBe('\n')
+    editor.remove()
+  })
+
+  it('does nothing outside markdown continuation lines', () => {
+    const editor = editorWithCaret('plain text')
+
+    expect(continueMarkdownAtCaret(editor)).toBe(false)
+    expect(composerPlainText(editor)).toBe('plain text')
+    editor.remove()
   })
 })
 

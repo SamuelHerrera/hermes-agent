@@ -75,6 +75,7 @@ import { QueuePanel } from './queue-panel'
 import {
   beginComposerComposition,
   composerPlainText,
+  continueMarkdownAtCaret,
   deleteChipBeforeCaret,
   deleteSelectionInEditor,
   insertComposerContentsAtCaret,
@@ -876,6 +877,15 @@ export function ChatBar({
       }
 
       return
+    }
+
+    if (event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (withUndoPoint(() => continueMarkdownAtCaret(event.currentTarget))) {
+        event.preventDefault()
+        flushEditorToDraft(event.currentTarget)
+
+        return
+      }
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {

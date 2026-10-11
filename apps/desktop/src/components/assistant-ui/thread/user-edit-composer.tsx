@@ -37,6 +37,7 @@ import {
 import { chipTypedPathOnSpace, pathifyRefs } from '@/app/chat/composer/path-refs'
 import {
   composerPlainText,
+  continueMarkdownAtCaret,
   insertComposerContentsAtCaret,
   placeCaretEnd,
   refChipElement,
@@ -716,6 +717,16 @@ export const UserEditComposer: FC<UserEditComposerProps> = ({ cwd, gateway, sess
       syncDraftFromEditor(event.currentTarget)
 
       return
+    }
+
+    if (event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (withUndoPoint(() => continueMarkdownAtCaret(event.currentTarget))) {
+        event.preventDefault()
+        rememberInitialDraft()
+        syncDraftFromEditor(event.currentTarget)
+
+        return
+      }
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
