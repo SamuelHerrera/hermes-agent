@@ -158,6 +158,8 @@ for (const cachedParent of [false, true])
           'Native browser media playback advances'
         )
         console.log('REAL_PROXY_RENDER_MEDIA_INPUT_REDIRECT_PASS', await site.locator('body').innerText())
+        await site.locator('body').evaluate(() => history.pushState({}, '', '/hermes-spa-navigation#music'))
+        await page.waitForFunction(() => events.some(event => event.url === 'https://httpbin.org/hermes-spa-navigation#music'))
         await site.locator('body').evaluate(body => {
           const link = document.createElement('a')
           link.href = 'https://httpbin.org/anything'
