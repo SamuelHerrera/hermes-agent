@@ -66,6 +66,47 @@ describe('Question notifications', () => {
     expect(openChat).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.queryByText('Which format?')).toBeNull())
   })
+  it('keeps titlebar pointerdown handlers from preempting the notification trigger', async () => {
+    const parentPointerDown = vi.fn()
+    render(
+      <div onPointerDown={parentPointerDown}>
+        <QuestionNotifications
+          copy={questionCopy.en}
+          gateway={gateway() as never}
+          onOpenSession={vi.fn()}
+          onSettings={vi.fn()}
+          profile="default"
+        />
+      </div>
+    )
+    const bell = await screen.findByRole('button', { name: 'Notifications (1)' })
+    fireEvent.pointerDown(bell, { button: 0, pointerType: 'mouse' })
+    expect(parentPointerDown).not.toHaveBeenCalled()
+    fireEvent.click(bell)
+    expect(await screen.findByText('Which format?')).toBeTruthy()
+  })
+  it('keeps popover content pointerdowns from dismissing before buttons click', async () => {
+    const parentPointerDown = vi.fn()
+    const openChat = vi.fn()
+    render(
+      <div onPointerDown={parentPointerDown}>
+        <QuestionNotifications
+          copy={questionCopy.en}
+          gateway={gateway() as never}
+          onOpenSession={openChat}
+          onSettings={vi.fn()}
+          profile="default"
+        />
+      </div>
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }))
+    const openSession = await screen.findByRole('button', { name: 'Open session' })
+    fireEvent.pointerDown(openSession, { button: 0, pointerType: 'mouse' })
+    expect(parentPointerDown).not.toHaveBeenCalled()
+    fireEvent.click(openSession)
+    expect(openChat).toHaveBeenCalledWith('chat1')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
   it('focuses the associated chat from the question title and closes the popover', async () => {
     const openChat = vi.fn()
     render(

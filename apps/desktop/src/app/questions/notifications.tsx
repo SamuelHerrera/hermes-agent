@@ -98,8 +98,10 @@ export function QuestionNotifications({
         <Button
           aria-label={`${copy.notifications}${inbox.count ? ` (${inbox.count})` : ''}`}
           className={`relative ${titlebarButtonClass}`}
+          onPointerDown={event => event.stopPropagation()}
           size="icon-titlebar"
           title={copy.notifications}
+          type="button"
           variant="ghost"
         >
           <TitlebarIcon name="bell" />
@@ -123,6 +125,7 @@ export function QuestionNotifications({
             event.preventDefault()
           }
         }}
+        onPointerDown={event => event.stopPropagation()}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-(--ui-stroke-tertiary) px-3 py-2">
           <h2 className="flex-1 text-sm font-medium">{copy.notifications}</h2>
