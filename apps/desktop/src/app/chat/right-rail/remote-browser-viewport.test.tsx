@@ -36,6 +36,7 @@ describe('isolated client browser', () => {
     render(<RemoteBrowserViewport initialUrl="about:blank" onState={vi.fn()} />)
     const iframe = (await screen.findByTitle('Isolated browser')) as HTMLIFrameElement
     expect(iframe.src).toBe('https://localhost/browser-proxy/#ticket=proxy-only-ticket-1234567890123456')
+    expect(screen.queryByText(/Development mode: browsing shares Hermes/)).toBeNull()
   })
   it('bootstraps on Hermes and sends controls only to exact iframe origin and source', async () => {
     const api = setup()
