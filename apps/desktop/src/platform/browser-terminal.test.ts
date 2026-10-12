@@ -72,6 +72,7 @@ function host(): HermesHost {
       browserNotifications: true,
       deepLinkProtocol: false,
       globalHotkeys: false,
+      keepAwake: true,
       nativeDialogs: false,
       nativeWindows: false,
       persistentTerminal: true,

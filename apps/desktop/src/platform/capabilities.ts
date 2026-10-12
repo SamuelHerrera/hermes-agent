@@ -2,7 +2,7 @@ import type { HostCapabilities } from './types'
 
 export type BackendCapabilityManifest = Pick<
   HostCapabilities,
-  'backendFiles' | 'backendGit' | 'backendLifecycle' | 'persistentTerminal'
+  'backendFiles' | 'backendGit' | 'backendLifecycle' | 'keepAwake' | 'persistentTerminal'
 >
 
 export interface BrowserCapabilityEnvironment {
@@ -36,6 +36,7 @@ export function browserHostCapabilities(
     browserNotifications: environment.notifications,
     deepLinkProtocol: false,
     globalHotkeys: false,
+    keepAwake: manifest.keepAwake === true,
     nativeDialogs: false,
     nativeWindows: false,
     persistentTerminal: manifest.persistentTerminal === true,
@@ -54,6 +55,7 @@ export const electronHostCapabilities: Readonly<HostCapabilities> = Object.freez
   browserNotifications: true,
   deepLinkProtocol: true,
   globalHotkeys: true,
+  keepAwake: true,
   nativeDialogs: true,
   nativeWindows: true,
   persistentTerminal: true,

@@ -13,6 +13,7 @@ export interface HostCapabilities {
   browserNotifications: boolean
   deepLinkProtocol: boolean
   globalHotkeys: boolean
+  keepAwake: boolean
   nativeDialogs: boolean
   nativeWindows: boolean
   persistentTerminal: boolean

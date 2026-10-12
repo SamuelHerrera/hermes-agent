@@ -23,6 +23,7 @@ interface CapabilityResponse {
   capabilities?: {
     files?: boolean
     git?: boolean
+    keepAwake?: boolean
     lifecycle?: boolean
     persistentTerminal?: boolean
   }
@@ -39,6 +40,7 @@ function manifestCapabilities(value: CapabilityResponse): Partial<BackendCapabil
     backendFiles: value.capabilities.files === true,
     backendGit: value.capabilities.git === true,
     backendLifecycle: value.capabilities.lifecycle === true,
+    keepAwake: value.capabilities.keepAwake === true,
     persistentTerminal: value.capabilities.persistentTerminal === true
   }
 }

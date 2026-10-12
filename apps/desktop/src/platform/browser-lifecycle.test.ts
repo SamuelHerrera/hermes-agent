@@ -14,6 +14,7 @@ const capabilities = {
   deepLinkProtocol: false,
   externalLinks: true,
   globalHotkeys: false,
+  keepAwake: true,
   mediaCapture: true,
   nativeNotifications: false,
   nativeDialogs: false,

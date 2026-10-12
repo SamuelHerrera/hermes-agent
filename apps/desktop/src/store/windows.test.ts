@@ -59,7 +59,7 @@ describe('canOpenSessionWindow', () => {
       capabilities: {
         backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
         browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, globalHotkeys: false,
-        nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
+        keepAwake: true, nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
         screenWakeLock: true, windowBelow: false
       },
       getConnection: vi.fn(),
@@ -106,7 +106,7 @@ describe('openSessionInNewWindow', () => {
       capabilities: {
         backendFiles: true, backendGit: true, backendLifecycle: true, browserClipboard: true,
         browserMicrophone: true, browserNotifications: true, deepLinkProtocol: false, globalHotkeys: false,
-        nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
+        keepAwake: true, nativeDialogs: false, nativeWindows: false, persistentTerminal: true, revealHostPath: false,
         screenWakeLock: true, windowBelow: false
       },
       getConnection: vi.fn(),

@@ -12,7 +12,7 @@ describe('browser host', () => {
       return new Response(
         JSON.stringify({
           version: 1,
-          capabilities: { files: true, git: false, persistentTerminal: true, lifecycle: true }
+          capabilities: { files: true, git: false, keepAwake: true, persistentTerminal: true, lifecycle: true }
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
@@ -31,6 +31,7 @@ describe('browser host', () => {
       backendFiles: true,
       backendGit: false,
       backendLifecycle: true,
+      keepAwake: true,
       persistentTerminal: true,
       browserClipboard: true,
       browserMicrophone: false,

@@ -17,6 +17,7 @@ def test_capability_manifest_is_versioned_and_fails_each_probe_closed(monkeypatc
         "capabilities": {
             "files": True,
             "git": False,
+            "keepAwake": True,
             "persistentTerminal": True,
             "lifecycle": False,
         },
@@ -36,7 +37,7 @@ def test_capabilities_do_not_infer_availability_from_hermes_desktop(monkeypatch)
     monkeypatch.delenv("HERMES_DESKTOP")
 
     assert capabilities.probe_capabilities() == with_desktop_env
-    assert not any(with_desktop_env["capabilities"].values())
+    assert not any(value for key, value in with_desktop_env["capabilities"].items() if key != "keepAwake")
 
 
 def test_capabilities_router_uses_dashboard_auth_middleware():
@@ -53,7 +54,7 @@ def test_capabilities_router_uses_dashboard_auth_middleware():
     assert authenticated.status_code == 200
     payload = authenticated.json()
     assert payload["version"] == 1
-    assert set(payload["capabilities"]) == {"files", "git", "persistentTerminal", "lifecycle"}
+    assert set(payload["capabilities"]) == {"files", "git", "keepAwake", "persistentTerminal", "lifecycle"}
     assert all(isinstance(value, bool) for value in payload["capabilities"].values())
 
 

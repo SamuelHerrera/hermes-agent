@@ -79,6 +79,7 @@ def probe_capabilities() -> dict[str, object]:
         "capabilities": {
             "files": _closed_probe(_files_available),
             "git": _closed_probe(_git_available),
+            "keepAwake": True,
             "persistentTerminal": _closed_probe(_persistent_terminal_available),
             "lifecycle": _closed_probe(_lifecycle_available),
         },

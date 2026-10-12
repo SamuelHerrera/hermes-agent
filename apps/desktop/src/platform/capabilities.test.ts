@@ -17,6 +17,7 @@ describe('host capability contract', () => {
         backendFiles: true,
         backendGit: false,
         backendLifecycle: true,
+        keepAwake: true,
         persistentTerminal: true
       },
       browserEnvironment
@@ -31,6 +32,7 @@ describe('host capability contract', () => {
       browserNotifications: false,
       deepLinkProtocol: false,
       globalHotkeys: false,
+      keepAwake: true,
       nativeDialogs: false,
       nativeWindows: false,
       persistentTerminal: true,
@@ -46,6 +48,7 @@ describe('host capability contract', () => {
     expect(electronHostCapabilities.backendLifecycle).toBe(false)
     expect(electronHostCapabilities.deepLinkProtocol).toBe(true)
     expect(electronHostCapabilities.globalHotkeys).toBe(true)
+    expect(electronHostCapabilities.keepAwake).toBe(true)
     expect(electronHostCapabilities.nativeDialogs).toBe(true)
     expect(electronHostCapabilities.nativeWindows).toBe(true)
     expect(electronHostCapabilities.persistentTerminal).toBe(true)
@@ -55,6 +58,7 @@ describe('host capability contract', () => {
     const browser = browserHostCapabilities({}, browserEnvironment)
     expect(browser.nativeDialogs).toBe(false)
     expect(browser.nativeWindows).toBe(false)
+    expect(browser.keepAwake).toBe(false)
     expect(browser.persistentTerminal).toBe(false)
     expect(browser.revealHostPath).toBe(false)
   })

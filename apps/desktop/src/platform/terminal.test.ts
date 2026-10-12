@@ -12,6 +12,7 @@ const capabilities = {
   browserNotifications: false,
   deepLinkProtocol: false,
   globalHotkeys: false,
+  keepAwake: false,
   nativeDialogs: false,
   nativeWindows: false,
   persistentTerminal: false,
