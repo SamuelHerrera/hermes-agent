@@ -39,7 +39,7 @@ async function openInbox(page: Page) {
 
 test('durable question inbox survives restart, accumulates, and resumes a late answer', async ({}, testInfo) => {
   test.setTimeout(180_000)
-  const fixture = await setupMockBackend({ extraConfig: 'agent:\n  clarify_timeout: 0\n  clarify_soft_timeout: 1\n  clarify_review_timeout: 2' })
+  const fixture = await setupMockBackend({ extraConfig: 'desktop:\n  browser_proxy_setup_complete: true\nagent:\n  clarify_timeout: 0\n  clarify_soft_timeout: 1\n  clarify_review_timeout: 2' })
   let desktop = { app: fixture.app, page: fixture.page }
   try {
     await waitForAppReady(fixture, 120_000)
@@ -90,6 +90,47 @@ test('durable question inbox survives restart, accumulates, and resumes a late a
     await desktop.page.screenshot({ path: testInfo.outputPath('questions-answered-settings.png'), fullPage: true })
   } finally {
     await desktop.app.close().catch(() => undefined)
+    await fixture.cleanup()
+  }
+})
+
+test('busy saved answers show queue feedback and can be cleared from notifications', async ({}, testInfo) => {
+  test.setTimeout(180_000)
+  const activePrompt = 'E2E_QUESTION_BUSY_TURN'
+  const fixture = await setupMockBackend({
+    extraConfig: 'desktop:\n  browser_proxy_setup_complete: true\nagent:\n  clarify_soft_timeout: 1',
+    mockServer: { holdFirstStreamForPrompt: activePrompt }
+  })
+  try {
+    await waitForAppReady(fixture, 120_000)
+    await bindSocket(fixture.page)
+    await waitForAppReady(fixture, 120_000)
+    const created = await rpc(fixture.page, 'session.create', { source: 'desktop', title: 'Busy question test' })
+    await rpc(fixture.page, 'prompt.submit', { session_id: created.session_id, text: 'E2E_DURABLE_QUESTIONS' })
+    await expect.poll(async () => (await rpc(fixture.page, 'questions.list')).questions.length, { timeout: 40_000 }).toBe(2)
+    const questions = (await rpc(fixture.page, 'questions.list')).questions
+    await expect.poll(async () => JSON.stringify((await rpc(fixture.page, 'session.resume', { session_id: questions[0].session_id })).messages), { timeout: 30_000 })
+      .toContain('Question inbox fixture completed independent work.')
+    await rpc(fixture.page, 'prompt.submit', { session_id: created.session_id, text: activePrompt })
+    await fixture.mock.waitForHeldStream()
+    await openInbox(fixture.page)
+    const hard = fixture.page.getByRole('article').filter({ hasText: 'Which release needs your approval?' })
+    await hard.getByLabel('Release B', { exact: true }).check()
+    await hard.getByRole('button', { name: 'Answer and continue' }).click()
+    await expect(hard.getByRole('status')).toContainText('Queued')
+    await hard.getByRole('button', { name: 'Continue with saved answer' }).click()
+    await expect(hard.getByRole('status')).toContainText('current turn')
+    const pending = (await rpc(fixture.page, 'questions.list')).questions.find((row: any) => row.id === questions[0].id)
+    expect(pending.delivery_pending).toBe(true)
+    await fixture.page.screenshot({ path: testInfo.outputPath('saved-answer-queued.png'), fullPage: true })
+    await hard.getByRole('button', { name: 'Discard question' }).click()
+    await expect(hard).toHaveCount(0)
+    await expect(fixture.page.getByRole('button', { name: 'Notifications (1)', exact: true })).toBeVisible()
+    const history = (await rpc(fixture.page, 'questions.list', { include_answered: true })).questions
+    expect(history.find((row: any) => row.id === questions[0].id).status).toBe('dismissed')
+    expect(history.find((row: any) => row.id === questions[0].id).delivery_pending).toBe(false)
+  } finally {
+    fixture.mock.releaseHeldStream()
     await fixture.cleanup()
   }
 })

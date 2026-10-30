@@ -218,7 +218,9 @@ def respond_question(server, rid, params):
     with session["history_lock"]:
         deliveries = session.setdefault("question_deliveries", set())
         if question_id in deliveries:
-            return server._ok(rid, {"status": "already_resolved"})
+            # Accepted is not delivered: a busy/compressing turn may keep this
+            # answer queued for minutes. Retries must report that state.
+            return server._ok(rid, {"status": "queued", "session_id": sid})
         deliveries.add(question_id)
         running = session.get("running")
         if running:

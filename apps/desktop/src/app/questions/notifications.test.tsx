@@ -198,4 +198,50 @@ describe('Question notifications', () => {
     expect(screen.getByText(row.question)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Answer and continue' }) as HTMLButtonElement).disabled).toBe(false)
   })
+  it('explains that a saved answer is queued instead of silently showing the retry button again', async () => {
+    const api = gateway()
+    const saved = { ...row, status: 'answered', answer: 'CSV', answered_by: 'user', delivery_pending: true }
+    api.request.mockImplementation(async method =>
+      method === 'questions.respond'
+        ? { status: 'queued', session_id: 'chat1' }
+        : { questions: [saved], open_count: 1 }
+    )
+    render(
+      <QuestionNotifications
+        copy={questionCopy.en}
+        gateway={api as never}
+        onOpenSession={vi.fn()}
+        onSettings={vi.fn()}
+        profile="default"
+      />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue with saved answer' }))
+    expect((await screen.findByRole('status')).textContent).toContain('Queued')
+    expect(screen.getByRole('status').textContent).toContain('current turn')
+  })
+  it('clears an answered question whose delivery is pending without resubmitting it', async () => {
+    const api = gateway()
+    const openChat = vi.fn()
+    const saved = { ...row, status: 'answered', answer: 'CSV', answered_by: 'user', delivery_pending: true }
+    api.request.mockResolvedValue({ questions: [saved], open_count: 1 })
+    render(
+      <QuestionNotifications
+        copy={questionCopy.en}
+        gateway={api as never}
+        onOpenSession={openChat}
+        onSettings={vi.fn()}
+        profile="default"
+      />
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }))
+    const discard = await screen.findByRole('button', { name: 'Discard question' })
+    api.request.mockResolvedValue({ questions: [], open_count: 0 })
+    fireEvent.click(discard)
+    await waitFor(() => expect(screen.queryByText(row.question)).toBeNull())
+    expect(api.request).toHaveBeenCalledWith('questions.dismiss', { profile: 'default', question_id: 'q1' })
+    expect(api.request).not.toHaveBeenCalledWith('questions.respond', expect.anything())
+    expect(openChat).not.toHaveBeenCalled()
+    await screen.findByRole('button', { name: 'Notifications' })
+  })
 })

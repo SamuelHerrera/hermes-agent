@@ -55,7 +55,7 @@ def test_late_inbox_answer_queues_once_without_interrupt(gateway, monkeypatch):
     assert first["result"]["status"] == "queued"
     assert "CSV" in gateway._sessions["runtime"]["queued_prompt"]["text"]
     second = gateway._methods["questions.respond"](2, {"question_id": row["id"], "answer": "JSON"})
-    assert second["result"]["status"] == "already_resolved"
+    assert second["result"]["status"] == "queued"
     assert not gateway._sessions["runtime"].get("queued_prompts")
 
 
@@ -98,6 +98,23 @@ def test_discard_closes_question_without_resuming_session(gateway, monkeypatch):
     assert resumed == []
     assert store.get(row["id"])["status"] == "dismissed"
     assert store.count_open() == 0
+
+
+def test_discard_clears_saved_pending_answer_without_resubmitting(gateway, monkeypatch):
+    store = QuestionInbox()
+    row = store.create(session_id="durable", runtime_id="old", question="Still needed?", choices=None)
+    store.answer(row["id"], "saved answer", actor="user", delivery_pending=True)
+    calls = []
+    monkeypatch.setitem(gateway._methods, "session.resume", lambda *args: calls.append(args))
+    monkeypatch.setitem(gateway._methods, "prompt.submit", lambda *args: calls.append(args))
+
+    result = gateway._methods["questions.dismiss"](1, {"question_id": row["id"]})
+
+    assert result["result"]["status"] == "dismissed"
+    assert calls == []
+    assert store.get(row["id"])["delivery_pending"] is False
+    assert store.count_open() == 0
+    assert store.list() == []
 
 
 def test_queued_answer_can_be_recovered_after_backend_restart(gateway, monkeypatch):

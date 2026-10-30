@@ -54,7 +54,7 @@ export function QuestionNotifications({
       throw new Error(copy.disconnected)
     }
 
-    const result = await gateway.request<{ delivery_error?: string }>('questions.respond', {
+    const result = await gateway.request<{ status?: string; delivery_error?: string }>('questions.respond', {
       profile,
       question_id: row.id,
       answer: value
@@ -65,6 +65,8 @@ export function QuestionNotifications({
     if (result.delivery_error) {
       throw new Error(`${copy.savedOnly} ${result.delivery_error}`)
     }
+
+    return result
   }
 
   async function dismiss(row: Question) {

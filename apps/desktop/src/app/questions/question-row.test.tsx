@@ -1,10 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { QuestionRow } from './question-row'
 
 const copy = {
   resume: 'Continue with saved answer',
+  submitting: 'Continuing…',
+  queued: 'Queued — waiting for the current turn.',
+  resumed: 'Continuing in the original session.',
   answer: 'Answer and continue',
   discard: 'Discard question',
   dismissed: 'Discarded',
@@ -31,6 +34,32 @@ const row = {
 
 describe('QuestionRow', () => {
   afterEach(() => vi.restoreAllMocks())
+  it.each(['queued', 'resumed'] as const)('shows pending input and the %s delivery result', async status => {
+    let complete!: (value: { status: string }) => void
+
+    const pending = new Promise<{ status: string }>(resolve => {
+      complete = resolve
+    })
+
+    const answer = vi.fn(() => pending)
+
+    render(
+      <QuestionRow
+        copy={copy}
+        onAnswer={answer}
+        onDismiss={vi.fn()}
+        onOpen={vi.fn()}
+        row={{ ...row, status: 'answered', answer: 'CSV', answered_by: 'user', delivery_pending: true }}
+      />
+    )
+    fireEvent.click(screen.getByRole('button', { name: copy.resume }))
+    const submitting = screen.getByRole('button', { name: copy.submitting }) as HTMLButtonElement
+    expect(submitting.disabled).toBe(true)
+    fireEvent.click(submitting)
+    expect(answer).toHaveBeenCalledTimes(1)
+    await act(async () => complete({ status }))
+    expect(screen.getByRole('status').textContent).toBe(copy[status])
+  })
   it('can retry delivery of an immutable saved answer after restart', async () => {
     const answer = vi.fn().mockResolvedValue(undefined)
     render(

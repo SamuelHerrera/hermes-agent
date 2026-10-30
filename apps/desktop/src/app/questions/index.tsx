@@ -116,7 +116,7 @@ function QuestionsInbox({
   }, [gateway, refresh, generation])
 
   async function answer(row: Question, value: string | string[]) {
-    const result = await gateway.request<{ delivery_error?: string }>('questions.respond', {
+    const result = await gateway.request<{ status?: string; delivery_error?: string }>('questions.respond', {
       profile,
       question_id: row.id,
       answer: value
@@ -130,6 +130,8 @@ function QuestionsInbox({
     }
 
     await refresh()
+
+    return result
   }
 
   async function dismiss(row: Question) {

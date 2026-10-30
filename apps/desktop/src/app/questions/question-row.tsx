@@ -22,6 +22,9 @@ export interface QuestionRowCopy {
   discard: string
   dismissed: string
   resume: string
+  submitting: string
+  queued: string
+  resumed: string
   other: string
   hard: string
   soft: string
@@ -34,7 +37,7 @@ interface QuestionRowProps {
   compact?: boolean
   row: Question
   copy: QuestionRowCopy
-  onAnswer: (answer: string | string[]) => Promise<void>
+  onAnswer: (answer: string | string[]) => Promise<{ status?: string } | void>
   onDismiss: () => Promise<void>
   onOpen: () => void
 }
@@ -44,6 +47,7 @@ export function QuestionRow({ row, copy, onAnswer, onDismiss, onOpen, compact = 
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [deliveryStatus, setDeliveryStatus] = useState('')
   const [showOther, setShowOther] = useState(!compact || !row.choices?.length)
   const answered = row.status === 'answered'
   const dismissed = row.status === 'dismissed'
@@ -59,7 +63,12 @@ export function QuestionRow({ row, copy, onAnswer, onDismiss, onOpen, compact = 
     setError('')
 
     try {
-      await onAnswer(answer)
+      setDeliveryStatus('')
+      const result = await onAnswer(answer)
+
+      if (result?.status === 'queued' || result?.status === 'resumed') {
+        setDeliveryStatus(result.status)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -111,9 +120,12 @@ export function QuestionRow({ row, copy, onAnswer, onDismiss, onOpen, compact = 
             {Array.isArray(row.answer) ? row.answer.join(', ') : row.answer}
           </p>
           {row.delivery_pending && (
-            <div>
+            <div className="flex flex-wrap gap-2">
               <Button disabled={busy} onClick={() => void submit()} size="sm">
-                {copy.resume}
+                {busy ? copy.submitting : copy.resume}
+              </Button>
+              <Button disabled={busy} onClick={() => void dismiss()} size="sm" type="button" variant="outline">
+                {copy.discard}
               </Button>
             </div>
           )}
@@ -187,13 +199,18 @@ export function QuestionRow({ row, copy, onAnswer, onDismiss, onOpen, compact = 
           )}
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy || !hasAnswer} size="sm" type="submit">
-              {copy.answer}
+              {busy ? copy.submitting : copy.answer}
             </Button>
             <Button disabled={busy} onClick={() => void dismiss()} size="sm" type="button" variant="outline">
               {copy.discard}
             </Button>
           </div>
         </form>
+      )}
+      {deliveryStatus && !error && !dismissed && (
+        <p className="text-xs text-(--ui-text-secondary)" role="status">
+          {deliveryStatus === 'queued' ? copy.queued : copy.resumed}
+        </p>
       )}
     </article>
   )
